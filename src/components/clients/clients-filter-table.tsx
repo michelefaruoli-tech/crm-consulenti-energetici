@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 
@@ -19,7 +20,20 @@ export function ClientsFilterTable({ rows }: { rows: Row[] }) {
   const router = useRouter();
 
   const columns: FilterColumn[] = [
-    { key: "name", label: "Cliente", getValue: (r) => String(r.name ?? "") },
+    {
+      key: "name",
+      label: "Cliente",
+      getValue: (r) => String(r.name ?? ""),
+      render: (r) => (
+        <Link
+          href={`/clienti/${String(r.id)}`}
+          className="font-medium text-emerald-700 hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {String(r.name)}
+        </Link>
+      ),
+    },
     { key: "type", label: "Tipo", getValue: (r) => String(r.type ?? "") },
     { key: "fiscalCode", label: "CF / P.IVA", getValue: (r) => String(r.fiscalCode ?? "") },
     { key: "phone", label: "Telefono", getValue: (r) => String(r.phone ?? "") },

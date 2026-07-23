@@ -1,9 +1,10 @@
 "use server";
 
-import { destroySession } from "@/lib/auth";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 export async function logoutAction() {
-  await destroySession();
+  const cookieStore = await cookies();
+  cookieStore.delete("crm_session");
   redirect("/login");
 }

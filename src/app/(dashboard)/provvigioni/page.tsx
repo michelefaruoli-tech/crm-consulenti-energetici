@@ -1,11 +1,22 @@
+import { format } from "date-fns";
+import { it } from "date-fns/locale";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/commission";
+import { clientDisplayName } from "@/lib/utils";
 import {
   ProvvigioniFilterTable,
   type ProvvigioneRow,
 } from "@/components/provvigioni/provvigioni-filter-table";
+
+function normalizePaymentStatus(pay: string | null | undefined, received: number): string {
+  const raw = (pay ?? "").trim();
+  if (/incass/i.test(raw)) return "Incassato";
+  if (/attesa|da.?incass/i.test(raw)) return "In attesa";
+  if (raw) return raw;
+  return received > 0 ? "Incassato" : "In attesa";
+}
 
 export default async function ProvvigioniPage() {
   const session = await requireSession();
@@ -13,12 +24,30 @@ export default async function ProvvigioniPage() {
 
   const commissions = await prisma.commission.findMany({
     where: canViewAll ? {} : { contract: { collaboratorId: session.id } },
-    include: {
+    select: {
+      id: true,
+      expected: true,
+      received: true,
+      paid: true,
+      contractId: true,
       contract: {
-        include: {
-          client: true,
+        select: {
+          clientId: true,
+          paymentStatus: true,
+          recurrence: true,
+          podPdr: true,
+          collectionDate: true,
+          commissionConfirmed: true,
+          client: {
+            select: {
+              type: true,
+              companyName: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
           collaborator: { select: { name: true } },
-          supplier: true,
+          supplier: { select: { name: true } },
         },
       },
     },
@@ -40,16 +69,20 @@ export default async function ProvvigioniPage() {
   );
 
   const rows: ProvvigioneRow[] = commissions.map((item) => {
-    const pay = item.contract.paymentStatus || "";
-    const paidLabel = pay
-      ? pay
-      : Number(item.received) > 0
-        ? "incassato"
-        : "da_incassare";
+    const received = Number(item.received);
+    const paidLabel = normalizePaymentStatus(item.contract.paymentStatus, received);
+    const collectionMonth = item.contract.collectionDate
+      ? format(new Date(item.contract.collectionDate), "MMM yyyy", { locale: it })
+      : paidLabel === "Incassato"
+        ? format(new Date(), "MMM yyyy", { locale: it })
+        : "";
 
     return {
       id: item.contractId,
+      clientId: item.contract.clientId,
       commissionId: item.id,
+      clientName: clientDisplayName(item.contract.client),
+      podPdr: item.contract.podPdr || "",
       collaboratorName: item.contract.collaborator.name,
       supplierName: item.contract.supplier.name,
       clientType: item.contract.client.type === "AZIENDA" ? "Business" : "Domestico",
@@ -57,6 +90,7 @@ export default async function ProvvigioniPage() {
       recurrence: item.contract.recurrence || "Una tantum",
       paymentStatus: paidLabel,
       confirmed: item.contract.commissionConfirmed ? "Confermata" : "Da confermare",
+      collectionMonth,
     };
   });
 
@@ -65,7 +99,8 @@ export default async function ProvvigioniPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
         <p className="text-slate-500">
-          Filtra stile Excel · clicca una cella editabile e modifica (blur per salvare)
+          Le modifiche alle celle editabili (POD/PDR, gettone, ricorrenza, pagato) si salvano subito:
+          premi Invio oppure clicca fuori dalla cella. Non serve un tasto Salva.
         </p>
       </div>
 

@@ -131,57 +131,6 @@ export async function updateClientAction(formData: FormData): Promise<void> {
   revalidatePath("/");
 }
 
-export async function updateCommissionFieldAction(formData: FormData): Promise<void> {
-  const session = await requireSession();
-  const commissionId = String(formData.get("commissionId") ?? "");
-  const field = String(formData.get("field") ?? "");
-  const value = String(formData.get("value") ?? "");
-
-  const commission = await prisma.commission.findUnique({
-    where: { id: commissionId },
-    include: { contract: true },
-  });
-  if (!commission) throw new Error("Provvigione non trovata");
-
-  const canAll = hasPermission(session.role, "commissions.view_all");
-  if (!canAll && commission.contract.collaboratorId !== session.id) {
-    throw new Error("Permesso negato");
-  }
-
-  if (field === "expected" || field === "received" || field === "paid" || field === "accrued") {
-    const amount = Number(value.replace(",", ".")) || 0;
-    // Collaboratore può proporre solo expected → resta non confermata (gialla)
-    if (!canAll && field !== "expected") {
-      throw new Error("Puoi modificare solo il gettone previsto");
-    }
-    await prisma.commission.update({
-      where: { id: commissionId },
-      data: { [field]: amount },
-    });
-    if (field === "expected" && !canAll) {
-      await prisma.contract.update({
-        where: { id: commission.contractId },
-        data: { commissionConfirmed: false, commissionConfirmedAt: null },
-      });
-    }
-  } else if (field === "paymentStatus") {
-    await prisma.contract.update({
-      where: { id: commission.contractId },
-      data: { paymentStatus: value || null },
-    });
-  } else if (field === "recurrence") {
-    await prisma.contract.update({
-      where: { id: commission.contractId },
-      data: { recurrence: value || null },
-    });
-  } else if (field === "clientTypeLabel") {
-    // ignored - derived from client
-  }
-
-  revalidatePath("/provvigioni");
-  revalidatePath("/");
-}
-
 export async function createContractAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.create")) {

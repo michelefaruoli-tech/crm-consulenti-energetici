@@ -209,11 +209,24 @@ export function ExcelFilterTable({
                 onClick={() => onRowClick?.(row)}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <td
+                    key={col.key}
+                    className="px-3 py-2"
+                    onClick={(e) => {
+                      // Solo le celle editabili bloccano il click sulla riga
+                      if (col.editable) e.stopPropagation();
+                    }}
+                  >
                     {col.editable && onCellEdit ? (
                       <input
                         className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-slate-200 focus:border-emerald-500 focus:outline-none"
                         defaultValue={col.getValue(row)}
+                        title="Modifica e premi Invio oppure clicca fuori per salvare"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
                         onBlur={(e) => {
                           const next = e.target.value;
                           if (next !== col.getValue(row)) {

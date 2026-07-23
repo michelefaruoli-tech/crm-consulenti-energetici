@@ -1,12 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
-import { updateCommissionFieldAction } from "@/lib/actions";
+import { updateCommissionFieldAction } from "@/lib/commission-actions";
 
 export type ProvvigioneRow = {
   id: string;
+  clientId: string;
   commissionId: string;
+  clientName: string;
+  podPdr: string;
   collaboratorName: string;
   supplierName: string;
   clientType: string;
@@ -14,6 +18,7 @@ export type ProvvigioneRow = {
   recurrence: string;
   paymentStatus: string;
   confirmed: string;
+  collectionMonth: string;
 };
 
 export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
@@ -24,6 +29,7 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
       amount: "expected",
       recurrence: "recurrence",
       paymentStatus: "paymentStatus",
+      podPdr: "podPdr",
     };
     const field = map[key];
     if (!field) return;
@@ -37,6 +43,26 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
   }
 
   const columns: FilterColumn[] = [
+    {
+      key: "clientName",
+      label: "Cliente",
+      getValue: (r) => String(r.clientName ?? ""),
+      render: (r) => (
+        <Link
+          href={`/clienti/${String(r.clientId)}`}
+          className="font-medium text-emerald-700 hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {String(r.clientName)}
+        </Link>
+      ),
+    },
+    {
+      key: "podPdr",
+      label: "POD / PDR",
+      getValue: (r) => String(r.podPdr ?? ""),
+      editable: true,
+    },
     {
       key: "collaboratorName",
       label: "Collaboratore",
@@ -76,16 +102,23 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
       getValue: (r) => String(r.confirmed ?? ""),
       render: (r) => {
         const ok = String(r.confirmed) === "Confermata";
+        const month = String(r.collectionMonth ?? "");
+        const paid = /incass/i.test(String(r.paymentStatus ?? ""));
         return (
-          <span
-            className={
-              ok
-                ? "rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
-                : "rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
-            }
-          >
-            {ok ? "Verde" : "Gialla"}
-          </span>
+          <div className="flex flex-col gap-0.5">
+            <span
+              className={
+                ok
+                  ? "w-fit rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
+                  : "w-fit rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+              }
+            >
+              {ok ? "Verde" : "Gialla"}
+            </span>
+            {paid && month ? (
+              <span className="text-xs font-medium text-emerald-700">{month}</span>
+            ) : null}
+          </div>
         );
       },
     },
@@ -95,7 +128,7 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
     <ExcelFilterTable
       rows={rows as unknown as Record<string, unknown>[]}
       columns={columns}
-      rowKey={(r) => String(r.id)}
+      rowKey={(r) => String(r.commissionId)}
       onCellEdit={onCellEdit}
     />
   );
