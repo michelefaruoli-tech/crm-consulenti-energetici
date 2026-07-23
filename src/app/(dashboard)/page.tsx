@@ -42,11 +42,7 @@ export default async function DashboardPage() {
     prisma.contract.findMany({
       where: {
         ...where,
-        OR: [
-          { status: "IN_LAVORAZIONE" },
-          { workStatus: { contains: "lavorare", mode: "insensitive" } },
-          { toWork: true },
-        ],
+        status: "IN_LAVORAZIONE",
       },
       take: 10,
       include: { client: true, collaborator: true, supplier: true },
@@ -68,7 +64,7 @@ export default async function DashboardPage() {
       where,
       include: { client: true, supplier: true, collaborator: true },
       orderBy: { insertionDate: "desc" },
-      take: 50,
+      take: 25,
     }),
   ]);
 
