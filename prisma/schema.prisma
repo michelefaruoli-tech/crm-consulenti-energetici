@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  SEGRETERIA
+  COLLABORATORE
+  COMMERCIALE
+}
+
+enum ContractStatus {
+  BOZZA
+  INSERITO
+  DOCUMENTAZIONE_INCOMPLETA
+  DOCUMENTAZIONE_COMPLETA
+  INVIATO_AL_FORNITORE
+  IN_LAVORAZIONE
+  ATTIVATO
+  IN_ATTESA_PAGAMENTO
+  PAGATO_DAL_FORNITORE
+  PROVVIGIONE_LIQUIDATA
+  CHIUSO
+  ANNULLATO
+}
+
+enum CommissionPaymentType {
+  MENSILE
+  UNA_TANTUM
+  RATEIZZATO
+  BONUS
+  PREMIO
+}
+
+enum ClientType {
+  PRIVATO
+  AZIENDA
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(COLLABORATORE)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientsCreated   Client[]                @relation("ClientCreatedBy")
+  contracts        Contract[]              @relation("ContractCollaborator")
+  statusChanges    ContractStatusHistory[]
+  auditLogs        AuditLog[]
+  commissionPayouts CommissionEntry[]      @relation("CommissionPaidBy")
+}
+
+model Client {
+  id          String     @id @default(cuid())
+  type        ClientType @default(PRIVATO)
+  companyName String?
+  firstName   String?
+  lastName    String?
+  fiscalCode  String?
+  vatNumber   String?
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  province    String?
+  zipCode     String?
+  notes       String?
+  createdById String
+  createdBy   User       @relation("ClientCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  contracts Contract[]
+  documents Document[]
+  history   ClientHistory[]
+
+  @@index([fiscalCode])
+  @@index([vatNumber])
+  @@index([lastName, firstName])
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  active    Boolean  @default(true)
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  services        Service[]
+  commissionRules CommissionRule[]
+  contracts       Contract[]
+}
+
+model Service {
+  id         String   @id @default(cuid())
+  name       String
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  contracts       Contract[]
+  commissionRules CommissionRule[]
+}
+
+model CommissionRule {
+  id           String                @id @default(cuid())
+  supplierId   String
+  supplier     Supplier              @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  serviceId    String?
+  service      Service?              @relation(fields: [serviceId], references: [id])
+  name         String
+  paymentType  CommissionPaymentType @default(UNA_TANTUM)
+  fixedAmount  Decimal?              @db.Decimal(10, 2)
+  percentage   Decimal?              @db.Decimal(5, 2)
+  installments Int?
+  validFrom    DateTime              @default(now())
+  validTo      DateTime?
+  active       Boolean               @default(true)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  contracts Contract[]
+}
+
+model Contract {
+  id               String         @id @default(cuid())
+  contractNumber   String         @unique
+  clientId         String
+  client           Client         @relation(fields: [clientId], references: [id])
+  collaboratorId   String
+  collaborator     User           @relation("ContractCollaborator", fields: [collaboratorId], references: [id])
+  supplierId       String
+  supplier         Supplier       @relation(fields: [supplierId], references: [id])
+  serviceId        String?
+  service          Service?       @relation(fields: [serviceId], references: [id])
+  commissionRuleId String?
+  commissionRule   CommissionRule? @relation(fields: [commissionRuleId], references: [id])
+  status           ContractStatus @default(BOZZA)
+  insertionDate    DateTime       @default(now())
+  activationDate   DateTime?
+  paymentDate      DateTime?
+  expiryDate       DateTime?
+  notes            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  statusHistory ContractStatusHistory[]
+  documents     Document[]
+  commission    Commission?
+
+  @@index([status])
+  @@index([collaboratorId])
+  @@index([supplierId])
+}
+
+model ContractStatusHistory {
+  id          String          @id @default(cuid())
+  contractId  String
+  contract    Contract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  fromStatus  ContractStatus?
+  toStatus    ContractStatus
+  changedById String
+  changedBy   User            @relation(fields: [changedById], references: [id])
+  changedAt   DateTime        @default(now())
+  note        String?
+}
+
+model Commission {
+  id         String   @id @default(cuid())
+  contractId String   @unique
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  expected   Decimal  @default(0) @db.Decimal(10, 2)
+  accrued    Decimal  @default(0) @db.Decimal(10, 2)
+  received   Decimal  @default(0) @db.Decimal(10, 2)
+  paid       Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  entries CommissionEntry[]
+}
+
+model CommissionEntry {
+  id           String     @id @default(cuid())
+  commissionId String
+  commission   Commission @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+  type         String
+  amount       Decimal    @db.Decimal(10, 2)
+  note         String?
+  paidById     String?
+  paidBy       User?      @relation("CommissionPaidBy", fields: [paidById], references: [id])
+  createdAt    DateTime   @default(now())
+}
+
+model Document {
+  id         String    @id @default(cuid())
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contractId String?
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  filename   String
+  mimeType   String
+  size       Int
+  path       String
+  uploadedAt DateTime  @default(now())
+}
+
+model ClientHistory {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  field     String
+  oldValue  String?
+  newValue  String?
+  changedBy String
+  changedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  createdAt DateTime @default(now())
+}
+
+model BackupLog {
+  id        String   @id @default(cuid())
+  filename  String
+  size      Int?
+  status    String
+  createdAt DateTime @default(now())
+}
