@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { formatCurrency, commissionDifference } from "@/lib/commission";
-import { clientDisplayName } from "@/lib/utils";
-import Link from "next/link";
-import { StatusBadge } from "@/components/ui/badge";
+import { formatCurrency } from "@/lib/commission";
+import {
+  ProvvigioniFilterTable,
+  type ProvvigioneRow,
+} from "@/components/provvigioni/provvigioni-filter-table";
 
 export default async function ProvvigioniPage() {
   const session = await requireSession();
@@ -20,90 +21,78 @@ export default async function ProvvigioniPage() {
           supplier: true,
         },
       },
-      entries: { orderBy: { createdAt: "desc" }, take: 3 },
     },
     orderBy: { updatedAt: "desc" },
   });
 
   const totals = commissions.reduce(
     (acc, item) => {
-      acc.expected += Number(item.expected);
-      acc.received += Number(item.received);
-      acc.paid += Number(item.paid);
+      const expected = Number(item.expected);
+      const received = Number(item.received);
+      const paid = Number(item.paid);
+      acc.complessivo += expected;
+      acc.ricevuto += received;
+      acc.liquidato += paid;
+      acc.daAvere += Math.max(received - paid, 0);
       return acc;
     },
-    { expected: 0, received: 0, paid: 0 },
+    { complessivo: 0, ricevuto: 0, liquidato: 0, daAvere: 0 },
   );
+
+  const rows: ProvvigioneRow[] = commissions.map((item) => {
+    const pay = item.contract.paymentStatus || "";
+    const paidLabel = pay
+      ? pay
+      : Number(item.received) > 0
+        ? "incassato"
+        : "da_incassare";
+
+    return {
+      id: item.contractId,
+      commissionId: item.id,
+      collaboratorName: item.contract.collaborator.name,
+      supplierName: item.contract.supplier.name,
+      clientType: item.contract.client.type === "AZIENDA" ? "Business" : "Domestico",
+      amount: String(Number(item.expected)),
+      recurrence: item.contract.recurrence || "Una tantum",
+      paymentStatus: paidLabel,
+      confirmed: item.contract.commissionConfirmed ? "Confermata" : "Da confermare",
+    };
+  });
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
-        <p className="text-slate-500">Calcolo automatico e storico provvigioni</p>
+        <p className="text-slate-500">
+          Filtra stile Excel · clicca una cella editabile e modifica (blur per salvare)
+        </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Totale previsto</p>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.expected)}</p>
+          <p className="text-sm text-slate-500">Totale complessivo (previsto)</p>
+          <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.complessivo)}</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
           <p className="text-sm text-emerald-700">Totale ricevuto</p>
-          <p className="mt-2 text-2xl font-bold text-emerald-900">{formatCurrency(totals.received)}</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-900">
+            {formatCurrency(totals.ricevuto)}
+          </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Totale liquidato</p>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.paid)}</p>
+          <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.liquidato)}</p>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <p className="text-sm text-amber-800">Totale da avere</p>
+          <p className="mt-2 text-2xl font-bold text-amber-950">
+            {formatCurrency(totals.daAvere)}
+          </p>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Contratto</th>
-              <th className="px-4 py-3">Cliente</th>
-              {canViewAll ? <th className="px-4 py-3">Collaboratore</th> : null}
-              <th className="px-4 py-3">Prevista</th>
-              <th className="px-4 py-3">Ricevuta</th>
-              <th className="px-4 py-3">Liquidata</th>
-              <th className="px-4 py-3">Differenza</th>
-              <th className="px-4 py-3">Stato</th>
-            </tr>
-          </thead>
-          <tbody>
-            {commissions.map((item) => {
-              const diff = commissionDifference(
-                Number(item.expected),
-                Number(item.received),
-                Number(item.paid),
-              );
-              return (
-                <tr key={item.id} className="border-t border-slate-100">
-                  <td className="px-4 py-3">
-                    <Link href={`/contratti/${item.contractId}`} className="font-medium text-emerald-700 hover:underline">
-                      {item.contract.contractNumber}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">{clientDisplayName(item.contract.client)}</td>
-                  {canViewAll ? <td className="px-4 py-3">{item.contract.collaborator.name}</td> : null}
-                  <td className="px-4 py-3">{formatCurrency(item.expected)}</td>
-                  <td className="px-4 py-3">{formatCurrency(item.received)}</td>
-                  <td className="px-4 py-3">{formatCurrency(item.paid)}</td>
-                  <td className="px-4 py-3">
-                    <span className={diff.vsExpected !== 0 ? "text-amber-700" : "text-slate-600"}>
-                      {formatCurrency(diff.vsExpected)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={item.contract.status} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <ProvvigioniFilterTable rows={rows} />
     </div>
   );
 }

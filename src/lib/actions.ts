@@ -84,6 +84,104 @@ export async function createClientAction(formData: FormData): Promise<void> {
   redirect(`/clienti/${client.id}`);
 }
 
+export async function updateClientAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const clientId = String(formData.get("clientId") ?? "");
+  if (!clientId) throw new Error("Cliente non specificato");
+
+  const client = await prisma.client.findUnique({ where: { id: clientId } });
+  if (!client) throw new Error("Cliente non trovato");
+
+  const canEditAll = hasPermission(session.role, "clients.edit_all");
+  if (!canEditAll && client.createdById !== session.id) {
+    throw new Error("Permesso negato");
+  }
+
+  await prisma.client.update({
+    where: { id: clientId },
+    data: {
+      type: String(formData.get("type") ?? client.type) as "PRIVATO" | "AZIENDA",
+      companyName: String(formData.get("companyName") ?? "") || null,
+      firstName: String(formData.get("firstName") ?? "") || null,
+      lastName: String(formData.get("lastName") ?? "") || null,
+      fiscalCode: String(formData.get("fiscalCode") ?? "") || null,
+      vatNumber: String(formData.get("vatNumber") ?? "") || null,
+      email: String(formData.get("email") ?? "") || null,
+      pec: String(formData.get("pec") ?? "") || null,
+      phone: String(formData.get("phone") ?? "") || null,
+      iban: String(formData.get("iban") ?? "") || null,
+      address: String(formData.get("address") ?? "") || null,
+      city: String(formData.get("city") ?? "") || null,
+      province: String(formData.get("province") ?? "") || null,
+      region: String(formData.get("region") ?? "") || null,
+      zipCode: String(formData.get("zipCode") ?? "") || null,
+      classification: String(formData.get("classification") ?? "") || null,
+      supplyAddress: String(formData.get("supplyAddress") ?? "") || null,
+      supplyCity: String(formData.get("supplyCity") ?? "") || null,
+      supplyProvince: String(formData.get("supplyProvince") ?? "") || null,
+      supplyRegion: String(formData.get("supplyRegion") ?? "") || null,
+      supplyZipCode: String(formData.get("supplyZipCode") ?? "") || null,
+      notes: String(formData.get("notes") ?? "") || null,
+    },
+  });
+
+  revalidatePath("/clienti");
+  revalidatePath(`/clienti/${clientId}`);
+  revalidatePath("/contratti");
+  revalidatePath("/");
+}
+
+export async function updateCommissionFieldAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const commissionId = String(formData.get("commissionId") ?? "");
+  const field = String(formData.get("field") ?? "");
+  const value = String(formData.get("value") ?? "");
+
+  const commission = await prisma.commission.findUnique({
+    where: { id: commissionId },
+    include: { contract: true },
+  });
+  if (!commission) throw new Error("Provvigione non trovata");
+
+  const canAll = hasPermission(session.role, "commissions.view_all");
+  if (!canAll && commission.contract.collaboratorId !== session.id) {
+    throw new Error("Permesso negato");
+  }
+
+  if (field === "expected" || field === "received" || field === "paid" || field === "accrued") {
+    const amount = Number(value.replace(",", ".")) || 0;
+    // Collaboratore può proporre solo expected → resta non confermata (gialla)
+    if (!canAll && field !== "expected") {
+      throw new Error("Puoi modificare solo il gettone previsto");
+    }
+    await prisma.commission.update({
+      where: { id: commissionId },
+      data: { [field]: amount },
+    });
+    if (field === "expected" && !canAll) {
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: { commissionConfirmed: false, commissionConfirmedAt: null },
+      });
+    }
+  } else if (field === "paymentStatus") {
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { paymentStatus: value || null },
+    });
+  } else if (field === "recurrence") {
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { recurrence: value || null },
+    });
+  } else if (field === "clientTypeLabel") {
+    // ignored - derived from client
+  }
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+}
+
 export async function createContractAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.create")) {
@@ -339,7 +437,7 @@ export async function createUserAction(formData: FormData): Promise<void> {
   revalidatePath("/utenti");
 }
 
-/** Elimina un utente (se ha dati collegati lo disattiva e libera l'email). */
+/** Elimina un utente: sempre soft-delete (libera email) per evitare errori FK. */
 export async function deleteUserAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "users.manage")) {
@@ -355,25 +453,14 @@ export async function deleteUserAction(formData: FormData): Promise<void> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error("Utente non trovato");
 
-  const [clientsCount, contractsCount] = await Promise.all([
-    prisma.client.count({ where: { createdById: userId } }),
-    prisma.contract.count({ where: { collaboratorId: userId } }),
-  ]);
-
-  if (clientsCount > 0 || contractsCount > 0) {
-    // Non si può cancellare del tutto se ha pratiche: disattiva e libera l'email
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        active: false,
-        email: `deleted_${Date.now()}_${user.email}`,
-        name: `[Eliminato] ${user.name}`,
-      },
-    });
-  } else {
-    await prisma.auditLog.deleteMany({ where: { userId } });
-    await prisma.user.delete({ where: { id: userId } });
-  }
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      active: false,
+      email: `deleted_${Date.now()}_${user.email}`,
+      name: `[Eliminato] ${user.name}`,
+    },
+  });
 
   revalidatePath("/utenti");
 }
@@ -386,29 +473,20 @@ export async function deleteAllOtherUsersAction(): Promise<void> {
   }
 
   const others = await prisma.user.findMany({
-    where: { id: { not: session.id } },
+    where: { id: { not: session.id }, active: true },
     select: { id: true, email: true, name: true },
   });
 
+  const now = Date.now();
   for (const user of others) {
-    const [clientsCount, contractsCount] = await Promise.all([
-      prisma.client.count({ where: { createdById: user.id } }),
-      prisma.contract.count({ where: { collaboratorId: user.id } }),
-    ]);
-
-    if (clientsCount > 0 || contractsCount > 0) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          active: false,
-          email: `deleted_${Date.now()}_${user.email}`,
-          name: `[Eliminato] ${user.name}`,
-        },
-      });
-    } else {
-      await prisma.auditLog.deleteMany({ where: { userId: user.id } });
-      await prisma.user.delete({ where: { id: user.id } });
-    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        active: false,
+        email: `deleted_${now}_${user.id}_${user.email}`,
+        name: `[Eliminato] ${user.name}`,
+      },
+    });
   }
 
   revalidatePath("/utenti");

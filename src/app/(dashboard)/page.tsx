@@ -2,16 +2,16 @@ import Link from "next/link";
 import { requireSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
-import { clientDisplayName, formatDate, isContractExpired } from "@/lib/utils";
-import { StatCard } from "@/components/ui/card";
-import { StatusBadge } from "@/components/ui/badge";
 import { hasPermission } from "@/lib/permissions";
-import { ContractStatus } from "@/generated/prisma/client";
+import { StatCard } from "@/components/ui/card";
+import {
+  ContractsFilterTable,
+  toContractRow,
+} from "@/components/contracts/contracts-filter-table";
 
 export default async function DashboardPage() {
   const session = await requireSession();
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
-
   const where = canViewAll ? {} : { collaboratorId: session.id };
 
   const [
@@ -19,7 +19,7 @@ export default async function DashboardPage() {
     activeContracts,
     inProgress,
     expired,
-    blocked,
+    inLavorazioneList,
     commissions,
     topCollaborators,
     recentContracts,
@@ -42,18 +42,18 @@ export default async function DashboardPage() {
     prisma.contract.findMany({
       where: {
         ...where,
-        status: {
-          in: ["DOCUMENTAZIONE_INCOMPLETA", "IN_LAVORAZIONE", "IN_ATTESA_PAGAMENTO"],
-        },
+        OR: [
+          { status: "IN_LAVORAZIONE" },
+          { workStatus: { contains: "lavorare", mode: "insensitive" } },
+          { toWork: true },
+        ],
       },
-      take: 5,
-      include: { client: true, collaborator: true },
-      orderBy: { updatedAt: "desc" },
+      take: 10,
+      include: { client: true, collaborator: true, supplier: true },
+      orderBy: { insertionDate: "desc" },
     }),
     prisma.commission.aggregate({
-      where: canViewAll
-        ? {}
-        : { contract: { collaboratorId: session.id } },
+      where: canViewAll ? {} : { contract: { collaboratorId: session.id } },
       _sum: { expected: true, received: true, paid: true, accrued: true },
     }),
     hasPermission(session.role, "stats.full")
@@ -67,8 +67,8 @@ export default async function DashboardPage() {
     prisma.contract.findMany({
       where,
       include: { client: true, supplier: true, collaborator: true },
-      orderBy: { createdAt: "desc" },
-      take: 8,
+      orderBy: { insertionDate: "desc" },
+      take: 50,
     }),
   ]);
 
@@ -79,6 +79,8 @@ export default async function DashboardPage() {
           select: { id: true, name: true },
         })
       : [];
+
+  const tableRows = recentContracts.map(toContractRow);
 
   return (
     <div className="space-y-8">
@@ -112,20 +114,30 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">Pratiche bloccate</h2>
-          {blocked.length === 0 ? (
-            <p className="text-sm text-slate-500">Nessuna pratica bloccata al momento.</p>
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">
+            Pratiche in lavorazione
+          </h2>
+          {inLavorazioneList.length === 0 ? (
+            <p className="text-sm text-slate-500">Nessuna pratica in lavorazione.</p>
           ) : (
             <ul className="space-y-3">
-              {blocked.map((contract) => (
-                <li key={contract.id} className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 last:border-0">
+              {inLavorazioneList.map((contract) => (
+                <li
+                  key={contract.id}
+                  className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 last:border-0"
+                >
                   <div>
-                    <Link href={`/contratti/${contract.id}`} className="font-medium text-emerald-700 hover:underline">
-                      {contract.contractNumber}
+                    <Link
+                      href={`/contratti/${contract.id}`}
+                      className="font-medium text-emerald-700 hover:underline"
+                    >
+                      {contract.client.firstName || contract.client.companyName || "Cliente"}{" "}
+                      {contract.client.lastName || ""}
                     </Link>
-                    <p className="text-sm text-slate-500">{clientDisplayName(contract.client)}</p>
+                    <p className="text-sm text-slate-500">
+                      {contract.supplier.name} · {contract.collaborator.name}
+                    </p>
                   </div>
-                  <StatusBadge status={contract.status as ContractStatus} />
                 </li>
               ))}
             </ul>
@@ -134,14 +146,20 @@ export default async function DashboardPage() {
 
         {hasPermission(session.role, "stats.full") ? (
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">Collaboratori più produttivi</h2>
+            <h2 className="mb-4 text-lg font-semibold text-slate-900">
+              Collaboratori più produttivi
+            </h2>
             <ul className="space-y-3">
               {topCollaborators.map((row) => {
                 const user = collaboratorNames.find((u) => u.id === row.collaboratorId);
                 return (
                   <li key={row.collaboratorId} className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-700">{user?.name ?? "—"}</span>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-sm">{row._count.id} contratti</span>
+                    <span className="text-sm font-medium text-slate-700">
+                      {user?.name ?? "—"}
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-sm">
+                      {row._count.id} contratti
+                    </span>
                   </li>
                 );
               })}
@@ -150,47 +168,17 @@ export default async function DashboardPage() {
         ) : null}
       </div>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">Contratti recenti</h2>
           <Link href="/contratti" className="text-sm font-medium text-emerald-700 hover:underline">
             Vedi tutti
           </Link>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-slate-500">
-                <th className="px-2 py-2">Numero</th>
-                <th className="px-2 py-2">Cliente</th>
-                <th className="px-2 py-2">Fornitore</th>
-                <th className="px-2 py-2">Stato</th>
-                <th className="px-2 py-2">Scadenza</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentContracts.map((contract) => (
-                <tr key={contract.id} className="border-b border-slate-100">
-                  <td className="px-2 py-3">
-                    <Link href={`/contratti/${contract.id}`} className="font-medium text-emerald-700 hover:underline">
-                      {contract.contractNumber}
-                    </Link>
-                  </td>
-                  <td className="px-2 py-3">{clientDisplayName(contract.client)}</td>
-                  <td className="px-2 py-3">{contract.supplier.name}</td>
-                  <td className="px-2 py-3">
-                    <StatusBadge status={contract.status} />
-                  </td>
-                  <td className="px-2 py-3">
-                    <span className={isContractExpired(contract.expiryDate) ? "text-red-600" : ""}>
-                      {formatDate(contract.expiryDate)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <p className="text-xs text-slate-500">
+          Usa le frecce ▾ sulle colonne per filtrare (selezione multipla, stile Excel).
+        </p>
+        <ContractsFilterTable rows={tableRows} />
       </section>
     </div>
   );
