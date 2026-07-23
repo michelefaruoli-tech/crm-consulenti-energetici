@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const session = await requireSession();
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
-  const where = canViewAll ? {} : { collaboratorId: session.id };
+  const where = canViewAll
+    ? { isHistorical: false }
+    : { collaboratorId: session.id, isHistorical: false };
 
   try {
     const [

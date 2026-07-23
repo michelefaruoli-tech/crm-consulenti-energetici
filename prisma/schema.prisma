@@ -199,6 +199,10 @@ model Contract {
   workStatus       String?
   toWork           Boolean        @default(false)
   manuallyVerified Boolean        @default(false)
+  /// Contratti già chiusi/pagati importati solo per storico e report
+  isHistorical     Boolean        @default(false)
+  /// Etichetta lotto storico (es. "Excel pagati 2024")
+  archiveLabel     String?
   /// false = giallo (proposta collab), true = verde (confermata admin)
   commissionConfirmed Boolean     @default(false)
   commissionConfirmedAt DateTime?
@@ -219,6 +223,8 @@ model Contract {
   @@index([insertionDate])
   @@index([expiryDate])
   @@index([commissionConfirmed])
+  @@index([isHistorical])
+  @@index([archiveLabel])
 }
 
 model ContractStatusHistory {

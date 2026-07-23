@@ -5,10 +5,35 @@ import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { StatusBadge } from "@/components/ui/badge";
 import type { ContractTableRow } from "@/lib/contract-row";
-import { OPERATION_TYPE_LABELS, type OperationType } from "@/lib/supply-dates";
+import { updateContractFieldAction } from "@/lib/contract-actions";
 
-export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
+export function ContractsFilterTable({
+  rows,
+  editable = true,
+}: {
+  rows: ContractTableRow[];
+  editable?: boolean;
+}) {
   const router = useRouter();
+
+  async function onCellEdit(row: Record<string, unknown>, key: string, value: string) {
+    const map: Record<string, string> = {
+      podPdr: "podPdr",
+      statusLabel: "status",
+      insertionDate: "insertionDate",
+      supplyStartDate: "supplyStartDate",
+      operationLabel: "operationType",
+    };
+    const field = map[key];
+    if (!field) return;
+
+    const fd = new FormData();
+    fd.set("contractId", String(row.id));
+    fd.set("field", field);
+    fd.set("value", value);
+    await updateContractFieldAction(fd);
+    router.refresh();
+  }
 
   const columns: FilterColumn[] = [
     {
@@ -19,6 +44,7 @@ export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
         <Link
           href={`/contratti/${String(r.id)}`}
           className="font-medium text-emerald-700 hover:underline"
+          onClick={(e) => e.stopPropagation()}
         >
           {String(r.clientName)}
         </Link>
@@ -32,40 +58,38 @@ export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
     {
       key: "podPdr",
       label: "POD/PDR",
-      getValue: (r) => String(r.podPdr ?? "") || "(vuoto)",
-      render: (r) => {
-        const code = String(r.podPdr ?? "").trim();
-        if (!code) return <span className="text-slate-400">—</span>;
-        return (
-          <span className="font-mono text-xs font-semibold tracking-wide text-slate-900">
-            {code}
-          </span>
-        );
+      getValue: (r) => {
+        const v = String(r.podPdr ?? "").trim();
+        return v || "";
       },
+      editable,
     },
     {
       key: "statusLabel",
       label: "Stato",
       getValue: (r) => String(r.statusLabel ?? ""),
-      render: (r) => <StatusBadge status={String(r.status)} />,
+      editable,
+      render: editable
+        ? undefined
+        : (r) => <StatusBadge status={String(r.status)} />,
     },
     {
       key: "insertionDate",
       label: "Inserimento",
       getValue: (r) => String(r.insertionDate ?? ""),
+      editable,
     },
     {
       key: "supplyStartDate",
       label: "Inizio fornitura",
       getValue: (r) => String(r.supplyStartDate ?? ""),
+      editable,
     },
     {
-      key: "operationType",
+      key: "operationLabel",
       label: "Operazione",
-      getValue: (r) => {
-        const t = String(r.operationType ?? "CAMBIO") as OperationType;
-        return OPERATION_TYPE_LABELS[t] ?? t;
-      },
+      getValue: (r) => String(r.operationLabel ?? ""),
+      editable,
     },
     {
       key: "collaboratorName",
@@ -75,12 +99,21 @@ export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
   ];
 
   return (
-    <ExcelFilterTable
-      dense
-      rows={rows as unknown as Record<string, unknown>[]}
-      columns={columns}
-      rowKey={(r) => String(r.id)}
-      onRowClick={(r) => router.push(`/contratti/${r.id}`)}
-    />
+    <div className="space-y-2">
+      {editable ? (
+        <p className="text-xs text-slate-500">
+          Celle modificabili: POD/PDR, Stato, Inserimento, Inizio fornitura, Operazione (Cambio /
+          Voltura / Attivazione). Salva con Invio o click fuori.
+        </p>
+      ) : null}
+      <ExcelFilterTable
+        dense
+        rows={rows as unknown as Record<string, unknown>[]}
+        columns={columns}
+        rowKey={(r) => String(r.id)}
+        onRowClick={(r) => router.push(`/contratti/${r.id}`)}
+        onCellEdit={editable ? onCellEdit : undefined}
+      />
+    </div>
   );
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { parseFlexibleDate } from "@/lib/date-parse";
 
 export async function updateCommissionFieldAction(formData: FormData): Promise<void> {
   const session = await requireSession();
@@ -45,11 +46,34 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       where: { id: commission.contractId },
       data: {
         paymentStatus: normalized,
+        // Sì/Incassato → inserisce subito la data (oggi se assente)
         collectionDate: paid
-          ? (commission.contract.collectionDate ?? new Date())
+          ? commission.contract.collectionDate ?? new Date()
           : null,
       },
     });
+    // Se appena passato a Incassato senza data precedente, assicurati che ci sia
+    if (paid && !commission.contract.collectionDate) {
+      // già impostato sopra con new Date()
+    }
+  } else if (field === "collectionDate") {
+    const raw = value.trim();
+    if (!raw) {
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: { collectionDate: null, paymentStatus: "Da incassare" },
+      });
+    } else {
+      const d = parseFlexibleDate(raw);
+      if (!d) throw new Error("Data non valida (usa MM/AAAA o GG/MM/AAAA)");
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: {
+          collectionDate: d,
+          paymentStatus: "Incassato",
+        },
+      });
+    }
   } else if (field === "recurrence") {
     const raw = value.trim();
     const normalized = /ric/i.test(raw)
@@ -70,4 +94,5 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
 
   revalidatePath("/provvigioni");
   revalidatePath("/");
+  revalidatePath("/contratti");
 }

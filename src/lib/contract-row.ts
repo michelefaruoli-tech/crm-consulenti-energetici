@@ -15,7 +15,9 @@ export type ContractTableRow = {
   insertionDate: string;
   supplyStartDate: string;
   operationType: string;
+  operationLabel: string;
   collaboratorName: string;
+  archiveLabel: string;
 };
 
 export function toContractRow(contract: {
@@ -25,6 +27,8 @@ export function toContractRow(contract: {
   supplyStartDate?: Date | string | null;
   operationType?: string | null;
   podPdr?: string | null;
+  archiveLabel?: string | null;
+  isHistorical?: boolean;
   client: {
     type: string;
     companyName?: string | null;
@@ -49,6 +53,13 @@ export function toContractRow(contract: {
   const supply =
     contract.supplyStartDate ??
     computeSupplyStartDate(contract.insertionDate, contract.operationType);
+  const op = normalizeOperationType(contract.operationType);
+
+  const opLabels = {
+    CAMBIO: "Cambio",
+    VOLTURA: "Voltura",
+    ATTIVAZIONE: "Attivazione",
+  } as const;
 
   return {
     id: contract.id,
@@ -59,7 +70,9 @@ export function toContractRow(contract: {
     statusLabel: CONTRACT_STATUS_LABELS[status] ?? contract.status,
     insertionDate: insertion.split("-").reverse().join("/"),
     supplyStartDate: formatItDate(supply),
-    operationType: normalizeOperationType(contract.operationType),
+    operationType: op,
+    operationLabel: opLabels[op],
     collaboratorName: contract.collaborator.name,
+    archiveLabel: contract.archiveLabel ?? "",
   };
 }

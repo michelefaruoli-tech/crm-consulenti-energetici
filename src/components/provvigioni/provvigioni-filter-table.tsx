@@ -43,6 +43,7 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
       recurrence: "recurrence",
       paymentStatus: "paymentStatus",
       podPdr: "podPdr",
+      collectionMonth: "collectionDate",
     };
     const field = map[key];
     if (!field) return;
@@ -111,9 +112,10 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
       editable: true,
     },
     {
-      key: "confirmed",
-      label: "Conf.",
-      getValue: (r) => String(r.collectionMonth || r.confirmed || ""),
+      key: "collectionMonth",
+      label: "Data",
+      getValue: (r) => String(r.collectionMonth ?? ""),
+      editable: true,
       render: (r) => {
         const month = String(r.collectionMonth ?? "").trim();
         const paid = /incass/i.test(String(r.paymentStatus ?? ""));
@@ -124,29 +126,25 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
             </span>
           );
         }
-        const ok = String(r.confirmed) === "Confermata";
-        return (
-          <span
-            className={
-              ok
-                ? "rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
-                : "rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800"
-            }
-          >
-            {ok ? "OK" : "—"}
-          </span>
-        );
+        return <span className="text-slate-400">—</span>;
       },
     },
   ];
 
   return (
-    <ExcelFilterTable
-      dense
-      rows={rows as unknown as Record<string, unknown>[]}
-      columns={columns}
-      rowKey={(r) => String(r.commissionId)}
-      onCellEdit={onCellEdit}
-    />
+    <div className="space-y-2">
+      <p className="text-xs text-slate-500">
+        Pagato: scrivi <strong>Sì</strong> o <strong>No</strong> (si salva subito e inserisce la
+        data). Data: formato <strong>MM/AAAA</strong> (es. 07/2026) — se inserisci la data diventa
+        automaticamente Incassato.
+      </p>
+      <ExcelFilterTable
+        dense
+        rows={rows as unknown as Record<string, unknown>[]}
+        columns={columns}
+        rowKey={(r) => String(r.commissionId)}
+        onCellEdit={onCellEdit}
+      />
+    </div>
   );
 }

@@ -8,13 +8,26 @@ import { toContractRow } from "@/lib/contract-row";
 
 export const dynamic = "force-dynamic";
 
-export default async function ContrattiPage() {
+export default async function ContrattiPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ vista?: string }>;
+}) {
   const session = await requireSession();
+  const { vista } = await searchParams;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
+  const mode = vista === "storico" ? "storico" : vista === "tutti" ? "tutti" : "attivi";
 
   try {
     const contracts = await prisma.contract.findMany({
-      where: canViewAll ? {} : { collaboratorId: session.id },
+      where: {
+        ...(canViewAll ? {} : { collaboratorId: session.id }),
+        ...(mode === "attivi"
+          ? { isHistorical: false }
+          : mode === "storico"
+            ? { isHistorical: true }
+            : {}),
+      },
       select: {
         id: true,
         status: true,
@@ -22,6 +35,8 @@ export default async function ContrattiPage() {
         supplyStartDate: true,
         operationType: true,
         podPdr: true,
+        archiveLabel: true,
+        isHistorical: true,
         client: {
           select: { type: true, companyName: true, firstName: true, lastName: true },
         },
@@ -39,17 +54,57 @@ export default async function ContrattiPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Contratti</h1>
             <p className="text-slate-500">
-              Clicca sul nome cliente per aprire la pratica · filtra con ▾
+              Modifica le celle in elenco · click sul nome per la scheda completa
             </p>
           </div>
-          {hasPermission(session.role, "contracts.create") ? (
-            <Link href="/contratti/nuovo">
-              <Button>Nuovo contratto</Button>
-            </Link>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {canViewAll ? (
+              <Link href="/archivio">
+                <Button variant="secondary">Archivio storico</Button>
+              </Link>
+            ) : null}
+            {hasPermission(session.role, "contracts.create") ? (
+              <Link href="/contratti/nuovo">
+                <Button>Nuovo contratto</Button>
+              </Link>
+            ) : null}
+          </div>
         </div>
 
-        <ContractsFilterTable rows={rows} />
+        <div className="flex flex-wrap gap-2 text-sm">
+          <Link
+            href="/contratti"
+            className={
+              mode === "attivi"
+                ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
+                : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-700"
+            }
+          >
+            Attivi
+          </Link>
+          <Link
+            href="/contratti?vista=storico"
+            className={
+              mode === "storico"
+                ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
+                : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-700"
+            }
+          >
+            Storico
+          </Link>
+          <Link
+            href="/contratti?vista=tutti"
+            className={
+              mode === "tutti"
+                ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
+                : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-700"
+            }
+          >
+            Tutti
+          </Link>
+        </div>
+
+        <ContractsFilterTable rows={rows} editable={mode !== "storico"} />
       </div>
     );
   } catch (error) {

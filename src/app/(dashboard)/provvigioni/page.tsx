@@ -1,9 +1,8 @@
-import { format } from "date-fns";
-import { it } from "date-fns/locale";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/commission";
+import { formatMonthYear } from "@/lib/date-parse";
 import { clientDisplayName } from "@/lib/utils";
 import {
   ProvvigioniFilterTable,
@@ -22,7 +21,9 @@ export default async function ProvvigioniPage() {
   const canViewAll = hasPermission(session.role, "commissions.view_all");
 
   const commissions = await prisma.commission.findMany({
-    where: canViewAll ? {} : { contract: { collaboratorId: session.id } },
+    where: canViewAll
+      ? { contract: { isHistorical: false } }
+      : { contract: { collaboratorId: session.id, isHistorical: false } },
     select: {
       id: true,
       expected: true,
@@ -69,10 +70,9 @@ export default async function ProvvigioniPage() {
 
   const rows: ProvvigioneRow[] = commissions.map((item) => {
     const paidLabel = normalizePaymentStatus(item.contract.paymentStatus);
-    // Mese/anno solo se Incassato + data reale. Niente date inventate / gialle.
     const collectionMonth =
       paidLabel === "Incassato" && item.contract.collectionDate
-        ? format(new Date(item.contract.collectionDate), "MMM yyyy", { locale: it })
+        ? formatMonthYear(item.contract.collectionDate)
         : "";
 
     return {
@@ -97,8 +97,8 @@ export default async function ProvvigioniPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
         <p className="text-slate-500">
-          Celle editabili: salva con Invio o clic fuori. Scrivi &quot;Incassato&quot; o &quot;Da
-          incassare&quot; nella colonna pagato.
+          Solo pratiche attive (lo storico pagato è in Archivio). Modifiche immediate su Invio /
+          click fuori.
         </p>
       </div>
 
@@ -129,3 +129,4 @@ export default async function ProvvigioniPage() {
     </div>
   );
 }
+

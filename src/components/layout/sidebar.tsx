@@ -12,6 +12,7 @@ import {
   Settings,
   LogOut,
   Zap,
+  Archive,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: "all" as const },
   { href: "/clienti", label: "Clienti", icon: Users, roles: "all" as const },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" as const },
+  { href: "/archivio", label: "Archivio", icon: Archive, roles: ["ADMIN", "SEGRETERIA"] as AppRole[] },
   { href: "/fornitori", label: "Fornitori", icon: Building2, roles: ["ADMIN", "SEGRETERIA"] as AppRole[] },
   { href: "/provvigioni", label: "Provvigioni", icon: Coins, roles: "all" as const },
   { href: "/report", label: "Report", icon: BarChart3, roles: ["ADMIN", "SEGRETERIA", "COLLABORATORE"] as AppRole[] },
