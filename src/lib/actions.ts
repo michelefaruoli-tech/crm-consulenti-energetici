@@ -339,6 +339,81 @@ export async function createUserAction(formData: FormData): Promise<void> {
   revalidatePath("/utenti");
 }
 
+/** Elimina un utente (se ha dati collegati lo disattiva e libera l'email). */
+export async function deleteUserAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    throw new Error("Permesso negato");
+  }
+
+  const userId = String(formData.get("userId") ?? "");
+  if (!userId) throw new Error("Utente non specificato");
+  if (userId === session.id) {
+    throw new Error("Non puoi eliminare l'utente con cui sei collegato");
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new Error("Utente non trovato");
+
+  const [clientsCount, contractsCount] = await Promise.all([
+    prisma.client.count({ where: { createdById: userId } }),
+    prisma.contract.count({ where: { collaboratorId: userId } }),
+  ]);
+
+  if (clientsCount > 0 || contractsCount > 0) {
+    // Non si può cancellare del tutto se ha pratiche: disattiva e libera l'email
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        active: false,
+        email: `deleted_${Date.now()}_${user.email}`,
+        name: `[Eliminato] ${user.name}`,
+      },
+    });
+  } else {
+    await prisma.auditLog.deleteMany({ where: { userId } });
+    await prisma.user.delete({ where: { id: userId } });
+  }
+
+  revalidatePath("/utenti");
+}
+
+/** Disattiva tutti gli altri utenti (tiene solo quello loggato). */
+export async function deleteAllOtherUsersAction(): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    throw new Error("Permesso negato");
+  }
+
+  const others = await prisma.user.findMany({
+    where: { id: { not: session.id } },
+    select: { id: true, email: true, name: true },
+  });
+
+  for (const user of others) {
+    const [clientsCount, contractsCount] = await Promise.all([
+      prisma.client.count({ where: { createdById: user.id } }),
+      prisma.contract.count({ where: { collaboratorId: user.id } }),
+    ]);
+
+    if (clientsCount > 0 || contractsCount > 0) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          active: false,
+          email: `deleted_${Date.now()}_${user.email}`,
+          name: `[Eliminato] ${user.name}`,
+        },
+      });
+    } else {
+      await prisma.auditLog.deleteMany({ where: { userId: user.id } });
+      await prisma.user.delete({ where: { id: user.id } });
+    }
+  }
+
+  revalidatePath("/utenti");
+}
+
 export async function runBackupAction(): Promise<
   { error: string } | { filename: string; payload: string }
 > {

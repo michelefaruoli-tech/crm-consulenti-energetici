@@ -1,4 +1,8 @@
-import { createUserAction } from "@/lib/actions";
+import {
+  createUserAction,
+  deleteUserAction,
+  deleteAllOtherUsersAction,
+} from "@/lib/actions";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -12,6 +16,7 @@ export default async function UtentiPage() {
   if (!hasPermission(session.role, "users.manage")) redirect("/");
 
   const users = await prisma.user.findMany({
+    where: { active: true },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -25,12 +30,28 @@ export default async function UtentiPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Utenti</h1>
-        <p className="text-slate-500">Gestione accessi e ruoli</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Utenti</h1>
+          <p className="text-slate-500">Gestione accessi e ruoli</p>
+        </div>
+        <form action={deleteAllOtherUsersAction}>
+          <Button type="submit" variant="danger">
+            Elimina tutti tranne me
+          </Button>
+        </form>
       </div>
 
-      <form action={createUserAction} className="grid max-w-3xl gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2">
+      <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        Non puoi eliminare l&apos;account con cui sei collegato. Prima crea il
+        tuo admin reale, poi usa &quot;Elimina tutti tranne me&quot; oppure
+        elimina gli utenti uno per uno.
+      </p>
+
+      <form
+        action={createUserAction}
+        className="grid max-w-3xl gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2"
+      >
         <Field label="Nome">
           <Input name="name" required />
         </Field>
@@ -38,7 +59,7 @@ export default async function UtentiPage() {
           <Input name="email" type="email" required />
         </Field>
         <Field label="Password">
-          <Input name="password" type="password" required />
+          <Input name="password" type="password" required minLength={6} />
         </Field>
         <Field label="Ruolo">
           <Select name="role" defaultValue="COLLABORATORE">
@@ -62,15 +83,33 @@ export default async function UtentiPage() {
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Ruolo</th>
               <th className="px-4 py-3">Stato</th>
+              <th className="px-4 py-3">Azioni</th>
             </tr>
           </thead>
           <tbody>
             {users.map((user) => (
               <tr key={user.id} className="border-t border-slate-100">
-                <td className="px-4 py-3 font-medium">{user.name}</td>
+                <td className="px-4 py-3 font-medium">
+                  {user.name}
+                  {user.id === session.id ? (
+                    <span className="ml-2 text-xs text-emerald-700">(tu)</span>
+                  ) : null}
+                </td>
                 <td className="px-4 py-3">{user.email}</td>
                 <td className="px-4 py-3">{ROLE_LABELS[user.role]}</td>
                 <td className="px-4 py-3">{user.active ? "Attivo" : "Disattivo"}</td>
+                <td className="px-4 py-3">
+                  {user.id === session.id ? (
+                    <span className="text-xs text-slate-400">—</span>
+                  ) : (
+                    <form action={deleteUserAction}>
+                      <input type="hidden" name="userId" value={user.id} />
+                      <Button type="submit" variant="danger" size="sm">
+                        Elimina
+                      </Button>
+                    </form>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
