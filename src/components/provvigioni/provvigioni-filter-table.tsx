@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { updateCommissionFieldAction } from "@/lib/commission-actions";
+import { DeleteRowButton } from "@/components/ui/delete-row-button";
 
 export type ProvvigioneRow = {
   id: string;
@@ -34,7 +35,13 @@ function shortType(value: string): string {
   return value;
 }
 
-export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
+export function ProvvigioniFilterTable({
+  rows,
+  canDelete = false,
+}: {
+  rows: ProvvigioneRow[];
+  canDelete?: boolean;
+}) {
   const router = useRouter();
 
   async function onCellEdit(row: Record<string, unknown>, key: string, value: string) {
@@ -131,12 +138,21 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
     },
   ];
 
+  if (canDelete) {
+    columns.push({
+      key: "_del",
+      label: "",
+      getValue: () => "",
+      render: (r) => <DeleteRowButton kind="contract" id={String(r.id)} />,
+    });
+  }
+
   return (
     <div className="space-y-2">
       <p className="text-xs text-slate-500">
-        Pagato: scrivi <strong>Sì</strong> o <strong>No</strong> (si salva subito e inserisce la
-        data). Data: formato <strong>MM/AAAA</strong> (es. 07/2026) — se inserisci la data diventa
-        automaticamente Incassato.
+        Pagato: <strong>Sì</strong>/<strong>No</strong> (inserisce la data). Data:{" "}
+        <strong>MM/AAAA</strong>.
+        {canDelete ? " Elimina rimuove il contratto (doppioni)." : ""}
       </p>
       <ExcelFilterTable
         dense

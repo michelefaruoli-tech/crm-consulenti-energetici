@@ -14,6 +14,7 @@ import {
   updateContractOperationAction,
   liquidateCommissionAction,
 } from "@/lib/actions";
+import { deleteContractAction } from "@/lib/delete-actions";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import {
   computeSupplyStartDate,
@@ -98,9 +99,19 @@ export default async function ContrattoDetailPage({
             <StatusBadge status={contract.status} />
           </div>
         </div>
-        <Link href="/contratti">
-          <Button variant="secondary">Torna all&apos;elenco</Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/contratti">
+            <Button variant="secondary">Torna all&apos;elenco</Button>
+          </Link>
+          {hasPermission(session.role, "contracts.edit_all") ? (
+            <form action={deleteContractAction}>
+              <input type="hidden" name="contractId" value={contract.id} />
+              <Button type="submit" variant="secondary">
+                Elimina contratto
+              </Button>
+            </form>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">

@@ -111,7 +111,7 @@ export default async function ArchivioPage() {
         </Link>
       </div>
 
-      <ContractsFilterTable rows={rows} editable={false} />
+      <ContractsFilterTable rows={rows} editable={false} canDelete />
     </div>
   );
 }

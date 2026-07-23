@@ -125,7 +125,7 @@ export default async function ProvvigioniPage() {
         </div>
       </div>
 
-      <ProvvigioniFilterTable rows={rows} />
+      <ProvvigioniFilterTable rows={rows} canDelete={canViewAll} />
     </div>
   );
 }

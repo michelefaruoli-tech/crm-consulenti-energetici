@@ -104,7 +104,7 @@ export default async function ContrattiPage({
           </Link>
         </div>
 
-        <ContractsFilterTable rows={rows} editable={mode !== "storico"} />
+        <ContractsFilterTable rows={rows} editable={mode !== "storico"} canDelete={canViewAll} />
       </div>
     );
   } catch (error) {

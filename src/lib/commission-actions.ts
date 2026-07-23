@@ -52,10 +52,6 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
           : null,
       },
     });
-    // Se appena passato a Incassato senza data precedente, assicurati che ci sia
-    if (paid && !commission.contract.collectionDate) {
-      // già impostato sopra con new Date()
-    }
   } else if (field === "collectionDate") {
     const raw = value.trim();
     if (!raw) {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
+import { DeleteRowButton } from "@/components/ui/delete-row-button";
 
 type Row = {
   id: string;
@@ -16,7 +17,13 @@ type Row = {
   createdBy: string;
 };
 
-export function ClientsFilterTable({ rows }: { rows: Row[] }) {
+export function ClientsFilterTable({
+  rows,
+  canDelete = false,
+}: {
+  rows: Row[];
+  canDelete?: boolean;
+}) {
   const router = useRouter();
 
   const columns: FilterColumn[] = [
@@ -42,6 +49,15 @@ export function ClientsFilterTable({ rows }: { rows: Row[] }) {
     { key: "contracts", label: "Contratti", getValue: (r) => String(r.contracts ?? "") },
     { key: "createdBy", label: "Inserito da", getValue: (r) => String(r.createdBy ?? "") },
   ];
+
+  if (canDelete) {
+    columns.push({
+      key: "_del",
+      label: "",
+      getValue: () => "",
+      render: (r) => <DeleteRowButton kind="client" id={String(r.id)} />,
+    });
+  }
 
   return (
     <ExcelFilterTable

@@ -6,13 +6,16 @@ import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-fi
 import { StatusBadge } from "@/components/ui/badge";
 import type { ContractTableRow } from "@/lib/contract-row";
 import { updateContractFieldAction } from "@/lib/contract-actions";
+import { DeleteRowButton } from "@/components/ui/delete-row-button";
 
 export function ContractsFilterTable({
   rows,
   editable = true,
+  canDelete = false,
 }: {
   rows: ContractTableRow[];
   editable?: boolean;
+  canDelete?: boolean;
 }) {
   const router = useRouter();
 
@@ -58,10 +61,7 @@ export function ContractsFilterTable({
     {
       key: "podPdr",
       label: "POD/PDR",
-      getValue: (r) => {
-        const v = String(r.podPdr ?? "").trim();
-        return v || "";
-      },
+      getValue: (r) => String(r.podPdr ?? "").trim(),
       editable,
     },
     {
@@ -69,9 +69,7 @@ export function ContractsFilterTable({
       label: "Stato",
       getValue: (r) => String(r.statusLabel ?? ""),
       editable,
-      render: editable
-        ? undefined
-        : (r) => <StatusBadge status={String(r.status)} />,
+      render: editable ? undefined : (r) => <StatusBadge status={String(r.status)} />,
     },
     {
       key: "insertionDate",
@@ -98,12 +96,23 @@ export function ContractsFilterTable({
     },
   ];
 
+  if (canDelete) {
+    columns.push({
+      key: "_del",
+      label: "",
+      getValue: () => "",
+      render: (r) => <DeleteRowButton kind="contract" id={String(r.id)} />,
+    });
+  }
+
   return (
     <div className="space-y-2">
-      {editable ? (
+      {editable || canDelete ? (
         <p className="text-xs text-slate-500">
-          Celle modificabili: POD/PDR, Stato, Inserimento, Inizio fornitura, Operazione (Cambio /
-          Voltura / Attivazione). Salva con Invio o click fuori.
+          {editable
+            ? "Celle modificabili: POD/PDR, Stato, date, Operazione (Invio / click fuori)."
+            : null}{" "}
+          {canDelete ? "Elimina toglie la riga (utile per doppioni)." : null}
         </p>
       ) : null}
       <ExcelFilterTable

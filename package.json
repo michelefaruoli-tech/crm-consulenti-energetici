@@ -17,7 +17,8 @@
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
     "snapshot": "tsx scripts/snapshot-working.ts",
-    "db:backfill-supply": "tsx scripts/backfill-supply-start.ts"
+    "db:backfill-supply": "tsx scripts/backfill-supply-start.ts",
+    "db:import-utenze-aprile": "tsx scripts/import-utenze-aprile.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

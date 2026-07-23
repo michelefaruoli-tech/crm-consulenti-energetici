@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { updateClientAction } from "@/lib/actions";
+import { deleteClientAction } from "@/lib/delete-actions";
 import { hasPermission } from "@/lib/permissions";
 
 export default async function ClienteDetailPage({
@@ -44,9 +45,19 @@ export default async function ClienteDetailPage({
             {client.createdBy.name}
           </p>
         </div>
-        <Link href={`/contratti/nuovo?clientId=${client.id}`}>
-          <Button>Nuovo contratto</Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href={`/contratti/nuovo?clientId=${client.id}`}>
+            <Button>Nuovo contratto</Button>
+          </Link>
+          {hasPermission(session.role, "clients.edit_all") ? (
+            <form action={deleteClientAction}>
+              <input type="hidden" name="clientId" value={client.id} />
+              <Button type="submit" variant="secondary">
+                Elimina cliente
+              </Button>
+            </form>
+          ) : null}
+        </div>
       </div>
 
       {canEdit ? (

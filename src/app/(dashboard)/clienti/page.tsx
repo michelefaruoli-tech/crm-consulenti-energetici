@@ -92,7 +92,10 @@ export default async function ClientiPage({
           </Button>
         </form>
 
-        <ClientsFilterTable rows={rows} />
+        <ClientsFilterTable
+        rows={rows}
+        canDelete={hasPermission(session.role, "clients.edit_all")}
+      />
       </div>
     );
   } catch (error) {
