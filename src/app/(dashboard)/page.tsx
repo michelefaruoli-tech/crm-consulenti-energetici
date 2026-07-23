@@ -71,6 +71,8 @@ export default async function DashboardPage() {
           id: true,
           status: true,
           insertionDate: true,
+          supplyStartDate: true,
+          operationType: true,
           podPdr: true,
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },

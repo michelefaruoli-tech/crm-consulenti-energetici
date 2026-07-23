@@ -21,6 +21,8 @@ type Props = {
   onRowClick?: (row: Record<string, unknown>) => void;
   onCellEdit?: (row: Record<string, unknown>, key: string, value: string) => void | Promise<void>;
   emptyMessage?: string;
+  /** Celle più compatte per stare in una schermata */
+  dense?: boolean;
 };
 
 export function ExcelFilterTable({
@@ -30,6 +32,7 @@ export function ExcelFilterTable({
   onRowClick,
   onCellEdit,
   emptyMessage = "Nessun risultato",
+  dense = false,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
@@ -108,13 +111,19 @@ export function ExcelFilterTable({
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-      <table className="min-w-full text-sm">
-        <thead className="bg-slate-50 text-left text-slate-600">
+      <table className={cn("w-full text-left", dense ? "min-w-0 text-xs" : "min-w-full text-sm")}>
+        <thead className="bg-slate-50 text-slate-600">
           <tr>
             {columns.map((col) => {
               const active = (selected[col.key]?.size ?? 0) > 0;
               return (
-                <th key={col.key} className="relative px-3 py-2 align-bottom">
+                <th
+                  key={col.key}
+                  className={cn(
+                    "relative align-bottom whitespace-nowrap",
+                    dense ? "px-1.5 py-1.5" : "px-3 py-2",
+                  )}
+                >
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -211,7 +220,7 @@ export function ExcelFilterTable({
                 {columns.map((col) => (
                   <td
                     key={col.key}
-                    className="px-3 py-2"
+                    className={cn(dense ? "px-1.5 py-1" : "px-3 py-2")}
                     onClick={(e) => {
                       // Solo le celle editabili bloccano il click sulla riga
                       if (col.editable) e.stopPropagation();
@@ -220,9 +229,10 @@ export function ExcelFilterTable({
                     {col.editable && onCellEdit ? (
                       <input
                         className={cn(
-                          "w-full min-w-[10rem] rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-slate-200 focus:border-emerald-500 focus:outline-none",
+                          "w-full rounded border border-transparent bg-transparent hover:border-slate-200 focus:border-emerald-500 focus:outline-none",
+                          dense ? "min-w-0 px-0.5 py-0.5 text-xs" : "min-w-[10rem] px-1 py-0.5",
                           col.key === "podPdr" &&
-                            "font-mono text-sm font-semibold tracking-wide text-slate-900",
+                            "font-mono font-semibold tracking-wide text-slate-900",
                         )}
                         defaultValue={
                           col.getValue(row) === "(vuoto)" ? "" : col.getValue(row)

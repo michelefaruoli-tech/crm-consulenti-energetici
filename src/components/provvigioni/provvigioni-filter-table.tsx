@@ -21,6 +21,19 @@ export type ProvvigioneRow = {
   collectionMonth: string;
 };
 
+function shortRecurrence(value: string): string {
+  const v = value.toLowerCase();
+  if (v.includes("ricor")) return "Ric";
+  if (v.includes("tantum") || v.includes("una")) return "UT";
+  return value || "UT";
+}
+
+function shortType(value: string): string {
+  if (value === "Business") return "Bus";
+  if (value === "Domestico") return "Dom";
+  return value;
+}
+
 export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
   const router = useRouter();
 
@@ -59,54 +72,54 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
     },
     {
       key: "podPdr",
-      label: "POD / PDR (codice completo)",
+      label: "POD/PDR",
       getValue: (r) => String(r.podPdr ?? ""),
       editable: true,
     },
     {
       key: "collaboratorName",
-      label: "Collaboratore",
+      label: "Collab.",
       getValue: (r) => String(r.collaboratorName ?? ""),
     },
     {
       key: "supplierName",
-      label: "Fornitore",
+      label: "Forn.",
       getValue: (r) => String(r.supplierName ?? ""),
     },
     {
       key: "clientType",
-      label: "Tipo (Domestico/Business)",
+      label: "Tipologia",
       getValue: (r) => String(r.clientType ?? ""),
+      render: (r) => shortType(String(r.clientType ?? "")),
     },
     {
       key: "amount",
-      label: "Valore gettone",
+      label: "Gettone",
       getValue: (r) => String(r.amount ?? ""),
       editable: true,
     },
     {
       key: "recurrence",
-      label: "Una tantum / Ricorrente",
-      getValue: (r) => String(r.recurrence ?? ""),
+      label: "Ricorrenza",
+      getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
       editable: true,
     },
     {
       key: "paymentStatus",
-      label: "Pagato / Non pagato",
-      getValue: (r) => String(r.paymentStatus ?? ""),
+      label: "Pagato",
+      getValue: (r) => (/incass/i.test(String(r.paymentStatus ?? "")) ? "Sì" : "No"),
       editable: true,
     },
     {
       key: "confirmed",
-      label: "Conferma",
+      label: "Conf.",
       getValue: (r) => String(r.collectionMonth || r.confirmed || ""),
       render: (r) => {
         const month = String(r.collectionMonth ?? "").trim();
         const paid = /incass/i.test(String(r.paymentStatus ?? ""));
-        // Se incassato: solo mese/anno verde. La gialla sparisce.
         if (paid && month) {
           return (
-            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">
               {month}
             </span>
           );
@@ -116,11 +129,11 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
           <span
             className={
               ok
-                ? "w-fit rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
-                : "w-fit rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                ? "rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
+                : "rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800"
             }
           >
-            {ok ? "Verde" : "Gialla"}
+            {ok ? "OK" : "—"}
           </span>
         );
       },
@@ -129,6 +142,7 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
 
   return (
     <ExcelFilterTable
+      dense
       rows={rows as unknown as Record<string, unknown>[]}
       columns={columns}
       rowKey={(r) => String(r.commissionId)}

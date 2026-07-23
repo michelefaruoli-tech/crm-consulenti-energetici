@@ -39,7 +39,7 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
     }
   } else if (field === "paymentStatus") {
     const raw = value.trim();
-    const paid = /^incass/i.test(raw);
+    const paid = /^(incass|s[iì]|si|yes|1)$/i.test(raw);
     const normalized = paid ? "Incassato" : "Da incassare";
     await prisma.contract.update({
       where: { id: commission.contractId },
@@ -51,9 +51,15 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       },
     });
   } else if (field === "recurrence") {
+    const raw = value.trim();
+    const normalized = /ric/i.test(raw)
+      ? "Ricorrente"
+      : /ut|tantum|una/i.test(raw)
+        ? "Una tantum"
+        : raw || "Una tantum";
     await prisma.contract.update({
       where: { id: commission.contractId },
-      data: { recurrence: value.trim() || null },
+      data: { recurrence: normalized },
     });
   } else if (field === "podPdr") {
     await prisma.contract.update({

@@ -15,7 +15,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "snapshot": "tsx scripts/snapshot-working.ts",
+    "db:backfill-supply": "tsx scripts/backfill-supply-start.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

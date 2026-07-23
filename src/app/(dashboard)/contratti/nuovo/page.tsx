@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { PAYMENT_TYPE_LABELS } from "@/lib/constants";
+import { OPERATION_TYPE_LABELS } from "@/lib/supply-dates";
 
 export default async function NuovoContrattoPage({
   searchParams,
@@ -93,6 +94,16 @@ export default async function NuovoContrattoPage({
                 </option>
               )),
             )}
+          </Select>
+        </Field>
+
+        <Field label="Tipo operazione">
+          <Select name="operationType" defaultValue="CAMBIO">
+            {Object.entries(OPERATION_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </Select>
         </Field>
 

@@ -1,4 +1,9 @@
 import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
+import {
+  computeSupplyStartDate,
+  formatItDate,
+  normalizeOperationType,
+} from "@/lib/supply-dates";
 
 export type ContractTableRow = {
   id: string;
@@ -8,6 +13,8 @@ export type ContractTableRow = {
   status: string;
   statusLabel: string;
   insertionDate: string;
+  supplyStartDate: string;
+  operationType: string;
   collaboratorName: string;
 };
 
@@ -15,6 +22,8 @@ export function toContractRow(contract: {
   id: string;
   status: string;
   insertionDate: Date | string;
+  supplyStartDate?: Date | string | null;
+  operationType?: string | null;
   podPdr?: string | null;
   client: {
     type: string;
@@ -37,6 +46,9 @@ export function toContractRow(contract: {
       : contract.insertionDate.toISOString().slice(0, 10);
 
   const status = contract.status as AppContractStatus;
+  const supply =
+    contract.supplyStartDate ??
+    computeSupplyStartDate(contract.insertionDate, contract.operationType);
 
   return {
     id: contract.id,
@@ -46,6 +58,8 @@ export function toContractRow(contract: {
     status,
     statusLabel: CONTRACT_STATUS_LABELS[status] ?? contract.status,
     insertionDate: insertion.split("-").reverse().join("/"),
+    supplyStartDate: formatItDate(supply),
+    operationType: normalizeOperationType(contract.operationType),
     collaboratorName: contract.collaborator.name,
   };
 }

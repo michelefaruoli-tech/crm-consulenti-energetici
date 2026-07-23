@@ -9,6 +9,10 @@ import { calculateExpectedCommission } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { generateContractNumber } from "@/lib/utils";
+import {
+  computeSupplyStartDate,
+  normalizeOperationType,
+} from "@/lib/supply-dates";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "");
@@ -146,6 +150,10 @@ export async function createContractAction(formData: FormData): Promise<void> {
     : session.id;
   const notes = String(formData.get("notes") ?? "") || null;
   const expiryDateRaw = String(formData.get("expiryDate") ?? "");
+  const operationType = String(formData.get("operationType") ?? "CAMBIO");
+  const insertionDate = new Date();
+  const op = normalizeOperationType(operationType);
+  const supplyStartDate = computeSupplyStartDate(insertionDate, op);
 
   const rule = commissionRuleId
     ? await prisma.commissionRule.findUnique({ where: { id: commissionRuleId } })
@@ -154,38 +162,39 @@ export async function createContractAction(formData: FormData): Promise<void> {
   const contractNumber = await generateContractNumber();
   const expected = calculateExpectedCommission(rule);
 
-  const contract = await prisma.$transaction(async (tx) => {
-    const created = await tx.contract.create({
-      data: {
-        contractNumber,
-        clientId,
-        supplierId,
-        serviceId,
-        commissionRuleId,
-        collaboratorId,
-        notes,
-        expiryDate: expiryDateRaw ? new Date(expiryDateRaw) : null,
-        status: "INSERITO",
-      },
-    });
-
-    await tx.contractStatusHistory.create({
-      data: {
-        contractId: created.id,
-        toStatus: "INSERITO",
-        changedById: session.id,
-      },
-    });
-
-    await tx.commission.create({
-      data: {
-        contractId: created.id,
-        expected,
-      },
-    });
-
-    return created;
+  const created = await prisma.contract.create({
+    data: {
+      contractNumber,
+      clientId,
+      supplierId,
+      serviceId,
+      commissionRuleId,
+      collaboratorId,
+      notes,
+      expiryDate: expiryDateRaw ? new Date(expiryDateRaw) : null,
+      status: "INSERITO",
+      operationType: op,
+      insertionDate,
+      supplyStartDate,
+    },
   });
+
+  await prisma.contractStatusHistory.create({
+    data: {
+      contractId: created.id,
+      toStatus: "INSERITO",
+      changedById: session.id,
+    },
+  });
+
+  await prisma.commission.create({
+    data: {
+      contractId: created.id,
+      expected,
+    },
+  });
+
+  const contract = created;
 
   await prisma.auditLog.create({
     data: {
@@ -305,6 +314,39 @@ export async function updateContractCollaboratorAction(formData: FormData): Prom
   revalidatePath(`/contratti/${contractId}`);
   revalidatePath("/");
   revalidatePath("/provvigioni");
+}
+
+export async function updateContractOperationAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (
+    !hasPermission(session.role, "contracts.edit_all") &&
+    !hasPermission(session.role, "contracts.edit_own")
+  ) {
+    throw new Error("Permesso negato");
+  }
+
+  const contractId = String(formData.get("contractId") ?? "");
+  const op = normalizeOperationType(String(formData.get("operationType") ?? "CAMBIO"));
+
+  const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+  if (!contract) throw new Error("Contratto non trovato");
+  if (
+    !hasPermission(session.role, "contracts.edit_all") &&
+    contract.collaboratorId !== session.id
+  ) {
+    throw new Error("Permesso negato");
+  }
+
+  const supplyStartDate = computeSupplyStartDate(contract.insertionDate, op);
+
+  await prisma.contract.update({
+    where: { id: contractId },
+    data: { operationType: op, supplyStartDate },
+  });
+
+  revalidatePath("/contratti");
+  revalidatePath(`/contratti/${contractId}`);
+  revalidatePath("/");
 }
 
 export async function liquidateCommissionAction(formData: FormData): Promise<void> {

@@ -11,9 +11,16 @@ import { Field, Select, Textarea } from "@/components/ui/form";
 import {
   updateContractStatusAction,
   updateContractCollaboratorAction,
+  updateContractOperationAction,
   liquidateCommissionAction,
 } from "@/lib/actions";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
+import {
+  computeSupplyStartDate,
+  formatItDate,
+  OPERATION_TYPE_LABELS,
+  normalizeOperationType,
+} from "@/lib/supply-dates";
 
 export default async function ContrattoDetailPage({
   params,
@@ -46,11 +53,18 @@ export default async function ContrattoDetailPage({
 
   const canChangeStatus = hasPermission(session.role, "contracts.change_status");
   const canChangeCollaborator = hasPermission(session.role, "contracts.edit_all");
+  const canEditContract =
+    hasPermission(session.role, "contracts.edit_all") ||
+    contract.collaboratorId === session.id;
   const canLiquidate = hasPermission(session.role, "commissions.view_all");
   const expected = Number(contract.commission?.expected ?? 0);
   const accrued = Number(contract.commission?.accrued ?? 0);
   const received = Number(contract.commission?.received ?? 0);
   const paid = Number(contract.commission?.paid ?? 0);
+  const operationType = normalizeOperationType(contract.operationType);
+  const supplyStart =
+    contract.supplyStartDate ??
+    computeSupplyStartDate(contract.insertionDate, operationType);
 
   const collaborators = canChangeCollaborator
     ? await prisma.user.findMany({
@@ -131,6 +145,14 @@ export default async function ContrattoDetailPage({
               <dd>{formatDate(contract.insertionDate)}</dd>
             </div>
             <div>
+              <dt className="text-slate-500">Inizio fornitura</dt>
+              <dd className="font-semibold text-emerald-800">{formatItDate(supplyStart)}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Tipo operazione</dt>
+              <dd>{OPERATION_TYPE_LABELS[operationType]}</dd>
+            </div>
+            <div>
               <dt className="text-slate-500">Attivazione</dt>
               <dd>{formatDate(contract.activationDate)}</dd>
             </div>
@@ -188,6 +210,34 @@ export default async function ContrattoDetailPage({
           ) : null}
         </section>
       </div>
+
+      {canEditContract ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-2 font-semibold text-slate-900">Tipo operazione e inizio fornitura</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Cambio: se inserito prima del giorno 8 → 1° del mese successivo, altrimenti 1° di due
+            mesi dopo. Voltura/Attivazione: circa +7 giorni dall&apos;inserimento.
+          </p>
+          <form
+            action={updateContractOperationAction}
+            className="grid gap-4 md:grid-cols-[1fr_auto]"
+          >
+            <input type="hidden" name="contractId" value={contract.id} />
+            <Field label="Operazione">
+              <Select name="operationType" defaultValue={operationType}>
+                {Object.entries(OPERATION_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="flex items-end">
+              <Button type="submit">Ricalcola data</Button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       {canChangeCollaborator ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

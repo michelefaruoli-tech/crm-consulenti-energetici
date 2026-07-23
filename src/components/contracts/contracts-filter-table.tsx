@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { StatusBadge } from "@/components/ui/badge";
 import type { ContractTableRow } from "@/lib/contract-row";
+import { OPERATION_TYPE_LABELS, type OperationType } from "@/lib/supply-dates";
 
 export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
   const router = useRouter();
@@ -30,13 +31,13 @@ export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
     },
     {
       key: "podPdr",
-      label: "POD / PDR",
+      label: "POD/PDR",
       getValue: (r) => String(r.podPdr ?? "") || "(vuoto)",
       render: (r) => {
         const code = String(r.podPdr ?? "").trim();
         if (!code) return <span className="text-slate-400">—</span>;
         return (
-          <span className="font-mono text-sm font-semibold tracking-wide text-slate-900">
+          <span className="font-mono text-xs font-semibold tracking-wide text-slate-900">
             {code}
           </span>
         );
@@ -50,8 +51,21 @@ export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
     },
     {
       key: "insertionDate",
-      label: "Data inserimento",
+      label: "Inserimento",
       getValue: (r) => String(r.insertionDate ?? ""),
+    },
+    {
+      key: "supplyStartDate",
+      label: "Inizio fornitura",
+      getValue: (r) => String(r.supplyStartDate ?? ""),
+    },
+    {
+      key: "operationType",
+      label: "Operazione",
+      getValue: (r) => {
+        const t = String(r.operationType ?? "CAMBIO") as OperationType;
+        return OPERATION_TYPE_LABELS[t] ?? t;
+      },
     },
     {
       key: "collaboratorName",
@@ -62,6 +76,7 @@ export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
 
   return (
     <ExcelFilterTable
+      dense
       rows={rows as unknown as Record<string, unknown>[]}
       columns={columns}
       rowKey={(r) => String(r.id)}

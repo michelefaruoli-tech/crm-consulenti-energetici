@@ -58,3 +58,9 @@ skills-lock.json
 /import/*.xlsx
 /import/*.xls
 /import/*.csv
+
+# Backup dati locali (contengono anagrafiche)
+/backups/*.json
+!/backups/INDEX.md
+!/backups/.gitkeep
+build-output.txt

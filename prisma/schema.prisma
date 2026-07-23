@@ -186,6 +186,8 @@ model Contract {
 
   insertionDate    DateTime       @default(now())
   receivedDate     DateTime?
+  /// Data inizio fornitura (calcolata: regola giorno 8 / +7gg voltura-attivazione)
+  supplyStartDate  DateTime?
   activationDate   DateTime?
   paymentDate      DateTime?
   collectionDate   DateTime?
