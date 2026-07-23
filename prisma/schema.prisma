@@ -20,11 +20,15 @@ enum ContractStatus {
   DOCUMENTAZIONE_INCOMPLETA
   DOCUMENTAZIONE_COMPLETA
   INVIATO_AL_FORNITORE
+  DA_LAVORARE
+  INVIATO_AL_MASTER
+  ERRORE_INVIO
   IN_LAVORAZIONE
   ATTIVATO
   IN_ATTESA_PAGAMENTO
   PAGATO_DAL_FORNITORE
   PROVVIGIONE_LIQUIDATA
+  COMPLETATO
   CHIUSO
   ANNULLATO
 }
@@ -54,9 +58,11 @@ model User {
 
   clientsCreated   Client[]                @relation("ClientCreatedBy")
   contracts        Contract[]              @relation("ContractCollaborator")
+  contractsCreated Contract[]              @relation("ContractCreatedBy")
   statusChanges    ContractStatusHistory[]
   auditLogs        AuditLog[]
   commissionPayouts CommissionEntry[]      @relation("CommissionPaidBy")
+  emailLogsSent    ContractEmailLog[]      @relation("EmailSentBy")
 }
 
 model Client {
@@ -72,19 +78,30 @@ model Client {
   phone       String?
   iban        String?
   address     String?
+  street      String?
+  streetNumber String?
   city        String?
   province    String?
   region      String?
   zipCode     String?
+  country     String?    @default("Italia")
   /// Residente / Non residente / Altri usi
   classification String?
+  /// Business: rappresentante legale
+  legalFirstName String?
+  legalLastName  String?
+  legalFiscalCode String?
+  sdiCode        String?
   supplyAddress  String?
+  supplyStreet   String?
+  supplyStreetNumber String?
   supplyCity     String?
   supplyProvince String?
   supplyRegion   String?
   supplyZipCode  String?
   addressesMatch Boolean?
   notes       String?
+  deletedAt   DateTime?
   createdById String
   createdBy   User       @relation("ClientCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime   @default(now())
@@ -98,6 +115,7 @@ model Client {
   @@index([vatNumber])
   @@index([lastName, firstName])
   @@index([email])
+  @@index([deletedAt])
 }
 
 model Supplier {
@@ -156,6 +174,8 @@ model Contract {
   client           Client         @relation(fields: [clientId], references: [id])
   collaboratorId   String
   collaborator     User           @relation("ContractCollaborator", fields: [collaboratorId], references: [id])
+  createdById      String?
+  createdBy        User?          @relation("ContractCreatedBy", fields: [createdById], references: [id])
   supplierId       String
   supplier         Supplier       @relation(fields: [supplierId], references: [id])
   serviceId        String?
@@ -164,29 +184,60 @@ model Contract {
   commissionRule   CommissionRule? @relation(fields: [commissionRuleId], references: [id])
   status           ContractStatus @default(BOZZA)
 
-  /// Luce / Gas / Telefonia / Fibra...
+  /// Luce / Gas / Telefonia / POS / Fotovoltaico...
   utilityType      String?
   productName      String?
-  /// POD o PDR
+  offerCode        String?
+  contractKind     String?
+  /// POD o PDR (legacy singolo)
   podPdr           String?
-  /// Fisso / Variabile
+  pod              String?
+  pdr              String?
+  /// Fisso / Variabile / Indicizzato
   priceType        String?
   pcv              Decimal?       @db.Decimal(10, 4)
   pricePerKwh      Decimal?       @db.Decimal(10, 6)
+  pricePerSmc      Decimal?       @db.Decimal(10, 6)
+  spread           Decimal?       @db.Decimal(10, 6)
+  monthlyFee       Decimal?       @db.Decimal(10, 2)
+  oneOffFee        Decimal?       @db.Decimal(10, 2)
+  discount         Decimal?       @db.Decimal(10, 2)
+  powerKw          Decimal?       @db.Decimal(10, 2)
+  annualKwh        Decimal?       @db.Decimal(12, 2)
+  annualSmc        Decimal?       @db.Decimal(12, 2)
   bandCount        Int?
   bandsJson        String?
+  economicNotes    String?
   /// Una tantum / Mensile...
   recurrence       String?
   paymentMethod    String?
+  ibanHolder       String?
+  ibanHolderCf     String?
+  invoiceEmail     String?
+  invoiceMode      String?
+  billingPeriod    String?
   operationType    String?
+  operationOther   String?
+  serviceOther     String?
   agency           String?
   rowType          String?
   parentExternalId String?
+  parentContractId String?
   monthlyPeriod    String?
+  supplyClassification String?
+  durationMonths   Int            @default(12)
+  sendToMaster     Boolean        @default(false)
+  masterNotes      String?
+  internalNotes    String?
+  /// JSON condizioni/servizi tecnici extra
+  technicalJson    String?
+  economicJson     String?
+  paymentJson      String?
 
   insertionDate    DateTime       @default(now())
+  subscriptionDate DateTime?
   receivedDate     DateTime?
-  /// Data inizio fornitura (calcolata: regola giorno 8 / +7gg voltura-attivazione)
+  /// Data inizio fornitura
   supplyStartDate  DateTime?
   activationDate   DateTime?
   paymentDate      DateTime?
@@ -199,15 +250,13 @@ model Contract {
   workStatus       String?
   toWork           Boolean        @default(false)
   manuallyVerified Boolean        @default(false)
-  /// Contratti già chiusi/pagati importati solo per storico e report
   isHistorical     Boolean        @default(false)
-  /// Etichetta lotto storico (es. "Excel pagati 2024")
   archiveLabel     String?
-  /// false = giallo (proposta collab), true = verde (confermata admin)
   commissionConfirmed Boolean     @default(false)
   commissionConfirmedAt DateTime?
   attachmentsJson  String?
   notes            String?
+  deletedAt        DateTime?
 
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -216,16 +265,21 @@ model Contract {
   documents     Document[]
   commission    Commission?
   recurringMonths RecurringMonth[]
+  emailLogs     ContractEmailLog[]
 
   @@index([status])
   @@index([collaboratorId])
   @@index([supplierId])
   @@index([podPdr])
+  @@index([pod])
+  @@index([pdr])
   @@index([insertionDate])
   @@index([expiryDate])
   @@index([commissionConfirmed])
   @@index([isHistorical])
   @@index([archiveLabel])
+  @@index([deletedAt])
+  @@index([sendToMaster])
 }
 
 model ContractStatusHistory {
@@ -297,7 +351,31 @@ model Document {
   mimeType   String
   size       Int
   path       String
+  /// Tipologia documento (CI_FRONTE, BOLLETTA, ...)
+  docType    String?
+  /// Contenuto base64 per allegati piccoli / email (Vercel FS effimero)
+  contentBase64 String?
   uploadedAt DateTime  @default(now())
+}
+
+model ContractEmailLog {
+  id           String   @id @default(cuid())
+  contractId   String
+  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  toEmail      String
+  subject      String
+  status       String
+  error        String?
+  attempts     Int      @default(1)
+  messageId    String?
+  sentById     String?
+  sentBy       User?    @relation("EmailSentBy", fields: [sentById], references: [id])
+  payloadHash  String?
+  createdAt    DateTime @default(now())
+
+  @@index([contractId])
+  @@index([payloadHash])
+  @@index([status])
 }
 
 model ClientHistory {

@@ -28,9 +28,9 @@ export default async function ProvvigioniPage() {
 
   const [commissions, missing] = await Promise.all([
     prisma.commission.findMany({
-      where: canViewAll
-        ? { contract: { isHistorical: false } }
-        : { contract: { collaboratorId: session.id, isHistorical: false } },
+    where: canViewAll
+      ? { contract: { isHistorical: false, deletedAt: null } }
+      : { contract: { collaboratorId: session.id, isHistorical: false, deletedAt: null } },
       select: {
         id: true,
         expected: true,

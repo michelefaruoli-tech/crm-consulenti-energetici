@@ -12,7 +12,14 @@ export function normalizeOperationType(
 ): OperationType {
   const v = (value ?? "").trim().toUpperCase();
   if (v === "VOLTURA") return "VOLTURA";
-  if (v === "ATTIVAZIONE" || v === "ATTIVAZIONI") return "ATTIVAZIONE";
+  if (
+    v === "ATTIVAZIONE" ||
+    v === "ATTIVAZIONI" ||
+    v === "NUOVA_ATTIVAZIONE" ||
+    v === "SUBENTRO"
+  ) {
+    return "ATTIVAZIONE";
+  }
   return "CAMBIO";
 }
 

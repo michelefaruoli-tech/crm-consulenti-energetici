@@ -20,6 +20,7 @@ export default async function ClientiPage({
   try {
     const clients = await prisma.client.findMany({
       where: {
+        deletedAt: null,
         ...(canViewAll ? {} : { createdById: session.id }),
         ...(q
           ? {

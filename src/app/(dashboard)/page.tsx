@@ -13,8 +13,8 @@ export default async function DashboardPage() {
   const session = await requireSession();
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const where = canViewAll
-    ? { isHistorical: false }
-    : { collaboratorId: session.id, isHistorical: false };
+    ? { isHistorical: false, deletedAt: null }
+    : { collaboratorId: session.id, isHistorical: false, deletedAt: null };
 
   try {
     const [

@@ -22,7 +22,10 @@ export async function deleteContractAction(formData: FormData): Promise<void> {
   });
   if (!contract) throw new Error("Contratto non trovato");
 
-  await prisma.contract.delete({ where: { id: contractId } });
+  await prisma.contract.update({
+    where: { id: contractId },
+    data: { deletedAt: new Date(), status: "ANNULLATO" },
+  });
 
   revalidatePath("/contratti");
   revalidatePath("/provvigioni");
@@ -48,7 +51,10 @@ export async function deleteContractRowAction(formData: FormData): Promise<void>
   });
   if (!contract) throw new Error("Contratto non trovato");
 
-  await prisma.contract.delete({ where: { id: contractId } });
+  await prisma.contract.update({
+    where: { id: contractId },
+    data: { deletedAt: new Date(), status: "ANNULLATO" },
+  });
 
   revalidatePath("/contratti");
   revalidatePath("/provvigioni");
@@ -67,10 +73,14 @@ export async function deleteClientAction(formData: FormData): Promise<void> {
   const clientId = String(formData.get("clientId") ?? "");
   if (!clientId) throw new Error("Cliente mancante");
 
-  await prisma.contract.deleteMany({ where: { clientId } });
-  await prisma.document.deleteMany({ where: { clientId } }).catch(() => undefined);
-  await prisma.clientHistory.deleteMany({ where: { clientId } }).catch(() => undefined);
-  await prisma.client.delete({ where: { id: clientId } });
+  await prisma.contract.updateMany({
+    where: { clientId },
+    data: { deletedAt: new Date(), status: "ANNULLATO" },
+  });
+  await prisma.client.update({
+    where: { id: clientId },
+    data: { deletedAt: new Date() },
+  });
 
   revalidatePath("/clienti");
   revalidatePath("/contratti");
@@ -89,10 +99,14 @@ export async function deleteClientRowAction(formData: FormData): Promise<void> {
   const clientId = String(formData.get("clientId") ?? "");
   if (!clientId) throw new Error("Cliente mancante");
 
-  await prisma.contract.deleteMany({ where: { clientId } });
-  await prisma.document.deleteMany({ where: { clientId } }).catch(() => undefined);
-  await prisma.clientHistory.deleteMany({ where: { clientId } }).catch(() => undefined);
-  await prisma.client.delete({ where: { id: clientId } });
+  await prisma.contract.updateMany({
+    where: { clientId },
+    data: { deletedAt: new Date(), status: "ANNULLATO" },
+  });
+  await prisma.client.update({
+    where: { id: clientId },
+    data: { deletedAt: new Date() },
+  });
 
   revalidatePath("/clienti");
   revalidatePath("/contratti");

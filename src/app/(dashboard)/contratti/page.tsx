@@ -21,6 +21,7 @@ export default async function ContrattiPage({
   try {
     const contracts = await prisma.contract.findMany({
       where: {
+        deletedAt: null,
         ...(canViewAll ? {} : { collaboratorId: session.id }),
         ...(mode === "attivi"
           ? { isHistorical: false }

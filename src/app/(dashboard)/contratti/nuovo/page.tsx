@@ -1,13 +1,10 @@
-import { createContractAction } from "@/lib/actions";
+import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { clientDisplayName } from "@/lib/utils";
-import { redirect } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
-import { PAYMENT_TYPE_LABELS } from "@/lib/constants";
-import { OPERATION_TYPE_LABELS } from "@/lib/supply-dates";
+import { NuovoContrattoForm } from "@/components/contracts/nuovo-contratto-form";
+
+export const dynamic = "force-dynamic";
 
 export default async function NuovoContrattoPage({
   searchParams,
@@ -17,106 +14,33 @@ export default async function NuovoContrattoPage({
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.create")) redirect("/contratti");
   const { clientId } = await searchParams;
+  const canPickCollaborator = hasPermission(session.role, "contracts.edit_all");
 
-  const [clients, suppliers, collaborators] = await Promise.all([
-    prisma.client.findMany({ orderBy: { updatedAt: "desc" } }),
-    prisma.supplier.findMany({
-      where: { active: true },
-      include: { services: true, commissionRules: { where: { active: true } } },
-    }),
-    hasPermission(session.role, "contracts.edit_all")
-      ? prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" } })
-      : Promise.resolve([]),
-  ]);
+  const collaborators = canPickCollaborator
+    ? await prisma.user.findMany({
+        where: {
+          active: true,
+          role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })
+    : [{ id: session.id, name: session.name }];
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Nuovo contratto</h1>
-        <p className="text-slate-500">Inserimento pratica e calcolo provvigione prevista</p>
+        <p className="text-slate-500">
+          Autocomplete clienti/fornitori · durata 12 mesi automatica · invio al Master opzionale
+        </p>
       </div>
-
-      <form action={createContractAction} className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <Field label="Cliente">
-          <Select name="clientId" required defaultValue={clientId ?? ""}>
-            <option value="">Seleziona cliente</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {clientDisplayName(client)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        {collaborators.length > 0 ? (
-          <Field label="Collaboratore">
-            <Select name="collaboratorId" defaultValue={session.id}>
-              {collaborators.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        ) : null}
-
-        <Field label="Fornitore">
-          <Select name="supplierId" required>
-            <option value="">Seleziona fornitore</option>
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field label="Servizio">
-          <Select name="serviceId">
-            <option value="">Opzionale</option>
-            {suppliers.flatMap((supplier) =>
-              supplier.services.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {supplier.name} · {service.name}
-                </option>
-              )),
-            )}
-          </Select>
-        </Field>
-
-        <Field label="Regola provvigionale">
-          <Select name="commissionRuleId">
-            <option value="">Seleziona regola</option>
-            {suppliers.flatMap((supplier) =>
-              supplier.commissionRules.map((rule) => (
-                <option key={rule.id} value={rule.id}>
-                  {supplier.name} · {rule.name} · €{Number(rule.fixedAmount ?? 0)} · {PAYMENT_TYPE_LABELS[rule.paymentType]}
-                </option>
-              )),
-            )}
-          </Select>
-        </Field>
-
-        <Field label="Tipo operazione">
-          <Select name="operationType" defaultValue="CAMBIO">
-            {Object.entries(OPERATION_TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field label="Data scadenza">
-          <Input name="expiryDate" type="date" />
-        </Field>
-
-        <Field label="Note">
-          <Textarea name="notes" rows={4} />
-        </Field>
-
-        <Button type="submit">Crea contratto</Button>
-      </form>
+      <NuovoContrattoForm
+        session={{ id: session.id, name: session.name, role: session.role }}
+        collaborators={collaborators}
+        canPickCollaborator={canPickCollaborator}
+        initialClientId={clientId}
+      />
     </div>
   );
 }
