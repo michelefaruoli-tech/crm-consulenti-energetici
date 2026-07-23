@@ -215,6 +215,7 @@ model Contract {
   statusHistory ContractStatusHistory[]
   documents     Document[]
   commission    Commission?
+  recurringMonths RecurringMonth[]
 
   @@index([status])
   @@index([collaboratorId])
@@ -251,6 +252,27 @@ model Commission {
   updatedAt  DateTime @updatedAt
 
   entries CommissionEntry[]
+}
+
+/// Tracciamento mensile per contratti ricorrenti (es. Helios)
+model RecurringMonth {
+  id         String   @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  /// YYYY-MM
+  period     String
+  /// PAID | PENDING | MISSING | CLOSED | ERROR_UNPAID
+  status     String   @default("PENDING")
+  amount     Decimal? @db.Decimal(10, 2)
+  paidAt     DateTime?
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([contractId, period])
+  @@index([status])
+  @@index([period])
+  @@index([contractId])
 }
 
 model CommissionEntry {

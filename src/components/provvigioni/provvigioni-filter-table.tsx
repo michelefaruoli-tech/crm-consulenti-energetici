@@ -68,6 +68,7 @@ export function ProvvigioniFilterTable({
       key: "clientName",
       label: "Cliente",
       getValue: (r) => String(r.clientName ?? ""),
+      sortKind: "text",
       render: (r) => (
         <Link
           href={`/clienti/${String(r.clientId)}`}
@@ -83,21 +84,25 @@ export function ProvvigioniFilterTable({
       label: "POD/PDR",
       getValue: (r) => String(r.podPdr ?? ""),
       editable: true,
+      sortKind: "text",
     },
     {
       key: "collaboratorName",
       label: "Collab.",
       getValue: (r) => String(r.collaboratorName ?? ""),
+      sortKind: "text",
     },
     {
       key: "supplierName",
       label: "Forn.",
       getValue: (r) => String(r.supplierName ?? ""),
+      sortKind: "text",
     },
     {
       key: "clientType",
       label: "Tipologia",
       getValue: (r) => String(r.clientType ?? ""),
+      sortKind: "text",
       render: (r) => shortType(String(r.clientType ?? "")),
     },
     {
@@ -105,36 +110,29 @@ export function ProvvigioniFilterTable({
       label: "Gettone",
       getValue: (r) => String(r.amount ?? ""),
       editable: true,
+      sortKind: "number",
     },
     {
       key: "recurrence",
       label: "Ricorrenza",
       getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
       editable: true,
+      sortKind: "text",
     },
     {
       key: "paymentStatus",
       label: "Pagato",
-      getValue: (r) => (/incass/i.test(String(r.paymentStatus ?? "")) ? "Sì" : "No"),
+      // No se non c'è data
+      getValue: (r) => (String(r.collectionMonth ?? "").trim() ? "Sì" : "No"),
       editable: true,
+      sortKind: "text",
     },
     {
       key: "collectionMonth",
       label: "Data",
       getValue: (r) => String(r.collectionMonth ?? ""),
       editable: true,
-      render: (r) => {
-        const month = String(r.collectionMonth ?? "").trim();
-        const paid = /incass/i.test(String(r.paymentStatus ?? ""));
-        if (paid && month) {
-          return (
-            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">
-              {month}
-            </span>
-          );
-        }
-        return <span className="text-slate-400">—</span>;
-      },
+      sortKind: "date",
     },
   ];
 

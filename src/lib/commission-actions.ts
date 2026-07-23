@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { parseFlexibleDate } from "@/lib/date-parse";
+import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 
 export async function updateCommissionFieldAction(formData: FormData): Promise<void> {
   const session = await requireSession();
@@ -46,12 +47,14 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       where: { id: commission.contractId },
       data: {
         paymentStatus: normalized,
-        // Sì/Incassato → inserisce subito la data (oggi se assente)
         collectionDate: paid
           ? commission.contract.collectionDate ?? new Date()
           : null,
       },
     });
+    if (paid) {
+      await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
+    }
   } else if (field === "collectionDate") {
     const raw = value.trim();
     if (!raw) {
@@ -69,6 +72,7 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
           paymentStatus: "Incassato",
         },
       });
+      await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     }
   } else if (field === "recurrence") {
     const raw = value.trim();
@@ -81,6 +85,7 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       where: { id: commission.contractId },
       data: { recurrence: normalized },
     });
+    await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
   } else if (field === "podPdr") {
     await prisma.contract.update({
       where: { id: commission.contractId },

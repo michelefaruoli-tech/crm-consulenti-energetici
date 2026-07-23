@@ -18,7 +18,8 @@
     "db:push": "prisma db push",
     "snapshot": "tsx scripts/snapshot-working.ts",
     "db:backfill-supply": "tsx scripts/backfill-supply-start.ts",
-    "db:import-utenze-aprile": "tsx scripts/import-utenze-aprile.ts"
+    "db:import-utenze-aprile": "tsx scripts/import-utenze-aprile.ts",
+    "db:fix-gettoni": "tsx scripts/fix-provvigioni-gettoni.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

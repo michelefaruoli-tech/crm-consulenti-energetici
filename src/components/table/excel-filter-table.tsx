@@ -12,6 +12,8 @@ export type FilterColumn = {
   render?: (row: Record<string, unknown>) => React.ReactNode;
   /** se true, la cella è editabile inline (callback onEdit) */
   editable?: boolean;
+  /** tipo ordinamento: testo A-Z, data, numero */
+  sortKind?: "text" | "date" | "number";
 };
 
 type Props = {
@@ -52,6 +54,24 @@ export function ExcelFilterTable({
     return map;
   }, [rows, columns]);
 
+  function sortValue(col: FilterColumn, row: Record<string, unknown>): string | number {
+    const raw = col.getValue(row) || "";
+    if (col.sortKind === "number") {
+      const n = Number(String(raw).replace(",", ".").replace(/[^\d.-]/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    }
+    if (col.sortKind === "date") {
+      // MM/AAAA oppure GG/MM/AAAA
+      const my = raw.match(/^(\d{1,2})[/.-](\d{4})$/);
+      if (my) return Number(my[2]) * 100 + Number(my[1]);
+      const dmy = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+      if (dmy) return Number(dmy[3]) * 10000 + Number(dmy[2]) * 100 + Number(dmy[1]);
+      const t = Date.parse(raw);
+      return Number.isNaN(t) ? 0 : t;
+    }
+    return raw.toLowerCase();
+  }
+
   const filtered = useMemo(() => {
     let list = rows.filter((row) =>
       columns.every((col) => {
@@ -66,9 +86,11 @@ export function ExcelFilterTable({
       const col = columns.find((c) => c.key === sortKey);
       if (col) {
         list = [...list].sort((a, b) => {
-          const av = col.getValue(a);
-          const bv = col.getValue(b);
-          const cmp = av.localeCompare(bv, "it", { numeric: true });
+          const av = sortValue(col, a);
+          const bv = sortValue(col, b);
+          let cmp = 0;
+          if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+          else cmp = String(av).localeCompare(String(bv), "it", { numeric: true });
           return sortDir === "asc" ? cmp : -cmp;
         });
       }
@@ -129,9 +151,22 @@ export function ExcelFilterTable({
                       type="button"
                       className="font-medium hover:text-slate-900"
                       onClick={() => toggleSort(col.key)}
+                      title={
+                        col.sortKind === "date"
+                          ? "Ordina per data"
+                          : "Ordina A→Z / Z→A"
+                      }
                     >
                       {col.label}
-                      {sortKey === col.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                      {sortKey === col.key
+                        ? sortDir === "asc"
+                          ? col.sortKind === "date"
+                            ? " ↑"
+                            : " A↑"
+                          : col.sortKind === "date"
+                            ? " ↓"
+                            : " Z↓"
+                        : ""}
                     </button>
                     <button
                       type="button"

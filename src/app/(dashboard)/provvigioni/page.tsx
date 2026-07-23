@@ -8,72 +8,82 @@ import {
   ProvvigioniFilterTable,
   type ProvvigioneRow,
 } from "@/components/provvigioni/provvigioni-filter-table";
+import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
+import {
+  getMissingRecurringAlerts,
+  syncAllRecurringMonths,
+} from "@/lib/recurring-sync";
 
-/** Solo "Incassato" scritto esplicitamente. Default: Da incassare (mai inferire da importi). */
-function normalizePaymentStatus(pay: string | null | undefined): string {
-  const raw = (pay ?? "").trim();
-  if (/^incassato$/i.test(raw)) return "Incassato";
-  return "Da incassare";
-}
+export const dynamic = "force-dynamic";
 
 export default async function ProvvigioniPage() {
   const session = await requireSession();
   const canViewAll = hasPermission(session.role, "commissions.view_all");
+  const collabFilter = canViewAll ? undefined : session.id;
 
-  const commissions = await prisma.commission.findMany({
-    where: canViewAll
-      ? { contract: { isHistorical: false } }
-      : { contract: { collaboratorId: session.id, isHistorical: false } },
-    select: {
-      id: true,
-      expected: true,
-      received: true,
-      paid: true,
-      contractId: true,
-      contract: {
-        select: {
-          clientId: true,
-          paymentStatus: true,
-          recurrence: true,
-          podPdr: true,
-          collectionDate: true,
-          commissionConfirmed: true,
-          client: {
-            select: {
-              type: true,
-              companyName: true,
-              firstName: true,
-              lastName: true,
+  // Allinea tracciamento ricorrenze (mesi mancanti)
+  await syncAllRecurringMonths(collabFilter).catch((e) =>
+    console.error("sync recurring", e),
+  );
+
+  const [commissions, missing] = await Promise.all([
+    prisma.commission.findMany({
+      where: canViewAll
+        ? { contract: { isHistorical: false } }
+        : { contract: { collaboratorId: session.id, isHistorical: false } },
+      select: {
+        id: true,
+        expected: true,
+        received: true,
+        paid: true,
+        contractId: true,
+        contract: {
+          select: {
+            clientId: true,
+            paymentStatus: true,
+            recurrence: true,
+            podPdr: true,
+            collectionDate: true,
+            commissionConfirmed: true,
+            client: {
+              select: {
+                type: true,
+                companyName: true,
+                firstName: true,
+                lastName: true,
+              },
             },
+            collaborator: { select: { name: true } },
+            supplier: { select: { name: true } },
           },
-          collaborator: { select: { name: true } },
-          supplier: { select: { name: true } },
         },
       },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+      orderBy: { updatedAt: "desc" },
+    }),
+    getMissingRecurringAlerts(collabFilter),
+  ]);
 
   const totals = commissions.reduce(
     (acc, item) => {
       const expected = Number(item.expected);
       const received = Number(item.received);
-      const paid = Number(item.paid);
+      const paidAmt = Number(item.paid);
       acc.complessivo += expected;
       acc.ricevuto += received;
-      acc.liquidato += paid;
-      acc.daAvere += Math.max(received - paid, 0);
+      acc.liquidato += paidAmt;
+      acc.daAvere += Math.max(received - paidAmt, 0);
       return acc;
     },
     { complessivo: 0, ricevuto: 0, liquidato: 0, daAvere: 0 },
   );
 
   const rows: ProvvigioneRow[] = commissions.map((item) => {
-    const paidLabel = normalizePaymentStatus(item.contract.paymentStatus);
-    const collectionMonth =
-      paidLabel === "Incassato" && item.contract.collectionDate
-        ? formatMonthYear(item.contract.collectionDate)
-        : "";
+    // Senza data = non pagato (No). Con data = pagato (Sì).
+    const hasDate = Boolean(item.contract.collectionDate);
+    const paidLabel = hasDate ? "Incassato" : "Da incassare";
+    const collectionMonth = hasDate
+      ? formatMonthYear(item.contract.collectionDate)
+      : "";
 
     return {
       id: item.contractId,
@@ -92,15 +102,26 @@ export default async function ProvvigioniPage() {
     };
   });
 
+  const alertRows = missing.map((m) => ({
+    id: m.id,
+    period: m.period,
+    contractId: m.contractId,
+    podPdr: m.contract.podPdr || "",
+    supplierName: m.contract.supplier.name,
+    clientName: clientDisplayName(m.contract.client),
+  }));
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
         <p className="text-slate-500">
-          Solo pratiche attive (lo storico pagato è in Archivio). Modifiche immediate su Invio /
-          click fuori.
+          Clicca sul nome colonna per ordinare (A→Z / date). Senza data = No. Gettoni storici:
+          50 domestico / 80 business.
         </p>
       </div>
+
+      <RecurringMissingPanel alerts={alertRows} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -129,4 +150,3 @@ export default async function ProvvigioniPage() {
     </div>
   );
 }
-
