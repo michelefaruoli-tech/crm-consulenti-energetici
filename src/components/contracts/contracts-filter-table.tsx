@@ -4,14 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { StatusBadge } from "@/components/ui/badge";
-import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
-import type { ContractStatus } from "@/generated/prisma/client";
+import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
 
 type Row = {
   id: string;
   clientName: string;
   supplierName: string;
-  status: ContractStatus;
+  status: string;
   statusLabel: string;
   insertionDate: string;
   collaboratorName: string;
@@ -27,7 +26,7 @@ export function ContractsFilterTable({ rows }: { rows: Row[] }) {
       getValue: (r) => String(r.clientName ?? ""),
       render: (r) => (
         <Link
-          href={`/contratti/${r.id}`}
+          href={`/contratti/${String(r.id)}`}
           className="font-medium text-emerald-700 hover:underline"
         >
           {String(r.clientName)}
@@ -43,7 +42,7 @@ export function ContractsFilterTable({ rows }: { rows: Row[] }) {
       key: "statusLabel",
       label: "Stato",
       getValue: (r) => String(r.statusLabel ?? ""),
-      render: (r) => <StatusBadge status={r.status as ContractStatus} />,
+      render: (r) => <StatusBadge status={String(r.status)} />,
     },
     {
       key: "insertionDate",
@@ -69,9 +68,14 @@ export function ContractsFilterTable({ rows }: { rows: Row[] }) {
 
 export function toContractRow(contract: {
   id: string;
-  status: ContractStatus;
+  status: string;
   insertionDate: Date | string;
-  client: { type: string; companyName?: string | null; firstName?: string | null; lastName?: string | null };
+  client: {
+    type: string;
+    companyName?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+  };
   supplier: { name: string };
   collaborator: { name: string };
 }): Row {
@@ -83,15 +87,17 @@ export function toContractRow(contract: {
 
   const insertion =
     typeof contract.insertionDate === "string"
-      ? contract.insertionDate
+      ? contract.insertionDate.slice(0, 10)
       : contract.insertionDate.toISOString().slice(0, 10);
+
+  const status = contract.status as AppContractStatus;
 
   return {
     id: contract.id,
     clientName,
     supplierName: contract.supplier.name,
-    status: contract.status,
-    statusLabel: CONTRACT_STATUS_LABELS[contract.status],
+    status,
+    statusLabel: CONTRACT_STATUS_LABELS[status] ?? contract.status,
     insertionDate: insertion.split("-").reverse().join("/"),
     collaboratorName: contract.collaborator.name,
   };

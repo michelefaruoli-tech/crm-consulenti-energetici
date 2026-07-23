@@ -1,6 +1,5 @@
 import { format } from "date-fns";
 import { it } from "date-fns/locale";
-import { ContractStatus } from "@/generated/prisma/client";
 
 export function formatDate(date: Date | string | null | undefined): string {
   if (!date) return "—";
@@ -30,7 +29,7 @@ export async function generateContractNumber(): Promise<string> {
   return `CTR-${year}-${suffix}`;
 }
 
-export function isContractBlocked(status: ContractStatus): boolean {
+export function isContractBlocked(status: string): boolean {
   return ["DOCUMENTAZIONE_INCOMPLETA", "IN_LAVORAZIONE", "IN_ATTESA_PAGAMENTO"].includes(
     status,
   );

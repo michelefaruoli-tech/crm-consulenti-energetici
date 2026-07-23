@@ -1,13 +1,27 @@
-import { ContractStatus, Role } from "@/generated/prisma/client";
+export type AppRole = "ADMIN" | "SEGRETERIA" | "COLLABORATORE" | "COMMERCIALE";
 
-export const ROLE_LABELS: Record<Role, string> = {
+export type AppContractStatus =
+  | "BOZZA"
+  | "INSERITO"
+  | "DOCUMENTAZIONE_INCOMPLETA"
+  | "DOCUMENTAZIONE_COMPLETA"
+  | "INVIATO_AL_FORNITORE"
+  | "IN_LAVORAZIONE"
+  | "ATTIVATO"
+  | "IN_ATTESA_PAGAMENTO"
+  | "PAGATO_DAL_FORNITORE"
+  | "PROVVIGIONE_LIQUIDATA"
+  | "CHIUSO"
+  | "ANNULLATO";
+
+export const ROLE_LABELS: Record<AppRole, string> = {
   ADMIN: "Amministratore",
   SEGRETERIA: "Segreteria",
   COLLABORATORE: "Collaboratore",
   COMMERCIALE: "Commerciale",
 };
 
-export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
+export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   BOZZA: "Bozza",
   INSERITO: "Inserito",
   DOCUMENTAZIONE_INCOMPLETA: "Documentazione incompleta",
@@ -22,7 +36,7 @@ export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
   ANNULLATO: "Annullato",
 };
 
-export const CONTRACT_STATUS_FLOW: ContractStatus[] = [
+export const CONTRACT_STATUS_FLOW: AppContractStatus[] = [
   "BOZZA",
   "INSERITO",
   "DOCUMENTAZIONE_INCOMPLETA",
@@ -36,7 +50,7 @@ export const CONTRACT_STATUS_FLOW: ContractStatus[] = [
   "CHIUSO",
 ];
 
-export const STATUS_COLORS: Record<ContractStatus, string> = {
+export const STATUS_COLORS: Record<AppContractStatus, string> = {
   BOZZA: "bg-slate-100 text-slate-700",
   INSERITO: "bg-blue-100 text-blue-800",
   DOCUMENTAZIONE_INCOMPLETA: "bg-amber-100 text-amber-800",

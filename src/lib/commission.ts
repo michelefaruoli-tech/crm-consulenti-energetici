@@ -1,5 +1,3 @@
-import { CommissionPaymentType } from "@/generated/prisma/client";
-
 export function decimalToNumber(value: unknown): number {
   if (value == null) return 0;
   if (typeof value === "number") return value;
@@ -21,15 +19,15 @@ export function formatCurrency(value: unknown): string {
   }).format(num);
 }
 
-export function paymentTypeLabel(type: CommissionPaymentType): string {
-  const labels: Record<CommissionPaymentType, string> = {
+export function paymentTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
     MENSILE: "Mensile",
     UNA_TANTUM: "Una tantum",
     RATEIZZATO: "Rateizzato",
     BONUS: "Bonus",
     PREMIO: "Premio",
   };
-  return labels[type];
+  return labels[type] ?? type;
 }
 
 export function commissionDifference(

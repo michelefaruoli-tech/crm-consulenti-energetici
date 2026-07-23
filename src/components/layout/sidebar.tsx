@@ -14,24 +14,23 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { logoutAction } from "@/lib/actions";
-import { ROLE_LABELS } from "@/lib/constants";
-import { Role } from "@/generated/prisma/client";
+import { logoutAction } from "@/lib/logout-action";
+import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: "all" as const },
   { href: "/clienti", label: "Clienti", icon: Users, roles: "all" as const },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" as const },
-  { href: "/fornitori", label: "Fornitori", icon: Building2, roles: ["ADMIN", "SEGRETERIA"] as Role[] },
+  { href: "/fornitori", label: "Fornitori", icon: Building2, roles: ["ADMIN", "SEGRETERIA"] as AppRole[] },
   { href: "/provvigioni", label: "Provvigioni", icon: Coins, roles: "all" as const },
-  { href: "/report", label: "Report", icon: BarChart3, roles: ["ADMIN", "SEGRETERIA", "COLLABORATORE"] as Role[] },
-  { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] as Role[] },
+  { href: "/report", label: "Report", icon: BarChart3, roles: ["ADMIN", "SEGRETERIA", "COLLABORATORE"] as AppRole[] },
+  { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] as AppRole[] },
 ];
 
 export function Sidebar({
   user,
 }: {
-  user: { name: string; email: string; role: Role };
+  user: { name: string; email: string; role: AppRole };
 }) {
   const pathname = usePathname();
 
