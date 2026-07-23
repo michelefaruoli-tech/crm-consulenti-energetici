@@ -59,7 +59,7 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
     },
     {
       key: "podPdr",
-      label: "POD / PDR",
+      label: "POD / PDR (codice completo)",
       getValue: (r) => String(r.podPdr ?? ""),
       editable: true,
     },
@@ -99,26 +99,29 @@ export function ProvvigioniFilterTable({ rows }: { rows: ProvvigioneRow[] }) {
     {
       key: "confirmed",
       label: "Conferma",
-      getValue: (r) => String(r.confirmed ?? ""),
+      getValue: (r) => String(r.collectionMonth || r.confirmed || ""),
       render: (r) => {
-        const ok = String(r.confirmed) === "Confermata";
-        const month = String(r.collectionMonth ?? "");
+        const month = String(r.collectionMonth ?? "").trim();
         const paid = /incass/i.test(String(r.paymentStatus ?? ""));
-        return (
-          <div className="flex flex-col gap-0.5">
-            <span
-              className={
-                ok
-                  ? "w-fit rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
-                  : "w-fit rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
-              }
-            >
-              {ok ? "Verde" : "Gialla"}
+        // Se incassato: solo mese/anno verde. La gialla sparisce.
+        if (paid && month) {
+          return (
+            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+              {month}
             </span>
-            {paid && month ? (
-              <span className="text-xs font-medium text-emerald-700">{month}</span>
-            ) : null}
-          </div>
+          );
+        }
+        const ok = String(r.confirmed) === "Confermata";
+        return (
+          <span
+            className={
+              ok
+                ? "w-fit rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
+                : "w-fit rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+            }
+          >
+            {ok ? "Verde" : "Gialla"}
+          </span>
         );
       },
     },

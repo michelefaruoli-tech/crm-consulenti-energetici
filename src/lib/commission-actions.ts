@@ -38,17 +38,16 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       });
     }
   } else if (field === "paymentStatus") {
-    const paid = /incass/i.test(value);
-    const pending = /attesa|da.?incass/i.test(value);
+    const raw = value.trim();
+    const paid = /^incass/i.test(raw);
+    const normalized = paid ? "Incassato" : "Da incassare";
     await prisma.contract.update({
       where: { id: commission.contractId },
       data: {
-        paymentStatus: value.trim() || null,
-        ...(paid
-          ? { collectionDate: commission.contract.collectionDate ?? new Date() }
-          : pending
-            ? { collectionDate: null }
-            : {}),
+        paymentStatus: normalized,
+        collectionDate: paid
+          ? (commission.contract.collectionDate ?? new Date())
+          : null,
       },
     });
   } else if (field === "recurrence") {

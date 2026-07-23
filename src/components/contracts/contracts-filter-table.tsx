@@ -4,19 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { StatusBadge } from "@/components/ui/badge";
-import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
+import type { ContractTableRow } from "@/lib/contract-row";
 
-type Row = {
-  id: string;
-  clientName: string;
-  supplierName: string;
-  status: string;
-  statusLabel: string;
-  insertionDate: string;
-  collaboratorName: string;
-};
-
-export function ContractsFilterTable({ rows }: { rows: Row[] }) {
+export function ContractsFilterTable({ rows }: { rows: ContractTableRow[] }) {
   const router = useRouter();
 
   const columns: FilterColumn[] = [
@@ -37,6 +27,20 @@ export function ContractsFilterTable({ rows }: { rows: Row[] }) {
       key: "supplierName",
       label: "Fornitore",
       getValue: (r) => String(r.supplierName ?? ""),
+    },
+    {
+      key: "podPdr",
+      label: "POD / PDR",
+      getValue: (r) => String(r.podPdr ?? "") || "(vuoto)",
+      render: (r) => {
+        const code = String(r.podPdr ?? "").trim();
+        if (!code) return <span className="text-slate-400">—</span>;
+        return (
+          <span className="font-mono text-sm font-semibold tracking-wide text-slate-900">
+            {code}
+          </span>
+        );
+      },
     },
     {
       key: "statusLabel",
@@ -64,41 +68,4 @@ export function ContractsFilterTable({ rows }: { rows: Row[] }) {
       onRowClick={(r) => router.push(`/contratti/${r.id}`)}
     />
   );
-}
-
-export function toContractRow(contract: {
-  id: string;
-  status: string;
-  insertionDate: Date | string;
-  client: {
-    type: string;
-    companyName?: string | null;
-    firstName?: string | null;
-    lastName?: string | null;
-  };
-  supplier: { name: string };
-  collaborator: { name: string };
-}): Row {
-  const clientName =
-    contract.client.type === "AZIENDA" && contract.client.companyName
-      ? contract.client.companyName
-      : [contract.client.firstName, contract.client.lastName].filter(Boolean).join(" ") ||
-        "Cliente senza nome";
-
-  const insertion =
-    typeof contract.insertionDate === "string"
-      ? contract.insertionDate.slice(0, 10)
-      : contract.insertionDate.toISOString().slice(0, 10);
-
-  const status = contract.status as AppContractStatus;
-
-  return {
-    id: contract.id,
-    clientName,
-    supplierName: contract.supplier.name,
-    status,
-    statusLabel: CONTRACT_STATUS_LABELS[status] ?? contract.status,
-    insertionDate: insertion.split("-").reverse().join("/"),
-    collaboratorName: contract.collaborator.name,
-  };
 }

@@ -219,8 +219,14 @@ export function ExcelFilterTable({
                   >
                     {col.editable && onCellEdit ? (
                       <input
-                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-slate-200 focus:border-emerald-500 focus:outline-none"
-                        defaultValue={col.getValue(row)}
+                        className={cn(
+                          "w-full min-w-[10rem] rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-slate-200 focus:border-emerald-500 focus:outline-none",
+                          col.key === "podPdr" &&
+                            "font-mono text-sm font-semibold tracking-wide text-slate-900",
+                        )}
+                        defaultValue={
+                          col.getValue(row) === "(vuoto)" ? "" : col.getValue(row)
+                        }
                         title="Modifica e premi Invio oppure clicca fuori per salvare"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
@@ -229,7 +235,9 @@ export function ExcelFilterTable({
                         }}
                         onBlur={(e) => {
                           const next = e.target.value;
-                          if (next !== col.getValue(row)) {
+                          const prev =
+                            col.getValue(row) === "(vuoto)" ? "" : col.getValue(row);
+                          if (next !== prev) {
                             void onCellEdit(row, col.key, next);
                           }
                         }}

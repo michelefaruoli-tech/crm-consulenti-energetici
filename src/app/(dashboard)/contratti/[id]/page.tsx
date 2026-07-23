@@ -8,7 +8,11 @@ import { formatCurrency } from "@/lib/commission";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Textarea } from "@/components/ui/form";
-import { updateContractStatusAction, liquidateCommissionAction } from "@/lib/actions";
+import {
+  updateContractStatusAction,
+  updateContractCollaboratorAction,
+  liquidateCommissionAction,
+} from "@/lib/actions";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 
 export default async function ContrattoDetailPage({
@@ -25,7 +29,7 @@ export default async function ContrattoDetailPage({
       client: true,
       supplier: true,
       service: true,
-      collaborator: { select: { name: true, email: true } },
+      collaborator: { select: { id: true, name: true, email: true } },
       commission: true,
       statusHistory: {
         include: { changedBy: { select: { name: true } } },
@@ -41,11 +45,23 @@ export default async function ContrattoDetailPage({
   }
 
   const canChangeStatus = hasPermission(session.role, "contracts.change_status");
+  const canChangeCollaborator = hasPermission(session.role, "contracts.edit_all");
   const canLiquidate = hasPermission(session.role, "commissions.view_all");
   const expected = Number(contract.commission?.expected ?? 0);
   const accrued = Number(contract.commission?.accrued ?? 0);
   const received = Number(contract.commission?.received ?? 0);
   const paid = Number(contract.commission?.paid ?? 0);
+
+  const collaborators = canChangeCollaborator
+    ? await prisma.user.findMany({
+        where: {
+          active: true,
+          role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        },
+        select: { id: true, name: true, role: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
 
   return (
     <div className="space-y-6">
@@ -55,10 +71,15 @@ export default async function ContrattoDetailPage({
           <h1 className="text-2xl font-bold text-slate-900">
             {clientDisplayName(contract.client)}
           </h1>
-          <p className="text-sm text-slate-500">
-            {contract.supplier.name}
-            {contract.podPdr ? ` · POD/PDR ${contract.podPdr}` : ""}
-          </p>
+          <p className="text-sm text-slate-500">{contract.supplier.name}</p>
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">
+              POD / PDR (codice punto di fornitura)
+            </p>
+            <p className="mt-1 font-mono text-lg font-bold tracking-wide text-slate-900">
+              {contract.podPdr?.trim() || "Non indicato"}
+            </p>
+          </div>
           <div className="mt-2">
             <StatusBadge status={contract.status} />
           </div>
@@ -92,8 +113,10 @@ export default async function ContrattoDetailPage({
               <dd>{contract.utilityType || "—"}</dd>
             </div>
             <div>
-              <dt className="text-slate-500">POD / PDR</dt>
-              <dd>{contract.podPdr || "—"}</dd>
+              <dt className="text-slate-500">POD / PDR (codice completo)</dt>
+              <dd className="font-mono text-base font-semibold tracking-wide">
+                {contract.podPdr?.trim() || "—"}
+              </dd>
             </div>
             <div>
               <dt className="text-slate-500">Prodotto</dt>
@@ -165,6 +188,30 @@ export default async function ContrattoDetailPage({
           ) : null}
         </section>
       </div>
+
+      {canChangeCollaborator ? (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 font-semibold text-slate-900">Cambia collaboratore</h2>
+          <form
+            action={updateContractCollaboratorAction}
+            className="grid gap-4 md:grid-cols-[1fr_auto]"
+          >
+            <input type="hidden" name="contractId" value={contract.id} />
+            <Field label="Assegna a">
+              <Select name="collaboratorId" defaultValue={contract.collaboratorId}>
+                {collaborators.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="flex items-end">
+              <Button type="submit">Salva collaboratore</Button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       {canChangeStatus ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

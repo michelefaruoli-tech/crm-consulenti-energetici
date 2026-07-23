@@ -273,6 +273,40 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
   revalidatePath("/provvigioni");
 }
 
+export async function updateContractCollaboratorAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "contracts.edit_all")) {
+    throw new Error("Solo amministratore/segreteria può cambiare il collaboratore");
+  }
+
+  const contractId = String(formData.get("contractId") ?? "");
+  const collaboratorId = String(formData.get("collaboratorId") ?? "");
+  if (!contractId || !collaboratorId) {
+    throw new Error("Dati mancanti");
+  }
+
+  const collaborator = await prisma.user.findFirst({
+    where: {
+      id: collaboratorId,
+      active: true,
+      role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+    },
+  });
+  if (!collaborator) {
+    throw new Error("Collaboratore non valido");
+  }
+
+  await prisma.contract.update({
+    where: { id: contractId },
+    data: { collaboratorId },
+  });
+
+  revalidatePath("/contratti");
+  revalidatePath(`/contratti/${contractId}`);
+  revalidatePath("/");
+  revalidatePath("/provvigioni");
+}
+
 export async function liquidateCommissionAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "commissions.view_all")) {

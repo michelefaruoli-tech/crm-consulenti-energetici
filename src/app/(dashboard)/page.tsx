@@ -4,10 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
-import {
-  ContractsFilterTable,
-  toContractRow,
-} from "@/components/contracts/contracts-filter-table";
+import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
+import { toContractRow } from "@/lib/contract-row";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +71,7 @@ export default async function DashboardPage() {
           id: true,
           status: true,
           insertionDate: true,
+          podPdr: true,
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },

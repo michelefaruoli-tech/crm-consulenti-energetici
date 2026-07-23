@@ -10,12 +10,11 @@ import {
   type ProvvigioneRow,
 } from "@/components/provvigioni/provvigioni-filter-table";
 
-function normalizePaymentStatus(pay: string | null | undefined, received: number): string {
+/** Solo "Incassato" scritto esplicitamente. Default: Da incassare (mai inferire da importi). */
+function normalizePaymentStatus(pay: string | null | undefined): string {
   const raw = (pay ?? "").trim();
-  if (/incass/i.test(raw)) return "Incassato";
-  if (/attesa|da.?incass/i.test(raw)) return "In attesa";
-  if (raw) return raw;
-  return received > 0 ? "Incassato" : "In attesa";
+  if (/^incassato$/i.test(raw)) return "Incassato";
+  return "Da incassare";
 }
 
 export default async function ProvvigioniPage() {
@@ -69,12 +68,11 @@ export default async function ProvvigioniPage() {
   );
 
   const rows: ProvvigioneRow[] = commissions.map((item) => {
-    const received = Number(item.received);
-    const paidLabel = normalizePaymentStatus(item.contract.paymentStatus, received);
-    const collectionMonth = item.contract.collectionDate
-      ? format(new Date(item.contract.collectionDate), "MMM yyyy", { locale: it })
-      : paidLabel === "Incassato"
-        ? format(new Date(), "MMM yyyy", { locale: it })
+    const paidLabel = normalizePaymentStatus(item.contract.paymentStatus);
+    // Mese/anno solo se Incassato + data reale. Niente date inventate / gialle.
+    const collectionMonth =
+      paidLabel === "Incassato" && item.contract.collectionDate
+        ? format(new Date(item.contract.collectionDate), "MMM yyyy", { locale: it })
         : "";
 
     return {
@@ -99,8 +97,8 @@ export default async function ProvvigioniPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
         <p className="text-slate-500">
-          Le modifiche alle celle editabili (POD/PDR, gettone, ricorrenza, pagato) si salvano subito:
-          premi Invio oppure clicca fuori dalla cella. Non serve un tasto Salva.
+          Celle editabili: salva con Invio o clic fuori. Scrivi &quot;Incassato&quot; o &quot;Da
+          incassare&quot; nella colonna pagato.
         </p>
       </div>
 
