@@ -25,11 +25,14 @@ import {
 
 export default async function ContrattoDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const session = await requireSession();
   const { id } = await params;
+  const { error: statusError } = await searchParams;
 
   const contract = await prisma.contract.findUnique({
     where: { id },
@@ -52,7 +55,10 @@ export default async function ContrattoDetailPage({
     redirect("/contratti");
   }
 
-  const canChangeStatus = hasPermission(session.role, "contracts.change_status");
+  const canChangeStatus =
+    hasPermission(session.role, "contracts.change_status") ||
+    (hasPermission(session.role, "contracts.edit_own") &&
+      contract.collaboratorId === session.id);
   const canChangeCollaborator = hasPermission(session.role, "contracts.edit_all");
   const canEditContract =
     hasPermission(session.role, "contracts.edit_all") ||
@@ -80,6 +86,15 @@ export default async function ContrattoDetailPage({
 
   return (
     <div className="space-y-6">
+      {statusError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {statusError === "permesso"
+            ? "Non hai i permessi per cambiare lo stato."
+            : statusError === "stato_non_valido"
+              ? "Stato non valido."
+              : "Errore durante l'aggiornamento dello stato. Riprova."}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm text-slate-500">Pratica</p>

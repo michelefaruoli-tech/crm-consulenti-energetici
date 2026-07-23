@@ -13,6 +13,7 @@ import {
   computeSupplyStartDate,
   normalizeOperationType,
 } from "@/lib/supply-dates";
+import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "");
@@ -211,75 +212,90 @@ export async function createContractAction(formData: FormData): Promise<void> {
 
 export async function updateContractStatusAction(formData: FormData): Promise<void> {
   const session = await requireSession();
-  if (!hasPermission(session.role, "contracts.change_status")) {
-    throw new Error("Permesso negato");
-  }
-
   const contractId = String(formData.get("contractId") ?? "");
   const toStatus = String(formData.get("status") ?? "") as ContractStatus;
   const note = String(formData.get("note") ?? "") || null;
 
   const contract = await prisma.contract.findUnique({ where: { id: contractId } });
-  if (!contract) {
-    throw new Error("Contratto non trovato");
+  if (!contract || contract.deletedAt) {
+    redirect("/contratti?error=not_found");
   }
 
-  const updateData: {
-    status: ContractStatus;
-    activationDate?: Date;
-    paymentDate?: Date;
-  } = { status: toStatus };
-
-  if (toStatus === "ATTIVATO" && !contract.activationDate) {
-    updateData.activationDate = new Date();
-  }
-  if (toStatus === "PAGATO_DAL_FORNITORE" && !contract.paymentDate) {
-    updateData.paymentDate = new Date();
+  const canChangeAll = hasPermission(session.role, "contracts.change_status");
+  const canChangeOwn =
+    hasPermission(session.role, "contracts.edit_own") &&
+    contract.collaboratorId === session.id;
+  if (!canChangeAll && !canChangeOwn) {
+    redirect(`/contratti/${contractId}?error=permesso`);
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.contract.update({
-      where: { id: contractId },
-      data: updateData,
-    });
+  const validStatuses = Object.keys(CONTRACT_STATUS_LABELS) as ContractStatus[];
+  if (!validStatuses.includes(toStatus)) {
+    redirect(`/contratti/${contractId}?error=stato_non_valido`);
+  }
 
-    await tx.contractStatusHistory.create({
-      data: {
-        contractId,
-        fromStatus: contract.status,
-        toStatus,
-        changedById: session.id,
-        note,
-      },
-    });
+  try {
+    const updateData: {
+      status: ContractStatus;
+      activationDate?: Date;
+      paymentDate?: Date;
+    } = { status: toStatus };
 
-    if (toStatus === "PAGATO_DAL_FORNITORE") {
-      const commission = await tx.commission.findUnique({ where: { contractId } });
-      if (commission) {
-        const amount = Number(commission.expected);
-        await tx.commission.update({
-          where: { contractId },
-          data: {
-            received: amount,
-            accrued: amount,
-          },
-        });
-        await tx.commissionEntry.create({
-          data: {
-            commissionId: commission.id,
-            type: "received",
-            amount,
-            note: "Pagamento fornitore registrato automaticamente",
-          },
-        });
-      }
+    if (toStatus === "ATTIVATO" && !contract.activationDate) {
+      updateData.activationDate = new Date();
     }
-  });
+    if (toStatus === "PAGATO_DAL_FORNITORE" && !contract.paymentDate) {
+      updateData.paymentDate = new Date();
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.contract.update({
+        where: { id: contractId },
+        data: updateData,
+      });
+
+      await tx.contractStatusHistory.create({
+        data: {
+          contractId,
+          fromStatus: contract.status,
+          toStatus,
+          changedById: session.id,
+          note,
+        },
+      });
+
+      if (toStatus === "PAGATO_DAL_FORNITORE") {
+        const commission = await tx.commission.findUnique({ where: { contractId } });
+        if (commission) {
+          const amount = Number(commission.expected);
+          await tx.commission.update({
+            where: { contractId },
+            data: {
+              received: amount,
+              accrued: amount,
+            },
+          });
+          await tx.commissionEntry.create({
+            data: {
+              commissionId: commission.id,
+              type: "received",
+              amount,
+              note: "Pagamento fornitore registrato automaticamente",
+            },
+          });
+        }
+      }
+    });
+  } catch (e) {
+    console.error("[updateContractStatusAction]", e);
+    redirect(`/contratti/${contractId}?error=aggiornamento_stato`);
+  }
 
   revalidatePath("/contratti");
   revalidatePath(`/contratti/${contractId}`);
   revalidatePath("/");
   revalidatePath("/provvigioni");
+  redirect(`/contratti/${contractId}`);
 }
 
 export async function updateContractCollaboratorAction(formData: FormData): Promise<void> {

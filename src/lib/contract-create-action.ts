@@ -40,22 +40,34 @@ function num(v?: string): number | null {
 function validatePayload(payload: NewContractPayload, sendToMaster: boolean): string[] {
   const errors: string[] = [];
   const c = payload.client;
+
+  // Senza Master: solo anagrafica minima + fornitore + tipologia (privato/business)
   if (c.type === "PRIVATO") {
     if (!c.firstName?.trim()) errors.push("Nome obbligatorio");
     if (!c.lastName?.trim()) errors.push("Cognome obbligatorio");
   } else {
     if (!c.companyName?.trim()) errors.push("Ragione sociale obbligatoria");
-    if (!c.vatNumber?.trim()) errors.push("Partita IVA obbligatoria");
   }
+  if (!c.type) errors.push("Tipologia cliente (Privato / Business) obbligatoria");
   if (!payload.supplierId && !payload.supplierName?.trim()) {
     errors.push("Fornitore obbligatorio");
+  }
+  if (!payload.services.length) {
+    errors.push("Aggiungi almeno un servizio");
+  }
+
+  if (!sendToMaster) {
+    return errors;
+  }
+
+  // Con Master: validazione completa
+  if (c.type === "AZIENDA" && !c.vatNumber?.trim()) {
+    errors.push("Partita IVA obbligatoria per invio al Master");
   }
   if (!payload.operationType) errors.push("Tipo operazione obbligatorio");
   if (payload.operationType === "ALTRO" && !payload.operationOther?.trim()) {
     errors.push("Specifica operazione obbligatoria");
   }
-  if (!payload.services.length) errors.push("Aggiungi almeno un servizio");
-
   for (const s of payload.services) {
     if (!s.service) errors.push("Servizio obbligatorio su ogni riga");
     if (s.service === "ALTRO" && !s.serviceOther?.trim()) {
@@ -72,40 +84,35 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
       !s.techNotes?.trim() &&
       !s.phoneNumber?.trim()
     ) {
-      if (sendToMaster) {
-        errors.push(`Identificativo/descrizione tecnica obbligatoria per ${s.service}`);
-      }
+      errors.push(`Identificativo/descrizione tecnica obbligatoria per ${s.service}`);
     }
   }
-
-  if (sendToMaster) {
-    if (!c.fiscalCode?.trim()) errors.push("Codice fiscale obbligatorio per invio al Master");
-    if (!c.phone?.trim()) errors.push("Telefono obbligatorio per invio al Master");
-    if (!c.email?.trim()) errors.push("Email obbligatoria per invio al Master");
-    if (!c.zipCode?.trim() || !c.city?.trim()) {
-      errors.push("Indirizzo residenza/sede completo obbligatorio");
-    }
-    if (!payload.supplyStartDate) {
-      errors.push("Data ingresso in fornitura obbligatoria");
-    }
-    if (!payload.contractKind) errors.push("Tipo contratto obbligatorio");
-    if (!payload.paymentMethod) errors.push("Metodo di pagamento obbligatorio");
-    if (c.type === "AZIENDA") {
-      if (!c.legalFirstName?.trim() || !c.legalLastName?.trim()) {
-        errors.push("Nome e cognome rappresentante legale obbligatori");
-      }
-    }
-    if (!payload.supplyClassification) {
-      errors.push("Classificazione fornitura obbligatoria");
-    }
-    const hasId = payload.attachments.some((a) =>
-      ["CI_FRONTE", "CI_RETRO"].includes(a.docType),
-    );
-    const hasBill = payload.attachments.some((a) => a.docType === "BOLLETTA");
-    if (!hasId) errors.push("Allegato documento di identità obbligatorio");
-    if (!hasBill) errors.push("Allegato bolletta/fattura obbligatorio");
+  if (!c.fiscalCode?.trim()) errors.push("Codice fiscale obbligatorio per invio al Master");
+  if (!c.phone?.trim()) errors.push("Telefono obbligatorio per invio al Master");
+  if (!c.email?.trim()) errors.push("Email obbligatoria per invio al Master");
+  if (!c.zipCode?.trim() || !c.city?.trim()) {
+    errors.push("Indirizzo residenza/sede completo obbligatorio");
   }
+  if (!payload.contractKind) errors.push("Tipo contratto obbligatorio");
+  if (!payload.paymentMethod) errors.push("Metodo di pagamento obbligatorio");
+  if (c.type === "AZIENDA") {
+    if (!c.legalFirstName?.trim() || !c.legalLastName?.trim()) {
+      errors.push("Nome e cognome rappresentante legale obbligatori");
+    }
+  }
+  const classification =
+    payload.client.classification || payload.supplyClassification;
+  if (!classification?.trim()) {
+    errors.push("Classificazione (Residente / Non residente / Altri usi) obbligatoria");
+  }
+  const hasId = payload.attachments.some((a) =>
+    ["CI_FRONTE", "CI_RETRO"].includes(a.docType),
+  );
+  const hasBill = payload.attachments.some((a) => a.docType === "BOLLETTA");
+  if (!hasId) errors.push("Allegato documento di identità obbligatorio");
+  if (!hasBill) errors.push("Allegato bolletta/fattura obbligatorio");
 
+  // IBAN obbligatorio solo con Master + RID
   if (payload.paymentMethod === "RID") {
     if (!c.iban?.trim()) errors.push("IBAN obbligatorio per RID");
     else if (!isValidIban(c.iban)) errors.push("IBAN non valido");
@@ -211,6 +218,24 @@ export async function createFullContractAction(
   message?: string;
   emailError?: string;
 }> {
+  try {
+    return await createFullContractActionInner(payload);
+  } catch (e) {
+    console.error("[createFullContractAction]", e);
+    const msg = e instanceof Error ? e.message : "Errore imprevisto in salvataggio";
+    return { ok: false, errors: [msg] };
+  }
+}
+
+async function createFullContractActionInner(
+  payload: NewContractPayload,
+): Promise<{
+  ok: boolean;
+  errors?: string[];
+  contractIds?: string[];
+  message?: string;
+  emailError?: string;
+}> {
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.create")) {
     return { ok: false, errors: ["Permesso negato"] };
@@ -230,6 +255,8 @@ export async function createFullContractAction(
   const addressLine = [payload.client.street, payload.client.streetNumber]
     .filter(Boolean)
     .join(" ");
+  const classification =
+    payload.client.classification || payload.supplyClassification || null;
 
   if (clientId) {
     await prisma.client.update({
@@ -256,7 +283,7 @@ export async function createFullContractAction(
         legalLastName: payload.client.legalLastName || null,
         legalFiscalCode: payload.client.legalFiscalCode || null,
         sdiCode: payload.client.sdiCode || null,
-        classification: payload.client.classification || null,
+        classification,
         addressesMatch: payload.supplySameAsResidence,
         supplyStreet: payload.supplySameAsResidence
           ? payload.client.street || null
@@ -309,7 +336,7 @@ export async function createFullContractAction(
         legalLastName: payload.client.legalLastName || null,
         legalFiscalCode: payload.client.legalFiscalCode || null,
         sdiCode: payload.client.sdiCode || null,
-        classification: payload.client.classification || null,
+        classification,
         createdById: session.id,
         addressesMatch: payload.supplySameAsResidence,
         supplyStreet: payload.supplySameAsResidence
@@ -342,9 +369,6 @@ export async function createFullContractAction(
   // Fornitore
   let supplierId = payload.supplierId;
   if (!supplierId && payload.supplierName?.trim()) {
-    if (!hasPermission(session.role, "suppliers.manage") && !canPickCollab) {
-      // collaboratori possono creare fornitore al volo per praticità operativa
-    }
     const name = payload.supplierName.trim();
     const code =
       name
@@ -367,9 +391,8 @@ export async function createFullContractAction(
   }
 
   const insertionDate = new Date();
-  const supplyStart = payload.supplyStartDate
-    ? new Date(payload.supplyStartDate)
-    : computeSupplyStartDate(insertionDate, payload.operationType);
+  // Data ingresso calcolata dalla data registrazione + tipo operazione (mai inserita a mano)
+  const supplyStart = computeSupplyStartDate(insertionDate, payload.operationType);
   const duration = payload.durationMonths || 12;
   const expiryDate = calcExpiryDate(supplyStart, duration);
 
@@ -381,8 +404,12 @@ export async function createFullContractAction(
 
   const createdIds: string[] = [];
   let firstId = "";
+  const services =
+    payload.services.length > 0
+      ? payload.services
+      : [{ id: "default", service: "LUCE" as const }];
 
-  for (const line of payload.services) {
+  for (const line of services) {
     const contractNumber = await nextContractNumber();
     const podPdr =
       line.service === "LUCE"
@@ -401,7 +428,7 @@ export async function createFullContractAction(
         status,
         utilityType: line.service,
         serviceOther: line.serviceOther || null,
-        operationType: payload.operationType,
+        operationType: payload.operationType || "SWITCH",
         operationOther: payload.operationOther || null,
         productName: payload.productName || null,
         offerCode: payload.offerCode || null,
@@ -425,7 +452,7 @@ export async function createFullContractAction(
         ibanHolder: payload.ibanHolder || null,
         ibanHolderCf: payload.ibanHolderCf || null,
         invoiceEmail: payload.invoiceEmail || null,
-        supplyClassification: payload.supplyClassification || null,
+        supplyClassification: classification,
         durationMonths: duration,
         supplyStartDate: supplyStart,
         expiryDate,
@@ -464,19 +491,22 @@ export async function createFullContractAction(
       data: { contractId: created.id, expected: 0 },
     });
 
-    for (const att of payload.attachments) {
-      await prisma.document.create({
-        data: {
-          contractId: created.id,
-          clientId,
-          filename: att.filename,
-          mimeType: att.mimeType,
-          size: att.size,
-          path: `db://${att.id}`,
-          docType: att.docType,
-          contentBase64: att.contentBase64,
-        },
-      });
+    // Allegati solo sul primo contratto (evita payload enorme in multi-servizio)
+    if (created.id === firstId) {
+      for (const att of payload.attachments) {
+        await prisma.document.create({
+          data: {
+            contractId: created.id,
+            clientId,
+            filename: att.filename,
+            mimeType: att.mimeType,
+            size: att.size,
+            path: `db://${att.id}`,
+            docType: att.docType,
+            contentBase64: att.contentBase64,
+          },
+        });
+      }
     }
   }
 
@@ -485,7 +515,7 @@ export async function createFullContractAction(
     const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
     const supplier = await prisma.supplier.findUniqueOrThrow({ where: { id: supplierId } });
     const collab = await prisma.user.findUniqueOrThrow({ where: { id: collaboratorId } });
-    const subject = `Nuovo contratto da lavorare – ${clientDisplayName(client)} – ${payload.services.map((s) => s.service).join("+")} – ${supplier.name}`;
+    const subject = `Nuovo contratto da lavorare – ${clientDisplayName(client)} – ${services.map((s) => s.service).join("+")} – ${supplier.name}`;
     const body = [
       `Pratiche: ${(
         await prisma.contract.findMany({
@@ -495,18 +525,20 @@ export async function createFullContractAction(
       )
         .map((c) => `${c.contractNumber} (${c.utilityType} ${c.pod || c.pdr || ""})`)
         .join(", ")}`,
-      `Data inserimento: ${insertionDate.toISOString()}`,
-      `Collaboratore: ${collab.name} (${collab.email})`,
+      `Data registrazione: ${insertionDate.toISOString()}`,
+      `Collaboratore: ${collab.name}`,
       `Inserito da: ${session.name}`,
       `Cliente: ${clientDisplayName(client)}`,
+      `Tipologia: ${client.type}`,
+      `Classificazione: ${classification || "—"}`,
       `CF: ${client.fiscalCode || "—"}`,
       `P.IVA: ${client.vatNumber || "—"}`,
       `Telefono: ${client.phone || "—"}`,
       `Email: ${client.email || "—"}`,
-      `Operazione: ${payload.operationType}`,
+      `Operazione: ${payload.operationType || "—"}`,
       `Fornitore: ${supplier.name}`,
       `Offerta: ${payload.productName || "—"}`,
-      `Ingresso fornitura: ${supplyStart.toISOString().slice(0, 10)}`,
+      `Ingresso fornitura (calcolato): ${supplyStart.toISOString().slice(0, 10)}`,
       `Scadenza: ${expiryDate.toISOString().slice(0, 10)}`,
       `Pagamento: ${payload.paymentMethod || "—"}`,
       `Note: ${payload.masterNotes || payload.notes || "—"}`,
@@ -517,6 +549,20 @@ export async function createFullContractAction(
       .update(JSON.stringify({ createdIds, subject, sendToMaster: true }))
       .digest("hex");
 
+    // Allegati email: max ~4MB complessivi per evitare bounce SMTP
+    const mailAtts: { filename: string; content: Buffer; contentType: string }[] = [];
+    let mailBytes = 0;
+    for (const a of payload.attachments.slice(0, 6)) {
+      const buf = Buffer.from(a.contentBase64, "base64");
+      if (mailBytes + buf.length > 4 * 1024 * 1024) break;
+      mailBytes += buf.length;
+      mailAtts.push({
+        filename: a.filename,
+        content: buf,
+        contentType: a.mimeType,
+      });
+    }
+
     const mail = await sendMasterEmail({
       contractId: firstId,
       contractNumber: (
@@ -524,11 +570,7 @@ export async function createFullContractAction(
       )?.contractNumber ?? "",
       subject,
       body,
-      attachments: payload.attachments.slice(0, 8).map((a) => ({
-        filename: a.filename,
-        content: Buffer.from(a.contentBase64, "base64"),
-        contentType: a.mimeType,
-      })),
+      attachments: mailAtts,
       sentById: session.id,
       payloadHash: hash,
     });

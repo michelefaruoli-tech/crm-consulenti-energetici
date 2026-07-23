@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
 import { toContractRow } from "@/lib/contract-row";
+import { StatusBadge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,16 @@ export default async function DashboardPage() {
         where: {
           ...where,
           status: {
-            in: ["IN_LAVORAZIONE", "INVIATO_AL_FORNITORE", "DOCUMENTAZIONE_COMPLETA"],
+            in: [
+              "BOZZA",
+              "INSERITO",
+              "IN_LAVORAZIONE",
+              "INVIATO_AL_FORNITORE",
+              "DOCUMENTAZIONE_COMPLETA",
+              "DA_LAVORARE",
+              "INVIATO_AL_MASTER",
+              "ERRORE_INVIO",
+            ],
           },
         },
       }),
@@ -45,10 +55,27 @@ export default async function DashboardPage() {
         },
       }),
       prisma.contract.findMany({
-        where: { ...where, status: "IN_LAVORAZIONE" },
-        take: 10,
+        where: {
+          ...where,
+          status: {
+            in: [
+              "BOZZA",
+              "INSERITO",
+              "DOCUMENTAZIONE_INCOMPLETA",
+              "DOCUMENTAZIONE_COMPLETA",
+              "DA_LAVORARE",
+              "INVIATO_AL_MASTER",
+              "ERRORE_INVIO",
+              "IN_LAVORAZIONE",
+              "INVIATO_AL_FORNITORE",
+            ],
+          },
+        },
+        take: 20,
         select: {
           id: true,
+          status: true,
+          contractNumber: true,
           client: { select: { firstName: true, lastName: true, companyName: true, type: true } },
           collaborator: { select: { name: true } },
           supplier: { select: { name: true } },
@@ -132,6 +159,9 @@ export default async function DashboardPage() {
             <h2 className="mb-4 text-lg font-semibold text-slate-900">
               Pratiche in lavorazione
             </h2>
+            <p className="mb-3 text-xs text-slate-500">
+              Include bozze, salvati, da lavorare e in lavorazione. Clicca per aprire.
+            </p>
             {inLavorazioneList.length === 0 ? (
               <p className="text-sm text-slate-500">Nessuna pratica in lavorazione.</p>
             ) : (
@@ -148,17 +178,19 @@ export default async function DashboardPage() {
                       key={contract.id}
                       className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 last:border-0"
                     >
-                      <div>
+                      <div className="min-w-0">
                         <Link
                           href={`/contratti/${contract.id}`}
                           className="font-medium text-emerald-700 hover:underline"
                         >
                           {name}
                         </Link>
-                        <p className="text-sm text-slate-500">
-                          {contract.supplier.name} · {contract.collaborator.name}
+                        <p className="truncate text-sm text-slate-500">
+                          {contract.contractNumber} · {contract.supplier.name} ·{" "}
+                          {contract.collaborator.name}
                         </p>
                       </div>
+                      <StatusBadge status={contract.status} />
                     </li>
                   );
                 })}
