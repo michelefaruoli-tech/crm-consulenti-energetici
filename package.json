@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
+    "db:import-dati": "tsx scripts/import-excel-dati.ts",
     "db:setup": "prisma migrate deploy && tsx prisma/seed.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

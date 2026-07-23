@@ -68,11 +68,22 @@ model Client {
   fiscalCode  String?
   vatNumber   String?
   email       String?
+  pec         String?
   phone       String?
+  iban        String?
   address     String?
   city        String?
   province    String?
+  region      String?
   zipCode     String?
+  /// Residente / Non residente / Altri usi
+  classification String?
+  supplyAddress  String?
+  supplyCity     String?
+  supplyProvince String?
+  supplyRegion   String?
+  supplyZipCode  String?
+  addressesMatch Boolean?
   notes       String?
   createdById String
   createdBy   User       @relation("ClientCreatedBy", fields: [createdById], references: [id])
@@ -86,6 +97,7 @@ model Client {
   @@index([fiscalCode])
   @@index([vatNumber])
   @@index([lastName, firstName])
+  @@index([email])
 }
 
 model Supplier {
@@ -137,6 +149,8 @@ model CommissionRule {
 
 model Contract {
   id               String         @id @default(cuid())
+  /// ID originale dal foglio Excel / sistema precedente
+  externalId       String?        @unique
   contractNumber   String         @unique
   clientId         String
   client           Client         @relation(fields: [clientId], references: [id])
@@ -149,11 +163,46 @@ model Contract {
   commissionRuleId String?
   commissionRule   CommissionRule? @relation(fields: [commissionRuleId], references: [id])
   status           ContractStatus @default(BOZZA)
+
+  /// Luce / Gas / Telefonia / Fibra...
+  utilityType      String?
+  productName      String?
+  /// POD o PDR
+  podPdr           String?
+  /// Fisso / Variabile
+  priceType        String?
+  pcv              Decimal?       @db.Decimal(10, 4)
+  pricePerKwh      Decimal?       @db.Decimal(10, 6)
+  bandCount        Int?
+  bandsJson        String?
+  /// Una tantum / Mensile...
+  recurrence       String?
+  paymentMethod    String?
+  operationType    String?
+  agency           String?
+  rowType          String?
+  parentExternalId String?
+  monthlyPeriod    String?
+
   insertionDate    DateTime       @default(now())
+  receivedDate     DateTime?
   activationDate   DateTime?
   paymentDate      DateTime?
+  collectionDate   DateTime?
   expiryDate       DateTime?
+  stornoEndDate    DateTime?
+  workEmailDate    DateTime?
+
+  paymentStatus    String?
+  workStatus       String?
+  toWork           Boolean        @default(false)
+  manuallyVerified Boolean        @default(false)
+  /// false = giallo (proposta collab), true = verde (confermata admin)
+  commissionConfirmed Boolean     @default(false)
+  commissionConfirmedAt DateTime?
+  attachmentsJson  String?
   notes            String?
+
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
@@ -164,6 +213,10 @@ model Contract {
   @@index([status])
   @@index([collaboratorId])
   @@index([supplierId])
+  @@index([podPdr])
+  @@index([insertionDate])
+  @@index([expiryDate])
+  @@index([commissionConfirmed])
 }
 
 model ContractStatusHistory {
