@@ -13,6 +13,8 @@ import {
   LogOut,
   Zap,
   Archive,
+  Briefcase,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -20,12 +22,14 @@ import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: "all" as const },
+  { href: "/lavorazione", label: "In lavorazione", icon: Briefcase, roles: "all" as const },
   { href: "/clienti", label: "Clienti", icon: Users, roles: "all" as const },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" as const },
   { href: "/archivio", label: "Archivio", icon: Archive, roles: ["ADMIN", "SEGRETERIA"] as AppRole[] },
   { href: "/fornitori", label: "Fornitori", icon: Building2, roles: ["ADMIN", "SEGRETERIA"] as AppRole[] },
   { href: "/provvigioni", label: "Provvigioni", icon: Coins, roles: "all" as const },
   { href: "/report", label: "Report", icon: BarChart3, roles: ["ADMIN", "SEGRETERIA", "COLLABORATORE"] as AppRole[] },
+  { href: "/account", label: "Sicurezza", icon: Shield, roles: "all" as const },
   { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] as AppRole[] },
 ];
 

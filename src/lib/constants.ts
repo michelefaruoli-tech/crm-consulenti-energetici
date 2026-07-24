@@ -16,7 +16,8 @@ export type AppContractStatus =
   | "PROVVIGIONE_LIQUIDATA"
   | "COMPLETATO"
   | "CHIUSO"
-  | "ANNULLATO";
+  | "ANNULLATO"
+  | "KO";
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   ADMIN: "Amministratore",
@@ -42,6 +43,7 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   COMPLETATO: "Completato",
   CHIUSO: "Chiuso",
   ANNULLATO: "Annullato",
+  KO: "KO",
 };
 
 export const MASTER_EMAIL = "michele.faruoli@gmail.com";
@@ -116,6 +118,7 @@ export const STATUS_COLORS: Record<AppContractStatus, string> = {
   COMPLETATO: "bg-emerald-100 text-emerald-900",
   CHIUSO: "bg-gray-100 text-gray-700",
   ANNULLATO: "bg-red-100 text-red-800",
+  KO: "bg-red-200 text-red-950",
 };
 
 export const PAYMENT_TYPE_LABELS = {

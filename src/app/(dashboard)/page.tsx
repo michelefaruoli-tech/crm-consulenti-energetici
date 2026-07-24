@@ -33,17 +33,10 @@ export default async function DashboardPage() {
       prisma.contract.count({
         where: {
           ...where,
+          sendToMaster: true,
+          assignedToMaster: true,
           status: {
-            in: [
-              "BOZZA",
-              "INSERITO",
-              "IN_LAVORAZIONE",
-              "INVIATO_AL_FORNITORE",
-              "DOCUMENTAZIONE_COMPLETA",
-              "DA_LAVORARE",
-              "INVIATO_AL_MASTER",
-              "ERRORE_INVIO",
-            ],
+            in: ["IN_LAVORAZIONE", "IN_ATTESA_PAGAMENTO", "ERRORE_INVIO", "DA_LAVORARE", "INVIATO_AL_MASTER"],
           },
         },
       }),
@@ -51,36 +44,26 @@ export default async function DashboardPage() {
         where: {
           ...where,
           expiryDate: { lt: new Date() },
-          status: { notIn: ["CHIUSO", "ANNULLATO"] },
+          status: { notIn: ["CHIUSO", "ANNULLATO", "KO"] },
         },
       }),
       prisma.contract.findMany({
         where: {
           ...where,
-          status: {
-            in: [
-              "BOZZA",
-              "INSERITO",
-              "DOCUMENTAZIONE_INCOMPLETA",
-              "DOCUMENTAZIONE_COMPLETA",
-              "DA_LAVORARE",
-              "INVIATO_AL_MASTER",
-              "ERRORE_INVIO",
-              "IN_LAVORAZIONE",
-              "INVIATO_AL_FORNITORE",
-            ],
-          },
+          sendToMaster: true,
+          assignedToMaster: true,
         },
-        take: 20,
+        take: 12,
         select: {
           id: true,
           status: true,
           contractNumber: true,
+          sentToMasterAt: true,
           client: { select: { firstName: true, lastName: true, companyName: true, type: true } },
           collaborator: { select: { name: true } },
           supplier: { select: { name: true } },
         },
-        orderBy: { insertionDate: "desc" },
+        orderBy: [{ sentToMasterAt: "desc" }, { insertionDate: "desc" }],
       }),
       prisma.commission.aggregate({
         where: canViewAll ? {} : { contract: { collaboratorId: session.id } },
@@ -156,14 +139,22 @@ export default async function DashboardPage() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-900">
-              Pratiche in lavorazione
-            </h2>
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Contratti in lavorazione
+              </h2>
+              <Link
+                href="/lavorazione"
+                className="text-sm font-medium text-emerald-700 hover:underline"
+              >
+                Vedi tutti
+              </Link>
+            </div>
             <p className="mb-3 text-xs text-slate-500">
-              Include bozze, salvati, da lavorare e in lavorazione. Clicca per aprire.
+              Solo pratiche inviate al Master (non bozze / registrazioni interne).
             </p>
             {inLavorazioneList.length === 0 ? (
-              <p className="text-sm text-slate-500">Nessuna pratica in lavorazione.</p>
+              <p className="text-sm text-slate-500">Nessun contratto inviato al Master.</p>
             ) : (
               <ul className="space-y-3">
                 {inLavorazioneList.map((contract) => {
@@ -180,7 +171,7 @@ export default async function DashboardPage() {
                     >
                       <div className="min-w-0">
                         <Link
-                          href={`/contratti/${contract.id}`}
+                          href={`/lavorazione/${contract.id}`}
                           className="font-medium text-emerald-700 hover:underline"
                         >
                           {name}

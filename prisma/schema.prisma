@@ -31,6 +31,8 @@ enum ContractStatus {
   COMPLETATO
   CHIUSO
   ANNULLATO
+  /// Pratica Master non andata a buon fine
+  KO
 }
 
 enum CommissionPaymentType {
@@ -53,6 +55,7 @@ model User {
   name      String
   role      Role     @default(COLLABORATORE)
   active    Boolean  @default(true)
+  passwordChangedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -63,6 +66,8 @@ model User {
   auditLogs        AuditLog[]
   commissionPayouts CommissionEntry[]      @relation("CommissionPaidBy")
   emailLogsSent    ContractEmailLog[]      @relation("EmailSentBy")
+  passwordResetTokens PasswordResetToken[]
+  securityEvents   UserSecurityEvent[]
 }
 
 model Client {
@@ -227,8 +232,23 @@ model Contract {
   supplyClassification String?
   durationMonths   Int            @default(12)
   sendToMaster     Boolean        @default(false)
+  assignedToMaster Boolean        @default(false)
+  sentToMasterAt   DateTime?
+  masterEmail      String?
+  emailStatus      String?
+  emailMessageId   String?
+  emailAttempts    Int            @default(0)
+  emailLastError   String?
+  emailIdempotencyKey String?
+  koReason         String?
+  koNotes          String?
+  workCompletedAt  DateTime?
+  expectedPaymentAmount Decimal?  @db.Decimal(10, 2)
+  expectedPaymentDate DateTime?
+  paymentAmount    Decimal?       @db.Decimal(10, 2)
   masterNotes      String?
   internalNotes    String?
+  workNotes        String?
   /// JSON condizioni/servizi tecnici extra
   technicalJson    String?
   economicJson     String?
@@ -280,6 +300,8 @@ model Contract {
   @@index([archiveLabel])
   @@index([deletedAt])
   @@index([sendToMaster])
+  @@index([assignedToMaster])
+  @@index([sentToMasterAt])
 }
 
 model ContractStatusHistory {
@@ -292,6 +314,13 @@ model ContractStatusHistory {
   changedBy   User            @relation(fields: [changedById], references: [id])
   changedAt   DateTime        @default(now())
   note        String?
+  changeReason String?
+  koReason     String?
+  expectedPaymentAmount Decimal? @db.Decimal(10, 2)
+  expectedPaymentDate   DateTime?
+  activationDate        DateTime?
+  paymentDate           DateTime?
+  paymentAmount         Decimal? @db.Decimal(10, 2)
 }
 
 model Commission {
@@ -365,17 +394,70 @@ model ContractEmailLog {
   toEmail      String
   subject      String
   status       String
+  /// MASTER_NEW | MASTER_RESEND | DAILY_REPORT | PASSWORD_RESET | OTHER
+  emailType    String   @default("MASTER_NEW")
   error        String?
   attempts     Int      @default(1)
   messageId    String?
   sentById     String?
   sentBy       User?    @relation("EmailSentBy", fields: [sentById], references: [id])
+  /// Idempotency / payload hash
   payloadHash  String?
+  sentAt       DateTime?
   createdAt    DateTime @default(now())
 
   @@index([contractId])
   @@index([payloadHash])
   @@index([status])
+  @@index([emailType])
+}
+
+model DailyContractReport {
+  id             String   @id @default(cuid())
+  /// YYYY-MM-DD Europe/Rome
+  reportDate     String
+  recipient      String
+  contractsCount Int      @default(0)
+  status         String
+  messageId      String?
+  attempts       Int      @default(1)
+  lastError      String?
+  payloadSummary String?
+  sentAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([reportDate, recipient])
+  @@index([reportDate])
+  @@index([status])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Hash del token (mai token in chiaro)
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model UserSecurityEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// PASSWORD_CHANGED | PASSWORD_RESET_REQUESTED | PASSWORD_RESET_COMPLETED | LOGIN
+  eventType String
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([eventType])
 }
 
 model ClientHistory {

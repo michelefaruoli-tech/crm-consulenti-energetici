@@ -3,10 +3,12 @@ import {
   deleteUserAction,
   deleteAllOtherUsersAction,
 } from "@/lib/actions";
+import { adminSendPasswordResetAction } from "@/lib/master-actions";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { ROLE_LABELS } from "@/lib/constants";
@@ -99,16 +101,30 @@ export default async function UtentiPage() {
                 <td className="px-4 py-3">{ROLE_LABELS[user.role]}</td>
                 <td className="px-4 py-3">{user.active ? "Attivo" : "Disattivo"}</td>
                 <td className="px-4 py-3">
-                  {user.id === session.id ? (
-                    <span className="text-xs text-slate-400">—</span>
-                  ) : (
-                    <form action={deleteUserAction}>
-                      <input type="hidden" name="userId" value={user.id} />
-                      <Button type="submit" variant="danger" size="sm">
-                        Elimina
-                      </Button>
-                    </form>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {user.id === session.id ? (
+                      <Link href="/account">
+                        <Button type="button" size="sm" variant="secondary">
+                          Sicurezza
+                        </Button>
+                      </Link>
+                    ) : (
+                      <>
+                        <form action={adminSendPasswordResetAction}>
+                          <input type="hidden" name="userId" value={user.id} />
+                          <Button type="submit" size="sm" variant="secondary">
+                            Invia reset
+                          </Button>
+                        </form>
+                        <form action={deleteUserAction}>
+                          <input type="hidden" name="userId" value={user.id} />
+                          <Button type="submit" variant="danger" size="sm">
+                            Elimina
+                          </Button>
+                        </form>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

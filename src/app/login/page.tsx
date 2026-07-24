@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { loginAction } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
@@ -32,21 +33,34 @@ export default async function LoginPage({
         <form action={loginAction} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-300">Email</label>
-            <Input type="email" name="email" required placeholder="admin@crm.local" className="bg-slate-900 text-white border-slate-700" />
+            <Input
+              type="email"
+              name="email"
+              required
+              placeholder="admin@crm.local"
+              className="border-slate-700 bg-slate-900 text-white"
+            />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-300">Password</label>
-            <Input type="password" name="password" required placeholder="••••••••" className="bg-slate-900 text-white border-slate-700" />
+            <Input
+              type="password"
+              name="password"
+              required
+              placeholder="••••••••"
+              className="border-slate-700 bg-slate-900 text-white"
+            />
           </div>
           <Button type="submit" className="w-full">
             Accedi
           </Button>
         </form>
 
-        <div className="mt-6 rounded-lg border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-400">
-          <p className="font-medium text-slate-300">Account demo:</p>
-          <p className="mt-2">admin@crm.local / Admin123!</p>
-        </div>
+        <p className="mt-4 text-center text-sm">
+          <Link href="/forgot-password" className="text-emerald-400 hover:underline">
+            Password dimenticata?
+          </Link>
+        </p>
       </div>
     </div>
   );
