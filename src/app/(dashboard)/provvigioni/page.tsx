@@ -14,6 +14,7 @@ import {
   syncAllRecurringMonths,
 } from "@/lib/recurring-sync";
 import {
+  markEarlyReswitchContracts,
   markLatestContractsByPod,
   resolveStornoInfo,
 } from "@/lib/storno-status";
@@ -72,7 +73,7 @@ export default async function ProvvigioniPage() {
               },
             },
             collaborator: { select: { name: true } },
-            supplier: { select: { name: true, stornoMonths: true } },
+            supplier: { select: { id: true, name: true, stornoMonths: true } },
           },
         },
       },
@@ -91,6 +92,20 @@ export default async function ProvvigioniPage() {
       supplyStartDate: c.contract.supplyStartDate,
       insertionDate: c.contract.insertionDate,
       createdAt: c.contract.createdAt,
+    })),
+  );
+  const earlyMap = markEarlyReswitchContracts(
+    commissions.map((c) => ({
+      id: c.contract.id,
+      clientId: c.contract.clientId,
+      supplierId: c.contract.supplierId,
+      podPdr: c.contract.podPdr || c.contract.pod || c.contract.pdr,
+      supplyStartDate: c.contract.supplyStartDate,
+      insertionDate: c.contract.insertionDate,
+      createdAt: c.contract.createdAt,
+      collectionDate: c.contract.collectionDate,
+      stornoMonths: c.contract.supplier.stornoMonths,
+      stornoEndDate: c.contract.stornoEndDate,
     })),
   );
 
@@ -129,6 +144,8 @@ export default async function ProvvigioniPage() {
       expiryDate: item.contract.expiryDate,
       durationMonths: item.contract.durationMonths,
       isLatestForPod: latestMap.get(item.contract.id) ?? true,
+      collectionDate: item.contract.collectionDate,
+      isEarlyReswitch: earlyMap.get(item.contract.id) ?? false,
     });
 
     return {

@@ -9,6 +9,7 @@ import { hasPermission } from "@/lib/permissions";
 import { ClientSheet } from "@/components/clients/client-sheet";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import {
+  markEarlyReswitchContracts,
   markLatestContractsByPod,
   resolveStornoInfo,
 } from "@/lib/storno-status";
@@ -132,6 +133,20 @@ export default async function ClienteDetailPage({
       createdAt: c.createdAt,
     })),
   );
+  const earlyMap = markEarlyReswitchContracts(
+    client.contracts.map((c) => ({
+      id: c.id,
+      clientId: client.id,
+      supplierId: c.supplierId,
+      podPdr: c.podPdr || c.pod || c.pdr,
+      supplyStartDate: c.supplyStartDate,
+      insertionDate: c.insertionDate,
+      createdAt: c.createdAt,
+      collectionDate: c.collectionDate,
+      stornoMonths: c.supplier.stornoMonths,
+      stornoEndDate: c.stornoEndDate,
+    })),
+  );
 
   const sheetContracts = client.contracts.map((c) => {
     const supply =
@@ -145,6 +160,8 @@ export default async function ClienteDetailPage({
       expiryDate: c.expiryDate,
       durationMonths: c.durationMonths,
       isLatestForPod: latestMap.get(c.id) ?? true,
+      collectionDate: c.collectionDate,
+      isEarlyReswitch: earlyMap.get(c.id) ?? false,
     });
 
     return {

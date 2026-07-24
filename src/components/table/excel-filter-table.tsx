@@ -125,6 +125,12 @@ export function ExcelFilterTable({
     });
   }
 
+  function clearAllFilters() {
+    setSelected({});
+  }
+
+  const hasAnyFilter = Object.values(selected).some((s) => s && s.size > 0);
+
   function toggleSort(colKey: string) {
     if (sortKey === colKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -136,6 +142,21 @@ export function ExcelFilterTable({
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      {hasAnyFilter ? (
+        <div className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <span>
+            Filtri attivi: vedi {filtered.length} di {rows.length} righe. Se mancano
+            collaboratori, probabilmente hai filtrato la colonna Collaboratore.
+          </span>
+          <button
+            type="button"
+            className="rounded bg-amber-800 px-2 py-1 font-medium text-white hover:bg-amber-900"
+            onClick={clearAllFilters}
+          >
+            Azzera filtri
+          </button>
+        </div>
+      ) : null}
       <table className={cn("w-full text-left", dense ? "min-w-0 text-xs" : "min-w-full text-sm")}>
         <thead className="bg-slate-50 text-slate-600">
           <tr>

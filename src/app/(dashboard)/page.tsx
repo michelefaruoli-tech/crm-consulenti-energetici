@@ -123,6 +123,7 @@ export default async function DashboardPage() {
           expiryDate: true,
           durationMonths: true,
           stornoEndDate: true,
+          collectionDate: true,
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },

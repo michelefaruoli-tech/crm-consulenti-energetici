@@ -6,6 +6,7 @@ import {
 } from "@/lib/supply-dates";
 import { resolveUtilityDisplay } from "@/lib/utility-display";
 import {
+  markEarlyReswitchContracts,
   markLatestContractsByPod,
   resolveStornoInfo,
   type StornoKind,
@@ -65,6 +66,7 @@ type ContractForRow = {
   expiryDate?: Date | string | null;
   durationMonths?: number | null;
   stornoEndDate?: Date | string | null;
+  collectionDate?: Date | string | null;
   client: {
     type: string;
     companyName?: string | null;
@@ -84,7 +86,7 @@ function toDate(v: Date | string | null | undefined): Date | null {
 
 export function toContractRow(
   contract: ContractForRow,
-  options?: { isLatestForPod?: boolean },
+  options?: { isLatestForPod?: boolean; isEarlyReswitch?: boolean },
 ): ContractTableRow {
   const clientName =
     contract.client.type === "AZIENDA" && contract.client.companyName
@@ -134,6 +136,8 @@ export function toContractRow(
     expiryDate: toDate(contract.expiryDate),
     durationMonths: contract.durationMonths,
     isLatestForPod: options?.isLatestForPod,
+    collectionDate: toDate(contract.collectionDate),
+    isEarlyReswitch: options?.isEarlyReswitch,
   });
 
   return {
@@ -163,7 +167,7 @@ export function toContractRow(
   };
 }
 
-/** Costruisce le righe tabella applicando la regola “POD più recente”. */
+/** Costruisce le righe tabella applicando POD più recente + ricambio in storno. */
 export function toContractRows(contracts: ContractForRow[]): ContractTableRow[] {
   const forMark = contracts.map((c) => ({
     id: c.id,
@@ -173,10 +177,17 @@ export function toContractRows(contracts: ContractForRow[]): ContractTableRow[] 
     supplyStartDate: toDate(c.supplyStartDate),
     insertionDate: toDate(c.insertionDate),
     createdAt: toDate(c.createdAt),
+    collectionDate: toDate(c.collectionDate),
+    stornoMonths: c.supplier.stornoMonths ?? null,
+    stornoEndDate: toDate(c.stornoEndDate),
   }));
   const latestMap = markLatestContractsByPod(forMark);
+  const earlyMap = markEarlyReswitchContracts(forMark);
   return contracts.map((c) =>
-    toContractRow(c, { isLatestForPod: latestMap.get(c.id) ?? true }),
+    toContractRow(c, {
+      isLatestForPod: latestMap.get(c.id) ?? true,
+      isEarlyReswitch: earlyMap.get(c.id) ?? false,
+    }),
   );
 }
 

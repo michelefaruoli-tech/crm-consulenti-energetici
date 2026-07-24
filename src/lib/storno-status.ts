@@ -1,17 +1,20 @@
 /**
  * Stato storno / colori riga contratto.
  *
- * Conteggio: da data ingresso in fornitura + mesi storno del fornitore.
+ * Regola di business (provvigioni energia):
+ * - Contratto NON ancora pagato → FUORI STORNO («Da pagare»).
+ * - Dopo il pagamento parte il periodo di storno del fornitore
+ *   (data ingresso fornitura + mesi storno).
+ * - «In storno» critico = RICAMBIO: nuovo contratto sullo stesso POD
+ *   mentre un contratto precedente già pagato è ancora nel periodo storno.
  *
  * Priorità colori:
- * 1. grigio  — KO / Annullato / Chiuso (cessati)
- * 2. rosso   — Scaduto (oltre expiry / durata) oppure ancora in storno (non vicino alla fine)
- * 3. giallo  — In scadenza (ultimi 30 giorni prima della fine storno)
- * 4. salvia  — Ricorrente (pagamento ogni mese)
- * 5. verde   — Fuori storno
- *
- * Stesso cliente + stesso POD/PDR più volte → si considera il contratto più recente
- * (per data ingresso fornitura, poi inserimento).
+ * 1. grigio  — KO / Annullato / Chiuso
+ * 2. rosso   — Ricambio in periodo storno / Scaduto
+ * 3. ambra   — Periodo storno in scadenza (pagato, ultimi 30 gg)
+ * 4. rosso chiaro — Pagato e ancora nel periodo storno (non ricambiare)
+ * 5. salvia  — Ricorrente
+ * 6. verde   — Da pagare / Fuori storno
  */
 
 export type StornoKind =
@@ -22,7 +25,8 @@ export type StornoKind =
   | "ricorrente"
   | "fuori_storno"
   | "sconosciuto"
-  | "precedente";
+  | "precedente"
+  | "da_pagare";
 
 export type StornoInfo = {
   kind: StornoKind;
@@ -78,6 +82,10 @@ function daysBetween(from: Date, to: Date): number {
   return Math.round(ms / (24 * 60 * 60 * 1000));
 }
 
+function isPaid(collectionDate: Date | null | undefined): boolean {
+  return Boolean(collectionDate);
+}
+
 export function resolveStornoInfo(input: {
   status: string;
   recurrence?: string | null;
@@ -88,6 +96,13 @@ export function resolveStornoInfo(input: {
   durationMonths?: number | null;
   /** Se false: stesso POD, non è il contratto più recente */
   isLatestForPod?: boolean;
+  /** Data incasso / pagamento gettone (se assente = ancora da pagare) */
+  collectionDate?: Date | null;
+  /**
+   * Nuovo contratto sullo stesso POD mentre un precedente già pagato
+   * è ancora dentro i mesi di storno del fornitore.
+   */
+  isEarlyReswitch?: boolean;
   now?: Date;
 }): StornoInfo {
   const now = input.now ?? new Date();
@@ -120,7 +135,31 @@ export function resolveStornoInfo(input: {
     input.stornoEndDate,
   );
 
-  // 0 mesi = nessun periodo di storno → subito fuori storno
+  // Ricambio anticipato = vero rischio storno (anche se il nuovo non è ancora pagato)
+  if (input.isEarlyReswitch) {
+    return {
+      kind: "in_storno",
+      label: "Ricambio in periodo storno",
+      rowClassName: "bg-red-50/90",
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: false,
+      warnOnEdit: true,
+    };
+  }
+
+  // Non ancora pagato → fuori storno (nuovo da liquidare)
+  if (!isPaid(input.collectionDate)) {
+    return {
+      kind: "da_pagare",
+      label: "Da pagare",
+      rowClassName: "bg-emerald-50/90",
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: true,
+      warnOnEdit: false,
+    };
+  }
+
+  // 0 mesi = nessun periodo di storno dopo pagamento
   if (input.stornoMonths === 0) {
     return {
       kind: "fuori_storno",
@@ -132,7 +171,7 @@ export function resolveStornoInfo(input: {
     };
   }
 
-  // Ricorrente: resta sempre verde salvia (dopo KO/precedente)
+  // Ricorrente: resta sempre verde salvia
   if (isRecurring(input.recurrence)) {
     return {
       kind: "ricorrente",
@@ -165,12 +204,12 @@ export function resolveStornoInfo(input: {
 
   if (!stornoEnd) {
     return {
-      kind: "sconosciuto",
-      label: "Storno non calcolato",
-      rowClassName: "",
+      kind: "fuori_storno",
+      label: "Fuori storno",
+      rowClassName: "bg-emerald-50/90",
       stornoEndDate: null,
-      isFuoriStorno: false,
-      warnOnEdit: true,
+      isFuoriStorno: true,
+      warnOnEdit: false,
     };
   }
 
@@ -190,7 +229,7 @@ export function resolveStornoInfo(input: {
   if (remaining <= STORNO_WARNING_DAYS) {
     return {
       kind: "in_scadenza",
-      label: "In scadenza",
+      label: "Fine periodo storno",
       rowClassName: "bg-amber-100/90",
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
@@ -198,9 +237,10 @@ export function resolveStornoInfo(input: {
     };
   }
 
+  // Pagato e ancora dentro i mesi di storno: non ricambiare
   return {
     kind: "in_storno",
-    label: "In storno",
+    label: "In periodo storno (pagato)",
     rowClassName: "bg-red-50/90",
     stornoEndDate: stornoEnd,
     isFuoriStorno: false,
@@ -248,10 +288,71 @@ export function markLatestContractsByPod<
   return map;
 }
 
+/**
+ * Segna i contratti che sono un ricambio sullo stesso POD mentre
+ * un contratto precedente già pagato è ancora nel periodo storno.
+ */
+export function markEarlyReswitchContracts<
+  T extends {
+    id: string;
+    clientId: string;
+    supplierId?: string | null;
+    podPdr?: string | null;
+    supplyStartDate?: Date | null;
+    insertionDate?: Date | null;
+    createdAt?: Date | null;
+    collectionDate?: Date | null;
+    stornoMonths?: number | null;
+    stornoEndDate?: Date | null;
+  },
+>(contracts: T[], now = new Date()): Map<string, boolean> {
+  type Scored = T & { key: string; score: number; stornoEnd: Date | null };
+
+  const scored: Scored[] = [];
+  for (const c of contracts) {
+    const pod = normalizePodKey(c.podPdr);
+    if (!pod) continue;
+    const supply = c.supplyStartDate?.getTime() ?? 0;
+    const insert = c.insertionDate?.getTime() ?? 0;
+    const created = c.createdAt?.getTime() ?? 0;
+    scored.push({
+      ...c,
+      key: `${c.clientId}::${c.supplierId || ""}::${pod}`,
+      score: supply * 1e6 + insert * 1e3 + created,
+      stornoEnd: computeStornoEndDate(c.supplyStartDate, c.stornoMonths, c.stornoEndDate),
+    });
+  }
+
+  const byKey = new Map<string, Scored[]>();
+  for (const s of scored) {
+    const list = byKey.get(s.key) ?? [];
+    list.push(s);
+    byKey.set(s.key, list);
+  }
+
+  const map = new Map<string, boolean>();
+  for (const c of contracts) map.set(c.id, false);
+
+  for (const list of byKey.values()) {
+    const sorted = [...list].sort((a, b) => a.score - b.score);
+    for (let i = 0; i < sorted.length; i++) {
+      const curr = sorted[i];
+      const earlierPaidInStorno = sorted.slice(0, i).some((prev) => {
+        if (!prev.collectionDate) return false;
+        if (!prev.stornoEnd) return false;
+        return startOfDay(now) <= startOfDay(prev.stornoEnd);
+      });
+      if (earlierPaidInStorno) map.set(curr.id, true);
+    }
+  }
+
+  return map;
+}
+
 export const STORNO_LEGEND = [
-  { label: "Fuori storno", className: "bg-emerald-200 ring-emerald-300" },
+  { label: "Da pagare / Fuori storno", className: "bg-emerald-200 ring-emerald-300" },
   { label: "Ricorrente", className: "bg-teal-200 ring-teal-300" },
-  { label: "In scadenza", className: "bg-amber-200 ring-amber-300" },
-  { label: "In storno / Scaduto", className: "bg-red-200 ring-red-300" },
+  { label: "Fine periodo storno", className: "bg-amber-200 ring-amber-300" },
+  { label: "Periodo storno / Ricambio", className: "bg-red-200 ring-red-300" },
   { label: "KO / Cessato", className: "bg-slate-300 ring-slate-400" },
 ] as const;

@@ -41,6 +41,7 @@ export default async function ArchivioPage() {
         expiryDate: true,
         durationMonths: true,
         stornoEndDate: true,
+        collectionDate: true,
         client: {
           select: { type: true, companyName: true, firstName: true, lastName: true },
         },
