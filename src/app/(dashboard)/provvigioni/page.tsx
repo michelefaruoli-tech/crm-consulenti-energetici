@@ -11,9 +11,15 @@ import {
   type ProvvigioneRow,
 } from "@/components/provvigioni/provvigioni-filter-table";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
+import {
+  RecurringRendicontoPanel,
+  toSettledRow,
+} from "@/components/provvigioni/recurring-rendiconto-panel";
 import { PaginationNav } from "@/components/ui/pagination-nav";
+import { Button } from "@/components/ui/button";
 import {
   getMissingRecurringAlerts,
+  getSettledRecurringForPeriod,
   syncAllRecurringMonths,
 } from "@/lib/recurring-sync";
 import {
@@ -23,33 +29,37 @@ import {
 } from "@/lib/storno-status";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
+import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
+import { toPeriod } from "@/lib/recurring";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProvvigioniPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; collab?: string }>;
+  searchParams: Promise<{ page?: string; collab?: string; settled?: string }>;
 }) {
   const session = await requireSession();
-  const { page: pageRaw, collab } = await searchParams;
+  const { page: pageRaw, collab, settled: settledRaw } = await searchParams;
   const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
+  const canExport = hasPermission(session.role, "reports.export");
+
+  const contractWhere = buildProvvigioniContractWhere({
+    canViewAll,
+    sessionUserId: session.id,
+    collab,
+  });
   const collabFilter =
     canViewAll && collab && collab !== "tutti" ? collab : undefined;
   const sessionCollabFilter = canViewAll ? collabFilter : session.id;
+  const settledPeriod =
+    settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
 
-  // Sync ricorrenze in background non bloccante
-  void syncAllRecurringMonths(canViewAll ? undefined : session.id).catch((e) =>
+  void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
     console.error("sync recurring", e),
   );
-
-  const contractWhere = {
-    isHistorical: false as const,
-    deletedAt: null,
-    ...(sessionCollabFilter ? { collaboratorId: sessionCollabFilter } : {}),
-  };
 
   const [
     total,
@@ -59,6 +69,7 @@ export default async function ProvvigioniPage({
     collaboratorOptions,
     missing,
     collabGroups,
+    settledRowsRaw,
   ] = await Promise.all([
     prisma.contract.count({ where: contractWhere }),
     prisma.contract.findMany({
@@ -117,7 +128,7 @@ export default async function ProvvigioniPage({
           orderBy: [{ active: "desc" }, { name: "asc" }],
         })
       : Promise.resolve([]),
-    getMissingRecurringAlerts(canViewAll ? undefined : session.id),
+    getMissingRecurringAlerts(sessionCollabFilter),
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
@@ -125,6 +136,7 @@ export default async function ProvvigioniPage({
           _count: { id: true },
         })
       : Promise.resolve([]),
+    getSettledRecurringForPeriod(settledPeriod, sessionCollabFilter),
   ]);
 
   const latestMap = markLatestContractsByPod(
@@ -217,6 +229,10 @@ export default async function ProvvigioniPage({
     }))
     .sort((a, b) => b.n - a.n);
 
+  const selectedCollabName = collabFilter
+    ? nameById[collabFilter] ?? collabCounts.find((c) => c.id === collabFilter)?.name
+    : null;
+
   const alertRows = missing.map((m) => ({
     id: m.id,
     period: m.period,
@@ -226,36 +242,43 @@ export default async function ProvvigioniPage({
     clientName: clientDisplayName(m.contract.client),
   }));
 
+  const settledRows = settledRowsRaw.map(toSettledRow);
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
-  const queryBase = { collab: collabFilter };
+  const queryBase = { collab: collabFilter, settled: settledPeriod };
+  const collabQs = collabFilter ? `&collab=${collabFilter}` : "";
+  const exportHref = `/api/provvigioni/export?settled=${settledPeriod}${
+    collabFilter ? `&collab=${collabFilter}` : ""
+  }`;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
-        <p className="text-slate-500">
-          {total} contratti attivi
-          {canViewAll
-            ? ` · accesso ${roleLabel} — tutti i collaboratori`
-            : " · solo i tuoi"}
-          . Ordinati per data inserimento (più recenti prima). Colori = storno; bordo =
-          gettone.
-          {totals.daConfermare > 0
-            ? ` · ${totals.daConfermare} gettoni da confermare.`
-            : ""}
-        </p>
-        {!canViewAll ? (
-          <p className="mt-1 text-xs text-amber-800">
-            Il tuo ruolo ({roleLabel}) vede solo le tue provvigioni. Serve Admin/Segreteria
-            per tutti.
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
+          <p className="text-slate-500">
+            {total} contratti attivi
+            {selectedCollabName
+              ? ` · filtro: ${selectedCollabName}`
+              : canViewAll
+                ? ` · accesso ${roleLabel} — tutti i collaboratori`
+                : " · solo i tuoi"}
+            . Ordinati per data inserimento. Colori = storno; bordo = gettone.
+            {totals.daConfermare > 0
+              ? ` · ${totals.daConfermare} gettoni da confermare.`
+              : ""}
           </p>
+        </div>
+        {canExport ? (
+          <a href={exportHref}>
+            <Button variant="secondary">Scarica Excel</Button>
+          </a>
         ) : null}
       </div>
 
       {canViewAll ? (
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
-            href="/provvigioni"
+            href={`/provvigioni?settled=${settledPeriod}`}
             className={
               !collabFilter
                 ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
@@ -267,7 +290,7 @@ export default async function ProvvigioniPage({
           {collabCounts.map((c) => (
             <Link
               key={c.id}
-              href={`/provvigioni?collab=${c.id}`}
+              href={`/provvigioni?collab=${c.id}&settled=${settledPeriod}`}
               className={
                 collabFilter === c.id
                   ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
@@ -282,16 +305,29 @@ export default async function ProvvigioniPage({
 
       <RecurringMissingPanel alerts={alertRows} />
 
+      <RecurringRendicontoPanel
+        settledPeriod={settledPeriod}
+        rows={settledRows}
+        collabQuery={collabQs}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Totale complessivo (previsto)</p>
           <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.complessivo)}</p>
-          <p className="mt-1 text-xs text-slate-400">su tutti i filtri, non solo questa pagina</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {selectedCollabName
+              ? `Solo ${selectedCollabName} (tutte le pagine)`
+              : "Tutti i collaboratori visibili (tutte le pagine)"}
+          </p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
           <p className="text-sm text-emerald-700">Totale ricevuto</p>
           <p className="mt-2 text-2xl font-bold text-emerald-900">
             {formatCurrency(totals.ricevuto)}
+          </p>
+          <p className="mt-1 text-xs text-emerald-800/70">
+            {selectedCollabName ? `Filtro: ${selectedCollabName}` : "Stesso filtro della lista"}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -306,12 +342,7 @@ export default async function ProvvigioniPage({
         </div>
       </div>
 
-      <PaginationNav
-        path="/provvigioni"
-        page={page}
-        total={total}
-        query={queryBase}
-      />
+      <PaginationNav path="/provvigioni" page={page} total={total} query={queryBase} />
 
       <ProvvigioniFilterTable
         rows={rows.filter((r) => r.commissionId)}
@@ -319,12 +350,7 @@ export default async function ProvvigioniPage({
         canConfirm={canConfirm}
       />
 
-      <PaginationNav
-        path="/provvigioni"
-        page={page}
-        total={total}
-        query={queryBase}
-      />
+      <PaginationNav path="/provvigioni" page={page} total={total} query={queryBase} />
     </div>
   );
 }

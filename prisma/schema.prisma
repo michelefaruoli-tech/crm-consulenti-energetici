@@ -377,12 +377,15 @@ model RecurringMonth {
   id         String   @id @default(cuid())
   contractId String
   contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  /// YYYY-MM
+  /// Mese di competenza YYYY-MM (es. 2026-04 = gettone di aprile)
   period     String
   /// PAID | PENDING | MISSING | CLOSED | ERROR_UNPAID
   status     String   @default("PENDING")
   amount     Decimal? @db.Decimal(10, 2)
+  /// Quando è stato segnato come pagato (data reale click/incasso)
   paidAt     DateTime?
+  /// Mese del rendiconto / bonifico YYYY-MM (es. pagato a luglio → 2026-07, competenza aprile)
+  settledPeriod String?
   note       String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -390,6 +393,7 @@ model RecurringMonth {
   @@unique([contractId, period])
   @@index([status])
   @@index([period])
+  @@index([settledPeriod])
   @@index([contractId])
 }
 
