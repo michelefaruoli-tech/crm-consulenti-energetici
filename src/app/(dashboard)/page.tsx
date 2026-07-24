@@ -5,7 +5,7 @@ import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
-import { toContractRow } from "@/lib/contract-row";
+import { toCollaboratorOption, toContractRow } from "@/lib/contract-row";
 import { StatusBadge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,10 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const session = await requireSession();
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
+  const canChangeCollaborator = hasPermission(
+    session.role,
+    "contracts.change_collaborator_dashboard",
+  );
   const where = canViewAll
     ? { isHistorical: false, deletedAt: null }
     : { collaboratorId: session.id, isHistorical: false, deletedAt: null };
@@ -27,6 +31,7 @@ export default async function DashboardPage() {
       commissions,
       topCollaborators,
       recentContracts,
+      collaboratorOptions,
     ] = await Promise.all([
       prisma.contract.count({ where }),
       prisma.contract.count({ where: { ...where, status: "ATTIVATO" } }),
@@ -36,7 +41,13 @@ export default async function DashboardPage() {
           sendToMaster: true,
           assignedToMaster: true,
           status: {
-            in: ["IN_LAVORAZIONE", "IN_ATTESA_PAGAMENTO", "ERRORE_INVIO", "DA_LAVORARE", "INVIATO_AL_MASTER"],
+            in: [
+              "IN_LAVORAZIONE",
+              "IN_ATTESA_PAGAMENTO",
+              "ERRORE_INVIO",
+              "DA_LAVORARE",
+              "INVIATO_AL_MASTER",
+            ],
           },
         },
       }),
@@ -59,11 +70,13 @@ export default async function DashboardPage() {
           status: true,
           contractNumber: true,
           sentToMasterAt: true,
-          client: { select: { firstName: true, lastName: true, companyName: true, type: true } },
+          client: {
+            select: { firstName: true, lastName: true, companyName: true, type: true },
+          },
           collaborator: { select: { name: true } },
           supplier: { select: { name: true } },
         },
-        orderBy: [{ sentToMasterAt: "desc" }, { insertionDate: "desc" }],
+        orderBy: [{ sentToMasterAt: "desc" }, { createdAt: "desc" }],
       }),
       prisma.commission.aggregate({
         where: canViewAll ? {} : { contract: { collaboratorId: session.id } },
@@ -83,18 +96,33 @@ export default async function DashboardPage() {
           id: true,
           status: true,
           insertionDate: true,
+          createdAt: true,
           supplyStartDate: true,
           operationType: true,
+          utilityType: true,
           podPdr: true,
+          pod: true,
+          pdr: true,
+          serviceOther: true,
+          collaboratorId: true,
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },
           supplier: { select: { name: true } },
-          collaborator: { select: { name: true } },
+          collaborator: { select: { id: true, name: true } },
         },
-        orderBy: { insertionDate: "desc" },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 30,
       }),
+      canChangeCollaborator
+        ? prisma.user.findMany({
+            where: {
+              role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+            },
+            select: { id: true, name: true, active: true, role: true },
+            orderBy: [{ active: "desc" }, { name: "asc" }],
+          })
+        : Promise.resolve([]),
     ]);
 
     const collaboratorNames =
@@ -106,6 +134,7 @@ export default async function DashboardPage() {
         : [];
 
     const tableRows = recentContracts.map(toContractRow);
+    const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
     return (
       <div className="space-y-8">
@@ -227,9 +256,13 @@ export default async function DashboardPage() {
             </Link>
           </div>
           <p className="text-xs text-slate-500">
-            Usa ▾ sulle colonne per filtrare (selezione multipla).
+            Ultimi inserimenti per primi. Usa ▾ sulle colonne per filtrare.
           </p>
-          <ContractsFilterTable rows={tableRows} />
+          <ContractsFilterTable
+            rows={tableRows}
+            canChangeCollaborator={canChangeCollaborator}
+            collaborators={collaborators}
+          />
         </section>
       </div>
     );

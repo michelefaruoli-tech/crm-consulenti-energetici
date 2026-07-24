@@ -14,6 +14,7 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
+import { writeClientHistoryBatch } from "@/lib/audit";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "");
@@ -102,33 +103,74 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     throw new Error("Permesso negato");
   }
 
+  const next = {
+    type: String(formData.get("type") ?? client.type) as "PRIVATO" | "AZIENDA",
+    companyName: String(formData.get("companyName") ?? "") || null,
+    firstName: String(formData.get("firstName") ?? "") || null,
+    lastName: String(formData.get("lastName") ?? "") || null,
+    fiscalCode: String(formData.get("fiscalCode") ?? "") || null,
+    vatNumber: String(formData.get("vatNumber") ?? "") || null,
+    email: String(formData.get("email") ?? "") || null,
+    pec: String(formData.get("pec") ?? "") || null,
+    phone: String(formData.get("phone") ?? "") || null,
+    iban: String(formData.get("iban") ?? "") || null,
+    address: String(formData.get("address") ?? "") || null,
+    street: String(formData.get("street") ?? "") || null,
+    streetNumber: String(formData.get("streetNumber") ?? "") || null,
+    city: String(formData.get("city") ?? "") || null,
+    province: String(formData.get("province") ?? "") || null,
+    region: String(formData.get("region") ?? "") || null,
+    zipCode: String(formData.get("zipCode") ?? "") || null,
+    country: String(formData.get("country") ?? "") || "Italia",
+    classification: String(formData.get("classification") ?? "") || null,
+    legalFirstName: String(formData.get("legalFirstName") ?? "") || null,
+    legalLastName: String(formData.get("legalLastName") ?? "") || null,
+    legalFiscalCode: String(formData.get("legalFiscalCode") ?? "") || null,
+    sdiCode: String(formData.get("sdiCode") ?? "") || null,
+    notes: String(formData.get("notes") ?? "") || null,
+  };
+
+  // Indirizzo fornitura NON si aggiorna più dall'anagrafica (resta solo sul contratto)
   await prisma.client.update({
     where: { id: clientId },
-    data: {
-      type: String(formData.get("type") ?? client.type) as "PRIVATO" | "AZIENDA",
-      companyName: String(formData.get("companyName") ?? "") || null,
-      firstName: String(formData.get("firstName") ?? "") || null,
-      lastName: String(formData.get("lastName") ?? "") || null,
-      fiscalCode: String(formData.get("fiscalCode") ?? "") || null,
-      vatNumber: String(formData.get("vatNumber") ?? "") || null,
-      email: String(formData.get("email") ?? "") || null,
-      pec: String(formData.get("pec") ?? "") || null,
-      phone: String(formData.get("phone") ?? "") || null,
-      iban: String(formData.get("iban") ?? "") || null,
-      address: String(formData.get("address") ?? "") || null,
-      city: String(formData.get("city") ?? "") || null,
-      province: String(formData.get("province") ?? "") || null,
-      region: String(formData.get("region") ?? "") || null,
-      zipCode: String(formData.get("zipCode") ?? "") || null,
-      classification: String(formData.get("classification") ?? "") || null,
-      supplyAddress: String(formData.get("supplyAddress") ?? "") || null,
-      supplyCity: String(formData.get("supplyCity") ?? "") || null,
-      supplyProvince: String(formData.get("supplyProvince") ?? "") || null,
-      supplyRegion: String(formData.get("supplyRegion") ?? "") || null,
-      supplyZipCode: String(formData.get("supplyZipCode") ?? "") || null,
-      notes: String(formData.get("notes") ?? "") || null,
-    },
+    data: next,
   });
+
+  const tracked: Array<keyof typeof next> = [
+    "type",
+    "companyName",
+    "firstName",
+    "lastName",
+    "fiscalCode",
+    "vatNumber",
+    "email",
+    "pec",
+    "phone",
+    "iban",
+    "address",
+    "street",
+    "streetNumber",
+    "city",
+    "province",
+    "region",
+    "zipCode",
+    "country",
+    "classification",
+    "legalFirstName",
+    "legalLastName",
+    "legalFiscalCode",
+    "sdiCode",
+    "notes",
+  ];
+  await writeClientHistoryBatch(
+    clientId,
+    session.id,
+    tracked.map((field) => ({
+      field,
+      oldValue: String(client[field] ?? "") || null,
+      newValue: String(next[field] ?? "") || null,
+    })),
+  );
 
   revalidatePath("/clienti");
   revalidatePath(`/clienti/${clientId}`);
@@ -298,14 +340,21 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
 
 export async function updateContractCollaboratorAction(formData: FormData): Promise<void> {
   const session = await requireSession();
-  if (!hasPermission(session.role, "contracts.edit_all")) {
-    throw new Error("Solo amministratore/segreteria può cambiare il collaboratore");
+  // Scheda completa: solo Admin (non Segreteria)
+  if (!hasPermission(session.role, "contracts.change_collaborator")) {
+    throw new Error("Solo l'amministratore può cambiare il collaboratore dalla scheda completa");
   }
 
   const contractId = String(formData.get("contractId") ?? "");
   const collaboratorId = String(formData.get("collaboratorId") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim() || null;
   if (!contractId || !collaboratorId) {
     throw new Error("Dati mancanti");
+  }
+
+  const contract = await prisma.contract.findUnique({ where: { id: contractId } });
+  if (!contract || contract.deletedAt) {
+    throw new Error("Contratto non trovato");
   }
 
   const collaborator = await prisma.user.findFirst({
@@ -319,9 +368,37 @@ export async function updateContractCollaboratorAction(formData: FormData): Prom
     throw new Error("Collaboratore non valido");
   }
 
+  if (collaborator.id === contract.collaboratorId) {
+    revalidatePath(`/contratti/${contractId}`);
+    return;
+  }
+
+  const previous = await prisma.user.findUnique({
+    where: { id: contract.collaboratorId },
+    select: { name: true },
+  });
+
   await prisma.contract.update({
     where: { id: contractId },
     data: { collaboratorId },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: contractId,
+      details: JSON.stringify({
+        field: "collaboratorId",
+        from: contract.collaboratorId,
+        fromName: previous?.name ?? null,
+        to: collaborator.id,
+        toName: collaborator.name,
+        reason,
+        source: "contract_detail",
+      }),
+    },
   });
 
   revalidatePath("/contratti");

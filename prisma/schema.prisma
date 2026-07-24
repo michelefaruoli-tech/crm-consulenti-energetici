@@ -216,8 +216,24 @@ model Contract {
   /// Una tantum / Mensile...
   recurrence       String?
   paymentMethod    String?
+  /// IBAN specifico del contratto (copia indipendente dall'anagrafica)
+  contractIban     String?
   ibanHolder       String?
   ibanHolderCf     String?
+  sepaMandate      String?
+  paymentNotes     String?
+  /// Indirizzo di fornitura (copia storica, non dipende dall'anagrafica cliente)
+  supplyStreet         String?
+  supplyStreetNumber   String?
+  supplyCity           String?
+  supplyProvince       String?
+  supplyRegion         String?
+  supplyZipCode        String?
+  supplyCountry        String?  @default("Italia")
+  supplyAddress        String?
+  addressesMatch       Boolean?
+  /// Bassa tensione / Media tensione (business luce)
+  voltageLevel         String?
   invoiceEmail     String?
   invoiceMode      String?
   billingPeriod    String?

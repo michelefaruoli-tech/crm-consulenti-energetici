@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
-import { toContractRow } from "@/lib/contract-row";
+import { toCollaboratorOption, toContractRow } from "@/lib/contract-row";
 
 export const dynamic = "force-dynamic";
 
@@ -16,38 +16,60 @@ export default async function ContrattiPage({
   const session = await requireSession();
   const { vista } = await searchParams;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
+  const canChangeCollaborator = hasPermission(
+    session.role,
+    "contracts.change_collaborator_dashboard",
+  );
   const mode = vista === "storico" ? "storico" : vista === "tutti" ? "tutti" : "attivi";
 
   try {
-    const contracts = await prisma.contract.findMany({
-      where: {
-        deletedAt: null,
-        ...(canViewAll ? {} : { collaboratorId: session.id }),
-        ...(mode === "attivi"
-          ? { isHistorical: false }
-          : mode === "storico"
-            ? { isHistorical: true }
-            : {}),
-      },
-      select: {
-        id: true,
-        status: true,
-        insertionDate: true,
-        supplyStartDate: true,
-        operationType: true,
-        podPdr: true,
-        archiveLabel: true,
-        isHistorical: true,
-        client: {
-          select: { type: true, companyName: true, firstName: true, lastName: true },
+    const [contracts, collaboratorOptions] = await Promise.all([
+      prisma.contract.findMany({
+        where: {
+          deletedAt: null,
+          ...(canViewAll ? {} : { collaboratorId: session.id }),
+          ...(mode === "attivi"
+            ? { isHistorical: false }
+            : mode === "storico"
+              ? { isHistorical: true }
+              : {}),
         },
-        supplier: { select: { name: true } },
-        collaborator: { select: { name: true } },
-      },
-      orderBy: { insertionDate: "desc" },
-    });
+        select: {
+          id: true,
+          status: true,
+          insertionDate: true,
+          createdAt: true,
+          supplyStartDate: true,
+          operationType: true,
+          utilityType: true,
+          podPdr: true,
+          pod: true,
+          pdr: true,
+          serviceOther: true,
+          archiveLabel: true,
+          isHistorical: true,
+          collaboratorId: true,
+          client: {
+            select: { type: true, companyName: true, firstName: true, lastName: true },
+          },
+          supplier: { select: { name: true } },
+          collaborator: { select: { id: true, name: true } },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      }),
+      canChangeCollaborator
+        ? prisma.user.findMany({
+            where: {
+              role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+            },
+            select: { id: true, name: true, active: true, role: true },
+            orderBy: [{ active: "desc" }, { name: "asc" }],
+          })
+        : Promise.resolve([]),
+    ]);
 
     const rows = contracts.map(toContractRow);
+    const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
     return (
       <div className="space-y-6">
@@ -55,7 +77,7 @@ export default async function ContrattiPage({
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Contratti</h1>
             <p className="text-slate-500">
-              Modifica le celle in elenco · click sul nome per la scheda completa
+              Ultimi inserimenti per primi · click sul nome per la scheda completa
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -105,7 +127,13 @@ export default async function ContrattiPage({
           </Link>
         </div>
 
-        <ContractsFilterTable rows={rows} editable={mode !== "storico"} canDelete={canViewAll} />
+        <ContractsFilterTable
+          rows={rows}
+          editable={mode !== "storico"}
+          canDelete={canViewAll}
+          canChangeCollaborator={canChangeCollaborator && mode !== "storico"}
+          collaborators={collaborators}
+        />
       </div>
     );
   } catch (error) {

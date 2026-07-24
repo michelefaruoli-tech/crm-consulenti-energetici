@@ -51,6 +51,7 @@ export const MASTER_EMAIL = "michele.faruoli@gmail.com";
 export const SERVICE_OPTIONS = [
   { value: "LUCE", label: "Luce" },
   { value: "GAS", label: "Gas" },
+  { value: "DUAL", label: "Dual Luce e Gas" },
   { value: "TELEFONIA", label: "Telefonia" },
   { value: "POS", label: "POS" },
   { value: "FOTOVOLTAICO", label: "Fotovoltaico" },

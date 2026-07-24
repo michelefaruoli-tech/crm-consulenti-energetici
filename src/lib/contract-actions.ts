@@ -91,6 +91,52 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       where: { id: contractId },
       data: { notes: value.trim() || null },
     });
+  } else if (field === "collaboratorId") {
+    if (!hasPermission(session.role, "contracts.change_collaborator_dashboard")) {
+      throw new Error("Non puoi cambiare il collaboratore");
+    }
+    const collaboratorId = value.trim();
+    if (!collaboratorId) throw new Error("Collaboratore mancante");
+    const collaborator = await prisma.user.findFirst({
+      where: {
+        id: collaboratorId,
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      },
+      select: { id: true, name: true, active: true },
+    });
+    if (!collaborator) throw new Error("Collaboratore non valido");
+    if (!collaborator.active && collaborator.id !== contract.collaboratorId) {
+      throw new Error("Collaboratore non attivo");
+    }
+    if (collaborator.id === contract.collaboratorId) return;
+
+    const previous = await prisma.user.findUnique({
+      where: { id: contract.collaboratorId },
+      select: { name: true },
+    });
+
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: { collaboratorId: collaborator.id },
+    });
+    await prisma.auditLog.create({
+      data: {
+        userId: session.id,
+        action: "UPDATE",
+        entity: "Contract",
+        entityId: contractId,
+        details: JSON.stringify({
+          field: "collaboratorId",
+          from: contract.collaboratorId,
+          fromName: previous?.name ?? null,
+          to: collaborator.id,
+          toName: collaborator.name,
+          source: "dashboard_list",
+        }),
+      },
+    });
+  } else {
+    throw new Error("Campo non modificabile");
   }
 
   revalidatePath("/contratti");

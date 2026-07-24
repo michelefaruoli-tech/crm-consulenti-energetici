@@ -26,7 +26,11 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
 
   if (field === "expected" || field === "received" || field === "paid" || field === "accrued") {
     const amount = Number(value.replace(",", ".")) || 0;
-    if (!canAll && field !== "expected") {
+    if (field === "expected") {
+      if (!hasPermission(session.role, "commissions.edit_gettone")) {
+        throw new Error("Non puoi modificare il valore gettone");
+      }
+    } else if (!canAll) {
       throw new Error("Puoi modificare solo il gettone previsto");
     }
     await prisma.commission.update({

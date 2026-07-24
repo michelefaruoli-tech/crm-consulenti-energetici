@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ContractTableRow } from "@/lib/contract-row";
+import type { CollaboratorOption, ContractTableRow } from "@/lib/contract-row";
 import { updateContractFieldAction } from "@/lib/contract-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 
@@ -16,10 +16,15 @@ export function ContractsFilterTable({
   rows,
   editable = true,
   canDelete = false,
+  canChangeCollaborator = false,
+  collaborators = [],
 }: {
   rows: ContractTableRow[];
   editable?: boolean;
   canDelete?: boolean;
+  /** Admin + Segreteria: tendina collaboratore in elenco/Dashboard */
+  canChangeCollaborator?: boolean;
+  collaborators?: CollaboratorOption[];
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<Pending[]>([]);
@@ -47,6 +52,7 @@ export function ContractsFilterTable({
         insertionDate: "insertionDate",
         supplyStartDate: "supplyStartDate",
         operationLabel: "operationType",
+        collaboratorName: "collaboratorId",
       };
       const field = map[key];
       if (!field) return;
@@ -109,10 +115,58 @@ export function ContractsFilterTable({
       getValue: (r) => String(r.supplierName ?? ""),
     },
     {
-      key: "podPdr",
+      key: "utilityFilter",
       label: "POD / PDR",
-      getValue: (r) => String(r.podPdr ?? "").trim(),
-      editable,
+      getValue: (r) => String(r.utilityFilter ?? r.podPdr ?? "").trim(),
+      editable: false,
+      render: (r) => {
+        const techLines = Array.isArray(r.techLines)
+          ? (r.techLines as string[])
+          : [String(r.podPdr ?? "")].filter(Boolean);
+        const serviceLabel = String(r.serviceLabel ?? "");
+        if (editable) {
+          return (
+            <div className="min-w-[8rem]" onClick={(e) => e.stopPropagation()}>
+              <input
+                className="w-full rounded border border-transparent bg-transparent px-0.5 py-0.5 text-xs hover:border-slate-200 focus:border-emerald-500 focus:outline-none"
+                defaultValue={String(r.podPdr ?? "")}
+                title="Modifica POD/PDR"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                onBlur={(e) => {
+                  const next = e.target.value;
+                  const prev = String(r.podPdr ?? "");
+                  if (next !== prev) queueEdit(r, "podPdr", next);
+                }}
+              />
+              {serviceLabel ? (
+                <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  {serviceLabel}
+                </p>
+              ) : null}
+            </div>
+          );
+        }
+        return (
+          <div className="min-w-[7rem]">
+            {techLines.length > 0 ? (
+              techLines.map((line) => (
+                <p key={line} className="text-xs text-slate-900">
+                  {line}
+                </p>
+              ))
+            ) : (
+              <p className="text-xs text-slate-400">—</p>
+            )}
+            {serviceLabel ? (
+              <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                {serviceLabel}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       key: "statusLabel",
@@ -126,12 +180,14 @@ export function ContractsFilterTable({
       label: "Inserimento",
       getValue: (r) => String(r.insertionDate ?? ""),
       editable,
+      sortKind: "date",
     },
     {
       key: "supplyStartDate",
       label: "Inizio fornitura",
       getValue: (r) => String(r.supplyStartDate ?? ""),
       editable,
+      sortKind: "date",
     },
     {
       key: "operationLabel",
@@ -143,6 +199,31 @@ export function ContractsFilterTable({
       key: "collaboratorName",
       label: "Collaboratore",
       getValue: (r) => String(r.collaboratorName ?? ""),
+      render: (r) => {
+        if (!canChangeCollaborator || collaborators.length === 0) {
+          return <span className="text-xs text-slate-700">{String(r.collaboratorName ?? "")}</span>;
+        }
+        const currentId = String(r.collaboratorId ?? "");
+        return (
+          <select
+            className="max-w-[11rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-xs"
+            defaultValue={currentId}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next !== currentId) queueEdit(r, "collaboratorName", next);
+            }}
+          >
+            {collaborators.map((c) => (
+              <option key={c.id} value={c.id} disabled={!c.active && c.id !== currentId}>
+                {c.name}
+                {!c.active ? " (inattivo)" : ""}
+                {c.roleLabel ? ` · ${c.roleLabel}` : ""}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
   ];
 
@@ -160,11 +241,14 @@ export function ContractsFilterTable({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-500">
           {editable
-            ? "Modifica le celle, poi clicca «Salva cambiamenti». POD / PDR in maiuscolo uniforme."
+            ? "Modifica le celle, poi clicca «Salva cambiamenti». Sotto POD/PDR vedi il tipo di servizio."
+            : null}{" "}
+          {canChangeCollaborator
+            ? "Puoi cambiare il collaboratore dalla tendina (Admin/Segreteria)."
             : null}{" "}
           {canDelete ? "Elimina archivia la riga (soft delete)." : null}
         </p>
-        {editable ? (
+        {editable || canChangeCollaborator ? (
           <Button type="button" size="sm" disabled={!dirty || saving} onClick={saveAll}>
             {saving ? "Salvataggio…" : `Salva cambiamenti${dirty ? ` (${pending.length})` : ""}`}
           </Button>

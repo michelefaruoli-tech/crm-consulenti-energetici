@@ -10,11 +10,14 @@ export type Permission =
   | "contracts.edit_own"
   | "contracts.create"
   | "contracts.change_status"
+  | "contracts.change_collaborator_dashboard"
+  | "contracts.change_collaborator"
   | "clients.edit_all"
   | "clients.create"
   | "documents.manage"
   | "commissions.view_all"
   | "commissions.view_own"
+  | "commissions.edit_gettone"
   | "reports.export"
   | "reports.email";
 
@@ -28,10 +31,13 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "contracts.edit_all",
     "contracts.create",
     "contracts.change_status",
+    "contracts.change_collaborator_dashboard",
+    "contracts.change_collaborator",
     "clients.edit_all",
     "clients.create",
     "documents.manage",
     "commissions.view_all",
+    "commissions.edit_gettone",
     "reports.export",
     "reports.email",
   ],
@@ -39,10 +45,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "contracts.edit_all",
     "contracts.create",
     "contracts.change_status",
+    "contracts.change_collaborator_dashboard",
     "clients.edit_all",
     "clients.create",
     "documents.manage",
     "commissions.view_all",
+    "commissions.edit_gettone",
     "reports.export",
     "reports.email",
   ],

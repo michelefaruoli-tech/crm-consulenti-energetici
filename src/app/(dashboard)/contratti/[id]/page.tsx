@@ -59,7 +59,11 @@ export default async function ContrattoDetailPage({
     hasPermission(session.role, "contracts.change_status") ||
     (hasPermission(session.role, "contracts.edit_own") &&
       contract.collaboratorId === session.id);
-  const canChangeCollaborator = hasPermission(session.role, "contracts.edit_all");
+  // Scheda completa: solo Admin (Segreteria cambia dalla Dashboard)
+  const canChangeCollaborator = hasPermission(
+    session.role,
+    "contracts.change_collaborator",
+  );
   const canEditContract =
     hasPermission(session.role, "contracts.edit_all") ||
     contract.collaboratorId === session.id;

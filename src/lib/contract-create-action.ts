@@ -416,6 +416,7 @@ async function createFullContractActionInner(
             discount: num(payload.discount),
             economicNotes: payload.economicNotes || null,
             paymentMethod: payload.paymentMethod || null,
+            contractIban: payload.client.iban || null,
             ibanHolder: payload.ibanHolder || null,
             ibanHolderCf: payload.ibanHolderCf || null,
             invoiceEmail: payload.invoiceEmail || null,
@@ -424,6 +425,30 @@ async function createFullContractActionInner(
             supplyStartDate: supplyStart,
             expiryDate,
             insertionDate,
+            addressesMatch: payload.supplySameAsResidence,
+            supplyStreet: payload.supplySameAsResidence
+              ? payload.client.street || null
+              : payload.supplyStreet || null,
+            supplyStreetNumber: payload.supplySameAsResidence
+              ? payload.client.streetNumber || null
+              : payload.supplyStreetNumber || null,
+            supplyZipCode: payload.supplySameAsResidence
+              ? payload.client.zipCode || null
+              : payload.supplyZipCode || null,
+            supplyCity: payload.supplySameAsResidence
+              ? payload.client.city || null
+              : payload.supplyCity || null,
+            supplyProvince: payload.supplySameAsResidence
+              ? payload.client.province || null
+              : payload.supplyProvince || null,
+            supplyRegion: payload.supplySameAsResidence
+              ? payload.client.region || null
+              : payload.supplyRegion || null,
+            supplyAddress: payload.supplySameAsResidence
+              ? addressLine || null
+              : [payload.supplyStreet, payload.supplyStreetNumber].filter(Boolean).join(" ") ||
+                null,
+            supplyCountry: "Italia",
             sendToMaster,
             assignedToMaster: sendToMaster,
             masterEmail,
