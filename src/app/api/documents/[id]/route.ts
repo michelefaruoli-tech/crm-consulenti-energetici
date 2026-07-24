@@ -35,7 +35,11 @@ export async function GET(
 
   if (!doc.contentBase64) {
     return NextResponse.json(
-      { error: "File non disponibile (solo metadati)" },
+      {
+        error: doc.contentClearedAt
+          ? "File eliminato dopo retention/invio (restano solo i metadati)"
+          : "File non disponibile (solo metadati)",
+      },
       { status: 404 },
     );
   }

@@ -255,6 +255,7 @@ model Contract {
   emailMessageId   String?
   emailAttempts    Int            @default(0)
   emailLastError   String?
+  emailLastAttemptAt DateTime?
   emailIdempotencyKey String?
   koReason         String?
   koNotes          String?
@@ -395,12 +396,20 @@ model Document {
   filename   String
   mimeType   String
   size       Int
+  /// Percorso logico: db://… (contenuto in contentBase64). Non usare FS Vercel.
   path       String
   /// Tipologia documento (CI_FRONTE, BOLLETTA, ...)
   docType    String?
-  /// Contenuto base64 per allegati piccoli / email (Vercel FS effimero)
+  /// Contenuto base64 in PostgreSQL (Neon). Null se eliminato dopo invio / retention.
   contentBase64 String?
+  /// postgres_base64 | cleared
+  storageProvider String? @default("postgres_base64")
+  uploadedById String?
   uploadedAt DateTime  @default(now())
+  /// Soft-clear contenuto dopo email / retention (metadati restano)
+  contentClearedAt DateTime?
+  contentClearedReason String?
+  deletedAt DateTime?
 }
 
 model ContractEmailLog {

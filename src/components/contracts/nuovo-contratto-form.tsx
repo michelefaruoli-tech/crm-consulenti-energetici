@@ -116,7 +116,9 @@ export function NuovoContrattoForm({
       mimeType: string;
       size: number;
       docType: string;
-      contentBase64: string;
+      /** File originale (preferito per upload su Vercel) */
+      file?: File;
+      contentBase64?: string;
     }[]
   >([]);
 
@@ -256,33 +258,63 @@ export function NuovoContrattoForm({
         }
 
         if (attachments.length > 0) {
-          const fd = new FormData();
+          let savedTotal = 0;
+          const failReasons: string[] = [];
           for (const a of attachments) {
-            const bin = atob(a.contentBase64);
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            const file = new File([bytes], a.filename, {
-              type: a.mimeType || "application/octet-stream",
-            });
-            fd.append("files", file);
-            fd.append("docTypes", a.docType);
+            try {
+              let up: Response;
+              if (a.file) {
+                const fd = new FormData();
+                fd.append("files", a.file, a.filename);
+                fd.append("docTypes", a.docType);
+                up = await fetch(`/api/contracts/${contractId}/attachments`, {
+                  method: "POST",
+                  body: fd,
+                });
+              } else if (a.contentBase64) {
+                up = await fetch(`/api/contracts/${contractId}/attachments`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    filename: a.filename,
+                    mimeType: a.mimeType,
+                    docType: a.docType,
+                    contentBase64: a.contentBase64,
+                  }),
+                });
+              } else {
+                failReasons.push(`${a.filename}: file non disponibile`);
+                continue;
+              }
+              const upJson = (await up.json().catch(() => null)) as {
+                success?: boolean;
+                message?: string;
+                saved?: number;
+              } | null;
+              if (!up.ok || !upJson?.success || !upJson.saved) {
+                failReasons.push(
+                  `${a.filename}: ${upJson?.message ?? `HTTP ${up.status}`}`,
+                );
+              } else {
+                savedTotal += upJson.saved;
+              }
+            } catch (err) {
+              failReasons.push(
+                `${a.filename}: ${err instanceof Error ? err.message : "errore rete"}`,
+              );
+            }
           }
-          const up = await fetch(`/api/contracts/${contractId}/attachments`, {
-            method: "POST",
-            body: fd,
-          });
-          const upJson = (await up.json().catch(() => null)) as {
-            success?: boolean;
-            message?: string;
-            saved?: number;
-          } | null;
-          if (!up.ok || !upJson?.success || !upJson.saved) {
-            // Contratto salvato: NON navigare via, così l'errore resta visibile
+          if (savedTotal === 0) {
             setErrors([
-              `Il contratto è stato salvato, ma l'upload allegati non è riuscito (${upJson?.message ?? "errore"}). Apri la pratica e allega di nuovo, poi usa «Reinvia al Master».`,
+              `Il contratto è stato salvato, ma nessun allegato è stato caricato. ${failReasons.slice(0, 3).join(" · ")}. Apri la pratica e allega di nuovo (max 3MB ciascuno), poi usa «Reinvia al Master».`,
             ]);
-            setMessage(`Contratto salvato (ID pratica pronto). Vai a /lavorazione/${contractId} se chiudi questo messaggio.`);
+            setMessage(null);
             return;
+          }
+          if (failReasons.length > 0) {
+            setErrors([
+              `Contratto salvato. Allegati parziali (${savedTotal}/${attachments.length}): ${failReasons.slice(0, 2).join(" · ")}. Completa dalla scheda lavorazione.`,
+            ]);
           }
         }
 
@@ -334,26 +366,24 @@ export function NuovoContrattoForm({
     if (!files?.length) return;
     const next = [...attachments];
     for (const file of Array.from(files)) {
-      if (!["application/pdf", "image/jpeg", "image/png", "image/jpg"].includes(file.type)) {
+      const okType =
+        ["application/pdf", "image/jpeg", "image/png", "image/jpg"].includes(file.type) ||
+        /\.(pdf|jpe?g|png)$/i.test(file.name);
+      if (!okType) {
         setErrors((e) => [...e, `Formato non supportato: ${file.name}`]);
         continue;
       }
-      if (file.size > 5 * 1024 * 1024) {
-        setErrors((e) => [...e, `File troppo grande (max 5MB): ${file.name}`]);
+      if (file.size > 15 * 1024 * 1024) {
+        setErrors((e) => [...e, `File troppo grande (max 15MB): ${file.name}`]);
         continue;
       }
-      const buf = await file.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
-      const contentBase64 = btoa(binary);
       next.push({
         id: uid(),
         filename: file.name,
-        mimeType: file.type,
+        mimeType: file.type || "application/octet-stream",
         size: file.size,
         docType,
-        contentBase64,
+        file, // mantiene il File originale → upload affidabile
       });
     }
     setAttachments(next);
@@ -962,7 +992,7 @@ export function NuovoContrattoForm({
         {sendToMaster ? (
           <p className="text-xs text-amber-800">
             Con invio al Master sono obbligatori: documento di identità e bolletta/fattura (max
-            5MB ciascuno). Un solo click sulla casella apre il selettore file.
+            15MB ciascuno; totale consigliato 25MB). File grandi: email con link protetti.
           </p>
         ) : null}
         <div className="grid gap-3 md:grid-cols-2">
@@ -1008,8 +1038,8 @@ export function NuovoContrattoForm({
                   <p className="text-xs text-slate-500">
                     {DOC_TYPE_OPTIONS.find((d) => d.value === a.docType)?.label}
                     {a.mimeType ? ` · ${a.mimeType}` : ""}
-                    {a.contentBase64
-                      ? ` · ~${Math.max(1, Math.round((a.contentBase64.length * 0.75) / 1024))} KB`
+                    {a.size
+                      ? ` · ${Math.max(1, Math.round(a.size / 1024))} KB`
                       : ""}
                   </p>
                 </div>

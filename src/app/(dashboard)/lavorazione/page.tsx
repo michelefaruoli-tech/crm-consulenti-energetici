@@ -63,7 +63,7 @@ export default async function LavorazionePage({
       : {}),
   };
 
-  const [contracts, collaborators, suppliers, countInLavorazione, countAttesa] =
+  const [contracts, collaborators, suppliers, countInLavorazione, countKo] =
     await Promise.all([
     prisma.contract.findMany({
       where,
@@ -99,9 +99,7 @@ export default async function LavorazionePage({
     prisma.contract.count({
       where: {
         deletedAt: null,
-        sendToMaster: true,
-        assignedToMaster: true,
-        status: "IN_ATTESA_PAGAMENTO",
+        status: "KO",
         ...(canSeeAll ? {} : { collaboratorId: session.id }),
       },
     }),
@@ -116,13 +114,11 @@ export default async function LavorazionePage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Contratti in lavorazione</h1>
         <p className="text-slate-500">
-          Solo pratiche con stato «In lavorazione». Le pratiche «In attesa di pagamento» sono
-          nella sezione dedicata.
-        </p>
-        <p className="mt-1 text-sm">
-          <Link href="/attesa-pagamento" className="text-emerald-700 underline">
-            Vai a Contratti in attesa di pagamento →
+          Solo pratiche con stato «In lavorazione». Pagamenti e attivazioni si gestiscono in{" "}
+          <Link href="/provvigioni" className="text-emerald-700 underline">
+            Provvigioni
           </Link>
+          .
         </p>
       </div>
 
@@ -131,9 +127,9 @@ export default async function LavorazionePage({
           <p className="text-xs text-slate-500">In lavorazione</p>
           <p className="text-2xl font-semibold text-slate-900">{countInLavorazione}</p>
         </div>
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
-          <p className="text-xs text-amber-800">In attesa di pagamento (altra sezione)</p>
-          <p className="text-2xl font-semibold text-amber-950">{countAttesa}</p>
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 shadow-sm">
+          <p className="text-xs text-red-800">KO (totale)</p>
+          <p className="text-2xl font-semibold text-red-950">{countKo}</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
           <p className="text-xs text-emerald-800">Aggiornate oggi (lista)</p>

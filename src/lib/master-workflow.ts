@@ -1,10 +1,9 @@
 import type { AppContractStatus } from "@/lib/constants";
 
-/** Stati operativi Master (flusso lavorazione) */
+/** Stati operativi Master (flusso semplificato) */
 export const MASTER_WORKFLOW_STATUSES = [
   "IN_LAVORAZIONE",
-  "IN_ATTESA_PAGAMENTO",
-  "ATTIVATO",
+  "COMPLETATO",
   "KO",
 ] as const;
 
@@ -12,8 +11,7 @@ export type MasterWorkflowStatus = (typeof MASTER_WORKFLOW_STATUSES)[number];
 
 export const MASTER_STATUS_LABELS: Record<MasterWorkflowStatus, string> = {
   IN_LAVORAZIONE: "In lavorazione",
-  IN_ATTESA_PAGAMENTO: "In attesa di pagamento",
-  ATTIVATO: "Attivato",
+  COMPLETATO: "Completato",
   KO: "KO",
 };
 
@@ -31,9 +29,8 @@ export const KO_REASON_OPTIONS = [
 ] as const;
 
 const TRANSITIONS: Record<MasterWorkflowStatus, MasterWorkflowStatus[]> = {
-  IN_LAVORAZIONE: ["IN_ATTESA_PAGAMENTO", "KO"],
-  IN_ATTESA_PAGAMENTO: ["ATTIVATO", "KO"],
-  ATTIVATO: [],
+  IN_LAVORAZIONE: ["COMPLETATO", "KO"],
+  COMPLETATO: [],
   KO: [],
 };
 
@@ -50,9 +47,17 @@ export function canTransitionMasterStatus(
 ): boolean {
   if (!isMasterWorkflowStatus(to)) return false;
   if (allowAdminOverride) return true;
+  // Legacy: da attesa/attivato si può chiudere a COMPLETATO o KO
+  if (
+    from === "IN_ATTESA_PAGAMENTO" ||
+    from === "ATTIVATO" ||
+    from === "DA_LAVORARE" ||
+    from === "INVIATO_AL_MASTER"
+  ) {
+    return to === "COMPLETATO" || to === "KO" || to === "IN_LAVORAZIONE";
+  }
   if (!isMasterWorkflowStatus(from)) {
-    // Pratiche appena inviate o legacy: consentono ingresso nel flusso
-    return to === "IN_LAVORAZIONE" || to === "IN_ATTESA_PAGAMENTO" || to === "KO";
+    return to === "IN_LAVORAZIONE" || to === "COMPLETATO" || to === "KO";
   }
   if (from === to) return false;
   return TRANSITIONS[from].includes(to);
@@ -72,7 +77,7 @@ export function validateMasterTransition(opts: {
   const errors: string[] = [];
   if (!canTransitionMasterStatus(opts.from, opts.to, opts.allowAdminOverride)) {
     errors.push(
-      `Transizione non consentita: ${opts.from} → ${opts.to}. Flusso: In lavorazione → In attesa di pagamento → Attivato (oppure KO).`,
+      `Transizione non consentita: ${opts.from} → ${opts.to}. Flusso: In lavorazione → Completato oppure KO.`,
     );
   }
   if (opts.to === "KO") {
@@ -82,12 +87,7 @@ export function validateMasterTransition(opts: {
     }
     if (!opts.koNotes?.trim()) errors.push("Note sul KO obbligatorie");
   }
-  if (opts.to === "ATTIVATO") {
-    if (!opts.activationDate?.trim()) errors.push("Data attivazione obbligatoria");
-    if (!opts.paymentDate?.trim() && !opts.paymentConfirmed) {
-      errors.push("Data pagamento oppure conferma pagamento obbligatoria");
-    }
-  }
+  // COMPLETATO: dati economici in Provvigioni (non obbligatori qui)
   return errors;
 }
 
@@ -98,14 +98,14 @@ export function daysSince(date: Date | string | null | undefined): number | null
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
-/** Alias etichette CRM generali per stati Master */
 export function masterAwareStatusLabel(
   status: AppContractStatus | string,
   labels: Record<string, string>,
 ): string {
   if (status === "KO") return "KO";
   if (status === "IN_LAVORAZIONE") return "In lavorazione";
-  if (status === "IN_ATTESA_PAGAMENTO") return "In attesa di pagamento";
-  if (status === "ATTIVATO") return "Attivato";
+  if (status === "COMPLETATO") return "Completato";
+  if (status === "IN_ATTESA_PAGAMENTO") return "In attesa di pagamento (archiviato)";
+  if (status === "ATTIVATO") return "Attivato (archiviato)";
   return labels[status] ?? status;
 }

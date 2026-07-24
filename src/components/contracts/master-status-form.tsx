@@ -19,7 +19,11 @@ export function MasterStatusForm({
   currentStatus: string;
   action: (formData: FormData) => Promise<void>;
 }) {
-  const [status, setStatus] = useState(currentStatus);
+  const [status, setStatus] = useState(
+    currentStatus === "IN_ATTESA_PAGAMENTO" || currentStatus === "ATTIVATO"
+      ? "COMPLETATO"
+      : currentStatus,
+  );
   const [koReason, setKoReason] = useState("");
 
   return (
@@ -57,32 +61,10 @@ export function MasterStatusForm({
         </label>
       </div>
 
-      {status === "IN_ATTESA_PAGAMENTO" ? (
-        <div className="grid gap-3 rounded-lg border border-orange-100 bg-orange-50/50 p-3 md:grid-cols-2">
-          <Field label="Importo atteso €">
-            <Input name="expectedPaymentAmount" inputMode="decimal" />
-          </Field>
-          <Field label="Data prevista pagamento">
-            <Input name="expectedPaymentDate" type="date" />
-          </Field>
-        </div>
-      ) : null}
-
-      {status === "ATTIVATO" ? (
-        <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 md:grid-cols-2">
-          <Field label="Data attivazione *">
-            <Input name="activationDate" type="date" required />
-          </Field>
-          <Field label="Data pagamento">
-            <Input name="paymentDate" type="date" />
-          </Field>
-          <Field label="Importo pagato €">
-            <Input name="paymentAmount" inputMode="decimal" />
-          </Field>
-          <label className="flex items-end gap-2 pb-2 text-sm">
-            <input type="checkbox" name="paymentConfirmed" />
-            Confermo pagamento ricevuto
-          </label>
+      {status === "COMPLETATO" ? (
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 text-sm text-emerald-900">
+          Completato: il tracciamento economico (attivazione, pagamento, gettoni) si gestisce in{" "}
+          <strong>Provvigioni</strong>.
         </div>
       ) : null}
 
@@ -103,20 +85,18 @@ export function MasterStatusForm({
               ))}
             </Select>
           </Field>
-          {koReason === "ALTRO" ? (
-            <Field label="Specifica motivo *">
-              <Input name="koOtherText" required />
-            </Field>
-          ) : null}
+          <Field label="Dettaglio Altro">
+            <Input name="koOtherText" placeholder="Solo se motivo = Altro" />
+          </Field>
           <div className="md:col-span-2">
-            <Field label="Note sul KO *">
+            <Field label="Note KO *">
               <Textarea name="koNotes" rows={3} required />
             </Field>
           </div>
         </div>
       ) : null}
 
-      <Button type="submit">Salva aggiornamento</Button>
+      <Button type="submit">Salva stato</Button>
     </form>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from "@/lib/master-actions";
 import { MasterStatusForm } from "@/components/contracts/master-status-form";
 import { LavorazioneEditForm } from "@/components/contracts/lavorazione-edit-form";
+import { LavorazioneUploadAttachments } from "@/components/contracts/lavorazione-upload-attachments";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 
 export const dynamic = "force-dynamic";
@@ -232,6 +233,8 @@ export default async function LavorazioneSchedaPage({
           <p className="mt-4 text-sm text-slate-500">Nessun allegato</p>
         )}
       </section>
+
+      <LavorazioneUploadAttachments contractId={contract.id} />
 
       <LavorazioneEditForm data={editData} canEdit={canEdit} />
 

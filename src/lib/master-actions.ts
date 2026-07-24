@@ -82,6 +82,14 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     workNotes,
   };
 
+  if (toStatus === "COMPLETATO") {
+    updateData.workCompletedAt = new Date();
+    if (activationDate) updateData.activationDate = new Date(activationDate);
+    if (paymentDate) updateData.paymentDate = new Date(paymentDate);
+    else if (paymentConfirmed) updateData.paymentDate = new Date();
+    if (paymentAmount != null) updateData.paymentAmount = paymentAmount;
+  }
+  // Legacy (UI rimossa): mantieni compatibilità se arriva ancora dallo storico
   if (toStatus === "IN_ATTESA_PAGAMENTO") {
     updateData.workCompletedAt = new Date();
     if (expectedPaymentAmount != null) updateData.expectedPaymentAmount = expectedPaymentAmount;
@@ -116,18 +124,19 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
             ? new Date(expectedPaymentDate)
             : null,
         activationDate:
-          toStatus === "ATTIVATO" && activationDate
+          (toStatus === "ATTIVATO" || toStatus === "COMPLETATO") && activationDate
             ? new Date(activationDate)
             : null,
         paymentDate:
-          toStatus === "ATTIVATO"
+          toStatus === "ATTIVATO" || toStatus === "COMPLETATO"
             ? paymentDate
               ? new Date(paymentDate)
               : paymentConfirmed
                 ? new Date()
                 : null
             : null,
-        paymentAmount: toStatus === "ATTIVATO" ? paymentAmount : null,
+        paymentAmount:
+          toStatus === "ATTIVATO" || toStatus === "COMPLETATO" ? paymentAmount : null,
       },
     });
   } catch (e) {

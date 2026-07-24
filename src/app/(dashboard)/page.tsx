@@ -24,10 +24,10 @@ export default async function DashboardPage() {
   try {
     const [
       totalContracts,
-      activeContracts,
       inLavorazioneCount,
-      inAttesaPagamentoCount,
+      completatoCount,
       koCount,
+      emailFailedCount,
       expired,
       inLavorazioneList,
       commissions,
@@ -36,7 +36,6 @@ export default async function DashboardPage() {
       collaboratorOptions,
     ] = await Promise.all([
       prisma.contract.count({ where }),
-      prisma.contract.count({ where: { ...where, status: "ATTIVATO" } }),
       prisma.contract.count({
         where: {
           ...where,
@@ -48,24 +47,27 @@ export default async function DashboardPage() {
       prisma.contract.count({
         where: {
           ...where,
-          sendToMaster: true,
-          assignedToMaster: true,
-          status: "IN_ATTESA_PAGAMENTO",
+          status: { in: ["COMPLETATO", "ATTIVATO"] },
         },
       }),
       prisma.contract.count({
         where: {
           ...where,
-          sendToMaster: true,
-          assignedToMaster: true,
           status: "KO",
         },
       }),
       prisma.contract.count({
         where: {
           ...where,
+          sendToMaster: true,
+          emailStatus: { in: ["FAILED", "ERROR", "ATTACHMENT_ERROR", "SKIPPED_NO_SMTP"] },
+        },
+      }),
+      prisma.contract.count({
+        where: {
+          ...where,
           expiryDate: { lt: new Date() },
-          status: { notIn: ["CHIUSO", "ANNULLATO", "KO"] },
+          status: { notIn: ["CHIUSO", "ANNULLATO", "KO", "COMPLETATO"] },
         },
       }),
       prisma.contract.findMany({
@@ -159,15 +161,15 @@ export default async function DashboardPage() {
           <Link href="/lavorazione">
             <StatCard label="In lavorazione" value={inLavorazioneCount} tone="warning" />
           </Link>
-          <Link href="/attesa-pagamento">
-            <StatCard label="In attesa di pagamento" value={inAttesaPagamentoCount} tone="warning" />
+          <Link href="/contratti">
+            <StatCard label="Completati" value={completatoCount} tone="success" />
           </Link>
-          <Link href="/attivati">
-            <StatCard label="Attivati" value={activeContracts} tone="success" />
-          </Link>
+          <StatCard label="KO" value={koCount} tone="danger" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="KO" value={koCount} tone="danger" />
+          <Link href="/lavorazione">
+            <StatCard label="Email da reinviare" value={emailFailedCount} tone="danger" />
+          </Link>
           <StatCard label="Scaduti / da rinnovare" value={expired} tone="danger" />
         </div>
 
