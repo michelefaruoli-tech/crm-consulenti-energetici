@@ -1,26 +1,19 @@
-import { createSupplierAction, createCommissionRuleAction } from "@/lib/actions";
+import { createSupplierAction } from "@/lib/actions";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/form";
-import { paymentTypeLabel } from "@/lib/commission";
-import { PAYMENT_TYPE_LABELS } from "@/lib/constants";
+import { Field, Input } from "@/components/ui/form";
 import {
-  FornitoriListinoTable,
-  type FornitoreListinoRow,
+  FornitoriListinoEditor,
+  type FornitoreAnagraficaRow,
+  type ListinoRegolaRow,
 } from "@/components/suppliers/fornitori-listino-table";
 
-function pickBaseRule<T extends { serviceId: string | null; name: string; fixedAmount: unknown; paymentType: string }>(
-  rules: T[],
-): T | null {
-  return (
-    rules.find((r) => !r.serviceId && /listino|base/i.test(r.name)) ??
-    rules.find((r) => !r.serviceId) ??
-    rules[0] ??
-    null
-  );
+function dec(v: { toString(): string } | null | undefined): string {
+  if (v == null) return "";
+  return String(Number(v));
 }
 
 export default async function FornitoriPage() {
@@ -29,137 +22,110 @@ export default async function FornitoriPage() {
 
   const suppliers = await prisma.supplier.findMany({
     include: {
-      services: true,
-      commissionRules: { where: { active: true }, orderBy: { createdAt: "asc" } },
+      commissionRules: {
+        where: { active: true },
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+      },
       _count: { select: { contracts: true } },
     },
     orderBy: { name: "asc" },
   });
 
-  const listinoRows: FornitoreListinoRow[] = suppliers.map((s) => {
-    const base = pickBaseRule(s.commissionRules);
-    return {
-      id: s.id,
-      name: s.name,
-      code: s.code,
-      email: s.email ?? "",
-      active: s.active,
-      contractsCount: s._count.contracts,
-      stornoMonths: s.stornoMonths != null ? String(s.stornoMonths) : "",
-      gettone: base?.fixedAmount != null ? String(Number(base.fixedAmount)) : "",
-      paymentType: base?.paymentType ?? "UNA_TANTUM",
-      paymentTypeLabel: paymentTypeLabel(base?.paymentType ?? "UNA_TANTUM"),
-    };
-  });
+  const anagrafica: FornitoreAnagraficaRow[] = suppliers.map((s) => ({
+    id: s.id,
+    name: s.name,
+    code: s.code,
+    email: s.email ?? "",
+    active: s.active,
+    contractsCount: s._count.contracts,
+    stornoMonths: s.stornoMonths != null ? String(s.stornoMonths) : "",
+  }));
+
+  const regole: ListinoRegolaRow[] = suppliers.flatMap((s) =>
+    s.commissionRules.map((r) => {
+      // Retrocompatibilità: se solo fixedAmount, usalo come base
+      const hasParts =
+        r.gettoneBase != null ||
+        r.gettoneRid != null ||
+        r.gettoneBollettaWeb != null ||
+        r.gettoneMail != null ||
+        r.gettoneMensile != null ||
+        r.gettoneUnaTantumIniziale != null;
+      const baseFallback =
+        !hasParts && r.fixedAmount != null ? dec(r.fixedAmount) : dec(r.gettoneBase);
+
+      return {
+        id: r.id,
+        supplierId: s.id,
+        supplierName: s.name,
+        name: r.name,
+        clientSegment: r.clientSegment || "TUTTI",
+        stornoMonths: r.stornoMonths != null ? String(r.stornoMonths) : "",
+        gettoneBase: baseFallback,
+        gettoneRid: dec(r.gettoneRid),
+        gettoneBollettaWeb: dec(r.gettoneBollettaWeb),
+        gettoneMail: dec(r.gettoneMail),
+        gettoneUnaTantumIniziale: dec(r.gettoneUnaTantumIniziale),
+        gettoneMensile: dec(r.gettoneMensile),
+        active: r.active,
+      };
+    }),
+  );
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Fornitori</h1>
         <p className="text-slate-500">
-          Listino base: storno e gettone semplice. Le regole complesse (potenza, kWh…) le
-          gestisci dopo, caso per caso.
+          Più regole per fornitore (Privato / Business / Extra). Voci: base, RID, bolletta web,
+          mail (fattura email), una tantum iniziale, mensile → totale automatico.
         </p>
       </div>
 
       <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-950">
-        <h2 className="mb-2 text-base font-semibold">Come usare questa pagina</h2>
-        <ol className="list-decimal space-y-1 pl-5">
+        <h2 className="mb-2 text-base font-semibold">Come funziona</h2>
+        <ul className="list-disc space-y-1 pl-5">
           <li>
-            Nella tabella sotto modifica <strong>Mesi storno</strong> e{" "}
-            <strong>Gettone € (base)</strong>, poi <strong>Salva cambiamenti</strong>.
+            <strong>Gettone mail</strong> = extra se il cliente riceve la fattura via email.
           </li>
           <li>
-            Il gettone base crea/aggiorna la regola «Listino base» di quel fornitore (regola
-            semplice).
+            <strong>Totale</strong> = Base + RID + Bolletta web + Mail + UT iniziale; il{" "}
+            <strong>mensile</strong> resta indicato a parte (€/mese).
           </li>
           <li>
-            Se un fornitore ha regole particolari (fasce kW, consumi…), per ora lasciale fuori
-            dal listino base e gestiscile a mano sul contratto.
+            Esempio: Dolomiti Privato, Dolomiti Business, Dolomiti Base Extra = tre regole sullo
+            stesso fornitore.
           </li>
-        </ol>
+          <li>
+            Regole con potenza/kWh particolari: per ora gestiscile a mano sul contratto.
+          </li>
+        </ul>
       </section>
 
-      <FornitoriListinoTable rows={listinoRows} />
+      <FornitoriListinoEditor suppliers={anagrafica} rules={regole} />
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <form
-          action={createSupplierAction}
-          className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-        >
-          <h2 className="font-semibold text-slate-900">Nuovo fornitore</h2>
-          <Field label="Nome">
-            <Input name="name" required placeholder="Es. Enel" />
-          </Field>
-          <Field label="Codice (univoco)">
-            <Input name="code" required placeholder="ENEL" />
-          </Field>
-          <Field label="Email">
-            <Input name="email" type="email" />
-          </Field>
-          <Field label="Mesi di storno">
-            <Input name="stornoMonths" type="number" min={0} placeholder="Es. 12" />
-          </Field>
-          <Field label="Gettone base € (opzionale)">
-            <Input name="gettone" type="number" step="0.01" min={0} placeholder="Es. 50" />
-          </Field>
-          <Button type="submit">Crea fornitore</Button>
-        </form>
-
-        <form
-          action={createCommissionRuleAction}
-          className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-        >
-          <h2 className="font-semibold text-slate-900">Aggiungi regola gettone extra</h2>
-          <p className="text-xs text-slate-500">
-            Per regole oltre al listino base (es. Bonus, Domestico RID). Non serve per il
-            gettone semplice: quello lo editi nella tabella sopra.
-          </p>
-          <Field label="Fornitore">
-            <Select name="supplierId" required>
-              <option value="">Seleziona</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>
-                  {supplier.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Servizio (opzionale)">
-            <Select name="serviceId">
-              <option value="">Generico / tutti i prodotti</option>
-              {suppliers.flatMap((supplier) =>
-                supplier.services.map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {supplier.name} · {service.name}
-                  </option>
-                )),
-              )}
-            </Select>
-          </Field>
-          <Field label="Nome regola">
-            <Input name="name" required placeholder="Es. Domestico RID" />
-          </Field>
-          <Field label="Tipo pagamento">
-            <Select name="paymentType" defaultValue="UNA_TANTUM">
-              {Object.entries(PAYMENT_TYPE_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Importo fisso €">
-              <Input name="fixedAmount" type="number" step="0.01" required />
-            </Field>
-            <Field label="Rate (se rateizzato)">
-              <Input name="installments" type="number" />
-            </Field>
-          </div>
-          <Button type="submit">Salva regola extra</Button>
-        </form>
-      </div>
+      <form
+        action={createSupplierAction}
+        className="max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <h2 className="font-semibold text-slate-900">Nuovo fornitore</h2>
+        <Field label="Nome">
+          <Input name="name" required placeholder="Es. Dolomiti" />
+        </Field>
+        <Field label="Codice (univoco)">
+          <Input name="code" required placeholder="DOLOMITI" />
+        </Field>
+        <Field label="Email contatto">
+          <Input name="email" type="email" />
+        </Field>
+        <Field label="Mesi storno (default)">
+          <Input name="stornoMonths" type="number" min={0} placeholder="Es. 12" />
+        </Field>
+        <Field label="Gettone base iniziale € (opzionale, crea regola Listino base)">
+          <Input name="gettone" type="number" step="0.01" min={0} placeholder="Es. 50" />
+        </Field>
+        <Button type="submit">Crea fornitore</Button>
+      </form>
     </div>
   );
 }

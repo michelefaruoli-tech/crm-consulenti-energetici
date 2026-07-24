@@ -566,6 +566,8 @@ export async function createSupplierAction(formData: FormData): Promise<void> {
       data: {
         supplierId: supplier.id,
         name: "Listino base",
+        clientSegment: "TUTTI",
+        gettoneBase: gettone,
         fixedAmount: gettone,
         paymentType: "UNA_TANTUM",
         active: true,
@@ -576,7 +578,7 @@ export async function createSupplierAction(formData: FormData): Promise<void> {
   revalidatePath("/fornitori");
 }
 
-/** Aggiorna listino base fornitore: anagrafica + storno + gettone semplice. */
+/** Aggiorna solo anagrafica fornitore (nome, codice, email, storno default, attivo). */
 export async function updateSupplierListinoAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "suppliers.manage")) {
@@ -598,28 +600,8 @@ export async function updateSupplierListinoAction(formData: FormData): Promise<v
     throw new Error("Mesi di storno non validi");
   }
 
-  const gettoneRaw = String(formData.get("gettone") ?? "").trim().replace(",", ".");
-  const gettone =
-    gettoneRaw === "" ? null : Number(gettoneRaw);
-  if (gettoneRaw !== "" && (!Number.isFinite(gettone) || (gettone ?? 0) < 0)) {
-    throw new Error("Gettone non valido");
-  }
-
-  const paymentTypeRaw = String(formData.get("paymentType") ?? "UNA_TANTUM").trim().toUpperCase();
-  const paymentTypes = ["MENSILE", "UNA_TANTUM", "RATEIZZATO", "BONUS", "PREMIO"] as const;
-  type Pay = (typeof paymentTypes)[number];
-  const paymentType: Pay = paymentTypes.includes(paymentTypeRaw as Pay)
-    ? (paymentTypeRaw as Pay)
-    : "UNA_TANTUM";
-
   if (!name) throw new Error("Nome fornitore obbligatorio");
   if (!code) throw new Error("Codice fornitore obbligatorio");
-
-  const existing = await prisma.supplier.findUnique({
-    where: { id: supplierId },
-    include: { commissionRules: { where: { active: true }, orderBy: { createdAt: "asc" } } },
-  });
-  if (!existing) throw new Error("Fornitore non trovato");
 
   const codeTaken = await prisma.supplier.findFirst({
     where: { code, NOT: { id: supplierId } },
@@ -632,77 +614,165 @@ export async function updateSupplierListinoAction(formData: FormData): Promise<v
     data: { name, code, email, active, stornoMonths },
   });
 
-  // Upsert regola "Listino base" (regola semplice senza servizio)
-  const baseRule =
-    existing.commissionRules.find(
-      (r) => !r.serviceId && /listino|base/i.test(r.name),
-    ) ??
-    existing.commissionRules.find((r) => !r.serviceId) ??
-    null;
+  revalidatePath("/fornitori");
+  revalidatePath("/contratti");
+  revalidatePath("/provvigioni");
+}
 
-  const paymentTypeTouched = formData.has("paymentType");
-  const gettoneTouched = formData.has("gettone");
+function moneyFromForm(formData: FormData, key: string): number | null {
+  const raw = String(formData.get(key) ?? "").trim().replace(",", ".");
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`Importo non valido: ${key}`);
+  return n;
+}
 
-  if (gettone != null) {
-    if (baseRule) {
-      await prisma.commissionRule.update({
-        where: { id: baseRule.id },
-        data: {
-          name: /listino|base/i.test(baseRule.name) ? baseRule.name : "Listino base",
-          fixedAmount: gettone,
-          paymentType,
-          active: true,
-        },
-      });
-    } else {
-      await prisma.commissionRule.create({
-        data: {
-          supplierId,
-          name: "Listino base",
-          fixedAmount: gettone,
-          paymentType,
-          active: true,
-        },
-      });
-    }
-  } else if (baseRule && paymentTypeTouched) {
-    await prisma.commissionRule.update({
-      where: { id: baseRule.id },
-      data: { paymentType, active: true },
-    });
-  } else if (!baseRule && gettoneTouched && gettoneRaw === "") {
-    // nessun gettone: non creare regola vuota
+function buildListinoAmounts(formData: FormData) {
+  const gettoneBase = moneyFromForm(formData, "gettoneBase");
+  const gettoneRid = moneyFromForm(formData, "gettoneRid");
+  const gettoneBollettaWeb = moneyFromForm(formData, "gettoneBollettaWeb");
+  const gettoneMail = moneyFromForm(formData, "gettoneMail");
+  const gettoneMensile = moneyFromForm(formData, "gettoneMensile");
+  const gettoneUnaTantumIniziale = moneyFromForm(formData, "gettoneUnaTantumIniziale");
+
+  const unaTantum =
+    (gettoneBase ?? 0) +
+    (gettoneRid ?? 0) +
+    (gettoneBollettaWeb ?? 0) +
+    (gettoneMail ?? 0) +
+    (gettoneUnaTantumIniziale ?? 0);
+
+  let paymentType: "UNA_TANTUM" | "MENSILE" = "UNA_TANTUM";
+  if ((gettoneMensile ?? 0) > 0 && unaTantum > 0) paymentType = "UNA_TANTUM"; // ibrido: totale UT in fixedAmount
+  else if ((gettoneMensile ?? 0) > 0) paymentType = "MENSILE";
+
+  return {
+    gettoneBase,
+    gettoneRid,
+    gettoneBollettaWeb,
+    gettoneMail,
+    gettoneMensile,
+    gettoneUnaTantumIniziale,
+    fixedAmount: unaTantum > 0 ? unaTantum : gettoneMensile,
+    paymentType,
+  };
+}
+
+/** Crea una regola listino (es. Dolomiti Privato). */
+export async function createListinoRuleAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (
+    !hasPermission(session.role, "suppliers.manage") &&
+    !hasPermission(session.role, "commission_rules.manage")
+  ) {
+    throw new Error("Permesso negato");
   }
+
+  const supplierId = String(formData.get("supplierId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  if (!supplierId) throw new Error("Fornitore mancante");
+  if (!name) throw new Error("Nome regola obbligatorio");
+
+  const segmentRaw = String(formData.get("clientSegment") ?? "TUTTI").trim().toUpperCase();
+  const clientSegment = ["PRIVATO", "BUSINESS", "TUTTI"].includes(segmentRaw)
+    ? segmentRaw
+    : "TUTTI";
+
+  const stornoRaw = String(formData.get("stornoMonths") ?? "").trim();
+  const stornoMonths = stornoRaw === "" ? null : Number.parseInt(stornoRaw, 10);
+  if (stornoRaw !== "" && (!Number.isFinite(stornoMonths) || (stornoMonths ?? 0) < 0)) {
+    throw new Error("Mesi di storno non validi");
+  }
+
+  const amounts = buildListinoAmounts(formData);
+
+  await prisma.commissionRule.create({
+    data: {
+      supplierId,
+      name,
+      clientSegment,
+      stornoMonths,
+      ...amounts,
+      active: true,
+    },
+  });
+
+  revalidatePath("/fornitori");
+  revalidatePath("/provvigioni");
+}
+
+/** Aggiorna una regola listino esistente. */
+export async function updateListinoRuleAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (
+    !hasPermission(session.role, "suppliers.manage") &&
+    !hasPermission(session.role, "commission_rules.manage")
+  ) {
+    throw new Error("Permesso negato");
+  }
+
+  const ruleId = String(formData.get("ruleId") ?? "");
+  if (!ruleId) throw new Error("Regola mancante");
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) throw new Error("Nome regola obbligatorio");
+
+  const segmentRaw = String(formData.get("clientSegment") ?? "TUTTI").trim().toUpperCase();
+  const clientSegment = ["PRIVATO", "BUSINESS", "TUTTI"].includes(segmentRaw)
+    ? segmentRaw
+    : "TUTTI";
+
+  const stornoRaw = String(formData.get("stornoMonths") ?? "").trim();
+  const stornoMonths = stornoRaw === "" ? null : Number.parseInt(stornoRaw, 10);
+  if (stornoRaw !== "" && (!Number.isFinite(stornoMonths) || (stornoMonths ?? 0) < 0)) {
+    throw new Error("Mesi di storno non validi");
+  }
+
+  const activeRaw = String(formData.get("active") ?? "true").trim().toLowerCase();
+  const active = !(activeRaw === "false" || activeRaw === "0" || activeRaw === "no");
+
+  const amounts = buildListinoAmounts(formData);
+
+  await prisma.commissionRule.update({
+    where: { id: ruleId },
+    data: {
+      name,
+      clientSegment,
+      stornoMonths,
+      active,
+      ...amounts,
+    },
+  });
 
   revalidatePath("/fornitori");
   revalidatePath("/contratti");
   revalidatePath("/provvigioni");
 }
 
-export async function createCommissionRuleAction(formData: FormData): Promise<void> {
+/** Disattiva una regola listino (soft). */
+export async function deactivateListinoRuleAction(formData: FormData): Promise<void> {
   const session = await requireSession();
-  if (!hasPermission(session.role, "commission_rules.manage")) {
+  if (
+    !hasPermission(session.role, "suppliers.manage") &&
+    !hasPermission(session.role, "commission_rules.manage")
+  ) {
     throw new Error("Permesso negato");
   }
 
-  await prisma.commissionRule.create({
-    data: {
-      supplierId: String(formData.get("supplierId") ?? ""),
-      serviceId: String(formData.get("serviceId") ?? "") || null,
-      name: String(formData.get("name") ?? ""),
-      paymentType: String(formData.get("paymentType") ?? "UNA_TANTUM") as
-        | "MENSILE"
-        | "UNA_TANTUM"
-        | "RATEIZZATO"
-        | "BONUS"
-        | "PREMIO",
-      fixedAmount: Number(formData.get("fixedAmount") ?? 0),
-      installments: Number(formData.get("installments") ?? 0) || null,
-    },
+  const ruleId = String(formData.get("ruleId") ?? "");
+  if (!ruleId) throw new Error("Regola mancante");
+
+  await prisma.commissionRule.update({
+    where: { id: ruleId },
+    data: { active: false },
   });
 
   revalidatePath("/fornitori");
-  revalidatePath("/provvigioni");
+}
+
+export async function createCommissionRuleAction(formData: FormData): Promise<void> {
+  // Retrocompatibilità: usa il form listino completo
+  return createListinoRuleAction(formData);
 }
 
 export async function createUserAction(formData: FormData): Promise<void> {

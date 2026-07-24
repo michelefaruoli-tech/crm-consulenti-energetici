@@ -160,9 +160,25 @@ model CommissionRule {
   service      Service?              @relation(fields: [serviceId], references: [id])
   name         String
   paymentType  CommissionPaymentType @default(UNA_TANTUM)
+  /// Totale una tantum (base+RID+web+mail+UT iniziale). Calcolato in salvataggio.
   fixedAmount  Decimal?              @db.Decimal(10, 2)
   percentage   Decimal?              @db.Decimal(5, 2)
   installments Int?
+  /// PRIVATO | BUSINESS | TUTTI
+  clientSegment String?
+  /// Mesi storno specifici di questa regola (override del fornitore)
+  stornoMonths Int?
+  gettoneBase              Decimal? @db.Decimal(10, 2)
+  gettoneRid               Decimal? @db.Decimal(10, 2)
+  /// Extra se bolletta web
+  gettoneBollettaWeb       Decimal? @db.Decimal(10, 2)
+  /// Extra se fattura via email
+  gettoneMail              Decimal? @db.Decimal(10, 2)
+  /// Gettone ricorrente mensile
+  gettoneMensile           Decimal? @db.Decimal(10, 2)
+  /// Una tantum iniziale (insieme al mensile)
+  gettoneUnaTantumIniziale Decimal? @db.Decimal(10, 2)
+  notes        String?
   validFrom    DateTime              @default(now())
   validTo      DateTime?
   active       Boolean               @default(true)
