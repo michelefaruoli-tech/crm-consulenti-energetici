@@ -7,7 +7,7 @@ import { clientDisplayName, formatDate, formatDateTime } from "@/lib/utils";
 import { formatCurrency } from "@/lib/commission";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import {
   updateContractStatusAction,
   updateContractCollaboratorAction,
@@ -22,6 +22,8 @@ import {
   OPERATION_TYPE_LABELS,
   normalizeOperationType,
 } from "@/lib/supply-dates";
+import { resolveUtilityDisplay } from "@/lib/utility-display";
+import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 
 export default async function ContrattoDetailPage({
   params,
@@ -88,6 +90,14 @@ export default async function ContrattoDetailPage({
       })
     : [];
 
+  const utility = resolveUtilityDisplay({
+    utilityType: contract.utilityType,
+    pod: contract.pod,
+    pdr: contract.pdr,
+    podPdr: contract.podPdr,
+    serviceOther: contract.serviceOther,
+  });
+
   return (
     <div className="space-y-6">
       {statusError ? (
@@ -110,8 +120,17 @@ export default async function ContrattoDetailPage({
             <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">
               POD / PDR
             </p>
-            <p className="mt-1 text-base text-slate-900">
-              {contract.podPdr?.trim() || "Non indicato"}
+            {utility.techLines.length > 0 ? (
+              utility.techLines.map((line) => (
+                <p key={line} className="mt-1 text-base text-slate-900">
+                  {line}
+                </p>
+              ))
+            ) : (
+              <p className="mt-1 text-base text-slate-900">Non indicato</p>
+            )}
+            <p className="mt-1 text-xs font-medium uppercase tracking-wide text-emerald-700">
+              {utility.serviceLabel}
             </p>
           </div>
           <div className="mt-2">
@@ -119,6 +138,9 @@ export default async function ContrattoDetailPage({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link href={`/clienti/${contract.clientId}?contratto=${contract.id}`}>
+            <Button variant="secondary">Scheda cliente (3 blocchi)</Button>
+          </Link>
           <Link href="/contratti">
             <Button variant="secondary">Torna all&apos;elenco</Button>
           </Link>
@@ -154,12 +176,12 @@ export default async function ContrattoDetailPage({
             </div>
             <div>
               <dt className="text-slate-500">Tipo utenza</dt>
-              <dd>{contract.utilityType || "—"}</dd>
+              <dd>{utility.serviceLabel}</dd>
             </div>
             <div>
               <dt className="text-slate-500">POD / PDR</dt>
               <dd className="text-sm text-slate-900">
-                {contract.podPdr?.trim() || "—"}
+                {utility.techLines.join(" · ") || "—"}
               </dd>
             </div>
             <div>
@@ -272,9 +294,12 @@ export default async function ContrattoDetailPage({
       {canChangeCollaborator ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold text-slate-900">Cambia collaboratore</h2>
+          <p className="mb-3 text-xs text-slate-500">
+            Solo amministratore. La modifica viene registrata nello storico.
+          </p>
           <form
             action={updateContractCollaboratorAction}
-            className="grid gap-4 md:grid-cols-[1fr_auto]"
+            className="grid gap-4 md:grid-cols-[1fr_1fr_auto]"
           >
             <input type="hidden" name="contractId" value={contract.id} />
             <Field label="Assegna a">
@@ -282,16 +307,30 @@ export default async function ContrattoDetailPage({
                 {collaborators.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.name}
+                    {user.role
+                      ? ` · ${ROLE_LABELS[user.role as AppRole] ?? user.role}`
+                      : ""}
                   </option>
                 ))}
               </Select>
+            </Field>
+            <Field label="Motivazione (facoltativa)">
+              <Input name="reason" placeholder="Motivo del cambio" />
             </Field>
             <div className="flex items-end">
               <Button type="submit">Salva collaboratore</Button>
             </div>
           </form>
         </section>
-      ) : null}
+      ) : (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-2 font-semibold text-slate-900">Collaboratore</h2>
+          <p className="text-sm text-slate-700">{contract.collaborator.name}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Solo l&apos;amministratore può cambiare il collaboratore da questa scheda.
+          </p>
+        </section>
+      )}
 
       {canChangeStatus ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

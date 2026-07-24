@@ -20,6 +20,8 @@ import {
 import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
 import { PersistentAlert } from "@/components/ui/persistent-alert";
+import { DocumentAutoFillPanel } from "@/components/contracts/ocr/document-auto-fill-panel";
+import type { OcrApplyPayload } from "@/lib/ocr/schema";
 import { format } from "date-fns";
 import { Paperclip, X } from "lucide-react";
 
@@ -389,6 +391,95 @@ export function NuovoContrattoForm({
     setAttachments(next);
   }
 
+  async function attachOcrFiles(
+    items: Array<{ file: File; docType: string }>,
+  ) {
+    const next = [...attachments];
+    for (const item of items) {
+      const file = item.file;
+      if (file.size > 5 * 1024 * 1024) continue;
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+      next.push({
+        id: uid(),
+        filename: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        docType: item.docType,
+        contentBase64: btoa(binary),
+      });
+    }
+    setAttachments(next);
+  }
+
+  function applyOcrPayload(payload: OcrApplyPayload) {
+    setCreatingClient(true);
+    setClientId(undefined);
+    if (payload.clientType) setClientType(payload.clientType);
+    if (payload.firstName != null) setFirstName(payload.firstName);
+    if (payload.lastName != null) setLastName(payload.lastName);
+    if (payload.companyName != null) setCompanyName(payload.companyName);
+    if (payload.fiscalCode != null) setFiscalCode(payload.fiscalCode);
+    if (payload.vatNumber != null) setVatNumber(payload.vatNumber);
+    if (payload.phone != null) setPhone(payload.phone);
+    if (payload.email != null) setEmail(payload.email);
+    if (payload.pec != null) setPec(payload.pec);
+    if (payload.iban != null) setIban(payload.iban);
+    if (payload.street != null) setStreet(payload.street);
+    if (payload.streetNumber != null) setStreetNumber(payload.streetNumber);
+    if (payload.zipCode != null) setZipCode(payload.zipCode);
+    if (payload.city != null) setCity(payload.city);
+    if (payload.province != null) setProvince(payload.province);
+    if (payload.region != null) setRegion(payload.region);
+    if (payload.legalFirstName != null) setLegalFirstName(payload.legalFirstName);
+    if (payload.legalLastName != null) setLegalLastName(payload.legalLastName);
+    if (payload.classification != null) setClassification(payload.classification);
+    if (payload.productName != null) setProductName(payload.productName);
+    if (payload.paymentMethod != null) setPaymentMethod(payload.paymentMethod);
+    if (payload.supplierName) {
+      const found = suppliers.find(
+        (s) => s.name.toLowerCase() === payload.supplierName!.toLowerCase(),
+      );
+      if (found) {
+        setSupplierChoice(found.id);
+        setSupplierId(found.id);
+        setSupplierName(found.name);
+      } else {
+        setSupplierChoice("__NEW__");
+        setSupplierId(undefined);
+        setSupplierName(payload.supplierName);
+      }
+    }
+    if (payload.supplySame != null) setSupplySame(payload.supplySame);
+    if (payload.supplyStreet != null) setSupplyStreet(payload.supplyStreet);
+    if (payload.supplyStreetNumber != null) {
+      setSupplyStreetNumber(payload.supplyStreetNumber);
+    }
+    if (payload.supplyZip != null) setSupplyZip(payload.supplyZip);
+    if (payload.supplyCity != null) setSupplyCity(payload.supplyCity);
+    if (payload.supplyProvince != null) setSupplyProvince(payload.supplyProvince);
+    if (payload.supplyRegion != null) setSupplyRegion(payload.supplyRegion);
+    if (payload.services?.length) {
+      setServices(
+        payload.services.map((s) => ({
+          id: uid(),
+          service: s.service,
+          pod: s.pod ?? "",
+          pdr: s.pdr ?? "",
+          annualKwh: s.annualKwh ?? "",
+          annualSmc: s.annualSmc ?? "",
+          powerKw: s.powerKw ?? "",
+        })),
+      );
+    }
+    setMessage(
+      "Dati dai documenti applicati al modulo. Controlla tutto prima di creare il contratto.",
+    );
+    setErrors([]);
+  }
+
   const hasLuce = services.some((s) => s.service === "LUCE");
   const hasGas = services.some((s) => s.service === "GAS");
 
@@ -551,6 +642,13 @@ export function NuovoContrattoForm({
 
   return (
     <div className="space-y-6">
+      <DocumentAutoFillPanel
+        onApply={applyOcrPayload}
+        onAttachFiles={(items) => {
+          void attachOcrFiles(items);
+        }}
+      />
+
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>

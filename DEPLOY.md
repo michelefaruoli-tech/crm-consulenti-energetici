@@ -15,6 +15,9 @@ Nel file `.env` (nella cartella del CRM):
 ```env
 DATABASE_URL="incolla-qui-la-stringa-neon"
 AUTH_SECRET="una-stringa-segreta-lunga-almeno-32-caratteri"
+# Opzionale: auto-compilazione da CI + bolletta (Nuovo contratto)
+OPENAI_API_KEY="sk-..."
+OCR_MODEL="gpt-4o"
 ```
 
 Poi esegui:
@@ -50,6 +53,8 @@ git push -u origin main
 4. In **Environment Variables** aggiungi:
    - `DATABASE_URL` = stessa stringa Neon (pooled)
    - `AUTH_SECRET` = stessa chiave del `.env`
+   - `OPENAI_API_KEY` = chiave OpenAI (per «Compila automaticamente dai documenti»)
+   - opzionale: `OCR_MODEL` = `gpt-4o`
 5. Deploy
 
 Dopo il primo deploy, se le tabelle non esistono ancora, da locale (con `.env` puntato a Neon):

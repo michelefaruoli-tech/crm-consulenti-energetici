@@ -1,4 +1,4 @@
-/** Tipi operazione pratica energetica */
+/** Tipi operazione pratica energetica (valore interno legacy CAMBIO = Switch in UI) */
 export type OperationType = "CAMBIO" | "VOLTURA" | "ATTIVAZIONE";
 
 export const OPERATION_TYPE_LABELS: Record<OperationType, string> = {
@@ -20,12 +20,15 @@ export function normalizeOperationType(
   ) {
     return "ATTIVAZIONE";
   }
+  // SWITCH e CAMBIO (legacy) → stesso comportamento "Switch"
+  if (v === "SWITCH" || v === "CAMBIO" || v === "CAMBIO_FORNITORE") return "CAMBIO";
+  // Default: Switch (mai etichettare come "Cambio" in UI)
   return "CAMBIO";
 }
 
 /**
  * Data inizio fornitura:
- * - Cambio: se inserito prima del giorno 8 → 1° del mese successivo;
+ * - Switch: se inserito prima del giorno 8 → 1° del mese successivo;
  *   dal 8 in poi → 1° di due mesi dopo.
  * - Voltura / Attivazione: circa 7 giorni dall'inserimento.
  */

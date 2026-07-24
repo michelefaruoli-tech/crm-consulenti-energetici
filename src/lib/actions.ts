@@ -40,10 +40,18 @@ const clientSchema = z.object({
   vatNumber: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().optional(),
+  pec: z.string().optional(),
+  iban: z.string().optional(),
   address: z.string().optional(),
+  street: z.string().optional(),
+  streetNumber: z.string().optional(),
   city: z.string().optional(),
   province: z.string().optional(),
+  region: z.string().optional(),
   zipCode: z.string().optional(),
+  country: z.string().optional(),
+  legalFirstName: z.string().optional(),
+  legalLastName: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -62,10 +70,18 @@ export async function createClientAction(formData: FormData): Promise<void> {
     vatNumber: formData.get("vatNumber") || undefined,
     email: formData.get("email") || undefined,
     phone: formData.get("phone") || undefined,
+    pec: formData.get("pec") || undefined,
+    iban: formData.get("iban") || undefined,
     address: formData.get("address") || undefined,
+    street: formData.get("street") || undefined,
+    streetNumber: formData.get("streetNumber") || undefined,
     city: formData.get("city") || undefined,
     province: formData.get("province") || undefined,
+    region: formData.get("region") || undefined,
     zipCode: formData.get("zipCode") || undefined,
+    country: formData.get("country") || "Italia",
+    legalFirstName: formData.get("legalFirstName") || undefined,
+    legalLastName: formData.get("legalLastName") || undefined,
     notes: formData.get("notes") || undefined,
   });
 
@@ -73,8 +89,32 @@ export async function createClientAction(formData: FormData): Promise<void> {
     throw new Error("Dati non validi");
   }
 
+  const data = {
+    ...parsed.data,
+    email: parsed.data.email || null,
+    companyName: parsed.data.companyName || null,
+    firstName: parsed.data.firstName || null,
+    lastName: parsed.data.lastName || null,
+    fiscalCode: parsed.data.fiscalCode || null,
+    vatNumber: parsed.data.vatNumber || null,
+    phone: parsed.data.phone || null,
+    pec: parsed.data.pec || null,
+    iban: parsed.data.iban || null,
+    address: parsed.data.address || null,
+    street: parsed.data.street || null,
+    streetNumber: parsed.data.streetNumber || null,
+    city: parsed.data.city || null,
+    province: parsed.data.province || null,
+    region: parsed.data.region || null,
+    zipCode: parsed.data.zipCode || null,
+    country: parsed.data.country || "Italia",
+    legalFirstName: parsed.data.legalFirstName || null,
+    legalLastName: parsed.data.legalLastName || null,
+    notes: parsed.data.notes || null,
+  };
+
   const client = await prisma.client.create({
-    data: { ...parsed.data, createdById: session.id },
+    data: { ...data, createdById: session.id },
   });
 
   await prisma.auditLog.create({
