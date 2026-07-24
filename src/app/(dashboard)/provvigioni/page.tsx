@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
-import { hasPermission } from "@/lib/permissions";
+import { canConfirmCommission, hasPermission } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/commission";
 import { formatMonthYear } from "@/lib/date-parse";
 import { clientDisplayName } from "@/lib/utils";
@@ -19,6 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function ProvvigioniPage() {
   const session = await requireSession();
   const canViewAll = hasPermission(session.role, "commissions.view_all");
+  const canConfirm = canConfirmCommission(session.role);
   const collabFilter = canViewAll ? undefined : session.id;
 
   // Sync ricorrenze in background non bloccante (evita attese di molti secondi)
@@ -73,9 +74,10 @@ export default async function ProvvigioniPage() {
       acc.ricevuto += received;
       acc.liquidato += paidAmt;
       acc.daAvere += Math.max(received - paidAmt, 0);
+      if (!item.contract.commissionConfirmed) acc.daConfermare += 1;
       return acc;
     },
-    { complessivo: 0, ricevuto: 0, liquidato: 0, daAvere: 0 },
+    { complessivo: 0, ricevuto: 0, liquidato: 0, daAvere: 0, daConfermare: 0 },
   );
 
   const rows: ProvvigioneRow[] = commissions.map((item) => {
@@ -119,6 +121,9 @@ export default async function ProvvigioniPage() {
         <p className="text-slate-500">
           Clicca sul nome colonna per ordinare (A→Z / date). Senza data = No. Gettoni storici:
           50 domestico / 80 business.
+          {totals.daConfermare > 0
+            ? ` · ${totals.daConfermare} gettoni da confermare.`
+            : ""}
         </p>
       </div>
 
@@ -147,7 +152,11 @@ export default async function ProvvigioniPage() {
         </div>
       </div>
 
-      <ProvvigioniFilterTable rows={rows} canDelete />
+      <ProvvigioniFilterTable
+        rows={rows}
+        canDelete
+        canConfirm={canConfirm}
+      />
     </div>
   );
 }

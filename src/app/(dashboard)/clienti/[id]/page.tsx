@@ -44,11 +44,17 @@ export default async function ClienteDetailPage({
 
   if (!client || client.deletedAt) notFound();
 
+  const isCollaboratorOnClient = client.contracts.some(
+    (c) => c.collaboratorId === session.id,
+  );
   const canEditClient =
-    hasPermission(session.role, "clients.edit_all") || client.createdById === session.id;
+    hasPermission(session.role, "clients.edit_all") ||
+    client.createdById === session.id ||
+    isCollaboratorOnClient;
   const canEditAllContracts = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(session.role, "contracts.change_collaborator");
   const canEditGettone = hasPermission(session.role, "commissions.edit_gettone");
+  const canEditOwnGettone = hasPermission(session.role, "commissions.edit_own_gettone");
 
   const [suppliers, collaborators] = await Promise.all([
     prisma.supplier.findMany({
@@ -124,6 +130,7 @@ export default async function ClienteDetailPage({
     collaboratorId: c.collaboratorId,
     collaboratorName: c.collaborator.name,
     gettone: Number(c.commission?.expected ?? 0).toFixed(2),
+    commissionConfirmed: c.commissionConfirmed,
     koReason: c.koReason,
     koNotes: c.koNotes,
   }));
@@ -189,6 +196,7 @@ export default async function ClienteDetailPage({
         sessionUserId={session.id}
         canChangeCollaborator={canChangeCollaborator}
         canEditGettone={canEditGettone}
+        canEditOwnGettone={canEditOwnGettone}
         initialContractId={initialContractId}
       />
     </div>

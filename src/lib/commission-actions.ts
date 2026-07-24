@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth";
-import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
+import {
+  canConfirmCommission,
+  canEditGettoneAmount,
+  hasPermission,
+} from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { parseFlexibleDate } from "@/lib/date-parse";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
@@ -27,7 +32,13 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
   if (field === "expected" || field === "received" || field === "paid" || field === "accrued") {
     const amount = Number(value.replace(",", ".")) || 0;
     if (field === "expected") {
-      if (!hasPermission(session.role, "commissions.edit_gettone")) {
+      if (
+        !canEditGettoneAmount(
+          session.role,
+          session.id,
+          commission.contract.collaboratorId,
+        )
+      ) {
         throw new Error("Non puoi modificare il valore gettone");
       }
     } else if (!canAll) {
@@ -37,10 +48,26 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       where: { id: commissionId },
       data: { [field]: amount },
     });
-    if (field === "expected" && !canAll) {
+    if (field === "expected") {
+      const isAdminGettone = hasPermission(session.role, "commissions.edit_gettone");
+      // Admin/Segreteria → auto-verde; collaboratore → giallo da confermare
       await prisma.contract.update({
         where: { id: commission.contractId },
-        data: { commissionConfirmed: false, commissionConfirmedAt: null },
+        data: isAdminGettone
+          ? { commissionConfirmed: true, commissionConfirmedAt: new Date() }
+          : { commissionConfirmed: false, commissionConfirmedAt: null },
+      });
+      await writeAuditLog({
+        userId: session.id,
+        action: "UPDATE",
+        entity: "Commission",
+        entityId: commission.contractId,
+        details: {
+          field: "expected",
+          to: amount,
+          confirmed: isAdminGettone,
+          source: "provvigioni_table",
+        },
       });
     }
   } else if (field === "paymentStatus") {
@@ -100,4 +127,42 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
   revalidatePath("/provvigioni");
   revalidatePath("/");
   revalidatePath("/contratti");
+}
+
+/** Admin/Segreteria conferma il gettone (riga verde). */
+export async function confirmCommissionAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!canConfirmCommission(session.role)) {
+    throw new Error("Solo Admin o Segreteria possono confermare il gettone");
+  }
+
+  const commissionId = String(formData.get("commissionId") ?? "");
+  if (!commissionId) throw new Error("Provvigione non specificata");
+
+  const commission = await prisma.commission.findUnique({
+    where: { id: commissionId },
+    select: { id: true, contractId: true },
+  });
+  if (!commission) throw new Error("Provvigione non trovata");
+
+  await prisma.contract.update({
+    where: { id: commission.contractId },
+    data: {
+      commissionConfirmed: true,
+      commissionConfirmedAt: new Date(),
+    },
+  });
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Contract",
+    entityId: commission.contractId,
+    details: { field: "commissionConfirmed", to: true, source: "confirm_button" },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath(`/contratti`);
+  revalidatePath(`/clienti`);
 }

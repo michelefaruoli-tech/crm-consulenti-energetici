@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ContractStatus } from "@/generated/prisma/client";
 import { requireSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
-import { hasPermission } from "@/lib/permissions";
+import { canEditGettoneAmount, hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
@@ -262,7 +262,9 @@ export async function updateClientOfferBlockAction(formData: FormData): Promise<
 
   const gettoneRaw = clean(formData.get("gettone"));
   if (gettoneRaw != null) {
-    if (!hasPermission(session.role, "commissions.edit_gettone")) {
+    if (
+      !canEditGettoneAmount(session.role, session.id, contract.collaboratorId)
+    ) {
       throw new Error("Non puoi modificare il valore gettone");
     }
     const amount = Number(gettoneRaw.replace(",", ".")) || 0;
@@ -278,12 +280,25 @@ export async function updateClientOfferBlockAction(formData: FormData): Promise<
       });
     }
     if (prev !== amount) {
+      const isAdminGettone = hasPermission(session.role, "commissions.edit_gettone");
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: isAdminGettone
+          ? { commissionConfirmed: true, commissionConfirmedAt: new Date() }
+          : { commissionConfirmed: false, commissionConfirmedAt: null },
+      });
       await writeAuditLog({
         userId: session.id,
         action: "UPDATE",
         entity: "Commission",
         entityId: contractId,
-        details: { field: "expected", from: prev, to: amount },
+        details: {
+          field: "expected",
+          from: prev,
+          to: amount,
+          confirmed: isAdminGettone,
+          source: "client_sheet",
+        },
       });
     }
   }

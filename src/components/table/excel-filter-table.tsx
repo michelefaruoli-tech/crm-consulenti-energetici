@@ -25,6 +25,8 @@ type Props = {
   emptyMessage?: string;
   /** Celle più compatte per stare in una schermata */
   dense?: boolean;
+  /** Classi CSS aggiuntive per riga (es. colori stato) */
+  getRowClassName?: (row: Record<string, unknown>) => string | undefined;
 };
 
 export function ExcelFilterTable({
@@ -35,6 +37,7 @@ export function ExcelFilterTable({
   onCellEdit,
   emptyMessage = "Nessun risultato",
   dense = false,
+  getRowClassName,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
@@ -249,6 +252,7 @@ export function ExcelFilterTable({
                 className={cn(
                   "border-t border-slate-100",
                   onRowClick && "cursor-pointer hover:bg-slate-50",
+                  getRowClassName?.(row),
                 )}
                 onClick={() => onRowClick?.(row)}
               >

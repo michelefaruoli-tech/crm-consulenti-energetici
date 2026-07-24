@@ -100,7 +100,16 @@ export async function updateClientAction(formData: FormData): Promise<void> {
 
   const canEditAll = hasPermission(session.role, "clients.edit_all");
   if (!canEditAll && client.createdById !== session.id) {
-    throw new Error("Permesso negato");
+    // Collaboratore di almeno un contratto del cliente può aggiornare l'anagrafica
+    const linked = await prisma.contract.findFirst({
+      where: {
+        clientId,
+        collaboratorId: session.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!linked) throw new Error("Permesso negato");
   }
 
   const next = {

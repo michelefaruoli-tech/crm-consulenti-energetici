@@ -104,6 +104,7 @@ export type ClientSheetContract = {
   collaboratorId: string;
   collaboratorName: string;
   gettone: string;
+  commissionConfirmed: boolean;
   koReason: string | null;
   koNotes: string | null;
 };
@@ -126,6 +127,7 @@ export function ClientSheet({
   sessionUserId,
   canChangeCollaborator,
   canEditGettone,
+  canEditOwnGettone,
   initialContractId,
 }: {
   client: ClientSheetClient;
@@ -137,6 +139,7 @@ export function ClientSheet({
   sessionUserId: string;
   canChangeCollaborator: boolean;
   canEditGettone: boolean;
+  canEditOwnGettone?: boolean;
   initialContractId?: string | null;
 }) {
   const router = useRouter();
@@ -152,6 +155,10 @@ export function ClientSheet({
   const canEditSelected =
     !!selected &&
     (canEditAllContracts || selected.collaboratorId === sessionUserId);
+  const canEditSelectedGettone =
+    !!selected &&
+    (canEditGettone ||
+      (!!canEditOwnGettone && selected.collaboratorId === sessionUserId));
 
   const [clientDirty, setClientDirty] = useState(false);
   const [block2Dirty, setBlock2Dirty] = useState(false);
@@ -487,7 +494,18 @@ export function ClientSheet({
                       <td className="px-2 py-2">
                         <StatusBadge status={c.status} />
                       </td>
-                      <td className="px-2 py-2">€ {c.gettone}</td>
+                      <td className="px-2 py-2">
+                        <div>€ {c.gettone}</div>
+                        <div
+                          className={
+                            c.commissionConfirmed
+                              ? "text-[10px] font-medium text-emerald-700"
+                              : "text-[10px] font-medium text-amber-800"
+                          }
+                        >
+                          {c.commissionConfirmed ? "Confermata" : "Da confermare"}
+                        </div>
+                      </td>
                       <td className="px-2 py-2">
                         <Button
                           type="button"
@@ -908,13 +926,29 @@ export function ClientSheet({
                 <Input
                   name="gettone"
                   defaultValue={selected.gettone}
-                  disabled={!canEditGettone}
+                  disabled={!canEditSelectedGettone}
                   title={
-                    canEditGettone
+                    canEditSelectedGettone
                       ? "Gettone previsto (Commission.expected)"
                       : "Non autorizzato a modificare il gettone"
                   }
                 />
+                <p
+                  className={
+                    selected.commissionConfirmed
+                      ? "mt-1 text-xs font-medium text-emerald-700"
+                      : "mt-1 text-xs font-medium text-amber-800"
+                  }
+                >
+                  {selected.commissionConfirmed
+                    ? "Gettone confermato (verde)"
+                    : "Gettone da confermare (giallo)"}
+                </p>
+                {canEditSelectedGettone && !canEditGettone ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Dopo la modifica resta in attesa di conferma Admin.
+                  </p>
+                ) : null}
               </Field>
 
               <Field label="Collaboratore">

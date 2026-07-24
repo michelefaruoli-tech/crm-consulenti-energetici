@@ -18,6 +18,7 @@ export type Permission =
   | "commissions.view_all"
   | "commissions.view_own"
   | "commissions.edit_gettone"
+  | "commissions.edit_own_gettone"
   | "reports.export"
   | "reports.email";
 
@@ -59,6 +60,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "contracts.create",
     "clients.create",
     "commissions.view_own",
+    "commissions.edit_own_gettone",
     "reports.export",
   ],
   COMMERCIALE: [
@@ -66,6 +68,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "contracts.create",
     "clients.create",
     "commissions.view_own",
+    "commissions.edit_own_gettone",
   ],
 };
 
@@ -102,4 +105,25 @@ export function canDeleteClient(
   if (hasPermission(role, "clients.edit_all")) return true;
   if (createdById && userId === createdById) return true;
   return false;
+}
+
+/** Admin/Segreteria può editare qualsiasi gettone; collab solo sul proprio contratto. */
+export function canEditGettoneAmount(
+  role: Role,
+  userId: string,
+  collaboratorId: string,
+): boolean {
+  if (hasPermission(role, "commissions.edit_gettone")) return true;
+  if (
+    hasPermission(role, "commissions.edit_own_gettone") &&
+    userId === collaboratorId
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Admin conferma gettone (passa da giallo a verde). */
+export function canConfirmCommission(role: Role): boolean {
+  return hasPermission(role, "commissions.edit_gettone");
 }

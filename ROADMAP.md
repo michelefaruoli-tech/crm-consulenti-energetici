@@ -9,10 +9,10 @@ Priorità concordate dopo analisi Excel `Rendiconto_Contratti_Database.xlsx`.
 
 ## Prossimi step (in ordine)
 
-### A. Modifica contratto (subito dopo import)
-- Collaboratore: può modificare anagrafica cliente e dati contratto
-- Provvigione: se la inserisce/modifica resta **gialla** finché admin non conferma → **verde**
-- Admin può modificare e confermare (verde)
+### A. Modifica contratto + conferma gettone ✅
+- Collaboratore: può modificare anagrafica cliente (se è collab sul contratto) e dati contratto
+- Può modificare il gettone sui **propri** contratti → riga **gialla** finché Admin/Segreteria non conferma → **verde**
+- Admin/Segreteria: modifica gettone = auto-verde; pulsante **Conferma** sulle righe gialle in Provvigioni
 
 ### B. Colori da date / storno / ricorrenza
 Regole da definire con te:
