@@ -98,9 +98,9 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     updateData.koNotes = koNotes;
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.contract.update({ where: { id: contractId }, data: updateData });
-    await tx.contractStatusHistory.create({
+  try {
+    await prisma.contract.update({ where: { id: contractId }, data: updateData });
+    await prisma.contractStatusHistory.create({
       data: {
         contractId,
         fromStatus: contract.status,
@@ -130,7 +130,17 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
         paymentAmount: toStatus === "ATTIVATO" ? paymentAmount : null,
       },
     });
-  });
+  } catch (e) {
+    console.error("[updateMasterWorkflowAction]", e);
+    const msg = e instanceof Error ? e.message : "Errore aggiornamento stato";
+    redirect(
+      `/lavorazione/${contractId}?error=${encodeURIComponent(
+        msg.includes("HTTP mode")
+          ? "Errore database. Riprova tra qualche secondo."
+          : msg.slice(0, 180),
+      )}`,
+    );
+  }
 
   revalidatePath("/lavorazione");
   revalidatePath(`/lavorazione/${contractId}`);
@@ -165,6 +175,9 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
+  const docLinks = contract.documents.map(
+    (d) => `- ${d.filename} (${d.docType || "file"}): ${appUrl}/api/documents/${d.id}`,
+  );
   const subject = `REINVIO – Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientDisplayName(contract.client)}`;
   const body = [
     `REINVIO richiesto da ${session.name}`,
@@ -175,7 +188,11 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     `Collaboratore: ${contract.collaborator.name}`,
     `Fornitore: ${contract.supplier.name}`,
     `Servizio: ${contract.utilityType || "—"}`,
-    `POD/PDR: ${contract.podPdr || contract.pod || contract.pdr || "—"}`,
+    `POD / PDR: ${contract.podPdr || contract.pod || contract.pdr || "—"}`,
+    "",
+    "Allegati (scarica dal gestionale, accesso autenticato):",
+    ...(docLinks.length ? docLinks : ["- Nessun allegato"]),
+    "",
     `Link: ${appUrl}/lavorazione/${contract.id}`,
   ].join("\n");
 
@@ -183,11 +200,31 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     .update(`resend:${contractId}:${reason}:${Date.now()}`)
     .digest("hex");
 
+  const atts: { filename: string; content: Buffer; contentType?: string }[] = [];
+  let bytes = 0;
+  for (const d of contract.documents.slice(0, 8)) {
+    if (!d.contentBase64) continue;
+    try {
+      const buf = Buffer.from(d.contentBase64, "base64");
+      if (buf.length === 0) continue;
+      if (bytes + buf.length > 7 * 1024 * 1024) break;
+      bytes += buf.length;
+      atts.push({
+        filename: d.filename,
+        content: buf,
+        contentType: d.mimeType || "application/octet-stream",
+      });
+    } catch {
+      // salta file corrotti
+    }
+  }
+
   const mail = await sendMail({
     to: getMasterEmail(),
     subject,
     text: body,
     html: textToHtmlParagraphs(body),
+    attachments: atts,
   });
 
   await prisma.contractEmailLog.create({
@@ -342,25 +379,24 @@ export async function resetPasswordWithTokenAction(
     return { ok: false, error: "Link non valido o scaduto" };
   }
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: row.userId },
-      data: {
-        password: await hashPassword(next),
-        passwordChangedAt: new Date(),
-      },
-    }),
-    prisma.passwordResetToken.update({
-      where: { id: row.id },
-      data: { usedAt: new Date() },
-    }),
-    prisma.userSecurityEvent.create({
-      data: {
-        userId: row.userId,
-        eventType: "PASSWORD_RESET_COMPLETED",
-      },
-    }),
-  ]);
+  const hashed = await hashPassword(next);
+  await prisma.user.update({
+    where: { id: row.userId },
+    data: {
+      password: hashed,
+      passwordChangedAt: new Date(),
+    },
+  });
+  await prisma.passwordResetToken.update({
+    where: { id: row.id },
+    data: { usedAt: new Date() },
+  });
+  await prisma.userSecurityEvent.create({
+    data: {
+      userId: row.userId,
+      eventType: "PASSWORD_RESET_COMPLETED",
+    },
+  });
 
   return { ok: true, message: "Password reimpostata. Ora puoi accedere." };
 }

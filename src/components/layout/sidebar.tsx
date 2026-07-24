@@ -33,6 +33,8 @@ const NAV_ITEMS = [
   { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] as AppRole[] },
 ];
 
+// Nota: Utenti è solo ADMIN — collaboratori e commerciali non lo vedono.
+
 export function Sidebar({
   user,
 }: {

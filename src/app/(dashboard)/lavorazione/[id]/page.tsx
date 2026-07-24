@@ -130,7 +130,7 @@ export default async function LavorazioneSchedaPage({
           </div>
           <div>
             <dt className="text-slate-500">POD / PDR</dt>
-            <dd className="font-mono">
+            <dd className="text-sm text-slate-900">
               {contract.podPdr || contract.pod || contract.pdr || "Non indicato"}
             </dd>
           </div>

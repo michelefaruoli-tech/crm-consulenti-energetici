@@ -266,8 +266,6 @@ export function ExcelFilterTable({
                         className={cn(
                           "w-full rounded border border-transparent bg-transparent hover:border-slate-200 focus:border-emerald-500 focus:outline-none",
                           dense ? "min-w-0 px-0.5 py-0.5 text-xs" : "min-w-[10rem] px-1 py-0.5",
-                          col.key === "podPdr" &&
-                            "font-mono font-semibold tracking-wide text-slate-900",
                         )}
                         defaultValue={
                           col.getValue(row) === "(vuoto)" ? "" : col.getValue(row)

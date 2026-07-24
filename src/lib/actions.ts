@@ -248,44 +248,42 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
       updateData.paymentDate = new Date();
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.contract.update({
-        where: { id: contractId },
-        data: updateData,
-      });
-
-      await tx.contractStatusHistory.create({
-        data: {
-          contractId,
-          fromStatus: contract.status,
-          toStatus,
-          changedById: session.id,
-          note,
-        },
-      });
-
-      if (toStatus === "PAGATO_DAL_FORNITORE") {
-        const commission = await tx.commission.findUnique({ where: { contractId } });
-        if (commission) {
-          const amount = Number(commission.expected);
-          await tx.commission.update({
-            where: { contractId },
-            data: {
-              received: amount,
-              accrued: amount,
-            },
-          });
-          await tx.commissionEntry.create({
-            data: {
-              commissionId: commission.id,
-              type: "received",
-              amount,
-              note: "Pagamento fornitore registrato automaticamente",
-            },
-          });
-        }
-      }
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: updateData,
     });
+
+    await prisma.contractStatusHistory.create({
+      data: {
+        contractId,
+        fromStatus: contract.status,
+        toStatus,
+        changedById: session.id,
+        note,
+      },
+    });
+
+    if (toStatus === "PAGATO_DAL_FORNITORE") {
+      const commission = await prisma.commission.findUnique({ where: { contractId } });
+      if (commission) {
+        const amount = Number(commission.expected);
+        await prisma.commission.update({
+          where: { contractId },
+          data: {
+            received: amount,
+            accrued: amount,
+          },
+        });
+        await prisma.commissionEntry.create({
+          data: {
+            commissionId: commission.id,
+            type: "received",
+            amount,
+            note: "Pagamento fornitore registrato automaticamente",
+          },
+        });
+      }
+    }
   } catch (e) {
     console.error("[updateContractStatusAction]", e);
     redirect(`/contratti/${contractId}?error=aggiornamento_stato`);
@@ -379,33 +377,31 @@ export async function liquidateCommissionAction(formData: FormData): Promise<voi
     throw new Error("Provvigione non trovata");
   }
 
-  await prisma.$transaction(async (tx) => {
-    const newPaid = Number(commission.paid) + amount;
-    await tx.commission.update({
-      where: { contractId },
-      data: { paid: newPaid },
-    });
-    await tx.commissionEntry.create({
-      data: {
-        commissionId: commission.id,
-        type: "paid",
-        amount,
-        paidById: session.id,
-        note: "Liquidazione collaboratore",
-      },
-    });
-    await tx.contract.update({
-      where: { id: contractId },
-      data: { status: "PROVVIGIONE_LIQUIDATA" },
-    });
-    await tx.contractStatusHistory.create({
-      data: {
-        contractId,
-        toStatus: "PROVVIGIONE_LIQUIDATA",
-        changedById: session.id,
-        note: `Liquidata provvigione di € ${amount.toFixed(2)}`,
-      },
-    });
+  const newPaid = Number(commission.paid) + amount;
+  await prisma.commission.update({
+    where: { contractId },
+    data: { paid: newPaid },
+  });
+  await prisma.commissionEntry.create({
+    data: {
+      commissionId: commission.id,
+      type: "paid",
+      amount,
+      paidById: session.id,
+      note: "Liquidazione collaboratore",
+    },
+  });
+  await prisma.contract.update({
+    where: { id: contractId },
+    data: { status: "PROVVIGIONE_LIQUIDATA" },
+  });
+  await prisma.contractStatusHistory.create({
+    data: {
+      contractId,
+      toStatus: "PROVVIGIONE_LIQUIDATA",
+      changedById: session.id,
+      note: `Liquidata provvigione di € ${amount.toFixed(2)}`,
+    },
   });
 
   revalidatePath("/provvigioni");

@@ -193,7 +193,7 @@ export default async function LavorazionePage({
               <th className="px-3 py-2">Servizio</th>
               <th className="px-3 py-2">Operazione</th>
               <th className="px-3 py-2">Fornitore</th>
-              <th className="px-3 py-2">POD/PDR</th>
+              <th className="px-3 py-2">POD / PDR</th>
               <th className="px-3 py-2">Stato</th>
               <th className="px-3 py-2">Giorni</th>
               <th className="px-3 py-2">Aggiornato</th>
@@ -231,7 +231,7 @@ export default async function LavorazionePage({
                     <td className="px-3 py-2">{c.utilityType || "—"}</td>
                     <td className="px-3 py-2">{c.operationType || "—"}</td>
                     <td className="px-3 py-2">{c.supplier.name}</td>
-                    <td className="px-3 py-2 font-mono text-xs">
+                    <td className="px-3 py-2 text-sm">
                       {c.podPdr || c.pod || c.pdr || "—"}
                     </td>
                     <td className="px-3 py-2">

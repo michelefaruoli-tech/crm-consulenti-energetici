@@ -104,9 +104,9 @@ export default async function ContrattoDetailPage({
           <p className="text-sm text-slate-500">{contract.supplier.name}</p>
           <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
             <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">
-              POD / PDR (codice punto di fornitura)
+              POD / PDR
             </p>
-            <p className="mt-1 font-mono text-lg font-bold tracking-wide text-slate-900">
+            <p className="mt-1 text-base text-slate-900">
               {contract.podPdr?.trim() || "Non indicato"}
             </p>
           </div>
@@ -153,8 +153,8 @@ export default async function ContrattoDetailPage({
               <dd>{contract.utilityType || "—"}</dd>
             </div>
             <div>
-              <dt className="text-slate-500">POD / PDR (codice completo)</dt>
-              <dd className="font-mono text-base font-semibold tracking-wide">
+              <dt className="text-slate-500">POD / PDR</dt>
+              <dd className="text-sm text-slate-900">
                 {contract.podPdr?.trim() || "—"}
               </dd>
             </div>

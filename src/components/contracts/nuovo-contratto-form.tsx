@@ -259,7 +259,10 @@ export function NuovoContrattoForm({
             const bin = atob(a.contentBase64);
             const bytes = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            fd.append("files", new Blob([bytes], { type: a.mimeType }), a.filename);
+            const file = new File([bytes], a.filename, {
+              type: a.mimeType || "application/octet-stream",
+            });
+            fd.append("files", file);
             fd.append("docTypes", a.docType);
           }
           const up = await fetch(`/api/contracts/${contractId}/attachments`, {
@@ -269,15 +272,20 @@ export function NuovoContrattoForm({
           const upJson = (await up.json().catch(() => null)) as {
             success?: boolean;
             message?: string;
+            saved?: number;
           } | null;
-          if (!up.ok || !upJson?.success) {
-            setMessage(
-              `Contratto salvato (${contractId}). Upload allegati: ${upJson?.message ?? "parziale"}.`,
-            );
+          if (!up.ok || !upJson?.success || !upJson.saved) {
+            setErrors([
+              `Contratto salvato, ma upload allegati non riuscito (${upJson?.message ?? "errore"}). Apri la scheda e allega di nuovo, poi reinvia email.`,
+            ]);
+            router.push(`/lavorazione/${contractId}`);
+            return;
           }
         }
 
         if (sendToMaster && !draft) {
+          // breve attesa per consistenza lettura DB
+          await new Promise((r) => setTimeout(r, 400));
           const mailRes = await fetch(`/api/contracts/${contractId}/attachments`, {
             method: "PUT",
           });
@@ -285,6 +293,7 @@ export function NuovoContrattoForm({
             success?: boolean;
             emailSent?: boolean;
             message?: string;
+            attachmentsInEmail?: number;
           } | null;
           if (!mailRes.ok || !mailJson?.success) {
             setErrors([
@@ -295,9 +304,10 @@ export function NuovoContrattoForm({
             return;
           }
           setMessage(
-            mailJson.emailSent
-              ? "Contratto creato e inviato al Master"
-              : mailJson.message || "Contratto salvato",
+            mailJson.message ||
+              (mailJson.emailSent
+                ? "Contratto creato e inviato al Master"
+                : "Contratto salvato"),
           );
           router.push(`/lavorazione/${contractId}`);
           router.refresh();

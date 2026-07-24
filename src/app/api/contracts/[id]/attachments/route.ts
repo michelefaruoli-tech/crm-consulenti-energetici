@@ -8,8 +8,9 @@ import { formatRomeDateTime } from "@/lib/timezone";
 import { createHash } from "node:crypto";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
-/** Upload allegati dopo creazione contratto (evita limite body Server Action). */
+/** Upload allegati dopo creazione contratto. */
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -26,7 +27,7 @@ export async function POST(
     const { id } = await context.params;
     const contract = await prisma.contract.findUnique({
       where: { id },
-      select: { id: true, clientId: true, collaboratorId: true },
+      select: { id: true, clientId: true },
     });
     if (!contract) {
       return NextResponse.json({ success: false, message: "Contratto non trovato" }, { status: 404 });
@@ -36,29 +37,43 @@ export async function POST(
     const files = form.getAll("files");
     const docTypes = form.getAll("docTypes");
     let saved = 0;
+    const names: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!(file instanceof File)) continue;
-      if (file.size > 5 * 1024 * 1024) continue;
-      const buf = Buffer.from(await file.arrayBuffer());
+      const entry = files[i];
+      // In Node/Vercel può arrivare come File o Blob
+      if (!(entry instanceof Blob)) continue;
+      if (entry.size <= 0 || entry.size > 5 * 1024 * 1024) continue;
+
+      const buf = Buffer.from(await entry.arrayBuffer());
+      const filename =
+        entry instanceof File && entry.name
+          ? entry.name
+          : `allegato-${i + 1}.bin`;
+      const mimeType =
+        entry.type ||
+        (filename.toLowerCase().endsWith(".pdf")
+          ? "application/pdf"
+          : "application/octet-stream");
       const docType = String(docTypes[i] ?? "ALTRO");
+
       await prisma.document.create({
         data: {
           contractId: contract.id,
           clientId: contract.clientId,
-          filename: file.name,
-          mimeType: file.type || "application/octet-stream",
-          size: file.size,
+          filename,
+          mimeType,
+          size: buf.length,
           path: `db://upload-${Date.now()}-${i}`,
           docType,
           contentBase64: buf.toString("base64"),
         },
       });
       saved++;
+      names.push(filename);
     }
 
-    return NextResponse.json({ success: true, saved });
+    return NextResponse.json({ success: true, saved, names });
   } catch (e) {
     console.error("[attachments upload]", e);
     return NextResponse.json(
@@ -68,9 +83,9 @@ export async function POST(
   }
 }
 
-/** Invio / reinvio email Master dopo salvataggio + allegati. */
+/** Invio email Master dopo salvataggio + allegati. */
 export async function PUT(
-  request: Request,
+  _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -82,29 +97,26 @@ export async function PUT(
       return NextResponse.json({ success: false, message: "Permesso negato" }, { status: 403 });
     }
     const { id } = await context.params;
+
+    // Rileggi documenti (dopo upload)
     const contract = await prisma.contract.findUnique({
       where: { id },
       include: {
         client: true,
         supplier: true,
         collaborator: true,
-        documents: true,
+        documents: { orderBy: { uploadedAt: "desc" } },
       },
     });
     if (!contract) {
       return NextResponse.json({ success: false, message: "Contratto non trovato" }, { status: 404 });
     }
 
-    if (contract.emailStatus === "SENT" && contract.emailIdempotencyKey) {
-      return NextResponse.json({
-        success: true,
-        emailSent: true,
-        message: "Email già inviata in precedenza",
-        contractId: contract.id,
-      });
-    }
-
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
+    const docLinks = contract.documents.map(
+      (d) => `- ${d.filename} (${d.docType || "file"}): ${appUrl}/api/documents/${d.id}`,
+    );
+
     const subject = `Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientDisplayName(contract.client)} – ${contract.utilityType || ""}`;
     const body = [
       "Il contratto è nella coda «In lavorazione».",
@@ -123,22 +135,50 @@ export async function PUT(
       `PDR: ${contract.pdr || "—"}`,
       `POD / PDR: ${contract.podPdr || "—"}`,
       `Note: ${contract.masterNotes || contract.notes || "—"}`,
-      `Allegati: ${contract.documents.map((d) => d.filename).join(", ") || "nessuno"}`,
-      `Link: ${appUrl}/lavorazione/${contract.id}`,
+      "",
+      "Allegati (scarica dal gestionale, accesso autenticato):",
+      ...(docLinks.length ? docLinks : ["- Nessun allegato caricato"]),
+      "",
+      `Scheda lavorazione: ${appUrl}/lavorazione/${contract.id}`,
     ].join("\n");
 
     const hash = createHash("sha256")
-      .update(`master:${contract.id}:${contract.contractNumber}`)
+      .update(
+        `master:${contract.id}:${contract.contractNumber}:docs:${contract.documents.length}`,
+      )
       .digest("hex");
+
+    // Evita duplicati solo se stesso hash (stessi documenti) già inviato
+    const already = await prisma.contractEmailLog.findFirst({
+      where: { contractId: contract.id, payloadHash: hash, status: "SENT" },
+    });
+    if (already) {
+      return NextResponse.json({
+        success: true,
+        emailSent: true,
+        message: "Email già inviata con questi allegati",
+        contractId: contract.id,
+        attachments: contract.documents.length,
+      });
+    }
 
     const atts: { filename: string; content: Buffer; contentType?: string }[] = [];
     let bytes = 0;
-    for (const d of contract.documents.slice(0, 6)) {
+    for (const d of contract.documents.slice(0, 8)) {
       if (!d.contentBase64) continue;
-      const buf = Buffer.from(d.contentBase64, "base64");
-      if (bytes + buf.length > 4 * 1024 * 1024) break;
-      bytes += buf.length;
-      atts.push({ filename: d.filename, content: buf, contentType: d.mimeType });
+      try {
+        const buf = Buffer.from(d.contentBase64, "base64");
+        if (buf.length === 0) continue;
+        if (bytes + buf.length > 7 * 1024 * 1024) break;
+        bytes += buf.length;
+        atts.push({
+          filename: d.filename,
+          content: buf,
+          contentType: d.mimeType || "application/octet-stream",
+        });
+      } catch {
+        // salta file corrotti
+      }
     }
 
     const mail = await sendMail({
@@ -156,7 +196,11 @@ export async function PUT(
         subject,
         status: mail.ok ? "SENT" : mail.skipped ? "SKIPPED_NO_SMTP" : "ERROR",
         emailType: "MASTER_NEW",
-        error: mail.error,
+        error: mail.error
+          ? `${mail.error}${atts.length ? "" : " (nessun file allegato in SMTP; link nel testo)"}`
+          : atts.length === 0 && contract.documents.length > 0
+            ? "Documenti in DB ma non allegati SMTP; link nel corpo email"
+            : null,
         messageId: mail.messageId,
         sentById: session.id,
         payloadHash: hash,
@@ -183,8 +227,12 @@ export async function PUT(
       contractId: contract.id,
       contractNumber: contract.contractNumber,
       emailSent: mail.ok,
+      attachmentsInEmail: atts.length,
+      documentsInDb: contract.documents.length,
       message: mail.ok
-        ? "Email inviata al Master"
+        ? atts.length
+          ? `Email inviata al Master con ${atts.length} allegat${atts.length === 1 ? "o" : "i"}`
+          : "Email inviata al Master (allegati come link nel testo)"
         : `Contratto salvato. Email non inviata: ${mail.error ?? "errore SMTP"}`,
       code: mail.ok ? "OK" : "EMAIL_SEND_FAILED",
     });

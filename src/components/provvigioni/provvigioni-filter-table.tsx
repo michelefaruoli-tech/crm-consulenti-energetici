@@ -81,7 +81,7 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "podPdr",
-      label: "POD/PDR",
+      label: "POD / PDR",
       getValue: (r) => String(r.podPdr ?? ""),
       editable: true,
       sortKind: "text",
