@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
-import { analyzeDocumentsWithOpenAI } from "@/lib/ocr/analyze";
+import { analyzeDocuments } from "@/lib/ocr/analyze";
 import { writeAuditLog } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Nessun file valido" }, { status: 400 });
     }
 
-    const extracted = await analyzeDocumentsWithOpenAI(inputs);
+    const { extracted, provider } = await analyzeDocuments(inputs);
 
     await writeAuditLog({
       userId: session.id,
@@ -124,12 +124,12 @@ export async function POST(request: Request) {
       details: {
         fileCount: inputs.length,
         roles: inputs.map((f) => f.role),
-        // niente nomi file completi con dati sensibili oltre il conteggio
+        provider,
         warningCount: extracted.warnings.length,
       },
     }).catch(() => undefined);
 
-    return NextResponse.json({ ok: true, extracted });
+    return NextResponse.json({ ok: true, extracted, provider });
   } catch (e) {
     const message =
       e instanceof Error ? e.message : "Errore durante l'analisi documenti";

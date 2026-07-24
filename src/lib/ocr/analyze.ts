@@ -70,6 +70,19 @@ export type OcrFileInput = {
   role: "identity" | "bill" | "other";
 };
 
+export type OcrProviderName = "gemini" | "openai";
+
+class ProviderError extends Error {
+  constructor(
+    message: string,
+    public readonly retryable: boolean,
+    public readonly provider: OcrProviderName,
+  ) {
+    super(message);
+    this.name = "ProviderError";
+  }
+}
+
 function postProcess(data: OcrExtracted): OcrExtracted {
   const c = data.customer;
   if (c.fiscalCode?.value) {
@@ -120,22 +133,110 @@ function postProcess(data: OcrExtracted): OcrExtracted {
   return data;
 }
 
-export async function analyzeDocumentsWithOpenAI(
-  files: OcrFileInput[],
-): Promise<OcrExtracted> {
+function parseAndValidate(raw: string): OcrExtracted {
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error("Output AI non valido (JSON)");
+  }
+  const validated = OcrExtractedSchema.safeParse(parsed);
+  if (!validated.success) {
+    console.error("[ocr] zod", validated.error.flatten());
+    throw new Error("Dati estratti non validabili — riprova o compila a mano");
+  }
+  return postProcess(validated.data);
+}
+
+function userPrompt(files: OcrFileInput[]): string {
+  return `Analizza questi ${files.length} documenti (ruoli: ${files
+    .map((f) => `${f.filename}=${f.role}`)
+    .join(", ")}). Estrai i dati per compilare un contratto luce/gas.`;
+}
+
+/** Gemini (free tier generoso) — supporta immagini e PDF. */
+async function analyzeWithGemini(files: OcrFileInput[]): Promise<OcrExtracted> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) {
+    throw new ProviderError("Gemini non configurato", false, "gemini");
+  }
+  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.0-flash";
+
+  const parts: Array<Record<string, unknown>> = [
+    { text: `${SYSTEM_PROMPT}\n\n${userPrompt(files)}` },
+  ];
+
+  for (const f of files) {
+    const mime = f.mimeType.startsWith("image/")
+      ? f.mimeType === "image/jpg"
+        ? "image/jpeg"
+        : f.mimeType
+      : f.mimeType === "application/pdf"
+        ? "application/pdf"
+        : null;
+    if (!mime) {
+      parts.push({
+        text: `[File ignorato perché non immagine/PDF: ${f.filename}]`,
+      });
+      continue;
+    }
+    parts.push({
+      inline_data: {
+        mime_type: mime,
+        data: f.base64,
+      },
+    });
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+        maxOutputTokens: 4096,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("[ocr] gemini error", res.status, errText.slice(0, 300));
+    if (res.status === 401 || res.status === 403) {
+      throw new ProviderError("Chiave Gemini non valida", false, "gemini");
+    }
+    if (res.status === 429) {
+      throw new ProviderError("Limite Gemini raggiunto", true, "gemini");
+    }
+    throw new ProviderError("Analisi Gemini non riuscita", true, "gemini");
+  }
+
+  const json = (await res.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+    }>;
+  };
+  const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "{}";
+  return parseAndValidate(raw);
+}
+
+/** OpenAI Vision */
+async function analyzeWithOpenAI(files: OcrFileInput[]): Promise<OcrExtracted> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error(
-      "OCR non configurato: manca OPENAI_API_KEY su Vercel / .env",
-    );
+    throw new ProviderError("OpenAI non configurato", false, "openai");
   }
   const model = process.env.OCR_MODEL || "gpt-4o";
 
   const content: Array<Record<string, unknown>> = [
-    {
-      type: "text",
-      text: `Analizza questi ${files.length} documenti (ruoli: ${files.map((f) => `${f.filename}=${f.role}`).join(", ")}). Estrai i dati per compilare un contratto luce/gas.`,
-    },
+    { type: "text", text: userPrompt(files) },
   ];
 
   for (const f of files) {
@@ -144,27 +245,23 @@ export async function analyzeDocumentsWithOpenAI(
       content.push({
         type: "image_url",
         image_url: {
-          url: `data:${mime};base64,${f.base64}`,
+          url: `data:${mime === "image/jpg" ? "image/jpeg" : mime};base64,${f.base64}`,
           detail: "high",
         },
       });
     } else if (mime === "application/pdf") {
-      // Molti account OpenAI accettano PDF come file input nelle Responses;
-      // in Chat Completions alleghiamo nota + tentativo data URL.
       content.push({
         type: "text",
-        text: `[PDF allegato: ${f.filename}, ruolo ${f.role}. Se non riesci a leggere il PDF binario qui sotto, indica warning.]`,
+        text: `[PDF: ${f.filename}, ruolo ${f.role}]`,
       });
       content.push({
         type: "image_url",
-        image_url: {
-          url: `data:application/pdf;base64,${f.base64}`,
-        },
+        image_url: { url: `data:application/pdf;base64,${f.base64}` },
       });
     } else {
       content.push({
         type: "text",
-        text: `[File non immagine: ${f.filename} (${mime}) — ignora se non leggibile]`,
+        text: `[File non supportato: ${f.filename}]`,
       });
     }
   }
@@ -190,27 +287,84 @@ export async function analyzeDocumentsWithOpenAI(
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     console.error("[ocr] openai error", res.status, errText.slice(0, 300));
-    if (res.status === 401) throw new Error("Chiave OpenAI non valida");
-    if (res.status === 429) throw new Error("Limite OpenAI raggiunto, riprova tra poco");
-    throw new Error("Analisi documenti non riuscita (provider AI)");
+    if (res.status === 401) {
+      throw new ProviderError("Chiave OpenAI non valida", false, "openai");
+    }
+    if (res.status === 429) {
+      throw new ProviderError("Limite OpenAI raggiunto", true, "openai");
+    }
+    throw new ProviderError("Analisi OpenAI non riuscita", true, "openai");
   }
 
   const json = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
   const raw = json.choices?.[0]?.message?.content ?? "{}";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("Output AI non valido (JSON)");
+  return parseAndValidate(raw);
+}
+
+function configuredProviders(): OcrProviderName[] {
+  // Default: Gemini prima (free tier), poi OpenAI
+  const raw = (process.env.OCR_PROVIDERS || "gemini,openai")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const list = raw.filter((p): p is OcrProviderName => p === "gemini" || p === "openai");
+  return list.length ? list : ["gemini", "openai"];
+}
+
+function hasKey(provider: OcrProviderName): boolean {
+  if (provider === "gemini") {
+    return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY);
+  }
+  return Boolean(process.env.OPENAI_API_KEY);
+}
+
+/**
+ * Prova i provider nell'ordine configurato.
+ * Se uno va in limite (429) o errore temporaneo, passa al successivo.
+ */
+export async function analyzeDocuments(
+  files: OcrFileInput[],
+): Promise<{ extracted: OcrExtracted; provider: OcrProviderName }> {
+  const order = configuredProviders().filter(hasKey);
+  if (order.length === 0) {
+    throw new Error(
+      "OCR non configurato: inserisci GEMINI_API_KEY e/o OPENAI_API_KEY su Vercel",
+    );
   }
 
-  const validated = OcrExtractedSchema.safeParse(parsed);
-  if (!validated.success) {
-    console.error("[ocr] zod", validated.error.flatten());
-    throw new Error("Dati estratti non validabili — riprova o compila a mano");
+  const errors: string[] = [];
+  for (const provider of order) {
+    try {
+      const extracted =
+        provider === "gemini"
+          ? await analyzeWithGemini(files)
+          : await analyzeWithOpenAI(files);
+      return { extracted, provider };
+    } catch (e) {
+      if (e instanceof ProviderError) {
+        errors.push(`${e.provider}: ${e.message}`);
+        // passa al successivo se retryable o se ci sono altri provider
+        continue;
+      }
+      if (e instanceof Error) {
+        errors.push(e.message);
+        continue;
+      }
+      errors.push("Errore sconosciuto");
+    }
   }
 
-  return postProcess(validated.data);
+  throw new Error(
+    `Tutti i provider OCR non disponibili. ${errors.join(" · ")}. Riprova tra poco o compila a mano.`,
+  );
+}
+
+/** @deprecated usa analyzeDocuments */
+export async function analyzeDocumentsWithOpenAI(
+  files: OcrFileInput[],
+): Promise<OcrExtracted> {
+  const { extracted } = await analyzeDocuments(files);
+  return extracted;
 }
