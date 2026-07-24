@@ -310,8 +310,9 @@ export function DocumentAutoFillPanel({
         </h2>
         <p className="text-sm text-slate-600">
           Carica documento di identità e fattura/bolletta. Controlla i dati riconosciuti
-          prima di applicarli al modulo. Il contratto non viene salvato finché non
-          clicchi «Crea contratto».
+          prima di applicarli al modulo. Per OCR <strong>gratis</strong> preferisci{" "}
+          <strong>foto JPG/PNG</strong> delle pagine; i PDF nudi funzionano meglio con{" "}
+          <strong>Mistral OCR</strong> (solo Admin, a pagamento).
         </p>
       </div>
 

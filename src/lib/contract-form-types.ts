@@ -80,6 +80,7 @@ export type NewContractPayload = {
   durationMonths: number;
   productName?: string;
   offerCode?: string;
+  commissionRuleId?: string;
   contractKind?: string;
   priceType?: string;
   paymentMethod?: string;

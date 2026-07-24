@@ -16,7 +16,7 @@ export default async function NuovoContrattoPage({
   const { clientId } = await searchParams;
   const canPickCollaborator = hasPermission(session.role, "contracts.edit_all");
 
-  const [collaborators, suppliers] = await Promise.all([
+  const [collaborators, suppliers, listinoRulesRaw] = await Promise.all([
     canPickCollaborator
       ? prisma.user.findMany({
           where: {
@@ -32,7 +32,48 @@ export default async function NuovoContrattoPage({
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
+    prisma.commissionRule.findMany({
+      where: { active: true },
+      select: {
+        id: true,
+        supplierId: true,
+        name: true,
+        clientSegment: true,
+        fixedAmount: true,
+        gettoneBase: true,
+        gettoneRid: true,
+        gettoneBollettaWeb: true,
+        gettoneMail: true,
+        gettoneUnaTantumIniziale: true,
+      },
+      orderBy: { name: "asc" },
+    }),
   ]);
+
+  const listinoRules = listinoRulesRaw.map((r) => {
+    const n = (v: { toString(): string } | null | undefined) =>
+      v == null ? 0 : Number(v.toString()) || 0;
+    const hasParts =
+      r.gettoneBase != null ||
+      r.gettoneRid != null ||
+      r.gettoneBollettaWeb != null ||
+      r.gettoneMail != null ||
+      r.gettoneUnaTantumIniziale != null;
+    const base = hasParts ? n(r.gettoneBase) : n(r.fixedAmount) || n(r.gettoneBase);
+    const totale =
+      base +
+      n(r.gettoneRid) +
+      n(r.gettoneBollettaWeb) +
+      n(r.gettoneMail) +
+      n(r.gettoneUnaTantumIniziale);
+    return {
+      id: r.id,
+      supplierId: r.supplierId,
+      name: r.name,
+      clientSegment: r.clientSegment || "TUTTI",
+      gettoneTotale: totale > 0 ? totale.toFixed(2) : "",
+    };
+  });
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -48,6 +89,7 @@ export default async function NuovoContrattoPage({
         collaborators={collaborators}
         canPickCollaborator={canPickCollaborator}
         suppliers={suppliers}
+        listinoRules={listinoRules}
         initialClientId={clientId}
       />
     </div>

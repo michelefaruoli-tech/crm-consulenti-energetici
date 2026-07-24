@@ -210,6 +210,7 @@ export async function updateClientOfferBlockAction(formData: FormData): Promise<
           koNotes: status === "KO" || status === "ANNULLATO" ? koNotes : contract.koNotes,
           productName: clean(formData.get("productName")),
           offerCode: clean(formData.get("offerCode")),
+          commissionRuleId: clean(formData.get("commissionRuleId")),
           priceType: clean(formData.get("priceType")),
           pcv: numOrNull(formData.get("pcv")),
           pricePerKwh: numOrNull(formData.get("pricePerKwh")),
@@ -241,6 +242,7 @@ export async function updateClientOfferBlockAction(formData: FormData): Promise<
         data: {
           productName: clean(formData.get("productName")),
           offerCode: clean(formData.get("offerCode")),
+          commissionRuleId: clean(formData.get("commissionRuleId")),
           priceType: clean(formData.get("priceType")),
           pcv: numOrNull(formData.get("pcv")),
           pricePerKwh: numOrNull(formData.get("pricePerKwh")),

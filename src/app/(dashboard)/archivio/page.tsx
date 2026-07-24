@@ -44,7 +44,7 @@ export default async function ArchivioPage() {
         client: {
           select: { type: true, companyName: true, firstName: true, lastName: true },
         },
-        supplier: { select: { name: true, stornoMonths: true } },
+        supplier: { select: { id: true, name: true, stornoMonths: true } },
         collaborator: { select: { id: true, name: true } },
       },
       orderBy: { insertionDate: "desc" },

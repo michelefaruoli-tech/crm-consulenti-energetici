@@ -27,8 +27,9 @@ GEMINI_OCR_MODEL="gemini-2.0-flash"
 GROQ_OCR_MODEL="meta-llama/llama-4-scout-17b-16e-instruct"
 # OpenRouter: modello che struttura il JSON + motore PDF
 OPENROUTER_OCR_MODEL="google/gemini-2.0-flash-001"
-# Default gratis. Mistral OCR solo se Admin spunta la casella in UI.
-OPENROUTER_PDF_ENGINE="cloudflare-ai"
+# PDF gratis: native (default nel codice). Mistral solo se Admin spunta la casella.
+# OPENROUTER_PDF_ENGINE="cloudflare-ai"  # opzionale, spesso instabile
+OPENROUTER_PDF_ENGINE=""
 # Opzionale: chiave gratis da ocr.space (altrimenti usa demo)
 OCRSPACE_API_KEY=""
 ```

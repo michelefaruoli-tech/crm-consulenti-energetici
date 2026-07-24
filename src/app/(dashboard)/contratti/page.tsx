@@ -20,7 +20,16 @@ export default async function ContrattiPage({
     session.role,
     "contracts.change_collaborator_dashboard",
   );
-  const mode = vista === "storico" ? "storico" : vista === "tutti" ? "tutti" : "attivi";
+  const mode =
+    vista === "storico"
+      ? "storico"
+      : vista === "attivi"
+        ? "attivi"
+        : vista === "tutti"
+          ? "tutti"
+          : canViewAll
+            ? "tutti"
+            : "attivi";
 
   try {
     const [contracts, collaboratorOptions] = await Promise.all([
@@ -57,7 +66,7 @@ export default async function ContrattiPage({
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },
-          supplier: { select: { name: true, stornoMonths: true } },
+          supplier: { select: { id: true, name: true, stornoMonths: true } },
           collaborator: { select: { id: true, name: true } },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -76,14 +85,35 @@ export default async function ContrattiPage({
     const rows = toContractRows(contracts);
     const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
+    const byCollab = new Map<string, number>();
+    for (const c of contracts) {
+      const name = c.collaborator.name;
+      byCollab.set(name, (byCollab.get(name) ?? 0) + 1);
+    }
+    const collabSummary = [...byCollab.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, n]) => `${name}: ${n}`)
+      .join(" · ");
+
     return (
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Contratti</h1>
             <p className="text-slate-500">
-              Ultimi inserimenti per primi · click sul nome per la scheda completa
+              {contracts.length} contratti in questa vista
+              {canViewAll && collabSummary ? ` · ${collabSummary}` : ""}
             </p>
+            {canViewAll && mode === "attivi" ? (
+              <p className="mt-1 text-xs text-amber-800">
+                Stai guardando solo «Attivi» (senza storico). Per vedere anche lo storico apri{" "}
+                <Link href="/contratti?vista=tutti" className="font-medium underline">
+                  Tutti
+                </Link>
+                . I conteggi per collaboratore sopra devono mostrare Michele, Laforgia, Fagiano,
+                ecc.
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {canViewAll ? (
@@ -101,7 +131,7 @@ export default async function ContrattiPage({
 
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
-            href="/contratti"
+            href="/contratti?vista=attivi"
             className={
               mode === "attivi"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"

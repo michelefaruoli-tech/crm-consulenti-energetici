@@ -34,6 +34,13 @@ type Props = {
   collaborators: { id: string; name: string }[];
   canPickCollaborator: boolean;
   suppliers: { id: string; name: string }[];
+  listinoRules?: {
+    id: string;
+    supplierId: string;
+    name: string;
+    clientSegment: string;
+    gettoneTotale: string;
+  }[];
   initialClientId?: string;
 };
 
@@ -42,6 +49,7 @@ export function NuovoContrattoForm({
   collaborators,
   canPickCollaborator,
   suppliers,
+  listinoRules = [],
   initialClientId,
 }: Props) {
   const router = useRouter();
@@ -95,6 +103,7 @@ export function NuovoContrattoForm({
 
   const [productName, setProductName] = useState("");
   const [offerCode, setOfferCode] = useState("");
+  const [commissionRuleId, setCommissionRuleId] = useState("");
   const [contractKind, setContractKind] = useState("Domestico");
   const [priceType, setPriceType] = useState("Fisso");
   const [priceIndex, setPriceIndex] = useState("PUN");
@@ -148,6 +157,7 @@ export function NuovoContrattoForm({
 
   function onSupplierChange(value: string) {
     setSupplierChoice(value);
+    setCommissionRuleId("");
     if (value === "__NEW__") {
       setSupplierId(undefined);
       setSupplierName("");
@@ -162,6 +172,11 @@ export function NuovoContrattoForm({
     setSupplierId(value);
     setSupplierName(found?.name ?? "");
   }
+
+  const rulesForSupplier = useMemo(
+    () => listinoRules.filter((r) => r.supplierId === supplierId),
+    [listinoRules, supplierId],
+  );
 
   function buildPayload(draft: boolean): NewContractPayload {
     return {
@@ -213,6 +228,7 @@ export function NuovoContrattoForm({
       durationMonths,
       productName,
       offerCode,
+      commissionRuleId: commissionRuleId || undefined,
       contractKind,
       priceType,
       paymentMethod,
@@ -925,6 +941,37 @@ export function NuovoContrattoForm({
             />
           </Field>
         ) : null}
+        <Field label="Regola listino (offerta)">
+          <Select
+            value={commissionRuleId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setCommissionRuleId(id);
+              if (!id) return;
+              const rule = listinoRules.find((r) => r.id === id);
+              if (rule) {
+                setProductName(rule.name);
+                setOfferCode(rule.name);
+              }
+            }}
+            disabled={!supplierId || creatingSupplier}
+          >
+            <option value="">
+              {!supplierId || creatingSupplier
+                ? "— (scegli prima il fornitore) —"
+                : rulesForSupplier.length === 0
+                  ? "— nessuna regola (lascia bianco / manuale) —"
+                  : "— nessuna / manuale —"}
+            </option>
+            {rulesForSupplier.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+                {r.clientSegment && r.clientSegment !== "TUTTI" ? ` · ${r.clientSegment}` : ""}
+                {r.gettoneTotale ? ` · ${r.gettoneTotale} €` : ""}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Nome offerta">
             <Input value={productName} onChange={(e) => setProductName(e.target.value)} />

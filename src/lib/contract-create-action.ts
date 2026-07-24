@@ -399,6 +399,7 @@ async function createFullContractActionInner(
             operationOther: payload.operationOther || null,
             productName: payload.productName || null,
             offerCode: payload.offerCode || null,
+            commissionRuleId: payload.commissionRuleId || null,
             contractKind: payload.contractKind || null,
             priceType: payload.priceType || null,
             pod: line.pod?.trim() || null,
@@ -505,8 +506,18 @@ async function createFullContractActionInner(
       },
     });
 
+    const expectedFromRule = payload.commissionRuleId
+      ? await prisma.commissionRule.findUnique({
+          where: { id: payload.commissionRuleId },
+          select: { fixedAmount: true },
+        })
+      : null;
+    const expected = expectedFromRule?.fixedAmount
+      ? Number(expectedFromRule.fixedAmount.toString()) || 0
+      : 0;
+
     await prisma.commission.create({
-      data: { contractId: created.id, expected: 0 },
+      data: { contractId: created.id, expected },
     });
 
     // Allegati piccoli solo sul primo contratto; i grandi arrivano via API upload

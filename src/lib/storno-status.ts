@@ -120,6 +120,18 @@ export function resolveStornoInfo(input: {
     input.stornoEndDate,
   );
 
+  // 0 mesi = nessun periodo di storno → subito fuori storno
+  if (input.stornoMonths === 0) {
+    return {
+      kind: "fuori_storno",
+      label: "Fuori storno (0 mesi)",
+      rowClassName: "bg-emerald-50/90",
+      stornoEndDate: input.supplyStartDate ?? null,
+      isFuoriStorno: true,
+      warnOnEdit: false,
+    };
+  }
+
   // Ricorrente: resta sempre verde salvia (dopo KO/precedente)
   if (isRecurring(input.recurrence)) {
     return {
@@ -196,11 +208,12 @@ export function resolveStornoInfo(input: {
   };
 }
 
-/** Chiavi cliente+POD → id contratto più recente */
+/** Chiavi cliente+fornitore+POD → id contratto più recente (utenze diverse restano indipendenti). */
 export function markLatestContractsByPod<
   T extends {
     id: string;
     clientId: string;
+    supplierId?: string | null;
     podPdr?: string | null;
     supplyStartDate?: Date | null;
     insertionDate?: Date | null;
@@ -212,7 +225,8 @@ export function markLatestContractsByPod<
   for (const c of contracts) {
     const pod = normalizePodKey(c.podPdr);
     if (!pod) continue;
-    const key = `${c.clientId}::${pod}`;
+    const supplier = c.supplierId || "";
+    const key = `${c.clientId}::${supplier}::${pod}`;
     const supply = c.supplyStartDate?.getTime() ?? 0;
     const insert = c.insertionDate?.getTime() ?? 0;
     const created = c.createdAt?.getTime() ?? 0;

@@ -105,6 +105,7 @@ export type ClientSheetContract = {
   collaboratorName: string;
   gettone: string;
   commissionConfirmed: boolean;
+  commissionRuleId?: string | null;
   warnOnEdit?: boolean;
   stornoLabel?: string;
   koReason: string | null;
@@ -112,6 +113,14 @@ export type ClientSheetContract = {
 };
 
 export type ClientSheetSupplier = { id: string; name: string; code: string };
+export type ClientSheetListinoRule = {
+  id: string;
+  supplierId: string;
+  name: string;
+  clientSegment: string;
+  gettoneBase: string;
+  gettoneTotale: string;
+};
 export type ClientSheetCollaborator = {
   id: string;
   name: string;
@@ -123,6 +132,7 @@ export function ClientSheet({
   client,
   contracts,
   suppliers,
+  listinoRules = [],
   collaborators,
   canEditClient,
   canEditAllContracts,
@@ -135,6 +145,7 @@ export function ClientSheet({
   client: ClientSheetClient;
   contracts: ClientSheetContract[];
   suppliers: ClientSheetSupplier[];
+  listinoRules?: ClientSheetListinoRule[];
   collaborators: ClientSheetCollaborator[];
   canEditClient: boolean;
   canEditAllContracts: boolean;
@@ -212,6 +223,16 @@ export function ClientSheet({
     selected?.contractIban ?? client.iban ?? "",
   );
   const [status, setStatus] = useState(selected?.status ?? "BOZZA");
+  const [offerSupplierId, setOfferSupplierId] = useState(selected?.supplierId ?? "");
+  const [commissionRuleId, setCommissionRuleId] = useState(selected?.commissionRuleId ?? "");
+  const [productName, setProductName] = useState(selected?.productName ?? "");
+  const [offerCode, setOfferCode] = useState(selected?.offerCode ?? "");
+  const [gettoneValue, setGettoneValue] = useState(selected?.gettone ?? "");
+
+  const rulesForSupplier = useMemo(
+    () => listinoRules.filter((r) => r.supplierId === offerSupplierId),
+    [listinoRules, offerSupplierId],
+  );
 
   useEffect(() => {
     if (!selected) return;
@@ -230,6 +251,11 @@ export function ClientSheet({
     setSupplyStreetNumber(selected.supplyStreetNumber ?? "");
     setContractIban(selected.contractIban ?? client.iban ?? "");
     setStatus(selected.status);
+    setOfferSupplierId(selected.supplierId);
+    setCommissionRuleId(selected.commissionRuleId ?? "");
+    setProductName(selected.productName ?? "");
+    setOfferCode(selected.offerCode ?? "");
+    setGettoneValue(selected.gettone ?? "");
     setBlock2Dirty(false);
     setBlock3Dirty(false);
   }, [selected, client.iban]);
@@ -862,7 +888,17 @@ export function ClientSheet({
               <input type="hidden" name="clientId" value={client.id} />
 
               <Field label="Fornitore">
-                <Select name="supplierId" defaultValue={selected.supplierId}>
+                <Select
+                  name="supplierId"
+                  value={offerSupplierId}
+                  onChange={(e) => {
+                    setOfferSupplierId(e.target.value);
+                    setCommissionRuleId("");
+                    setProductName("");
+                    setOfferCode("");
+                    mark3();
+                  }}
+                >
                   {suppliers.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.code})
@@ -871,12 +907,67 @@ export function ClientSheet({
                 </Select>
               </Field>
 
+              <Field label="Regola listino (offerta)">
+                <Select
+                  name="commissionRuleId"
+                  value={commissionRuleId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setCommissionRuleId(id);
+                    if (!id) {
+                      mark3();
+                      return;
+                    }
+                    const rule = listinoRules.find((r) => r.id === id);
+                    if (rule) {
+                      setProductName(rule.name);
+                      setOfferCode(rule.name);
+                      if (canEditSelectedGettone && rule.gettoneTotale) {
+                        setGettoneValue(rule.gettoneTotale);
+                      }
+                    }
+                    mark3();
+                  }}
+                >
+                  <option value="">— nessuna / manuale —</option>
+                  {rulesForSupplier.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                      {r.clientSegment && r.clientSegment !== "TUTTI"
+                        ? ` · ${r.clientSegment}`
+                        : ""}
+                      {r.gettoneTotale ? ` · ${r.gettoneTotale} €` : ""}
+                    </option>
+                  ))}
+                </Select>
+                {rulesForSupplier.length === 0 ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Nessuna regola listino per questo fornitore. Compila nome/codice a mano oppure
+                    creale in Fornitori.
+                  </p>
+                ) : null}
+              </Field>
+
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Nome offerta">
-                  <Input name="productName" defaultValue={selected.productName ?? ""} />
+                  <Input
+                    name="productName"
+                    value={productName}
+                    onChange={(e) => {
+                      setProductName(e.target.value);
+                      mark3();
+                    }}
+                  />
                 </Field>
                 <Field label="Codice offerta">
-                  <Input name="offerCode" defaultValue={selected.offerCode ?? ""} />
+                  <Input
+                    name="offerCode"
+                    value={offerCode}
+                    onChange={(e) => {
+                      setOfferCode(e.target.value);
+                      mark3();
+                    }}
+                  />
                 </Field>
               </div>
               <div className="grid gap-3 md:grid-cols-3">
@@ -946,7 +1037,11 @@ export function ClientSheet({
               <Field label="Valore gettone (€)">
                 <Input
                   name="gettone"
-                  defaultValue={selected.gettone}
+                  value={gettoneValue}
+                  onChange={(e) => {
+                    setGettoneValue(e.target.value);
+                    mark3();
+                  }}
                   disabled={!canEditSelectedGettone}
                   title={
                     canEditSelectedGettone

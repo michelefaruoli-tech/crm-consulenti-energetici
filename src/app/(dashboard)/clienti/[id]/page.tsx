@@ -61,11 +61,28 @@ export default async function ClienteDetailPage({
   const canEditGettone = hasPermission(session.role, "commissions.edit_gettone");
   const canEditOwnGettone = hasPermission(session.role, "commissions.edit_own_gettone");
 
-  const [suppliers, collaborators] = await Promise.all([
+  const [suppliers, listinoRulesRaw, collaborators] = await Promise.all([
     prisma.supplier.findMany({
       where: { active: true },
       select: { id: true, name: true, code: true },
       orderBy: { name: "asc" },
+    }),
+    prisma.commissionRule.findMany({
+      where: { active: true },
+      select: {
+        id: true,
+        supplierId: true,
+        name: true,
+        clientSegment: true,
+        fixedAmount: true,
+        gettoneBase: true,
+        gettoneRid: true,
+        gettoneBollettaWeb: true,
+        gettoneMail: true,
+        gettoneUnaTantumIniziale: true,
+        gettoneMensile: true,
+      },
+      orderBy: [{ name: "asc" }],
     }),
     canChangeCollaborator || hasPermission(session.role, "contracts.change_collaborator_dashboard")
       ? prisma.user.findMany({
@@ -78,10 +95,37 @@ export default async function ClienteDetailPage({
       : Promise.resolve([]),
   ]);
 
+  const listinoRules = listinoRulesRaw.map((r) => {
+    const n = (v: { toString(): string } | null | undefined) =>
+      v == null ? 0 : Number(v.toString()) || 0;
+    const hasParts =
+      r.gettoneBase != null ||
+      r.gettoneRid != null ||
+      r.gettoneBollettaWeb != null ||
+      r.gettoneMail != null ||
+      r.gettoneUnaTantumIniziale != null;
+    const base = hasParts ? n(r.gettoneBase) : n(r.fixedAmount) || n(r.gettoneBase);
+    const totale =
+      base +
+      n(r.gettoneRid) +
+      n(r.gettoneBollettaWeb) +
+      n(r.gettoneMail) +
+      n(r.gettoneUnaTantumIniziale);
+    return {
+      id: r.id,
+      supplierId: r.supplierId,
+      name: r.name,
+      clientSegment: r.clientSegment || "TUTTI",
+      gettoneBase: base > 0 ? base.toFixed(2) : "",
+      gettoneTotale: totale > 0 ? totale.toFixed(2) : "",
+    };
+  });
+
   const latestMap = markLatestContractsByPod(
     client.contracts.map((c) => ({
       id: c.id,
       clientId: client.id,
+      supplierId: c.supplierId,
       podPdr: c.podPdr || c.pod || c.pdr,
       supplyStartDate: c.supplyStartDate,
       insertionDate: c.insertionDate,
@@ -161,6 +205,7 @@ export default async function ClienteDetailPage({
     collaboratorName: c.collaborator.name,
     gettone: Number(c.commission?.expected ?? 0).toFixed(2),
     commissionConfirmed: c.commissionConfirmed,
+    commissionRuleId: c.commissionRuleId,
     warnOnEdit: storno.warnOnEdit,
     stornoLabel: storno.label,
     koReason: c.koReason,
@@ -223,6 +268,7 @@ export default async function ClienteDetailPage({
         }}
         contracts={sheetContracts}
         suppliers={suppliers}
+        listinoRules={listinoRules}
         collaborators={collaborators}
         canEditClient={canEditClient}
         canEditAllContracts={canEditAllContracts}

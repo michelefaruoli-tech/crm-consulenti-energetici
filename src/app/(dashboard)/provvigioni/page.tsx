@@ -47,6 +47,7 @@ export default async function ProvvigioniPage() {
           select: {
             id: true,
             clientId: true,
+            supplierId: true,
             status: true,
             paymentStatus: true,
             recurrence: true,
@@ -85,6 +86,7 @@ export default async function ProvvigioniPage() {
     commissions.map((c) => ({
       id: c.contract.id,
       clientId: c.contract.clientId,
+      supplierId: c.contract.supplierId,
       podPdr: c.contract.podPdr || c.contract.pod || c.contract.pdr,
       supplyStartDate: c.contract.supplyStartDate,
       insertionDate: c.contract.insertionDate,

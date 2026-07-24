@@ -100,7 +100,7 @@ export default async function DashboardPage() {
             by: ["collaboratorId"],
             _count: { id: true },
             orderBy: { _count: { id: "desc" } },
-            take: 5,
+            take: 20,
           })
         : Promise.resolve([]),
       prisma.contract.findMany({
@@ -126,11 +126,11 @@ export default async function DashboardPage() {
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },
-          supplier: { select: { name: true, stornoMonths: true } },
+          supplier: { select: { id: true, name: true, stornoMonths: true } },
           collaborator: { select: { id: true, name: true } },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: 30,
+        take: 200,
       }),
       canChangeCollaborator
         ? prisma.user.findMany({
@@ -158,7 +158,18 @@ export default async function DashboardPage() {
       <div className="space-y-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-slate-500">Panoramica attività e produzione</p>
+          <p className="text-slate-500">
+            Panoramica attività e produzione
+            {canViewAll ? (
+              <>
+                {" "}
+                · in tabella sotto vedi gli ultimi 200 contratti attivi; l’elenco completo è in{" "}
+                <Link href="/contratti?vista=tutti" className="underline">
+                  Contratti → Tutti
+                </Link>
+              </>
+            ) : null}
+          </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

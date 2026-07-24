@@ -71,7 +71,7 @@ type ContractForRow = {
     firstName?: string | null;
     lastName?: string | null;
   };
-  supplier: { name: string; stornoMonths?: number | null };
+  supplier: { id?: string; name: string; stornoMonths?: number | null };
   collaborator: { id?: string; name: string };
 };
 
@@ -168,6 +168,7 @@ export function toContractRows(contracts: ContractForRow[]): ContractTableRow[] 
   const forMark = contracts.map((c) => ({
     id: c.id,
     clientId: c.clientId ?? "",
+    supplierId: c.supplier.id ?? null,
     podPdr: c.podPdr?.trim() || c.pod || c.pdr || null,
     supplyStartDate: toDate(c.supplyStartDate),
     insertionDate: toDate(c.insertionDate),
