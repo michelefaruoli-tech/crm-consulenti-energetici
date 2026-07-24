@@ -5,17 +5,20 @@ import { hasPermission } from "@/lib/permissions";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
+import { PaginationNav } from "@/components/ui/pagination-nav";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
+import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
 
 export const dynamic = "force-dynamic";
 
 export default async function ContrattiPage({
   searchParams,
 }: {
-  searchParams: Promise<{ vista?: string; collab?: string }>;
+  searchParams: Promise<{ vista?: string; collab?: string; page?: string }>;
 }) {
   const session = await requireSession();
-  const { vista, collab } = await searchParams;
+  const { vista, collab, page: pageRaw } = await searchParams;
+  const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
     session.role,
@@ -35,22 +38,34 @@ export default async function ContrattiPage({
   const collabFilter =
     canViewAll && collab && collab !== "tutti" ? collab : undefined;
 
+  const where = {
+    deletedAt: null as null,
+    ...(canViewAll
+      ? collabFilter
+        ? { collaboratorId: collabFilter }
+        : {}
+      : { collaboratorId: session.id }),
+    ...(mode === "attivi"
+      ? { isHistorical: false as const }
+      : mode === "storico"
+        ? { isHistorical: true as const }
+        : {}),
+  };
+
+  const chipWhere = {
+    deletedAt: null as null,
+    ...(mode === "attivi"
+      ? { isHistorical: false as const }
+      : mode === "storico"
+        ? { isHistorical: true as const }
+        : {}),
+  };
+
   try {
-    const [contracts, collaboratorOptions] = await Promise.all([
+    const [total, contracts, collaboratorOptions, collabGroups] = await Promise.all([
+      prisma.contract.count({ where }),
       prisma.contract.findMany({
-        where: {
-          deletedAt: null,
-          ...(canViewAll
-            ? collabFilter
-              ? { collaboratorId: collabFilter }
-              : {}
-            : { collaboratorId: session.id }),
-          ...(mode === "attivi"
-            ? { isHistorical: false }
-            : mode === "storico"
-              ? { isHistorical: true }
-              : {}),
-        },
+        where,
         select: {
           id: true,
           clientId: true,
@@ -78,7 +93,9 @@ export default async function ContrattiPage({
           supplier: { select: { id: true, name: true, stornoMonths: true } },
           collaborator: { select: { id: true, name: true } },
         },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ insertionDate: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        skip: pageSkip(page),
+        take: PAGE_SIZE,
       }),
       canChangeCollaborator || canViewAll
         ? prisma.user.findMany({
@@ -89,53 +106,33 @@ export default async function ContrattiPage({
             orderBy: [{ active: "desc" }, { name: "asc" }],
           })
         : Promise.resolve([]),
+      canViewAll
+        ? prisma.contract.groupBy({
+            by: ["collaboratorId"],
+            where: chipWhere,
+            _count: { id: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const rows = toContractRows(contracts);
     const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
-    const byCollab = new Map<string, { id: string; name: string; n: number }>();
-    for (const c of contracts) {
-      const prev = byCollab.get(c.collaboratorId);
-      if (prev) prev.n += 1;
-      else
-        byCollab.set(c.collaboratorId, {
-          id: c.collaboratorId,
-          name: c.collaborator.name,
-          n: 1,
-        });
-    }
-    const collabCounts = [...byCollab.values()].sort((a, b) => b.n - a.n);
-
-    // Conteggi globali (senza filtro collab) per i chip Admin
-    let allCollabCounts = collabCounts;
-    if (canViewAll && collabFilter) {
-      const allForChips = await prisma.contract.groupBy({
-        by: ["collaboratorId"],
-        where: {
-          deletedAt: null,
-          ...(mode === "attivi"
-            ? { isHistorical: false }
-            : mode === "storico"
-              ? { isHistorical: true }
-              : {}),
-        },
-        _count: { id: true },
-      });
-      const nameById = Object.fromEntries(
-        collaboratorOptions.map((u) => [u.id, u.name]),
-      );
-      allCollabCounts = allForChips
-        .map((g) => ({
-          id: g.collaboratorId,
-          name: nameById[g.collaboratorId] ?? g.collaboratorId,
-          n: g._count.id,
-        }))
-        .sort((a, b) => b.n - a.n);
-    }
+    const nameById = Object.fromEntries(collaboratorOptions.map((u) => [u.id, u.name]));
+    const allCollabCounts = collabGroups
+      .map((g) => ({
+        id: g.collaboratorId,
+        name: nameById[g.collaboratorId] ?? g.collaboratorId,
+        n: g._count.id,
+      }))
+      .sort((a, b) => b.n - a.n);
 
     const vistaQ = mode === "tutti" ? "tutti" : mode;
     const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
+    const queryBase = {
+      vista: vistaQ,
+      collab: collabFilter,
+    };
 
     return (
       <div className="space-y-6">
@@ -143,9 +140,10 @@ export default async function ContrattiPage({
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Contratti</h1>
             <p className="text-slate-500">
-              {contracts.length} contratti in questa vista
+              {total} contratti in questa vista · ordinati per data inserimento (più recenti
+              prima)
               {canViewAll
-                ? ` · accesso ${roleLabel} (${session.email}) — tutti i collaboratori`
+                ? ` · accesso ${roleLabel} (${session.email})`
                 : ` · solo i tuoi`}
             </p>
             {!canViewAll ? (
@@ -212,7 +210,7 @@ export default async function ContrattiPage({
                   : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-700"
               }
             >
-              Tutti i collaboratori
+              Tutti i collaboratori ({allCollabCounts.reduce((s, c) => s + c.n, 0)})
             </Link>
             {allCollabCounts.map((c) => (
               <Link
@@ -230,6 +228,8 @@ export default async function ContrattiPage({
           </div>
         ) : null}
 
+        <PaginationNav path="/contratti" page={page} total={total} query={queryBase} />
+
         <ContractsFilterTable
           rows={rows}
           editable={mode !== "storico"}
@@ -237,6 +237,8 @@ export default async function ContrattiPage({
           canChangeCollaborator={canChangeCollaborator && mode !== "storico"}
           collaborators={collaborators}
         />
+
+        <PaginationNav path="/contratti" page={page} total={total} query={queryBase} />
       </div>
     );
   } catch (error) {

@@ -5,13 +5,21 @@ import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
+import { PaginationNav } from "@/components/ui/pagination-nav";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { StatusBadge } from "@/components/ui/badge";
+import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const session = await requireSession();
+  const { page: pageRaw } = await searchParams;
+  const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
     session.role,
@@ -98,6 +106,7 @@ export default async function DashboardPage() {
       hasPermission(session.role, "stats.full")
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
+            where: { deletedAt: null, isHistorical: false },
             _count: { id: true },
             orderBy: { _count: { id: "desc" } },
             take: 20,
@@ -130,8 +139,9 @@ export default async function DashboardPage() {
           supplier: { select: { id: true, name: true, stornoMonths: true } },
           collaborator: { select: { id: true, name: true } },
         },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: 200,
+        orderBy: [{ insertionDate: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        skip: pageSkip(page),
+        take: PAGE_SIZE,
       }),
       canChangeCollaborator
         ? prisma.user.findMany({
@@ -160,13 +170,18 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-slate-500">
-            Panoramica attività e produzione
+            Panoramica attività e produzione · contratti ordinati per data inserimento (più
+            recenti prima) · {PAGE_SIZE} per pagina
             {canViewAll ? (
               <>
                 {" "}
-                · in tabella sotto vedi gli ultimi 200 contratti attivi; l’elenco completo è in{" "}
+                · elenco completo anche in{" "}
                 <Link href="/contratti?vista=tutti" className="underline">
-                  Contratti → Tutti
+                  Contratti
+                </Link>{" "}
+                e{" "}
+                <Link href="/provvigioni" className="underline">
+                  Provvigioni
                 </Link>
               </>
             ) : null}
@@ -289,21 +304,25 @@ export default async function DashboardPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Contratti recenti</h2>
             <Link
-              href="/contratti"
+              href="/contratti?vista=tutti"
               className="text-sm font-medium text-emerald-700 hover:underline"
             >
               Vedi tutti
             </Link>
           </div>
           <p className="text-xs text-slate-500">
-            Ultimi inserimenti per primi. Usa ▾ sulle colonne per filtrare.
+            Ordinati per data inserimento (più recenti prima). Usa ▾ sulle colonne per
+            filtrare; usa le pagine sotto per scorrere tutti i collaboratori.
           </p>
+          <PaginationNav path="/" page={page} total={totalContracts} />
           <ContractsFilterTable
             rows={tableRows}
-            canDelete
+            editable
+            canDelete={canViewAll}
             canChangeCollaborator={canChangeCollaborator}
             collaborators={collaborators}
           />
+          <PaginationNav path="/" page={page} total={totalContracts} />
         </section>
       </div>
     );
