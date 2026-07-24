@@ -18,7 +18,7 @@ export default async function ArchivioPage() {
     redirect("/contratti");
   }
 
-  const [contracts, batches, totals] = await Promise.all([
+  const [contracts, batches, totals, collaborators] = await Promise.all([
     prisma.contract.findMany({
       where: { isHistorical: true },
       select: {
@@ -59,6 +59,14 @@ export default async function ArchivioPage() {
     prisma.commission.aggregate({
       where: { contract: { isHistorical: true } },
       _sum: { expected: true, received: true, paid: true },
+    }),
+    prisma.user.findMany({
+      where: {
+        active: true,
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      },
+      select: { id: true, name: true, email: true },
+      orderBy: { name: "asc" },
     }),
   ]);
 
@@ -110,10 +118,14 @@ export default async function ArchivioPage() {
         <h2 className="mb-2 font-semibold text-slate-900">Importa database già pagati</h2>
         <p className="mb-4 text-sm text-slate-500">
           Carica un Excel (.xlsx). Prima riga = intestazioni. Colonne utili: Nome, Cognome,
-          Ragione sociale, Tipo, Fornitore, POD/PDR, Data, Gettone, Collaboratore. Ogni file
-          diventa un lotto storico con l&apos;etichetta che indichi.
+          Ragione sociale, Tipo, Fornitore, POD/PDR, Data, Gettone, Collaboratore. Usa
+          l&apos;anteprima per vedere ok / avvisi / errori prima di confermare. Ogni file
+          diventa un lotto storico.
         </p>
-        <ArchiveImportForm />
+        <ArchiveImportForm
+          collaborators={collaborators}
+          defaultCollaboratorId={session.id}
+        />
       </section>
 
       <div className="flex items-center justify-between">
