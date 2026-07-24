@@ -130,6 +130,8 @@ model Supplier {
   active    Boolean  @default(true)
   email     String?
   notes     String?
+  /// Mesi di storno dal ingresso in fornitura (es. 12). Null = non configurato.
+  stornoMonths Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

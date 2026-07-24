@@ -5,7 +5,7 @@ import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
-import { toCollaboratorOption, toContractRow } from "@/lib/contract-row";
+import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { StatusBadge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +107,7 @@ export default async function DashboardPage() {
         where,
         select: {
           id: true,
+          clientId: true,
           status: true,
           insertionDate: true,
           createdAt: true,
@@ -118,10 +119,14 @@ export default async function DashboardPage() {
           pdr: true,
           serviceOther: true,
           collaboratorId: true,
+          recurrence: true,
+          expiryDate: true,
+          durationMonths: true,
+          stornoEndDate: true,
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },
-          supplier: { select: { name: true } },
+          supplier: { select: { name: true, stornoMonths: true } },
           collaborator: { select: { id: true, name: true } },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -146,7 +151,7 @@ export default async function DashboardPage() {
           })
         : [];
 
-    const tableRows = recentContracts.map(toContractRow);
+    const tableRows = toContractRows(recentContracts);
     const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
     return (

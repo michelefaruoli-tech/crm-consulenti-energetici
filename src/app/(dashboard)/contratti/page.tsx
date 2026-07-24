@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
-import { toCollaboratorOption, toContractRow } from "@/lib/contract-row";
+import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +36,7 @@ export default async function ContrattiPage({
         },
         select: {
           id: true,
+          clientId: true,
           status: true,
           insertionDate: true,
           createdAt: true,
@@ -49,10 +50,14 @@ export default async function ContrattiPage({
           archiveLabel: true,
           isHistorical: true,
           collaboratorId: true,
+          recurrence: true,
+          expiryDate: true,
+          durationMonths: true,
+          stornoEndDate: true,
           client: {
             select: { type: true, companyName: true, firstName: true, lastName: true },
           },
-          supplier: { select: { name: true } },
+          supplier: { select: { name: true, stornoMonths: true } },
           collaborator: { select: { id: true, name: true } },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -68,7 +73,7 @@ export default async function ContrattiPage({
         : Promise.resolve([]),
     ]);
 
-    const rows = contracts.map(toContractRow);
+    const rows = toContractRows(contracts);
     const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
     return (

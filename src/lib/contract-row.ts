@@ -5,6 +5,11 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { resolveUtilityDisplay } from "@/lib/utility-display";
+import {
+  markLatestContractsByPod,
+  resolveStornoInfo,
+  type StornoKind,
+} from "@/lib/storno-status";
 
 export type CollaboratorOption = {
   id: string;
@@ -16,6 +21,7 @@ export type CollaboratorOption = {
 
 export type ContractTableRow = {
   id: string;
+  clientId: string;
   clientName: string;
   supplierName: string;
   podPdr: string;
@@ -33,10 +39,15 @@ export type ContractTableRow = {
   collaboratorName: string;
   archiveLabel: string;
   createdAtSort: string;
+  stornoKind: StornoKind;
+  stornoLabel: string;
+  stornoRowClass: string;
+  warnOnEdit: boolean;
 };
 
-export function toContractRow(contract: {
+type ContractForRow = {
   id: string;
+  clientId?: string;
   status: string;
   insertionDate: Date | string;
   createdAt?: Date | string | null;
@@ -50,15 +61,31 @@ export function toContractRow(contract: {
   archiveLabel?: string | null;
   isHistorical?: boolean;
   collaboratorId?: string;
+  recurrence?: string | null;
+  expiryDate?: Date | string | null;
+  durationMonths?: number | null;
+  stornoEndDate?: Date | string | null;
   client: {
     type: string;
     companyName?: string | null;
     firstName?: string | null;
     lastName?: string | null;
   };
-  supplier: { name: string };
+  supplier: { name: string; stornoMonths?: number | null };
   collaborator: { id?: string; name: string };
-}): ContractTableRow {
+};
+
+function toDate(v: Date | string | null | undefined): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function toContractRow(
+  contract: ContractForRow,
+  options?: { isLatestForPod?: boolean },
+): ContractTableRow {
   const clientName =
     contract.client.type === "AZIENDA" && contract.client.companyName
       ? contract.client.companyName
@@ -97,8 +124,21 @@ export function toContractRow(contract: {
     serviceOther: contract.serviceOther,
   });
 
+  const supplyDate = toDate(supply);
+  const storno = resolveStornoInfo({
+    status: contract.status,
+    recurrence: contract.recurrence,
+    supplyStartDate: supplyDate,
+    stornoMonths: contract.supplier.stornoMonths,
+    stornoEndDate: toDate(contract.stornoEndDate),
+    expiryDate: toDate(contract.expiryDate),
+    durationMonths: contract.durationMonths,
+    isLatestForPod: options?.isLatestForPod,
+  });
+
   return {
     id: contract.id,
+    clientId: contract.clientId ?? "",
     clientName,
     supplierName: contract.supplier.name,
     podPdr: contract.podPdr?.trim() || utility.techLines.join(" · ") || "",
@@ -116,7 +156,27 @@ export function toContractRow(contract: {
     collaboratorName: contract.collaborator.name,
     archiveLabel: contract.archiveLabel ?? "",
     createdAtSort: created,
+    stornoKind: storno.kind,
+    stornoLabel: storno.label,
+    stornoRowClass: storno.rowClassName,
+    warnOnEdit: storno.warnOnEdit,
   };
+}
+
+/** Costruisce le righe tabella applicando la regola “POD più recente”. */
+export function toContractRows(contracts: ContractForRow[]): ContractTableRow[] {
+  const forMark = contracts.map((c) => ({
+    id: c.id,
+    clientId: c.clientId ?? "",
+    podPdr: c.podPdr?.trim() || c.pod || c.pdr || null,
+    supplyStartDate: toDate(c.supplyStartDate),
+    insertionDate: toDate(c.insertionDate),
+    createdAt: toDate(c.createdAt),
+  }));
+  const latestMap = markLatestContractsByPod(forMark);
+  return contracts.map((c) =>
+    toContractRow(c, { isLatestForPod: latestMap.get(c.id) ?? true }),
+  );
 }
 
 export function toCollaboratorOption(user: {

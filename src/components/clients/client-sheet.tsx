@@ -105,6 +105,8 @@ export type ClientSheetContract = {
   collaboratorName: string;
   gettone: string;
   commissionConfirmed: boolean;
+  warnOnEdit?: boolean;
+  stornoLabel?: string;
   koReason: string | null;
   koNotes: string | null;
 };
@@ -505,6 +507,9 @@ export function ClientSheet({
                         >
                           {c.commissionConfirmed ? "Confermata" : "Da confermare"}
                         </div>
+                        {c.stornoLabel ? (
+                          <div className="text-[10px] text-slate-600">{c.stornoLabel}</div>
+                        ) : null}
                       </td>
                       <td className="px-2 py-2">
                         <Button
@@ -542,6 +547,14 @@ export function ClientSheet({
               className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (selected.warnOnEdit) {
+                  const ok = window.confirm(
+                    "Attenzione: questo contratto NON è fuori storno " +
+                      `(${selected.stornoLabel ?? "in storno"}).\n\n` +
+                      "Confermi di voler salvare comunque?",
+                  );
+                  if (!ok) return;
+                }
                 const fd = new FormData(e.currentTarget);
                 fd.set("utilityType", utilityType);
                 fd.set("operationType", operationType);
@@ -822,6 +835,14 @@ export function ClientSheet({
               className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (selected.warnOnEdit) {
+                  const ok = window.confirm(
+                    "Attenzione: questo contratto NON è fuori storno " +
+                      `(${selected.stornoLabel ?? "in storno"}).\n\n` +
+                      "Confermi di voler salvare comunque?",
+                  );
+                  if (!ok) return;
+                }
                 const fd = new FormData(e.currentTarget);
                 fd.set("status", status);
                 start(async () => {

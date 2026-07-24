@@ -13,6 +13,11 @@ import {
   getMissingRecurringAlerts,
   syncAllRecurringMonths,
 } from "@/lib/recurring-sync";
+import {
+  markLatestContractsByPod,
+  resolveStornoInfo,
+} from "@/lib/storno-status";
+import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 export const dynamic = "force-dynamic";
 
@@ -40,12 +45,23 @@ export default async function ProvvigioniPage() {
         contractId: true,
         contract: {
           select: {
+            id: true,
             clientId: true,
+            status: true,
             paymentStatus: true,
             recurrence: true,
             podPdr: true,
+            pod: true,
+            pdr: true,
             collectionDate: true,
             commissionConfirmed: true,
+            supplyStartDate: true,
+            insertionDate: true,
+            createdAt: true,
+            expiryDate: true,
+            durationMonths: true,
+            stornoEndDate: true,
+            operationType: true,
             client: {
               select: {
                 type: true,
@@ -55,7 +71,7 @@ export default async function ProvvigioniPage() {
               },
             },
             collaborator: { select: { name: true } },
-            supplier: { select: { name: true } },
+            supplier: { select: { name: true, stornoMonths: true } },
           },
         },
       },
@@ -64,6 +80,17 @@ export default async function ProvvigioniPage() {
     }),
     getMissingRecurringAlerts(collabFilter),
   ]);
+
+  const latestMap = markLatestContractsByPod(
+    commissions.map((c) => ({
+      id: c.contract.id,
+      clientId: c.contract.clientId,
+      podPdr: c.contract.podPdr || c.contract.pod || c.contract.pdr,
+      supplyStartDate: c.contract.supplyStartDate,
+      insertionDate: c.contract.insertionDate,
+      createdAt: c.contract.createdAt,
+    })),
+  );
 
   const totals = commissions.reduce(
     (acc, item) => {
@@ -88,6 +115,20 @@ export default async function ProvvigioniPage() {
       ? formatMonthYear(item.contract.collectionDate)
       : "";
 
+    const supply =
+      item.contract.supplyStartDate ??
+      computeSupplyStartDate(item.contract.insertionDate, item.contract.operationType);
+    const storno = resolveStornoInfo({
+      status: item.contract.status,
+      recurrence: item.contract.recurrence,
+      supplyStartDate: supply,
+      stornoMonths: item.contract.supplier.stornoMonths,
+      stornoEndDate: item.contract.stornoEndDate,
+      expiryDate: item.contract.expiryDate,
+      durationMonths: item.contract.durationMonths,
+      isLatestForPod: latestMap.get(item.contract.id) ?? true,
+    });
+
     return {
       id: item.contractId,
       clientId: item.contract.clientId,
@@ -102,6 +143,12 @@ export default async function ProvvigioniPage() {
       paymentStatus: paidLabel,
       confirmed: item.contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,
+      stornoLabel: storno.label,
+      stornoRowClass: storno.rowClassName,
+      warnOnEdit: storno.warnOnEdit,
+      gettoneBorderClass: item.contract.commissionConfirmed
+        ? "border-l-4 border-l-emerald-600"
+        : "border-l-4 border-l-amber-500",
     };
   });
 
@@ -119,8 +166,7 @@ export default async function ProvvigioniPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
         <p className="text-slate-500">
-          Clicca sul nome colonna per ordinare (A→Z / date). Senza data = No. Gettoni storici:
-          50 domestico / 80 business.
+          Colori riga = storno. Bordo sinistro = gettone (ambra da confermare / verde confermato).
           {totals.daConfermare > 0
             ? ` · ${totals.daConfermare} gettoni da confermare.`
             : ""}

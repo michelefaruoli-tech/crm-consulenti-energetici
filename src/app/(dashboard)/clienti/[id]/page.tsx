@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { deleteClientAction } from "@/lib/delete-actions";
 import { hasPermission } from "@/lib/permissions";
 import { ClientSheet } from "@/components/clients/client-sheet";
+import { computeSupplyStartDate } from "@/lib/supply-dates";
+import {
+  markLatestContractsByPod,
+  resolveStornoInfo,
+} from "@/lib/storno-status";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +78,32 @@ export default async function ClienteDetailPage({
       : Promise.resolve([]),
   ]);
 
-  const sheetContracts = client.contracts.map((c) => ({
+  const latestMap = markLatestContractsByPod(
+    client.contracts.map((c) => ({
+      id: c.id,
+      clientId: client.id,
+      podPdr: c.podPdr || c.pod || c.pdr,
+      supplyStartDate: c.supplyStartDate,
+      insertionDate: c.insertionDate,
+      createdAt: c.createdAt,
+    })),
+  );
+
+  const sheetContracts = client.contracts.map((c) => {
+    const supply =
+      c.supplyStartDate ?? computeSupplyStartDate(c.insertionDate, c.operationType);
+    const storno = resolveStornoInfo({
+      status: c.status,
+      recurrence: c.recurrence,
+      supplyStartDate: supply,
+      stornoMonths: c.supplier.stornoMonths,
+      stornoEndDate: c.stornoEndDate,
+      expiryDate: c.expiryDate,
+      durationMonths: c.durationMonths,
+      isLatestForPod: latestMap.get(c.id) ?? true,
+    });
+
+    return {
     id: c.id,
     contractNumber: c.contractNumber,
     status: c.status,
@@ -131,9 +161,12 @@ export default async function ClienteDetailPage({
     collaboratorName: c.collaborator.name,
     gettone: Number(c.commission?.expected ?? 0).toFixed(2),
     commissionConfirmed: c.commissionConfirmed,
+    warnOnEdit: storno.warnOnEdit,
+    stornoLabel: storno.label,
     koReason: c.koReason,
     koNotes: c.koNotes,
-  }));
+  };
+  });
 
   return (
     <div className="space-y-6">

@@ -8,6 +8,7 @@ import {
   updateCommissionFieldAction,
 } from "@/lib/commission-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
+import { StornoLegend } from "@/components/ui/storno-legend";
 
 export type ProvvigioneRow = {
   id: string;
@@ -23,6 +24,10 @@ export type ProvvigioneRow = {
   paymentStatus: string;
   confirmed: string;
   collectionMonth: string;
+  stornoLabel?: string;
+  stornoRowClass?: string;
+  warnOnEdit?: boolean;
+  gettoneBorderClass?: string;
 };
 
 function shortRecurrence(value: string): string {
@@ -70,6 +75,17 @@ export function ProvvigioniFilterTable({
   const router = useRouter();
 
   async function onCellEdit(row: Record<string, unknown>, key: string, value: string) {
+    if (row.warnOnEdit) {
+      const ok = window.confirm(
+        "Attenzione: questo contratto NON è fuori storno.\n\n" +
+          "Confermi di voler modificare comunque?",
+      );
+      if (!ok) {
+        router.refresh();
+        return;
+      }
+    }
+
     const map: Record<string, string> = {
       amount: "expected",
       recurrence: "recurrence",
@@ -147,7 +163,6 @@ export function ProvvigioniFilterTable({
     {
       key: "paymentStatus",
       label: "Pagato",
-      // No se non c'è data
       getValue: (r) => (String(r.collectionMonth ?? "").trim() ? "Sì" : "No"),
       editable: true,
       sortKind: "text",
@@ -160,8 +175,14 @@ export function ProvvigioniFilterTable({
       sortKind: "date",
     },
     {
+      key: "stornoLabel",
+      label: "Storno",
+      getValue: (r) => String(r.stornoLabel ?? ""),
+      sortKind: "text",
+    },
+    {
       key: "confirmed",
-      label: "Stato",
+      label: "Gettone",
       getValue: (r) => String(r.confirmed ?? ""),
       sortKind: "text",
       render: (r) => {
@@ -175,7 +196,7 @@ export function ProvvigioniFilterTable({
                   : "font-medium text-amber-900"
               }
             >
-              {ok ? "Confermata" : "Da confermare"}
+              {ok ? "OK" : "Da conf."}
             </span>
             {canConfirm && !ok ? (
               <ConfirmButton commissionId={String(r.commissionId)} />
@@ -198,8 +219,8 @@ export function ProvvigioniFilterTable({
   return (
     <div className="space-y-2">
       <p className="text-xs text-slate-500">
-        Pagato: <strong>Sì</strong>/<strong>No</strong> (inserisce la data). Data:{" "}
-        <strong>MM/AAAA</strong>.
+        Pagato: <strong>Sì</strong>/<strong>No</strong>. Data: <strong>MM/AAAA</strong>.
+        Bordo sinistro = stato gettone (ambra / verde).
         {canDelete ? " Elimina rimuove il contratto (doppioni)." : ""}
       </p>
       <ExcelFilterTable
@@ -208,24 +229,16 @@ export function ProvvigioniFilterTable({
         columns={columns}
         rowKey={(r) => String(r.commissionId)}
         onCellEdit={onCellEdit}
-        getRowClassName={(r) =>
-          String(r.confirmed) === "Confermata"
-            ? "bg-emerald-50/80"
-            : "bg-amber-50/90"
-        }
+        getRowClassName={(r) => {
+          const storno = String(r.stornoRowClass ?? "");
+          const border = String(r.gettoneBorderClass ?? "");
+          return [storno, border].filter(Boolean).join(" ") || undefined;
+        }}
       />
-      <p className="text-xs text-slate-600">
-        <span className="mr-3 inline-flex items-center gap-1">
-          <span className="inline-block h-3 w-3 rounded bg-amber-200 ring-1 ring-amber-300" />
-          Giallo = gettone da confermare
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-3 w-3 rounded bg-emerald-200 ring-1 ring-emerald-300" />
-          Verde = gettone confermato
-        </span>
-        {canConfirm
-          ? " · Admin/Segreteria: usa «Conferma» sulle righe gialle."
-          : " · Dopo la tua modifica il gettone resta in attesa di conferma Admin."}
+      <StornoLegend />
+      <p className="text-xs text-slate-500">
+        Gettone: bordo ambra = da confermare · bordo verde = confermato
+        {canConfirm ? " · Admin: usa «Conferma»." : ""}
       </p>
     </div>
   );

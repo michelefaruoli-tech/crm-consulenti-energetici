@@ -14,12 +14,12 @@ Priorità concordate dopo analisi Excel `Rendiconto_Contratti_Database.xlsx`.
 - Può modificare il gettone sui **propri** contratti → riga **gialla** finché Admin/Segreteria non conferma → **verde**
 - Admin/Segreteria: modifica gettone = auto-verde; pulsante **Conferma** sulle righe gialle in Provvigioni
 
-### B. Colori da date / storno / ricorrenza
-Regole da definire con te:
-- fuori storno → verde
-- in scadenza → giallo
-- scaduti → rosso
-- pagamento ricorrente → verde salvia
+### B. Colori da date / storno / ricorrenza ✅
+- Mesi di storno configurabili per fornitore (`/fornitori`)
+- Conteggio da **ingresso in fornitura**
+- Colori in **Contratti** e **Provvigioni**: fuori storno (verde), ricorrente (salvia), in scadenza (giallo), in storno/scaduto (rosso), KO/cessato (grigio)
+- Stesso cliente + stesso POD → conta solo il contratto **più recente**
+- Popup di avviso se si modifica un contratto non fuori storno
 
 ### C. OCR da fattura/documento
 Estrazione automatica: nome, CF/P.IVA, POD/PDR, indirizzi, tipo contratto, consumi per fasce, fisso/variabile, PCV/spread

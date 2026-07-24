@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StornoLegend } from "@/components/ui/storno-legend";
 import type { CollaboratorOption, ContractTableRow } from "@/lib/contract-row";
 import { updateContractFieldAction } from "@/lib/contract-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
@@ -72,6 +73,18 @@ export function ContractsFilterTable({
     startSave(async () => {
       setError(null);
       try {
+        const needsWarn = pending.some((p) => {
+          const row = rows.find((r) => r.id === p.contractId);
+          return row?.warnOnEdit;
+        });
+        if (needsWarn) {
+          const ok = window.confirm(
+            "Attenzione: stai modificando uno o più contratti che NON sono fuori storno " +
+              "(ancora in storno, in scadenza, scaduti o precedenti sullo stesso POD).\n\n" +
+              "Confermi di voler salvare comunque?",
+          );
+          if (!ok) return;
+        }
         for (const p of pending) {
           const fd = new FormData();
           fd.set("contractId", p.contractId);
@@ -190,6 +203,12 @@ export function ContractsFilterTable({
       sortKind: "date",
     },
     {
+      key: "stornoLabel",
+      label: "Storno",
+      getValue: (r) => String(r.stornoLabel ?? ""),
+      sortKind: "text",
+    },
+    {
       key: "operationLabel",
       label: "Operazione",
       getValue: (r) => String(r.operationLabel ?? ""),
@@ -263,6 +282,7 @@ export function ContractsFilterTable({
         rows={rows as unknown as Record<string, unknown>[]}
         columns={columns}
         rowKey={(r) => String(r.id)}
+        getRowClassName={(r) => String(r.stornoRowClass ?? "") || undefined}
         onRowClick={(r) => {
           if (dirty && !confirm("Hai modifiche non salvate. Vuoi uscire senza salvarle?")) {
             return;
@@ -271,6 +291,7 @@ export function ContractsFilterTable({
         }}
         onCellEdit={editable ? queueEdit : undefined}
       />
+      <StornoLegend />
     </div>
   );
 }

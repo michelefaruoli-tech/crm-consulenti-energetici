@@ -7,7 +7,7 @@ import { hasPermission } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/commission";
 import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
-import { toContractRow } from "@/lib/contract-row";
+import { toContractRows } from "@/lib/contract-row";
 import { ArchiveImportForm } from "@/components/archive/archive-import-form";
 
 export const dynamic = "force-dynamic";
@@ -23,18 +23,29 @@ export default async function ArchivioPage() {
       where: { isHistorical: true },
       select: {
         id: true,
+        clientId: true,
         status: true,
         insertionDate: true,
+        createdAt: true,
         supplyStartDate: true,
         operationType: true,
+        utilityType: true,
         podPdr: true,
+        pod: true,
+        pdr: true,
+        serviceOther: true,
         archiveLabel: true,
         isHistorical: true,
+        collaboratorId: true,
+        recurrence: true,
+        expiryDate: true,
+        durationMonths: true,
+        stornoEndDate: true,
         client: {
           select: { type: true, companyName: true, firstName: true, lastName: true },
         },
-        supplier: { select: { name: true } },
-        collaborator: { select: { name: true } },
+        supplier: { select: { name: true, stornoMonths: true } },
+        collaborator: { select: { id: true, name: true } },
       },
       orderBy: { insertionDate: "desc" },
       take: 500,
@@ -50,7 +61,7 @@ export default async function ArchivioPage() {
     }),
   ]);
 
-  const rows = contracts.map(toContractRow);
+  const rows = toContractRows(contracts);
 
   return (
     <div className="space-y-6">
