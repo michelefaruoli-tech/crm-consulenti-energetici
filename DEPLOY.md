@@ -15,13 +15,17 @@ Nel file `.env` (nella cartella del CRM):
 ```env
 DATABASE_URL="incolla-qui-la-stringa-neon"
 AUTH_SECRET="una-stringa-segreta-lunga-almeno-32-caratteri"
-# OCR auto-compilazione (almeno una delle due chiavi)
+# OCR auto-compilazione (metti almeno UNA chiave gratis)
+GROQ_API_KEY="gsk_..."
 GEMINI_API_KEY="AIza..."
 OPENAI_API_KEY="sk-..."
-# Ordine di prova (default: gemini poi openai)
-OCR_PROVIDERS="gemini,openai"
+# Ordine di prova (default sotto)
+OCR_PROVIDERS="groq,gemini,openai,ocrspace"
 OCR_MODEL="gpt-4o"
 GEMINI_OCR_MODEL="gemini-2.0-flash"
+GROQ_OCR_MODEL="meta-llama/llama-4-scout-17b-16e-instruct"
+# Opzionale: chiave gratis da ocr.space (altrimenti usa demo)
+OCRSPACE_API_KEY=""
 ```
 
 Poi esegui:
@@ -57,9 +61,10 @@ git push -u origin main
 4. In **Environment Variables** aggiungi:
    - `DATABASE_URL` = stessa stringa Neon (pooled)
    - `AUTH_SECRET` = stessa chiave del `.env`
-   - `GEMINI_API_KEY` = chiave gratis da [Google AI Studio](https://aistudio.google.com/apikey) (consigliata)
-   - `OPENAI_API_KEY` = chiave OpenAI (opzionale, fallback)
-   - opzionale: `OCR_PROVIDERS` = `gemini,openai`
+   - `GROQ_API_KEY` = gratis da [console.groq.com](https://console.groq.com) (**consigliata**, limiti alti)
+   - `GEMINI_API_KEY` = gratis da [Google AI Studio](https://aistudio.google.com/apikey)
+   - `OPENAI_API_KEY` = OpenAI (opzionale)
+   - opzionale: `OCR_PROVIDERS` = `groq,gemini,openai,ocrspace`
 5. Deploy
 
 Dopo il primo deploy, se le tabelle non esistono ancora, da locale (con `.env` puntato a Neon):
