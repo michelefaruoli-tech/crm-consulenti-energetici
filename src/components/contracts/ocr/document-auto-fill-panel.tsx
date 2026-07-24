@@ -193,12 +193,15 @@ function rowsToApply(
 export function DocumentAutoFillPanel({
   onApply,
   onAttachFiles,
+  canUseMistralOcr = false,
 }: {
   onApply: (payload: OcrApplyPayload) => void;
   /** Aggiunge i file agli allegati del contratto (CI / bolletta) */
   onAttachFiles: (
     files: Array<{ file: File; docType: string }>,
   ) => void;
+  /** Solo Admin: può attivare Mistral OCR (a pagamento) */
+  canUseMistralOcr?: boolean;
 }) {
   const [identityFiles, setIdentityFiles] = useState<LocalFile[]>([]);
   const [billFiles, setBillFiles] = useState<LocalFile[]>([]);
@@ -206,6 +209,7 @@ export function DocumentAutoFillPanel({
   const [error, setError] = useState<string | null>(null);
   const [extracted, setExtracted] = useState<OcrExtracted | null>(null);
   const [rows, setRows] = useState<ReviewRow[]>([]);
+  const [useMistralOcr, setUseMistralOcr] = useState(false);
   const [pending, start] = useTransition();
 
   const canAnalyze = identityFiles.length + billFiles.length > 0;
@@ -259,7 +263,14 @@ export function DocumentAutoFillPanel({
           fd.append("files", f.file);
           fd.append("roles", "bill");
         }
-        setPhase("Lettura documento…");
+        if (canUseMistralOcr && useMistralOcr) {
+          fd.append("useMistralOcr", "true");
+        }
+        setPhase(
+          canUseMistralOcr && useMistralOcr
+            ? "Lettura con Mistral OCR…"
+            : "Lettura documento…",
+        );
         const res = await fetch("/api/ocr/analyze", { method: "POST", body: fd });
         setPhase("Riconoscimento dati…");
         const data = (await res.json()) as {
@@ -321,7 +332,7 @@ export function DocumentAutoFillPanel({
         />
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           type="button"
           disabled={!canAnalyze || pending}
@@ -342,6 +353,19 @@ export function DocumentAutoFillPanel({
         >
           Continua manualmente
         </Button>
+        {canUseMistralOcr ? (
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={useMistralOcr}
+              onChange={(e) => setUseMistralOcr(e.target.checked)}
+            />
+            <span>
+              Usa <strong>Mistral OCR</strong> (solo Admin · a pagamento · PDF difficili)
+            </span>
+          </label>
+        ) : null}
       </div>
 
       {phase ? <p className="text-sm text-emerald-800">{phase}</p> : null}

@@ -21,8 +21,10 @@ Priorità concordate dopo analisi Excel `Rendiconto_Contratti_Database.xlsx`.
 - Stesso cliente + stesso POD → conta solo il contratto **più recente**
 - Popup di avviso se si modifica un contratto non fuori storno
 
-### C. OCR da fattura/documento
-Estrazione automatica: nome, CF/P.IVA, POD/PDR, indirizzi, tipo contratto, consumi per fasce, fisso/variabile, PCV/spread
+### C. OCR da fattura/documento ✅ (in uso)
+Estrazione automatica CI/bolletta con fallback:
+- Groq → Gemini (gratis) → **OpenRouter + Cloudflare AI** (PDF gratis) → OpenAI → OCR.space
+- **Mistral OCR** (a pagamento): solo **Admin**, e solo se spunta la casella in «Analizza documenti»
 
 ### D. Report fornitori → assegnazione provvigioni
 Ogni fornitore ha format diverso → soluzione prevista:

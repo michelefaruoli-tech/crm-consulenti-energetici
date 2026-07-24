@@ -15,15 +15,20 @@ Nel file `.env` (nella cartella del CRM):
 ```env
 DATABASE_URL="incolla-qui-la-stringa-neon"
 AUTH_SECRET="una-stringa-segreta-lunga-almeno-32-caratteri"
-# OCR auto-compilazione (metti almeno UNA chiave gratis)
+# OCR auto-compilazione (metti almeno UNA chiave)
 GROQ_API_KEY="gsk_..."
 GEMINI_API_KEY="AIza..."
+OPENROUTER_API_KEY="sk-or-..."
 OPENAI_API_KEY="sk-..."
-# Ordine di prova (default sotto)
-OCR_PROVIDERS="groq,gemini,openai,ocrspace"
+# Ordine: gratis prima, poi OpenRouter+Mistral OCR, poi OpenAI
+OCR_PROVIDERS="groq,gemini,openrouter,openai,ocrspace"
 OCR_MODEL="gpt-4o"
 GEMINI_OCR_MODEL="gemini-2.0-flash"
 GROQ_OCR_MODEL="meta-llama/llama-4-scout-17b-16e-instruct"
+# OpenRouter: modello che struttura il JSON + motore PDF
+OPENROUTER_OCR_MODEL="google/gemini-2.0-flash-001"
+# Default gratis. Mistral OCR solo se Admin spunta la casella in UI.
+OPENROUTER_PDF_ENGINE="cloudflare-ai"
 # Opzionale: chiave gratis da ocr.space (altrimenti usa demo)
 OCRSPACE_API_KEY=""
 ```
@@ -63,8 +68,10 @@ git push -u origin main
    - `AUTH_SECRET` = stessa chiave del `.env`
    - `GROQ_API_KEY` = gratis da [console.groq.com](https://console.groq.com) (**consigliata**, limiti alti)
    - `GEMINI_API_KEY` = gratis da [Google AI Studio](https://aistudio.google.com/apikey)
-   - `OPENAI_API_KEY` = OpenAI (opzionale)
-   - opzionale: `OCR_PROVIDERS` = `groq,gemini,openai,ocrspace`
+   - `OPENROUTER_API_KEY` = da [openrouter.ai/keys](https://openrouter.ai/keys)
+   - opzionale: `OCR_PROVIDERS` = `groq,gemini,openrouter,openai,ocrspace`
+   - opzionale: `OPENROUTER_OCR_MODEL` = `google/gemini-2.0-flash-001`
+   - PDF default gratis: `OPENROUTER_PDF_ENGINE` = `cloudflare-ai` (Mistral OCR solo se Admin lo attiva in UI)
 5. Deploy
 
 Dopo il primo deploy, se le tabelle non esistono ancora, da locale (con `.env` puntato a Neon):

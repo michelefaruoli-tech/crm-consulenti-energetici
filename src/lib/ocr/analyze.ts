@@ -70,7 +70,7 @@ export type OcrFileInput = {
   role: "identity" | "bill" | "other";
 };
 
-export type OcrProviderName = "gemini" | "groq" | "openai" | "ocrspace";
+export type OcrProviderName = "gemini" | "groq" | "openai" | "openrouter" | "ocrspace";
 
 class ProviderError extends Error {
   constructor(
@@ -347,6 +347,131 @@ async function analyzeWithOpenAI(files: OcrFileInput[]): Promise<OcrExtracted> {
   return parseAndValidate(json.choices?.[0]?.message?.content ?? "{}");
 }
 
+/**
+ * OpenRouter: di default PDF con Cloudflare (gratis).
+ * Mistral OCR (a pagamento) solo se richiesto esplicitamente dall'Admin.
+ */
+async function analyzeWithOpenRouter(
+  files: OcrFileInput[],
+  opts?: { useMistralOcr?: boolean },
+): Promise<OcrExtracted> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new ProviderError("OpenRouter non configurato", false, "openrouter");
+
+  const model =
+    process.env.OPENROUTER_OCR_MODEL || "google/gemini-2.0-flash-001";
+  // Default gratis; Mistral solo se Admin lo attiva in UI
+  const pdfEngine = opts?.useMistralOcr
+    ? "mistral-ocr"
+    : process.env.OPENROUTER_PDF_ENGINE || "cloudflare-ai";
+
+  const content: Array<Record<string, unknown>> = [
+    { type: "text", text: `${SYSTEM_PROMPT}\n\n${userPrompt(files)}` },
+  ];
+
+  let hasPdf = false;
+  let hasImage = false;
+  for (const f of files) {
+    const mime = f.mimeType === "image/jpg" ? "image/jpeg" : f.mimeType;
+    if (mime.startsWith("image/")) {
+      hasImage = true;
+      content.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${mime};base64,${f.base64}`,
+        },
+      });
+    } else if (mime === "application/pdf") {
+      hasPdf = true;
+      content.push({
+        type: "file",
+        file: {
+          filename: f.filename || "documento.pdf",
+          file_data: `data:application/pdf;base64,${f.base64}`,
+        },
+      });
+    } else {
+      content.push({
+        type: "text",
+        text: `[File non supportato da OpenRouter: ${f.filename} (${f.mimeType})]`,
+      });
+    }
+  }
+
+  if (!hasPdf && !hasImage) {
+    throw new ProviderError(
+      "OpenRouter richiede immagini JPG/PNG o PDF",
+      false,
+      "openrouter",
+    );
+  }
+
+  const body: Record<string, unknown> = {
+    model,
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [{ role: "user", content }],
+    max_tokens: 4000,
+  };
+
+  if (hasPdf) {
+    body.plugins = [
+      {
+        id: "file-parser",
+        pdf: { engine: pdfEngine },
+      },
+    ];
+  }
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://crm.fmconsulenza.it",
+      "X-Title": process.env.OPENROUTER_APP_NAME || "CRM Consulenti Energetici",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("[ocr] openrouter", res.status, errText.slice(0, 300));
+    if (res.status === 401 || res.status === 403) {
+      throw new ProviderError("Chiave OpenRouter non valida", false, "openrouter");
+    }
+    if (res.status === 402) {
+      throw new ProviderError(
+        "Credito OpenRouter insufficiente (Mistral OCR a pagamento)",
+        false,
+        "openrouter",
+      );
+    }
+    if (res.status === 429) {
+      throw new ProviderError("Limite OpenRouter raggiunto", true, "openrouter");
+    }
+    throw new ProviderError("Analisi OpenRouter non riuscita", true, "openrouter");
+  }
+
+  const json = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+  };
+  if (json.error?.message) {
+    throw new ProviderError(json.error.message, true, "openrouter");
+  }
+
+  const extracted = parseAndValidate(json.choices?.[0]?.message?.content ?? "{}");
+  if (hasPdf) {
+    extracted.warnings.push(
+      pdfEngine === "mistral-ocr"
+        ? "PDF analizzato con Mistral OCR (Admin, a pagamento): verifica i campi."
+        : "PDF analizzato con Cloudflare AI (gratis): verifica i campi.",
+    );
+  }
+  return extracted;
+}
+
 /** OCR.space (testo) + LLM testo (Groq/Gemini) — ultima spiaggia gratuita */
 async function ocrSpaceExtractText(file: OcrFileInput): Promise<string> {
   const apiKey = process.env.OCRSPACE_API_KEY || "K87899142388957"; // free demo key
@@ -464,10 +589,18 @@ async function analyzeWithOcrSpace(files: OcrFileInput[]): Promise<OcrExtracted>
   return extracted;
 }
 
-const ALL_PROVIDERS: OcrProviderName[] = ["groq", "gemini", "openai", "ocrspace"];
+const ALL_PROVIDERS: OcrProviderName[] = [
+  "groq",
+  "gemini",
+  "openrouter",
+  "openai",
+  "ocrspace",
+];
 
 function configuredProviders(): OcrProviderName[] {
-  const raw = (process.env.OCR_PROVIDERS || "groq,gemini,openai,ocrspace")
+  const raw = (
+    process.env.OCR_PROVIDERS || "groq,gemini,openrouter,openai,ocrspace"
+  )
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
@@ -483,12 +616,14 @@ function hasKey(provider: OcrProviderName): boolean {
   }
   if (provider === "groq") return Boolean(process.env.GROQ_API_KEY);
   if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY);
+  if (provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
   // ocrspace: chiave demo sempre disponibile; serve almeno un LLM per strutturare
   if (provider === "ocrspace") {
     return Boolean(
       process.env.GROQ_API_KEY ||
         process.env.GEMINI_API_KEY ||
-        process.env.GOOGLE_AI_API_KEY,
+        process.env.GOOGLE_AI_API_KEY ||
+        process.env.OPENROUTER_API_KEY,
     );
   }
   return false;
@@ -497,6 +632,7 @@ function hasKey(provider: OcrProviderName): boolean {
 async function runProvider(
   provider: OcrProviderName,
   files: OcrFileInput[],
+  opts?: { useMistralOcr?: boolean },
 ): Promise<OcrExtracted> {
   switch (provider) {
     case "gemini":
@@ -505,6 +641,8 @@ async function runProvider(
       return analyzeWithGroq(files);
     case "openai":
       return analyzeWithOpenAI(files);
+    case "openrouter":
+      return analyzeWithOpenRouter(files, opts);
     case "ocrspace":
       return analyzeWithOcrSpace(files);
   }
@@ -512,18 +650,19 @@ async function runProvider(
 
 export async function analyzeDocuments(
   files: OcrFileInput[],
+  opts?: { useMistralOcr?: boolean },
 ): Promise<{ extracted: OcrExtracted; provider: OcrProviderName }> {
   const order = configuredProviders().filter(hasKey);
   if (order.length === 0) {
     throw new Error(
-      "OCR non configurato: aggiungi su Vercel almeno GROQ_API_KEY (gratis) o GEMINI_API_KEY",
+      "OCR non configurato: aggiungi su Vercel GROQ_API_KEY (gratis), GEMINI_API_KEY oppure OPENROUTER_API_KEY",
     );
   }
 
   const errors: string[] = [];
   for (const provider of order) {
     try {
-      const extracted = await runProvider(provider, files);
+      const extracted = await runProvider(provider, files, opts);
       return { extracted, provider };
     } catch (e) {
       if (e instanceof ProviderError) {
@@ -539,7 +678,7 @@ export async function analyzeDocuments(
   }
 
   throw new Error(
-    `Tutti i provider OCR non disponibili. ${errors.join(" · ")}. Aspetta qualche minuto, aggiungi GROQ_API_KEY (gratis su console.groq.com), oppure compila a mano.`,
+    `Tutti i provider OCR non disponibili. ${errors.join(" · ")}. Aspetta qualche minuto, aggiungi GROQ_API_KEY / OPENROUTER_API_KEY, oppure compila a mano.`,
   );
 }
 

@@ -643,6 +643,7 @@ export function NuovoContrattoForm({
   return (
     <div className="space-y-6">
       <DocumentAutoFillPanel
+        canUseMistralOcr={session.role === "ADMIN"}
         onApply={applyOcrPayload}
         onAttachFiles={(items) => {
           void attachOcrFiles(items);

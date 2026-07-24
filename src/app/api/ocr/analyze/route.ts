@@ -115,7 +115,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Nessun file valido" }, { status: 400 });
     }
 
-    const { extracted, provider } = await analyzeDocuments(inputs);
+    // Mistral OCR (a pagamento): solo Admin e solo se spunta la casella
+    const wantMistral =
+      String(form.get("useMistralOcr") ?? "").toLowerCase() === "true" ||
+      String(form.get("useMistralOcr") ?? "") === "1" ||
+      String(form.get("useMistralOcr") ?? "") === "on";
+    const useMistralOcr = wantMistral && session.role === "ADMIN";
+
+    const { extracted, provider } = await analyzeDocuments(inputs, { useMistralOcr });
 
     await writeAuditLog({
       userId: session.id,
@@ -125,11 +132,12 @@ export async function POST(request: Request) {
         fileCount: inputs.length,
         roles: inputs.map((f) => f.role),
         provider,
+        useMistralOcr,
         warningCount: extracted.warnings.length,
       },
     }).catch(() => undefined);
 
-    return NextResponse.json({ ok: true, extracted, provider });
+    return NextResponse.json({ ok: true, extracted, provider, useMistralOcr });
   } catch (e) {
     const message =
       e instanceof Error ? e.message : "Errore durante l'analisi documenti";
