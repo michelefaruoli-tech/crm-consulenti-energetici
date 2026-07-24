@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { analyzeDocuments } from "@/lib/ocr/analyze";
 import { writeAuditLog } from "@/lib/audit";
+import { humanizeOcrError } from "@/lib/ocr/messages";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -47,13 +48,19 @@ export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json({ ok: false, error: "Non autenticato" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, error: humanizeOcrError("Non autenticato") },
+        { status: 401 },
+      );
     }
     if (
       !hasPermission(session.role, "contracts.create") &&
       !hasPermission(session.role, "contracts.edit_all")
     ) {
-      return NextResponse.json({ ok: false, error: "Permesso negato" }, { status: 403 });
+      return NextResponse.json(
+        { ok: false, error: humanizeOcrError("Permesso negato") },
+        { status: 403 },
+      );
     }
 
     const form = await request.formData();
@@ -61,11 +68,17 @@ export async function POST(request: Request) {
     const roles = form.getAll("roles");
 
     if (files.length === 0) {
-      return NextResponse.json({ ok: false, error: "Nessun documento caricato" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: humanizeOcrError("Nessun documento caricato") },
+        { status: 400 },
+      );
     }
     if (files.length > MAX_FILES) {
       return NextResponse.json(
-        { ok: false, error: `Massimo ${MAX_FILES} documenti per analisi` },
+        {
+          ok: false,
+          error: humanizeOcrError(`Massimo ${MAX_FILES} documenti per analisi`),
+        },
         { status: 400 },
       );
     }
@@ -85,7 +98,9 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             ok: false,
-            error: `File troppo grande (max ${Math.round(MAX_SIZE / 1024 / 1024)} MB)`,
+            error: humanizeOcrError(
+              `File troppo grande (max ${Math.round(MAX_SIZE / 1024 / 1024)} MB)`,
+            ),
           },
           { status: 400 },
         );
@@ -96,7 +111,12 @@ export async function POST(request: Request) {
       const mime = sniffMime(buf, filename, entry.type || "");
       if (!ALLOWED.has(mime) && !ALLOWED.has(mime.replace("image/jpg", "image/jpeg"))) {
         return NextResponse.json(
-          { ok: false, error: `Formato non supportato: ${filename}. Usa PDF, JPG o PNG.` },
+          {
+            ok: false,
+            error: humanizeOcrError(
+              `Formato non supportato: ${filename}. Usa PDF, JPG o PNG.`,
+            ),
+          },
           { status: 400 },
         );
       }
@@ -139,9 +159,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, extracted, provider, useMistralOcr });
   } catch (e) {
-    const message =
-      e instanceof Error ? e.message : "Errore durante l'analisi documenti";
-    console.error("[ocr/analyze]", message);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const raw = e instanceof Error ? e.message : "Errore durante l'analisi documenti";
+    console.error("[ocr/analyze]", raw);
+    return NextResponse.json(
+      { ok: false, error: humanizeOcrError(raw) },
+      { status: 500 },
+    );
   }
 }

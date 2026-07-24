@@ -809,13 +809,14 @@ export async function analyzeDocuments(
 
   throw new Error(
     [
-      `Tutti i provider OCR non disponibili. ${errors.join(" · ")}.`,
+      "Non sono riuscito a leggere i documenti con i servizi automatici.",
       onlyPdf
-        ? "Suggerimento: carica foto JPG/PNG delle pagine (gratis) oppure Admin attiva Mistral OCR per i PDF."
-        : !process.env.GROQ_API_KEY
-          ? "Manca GROQ_API_KEY (utile per le foto). Oppure aspetta il reset dei limiti Gemini/OpenAI."
-          : "Aspetta qualche minuto che si resettino i limiti, oppure compila a mano.",
-    ].join(" "),
+        ? "Hai caricato solo PDF: scatta foto JPG/PNG delle pagine e riprova (gratis e più affidabile). In alternativa Admin può attivare Mistral OCR."
+        : "Riprova tra qualche minuto, oppure usa foto più nitide/leggere. Se continua, compila a mano.",
+      errors.length ? `Dettaglio tecnico: ${errors.slice(0, 2).join(" · ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
   );
 }
 
