@@ -18,6 +18,7 @@ import {
   type NewContractPayload,
 } from "@/lib/contract-form-types";
 import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
+import { CapAddressFields } from "@/components/contracts/cap-address-fields";
 import { format } from "date-fns";
 
 function uid() {
@@ -90,13 +91,15 @@ export function NuovoContrattoForm({
 
   const [productName, setProductName] = useState("");
   const [offerCode, setOfferCode] = useState("");
-  const [contractKind, setContractKind] = useState("Mercato libero");
+  const [contractKind, setContractKind] = useState("Domestico");
   const [priceType, setPriceType] = useState("Fisso");
+  const [priceIndex, setPriceIndex] = useState("PUN");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [ibanHolder, setIbanHolder] = useState("");
   const [pricePerKwh, setPricePerKwh] = useState("");
   const [pricePerSmc, setPricePerSmc] = useState("");
   const [pcv, setPcv] = useState("");
+  const [spread, setSpread] = useState("");
   const [monthlyFee, setMonthlyFee] = useState("");
   const [notes, setNotes] = useState("");
   const [masterNotes, setMasterNotes] = useState("");
@@ -126,36 +129,16 @@ export function NuovoContrattoForm({
   );
 
   useEffect(() => {
-    if (zipCode.replace(/\D/g, "").length !== 5) return;
-    void fetch(`/api/cap/${zipCode.replace(/\D/g, "")}`)
-      .then((r) => r.json())
-      .then((d: { found?: boolean; city?: string; province?: string; region?: string }) => {
-        if (!d.found) return;
-        if (d.city) setCity(d.city);
-        if (d.province) setProvince(d.province);
-        if (d.region) setRegion(d.region);
-      })
-      .catch(() => undefined);
-  }, [zipCode]);
+    // Indice di riferimento in base al servizio
+    if (priceType !== "Indicizzato") return;
+    if (services.some((s) => s.service === "GAS") && !services.some((s) => s.service === "LUCE")) {
+      setPriceIndex("PSV");
+    } else {
+      setPriceIndex("PUN");
+    }
+  }, [priceType, services]);
 
-  useEffect(() => {
-    if (supplySame || supplyZip.replace(/\D/g, "").length !== 5) return;
-    void fetch(`/api/cap/${supplyZip.replace(/\D/g, "")}`)
-      .then((r) => r.json())
-      .then((d: { found?: boolean; city?: string; province?: string; region?: string }) => {
-        if (!d.found) return;
-        if (d.city) setSupplyCity(d.city);
-        if (d.province) setSupplyProvince(d.province);
-        if (d.region) setSupplyRegion(d.region);
-      })
-      .catch(() => undefined);
-  }, [supplyZip, supplySame]);
-
-  // Se RID: IBAN preso dalla scheda cliente (già nello stesso campo)
-  useEffect(() => {
-    if (paymentMethod !== "RID") return;
-    // nessun override: usa iban cliente; mostra messaggio sotto
-  }, [paymentMethod]);
+  // CAP gestito da CapAddressFields
 
   function onSupplierChange(value: string) {
     setSupplierChoice(value);
@@ -180,6 +163,10 @@ export function NuovoContrattoForm({
       sendToMaster,
       collaboratorId,
       clientId,
+      idempotencyKey:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       client: {
         type: clientType,
         firstName,
@@ -227,11 +214,13 @@ export function NuovoContrattoForm({
       pricePerKwh,
       pricePerSmc,
       pcv,
+      spread,
       monthlyFee,
       notes,
       masterNotes,
       services,
-      attachments,
+      // Allegati via API separata (evita "unexpected response" per body troppo grande)
+      attachments: [],
     };
   }
 
@@ -239,6 +228,14 @@ export function NuovoContrattoForm({
     setErrors([]);
     setMessage(null);
     if (sendToMaster && !draft) {
+      const hasId = attachments.some((a) => ["CI_FRONTE", "CI_RETRO"].includes(a.docType));
+      const hasBill = attachments.some((a) => a.docType === "BOLLETTA");
+      if (!hasId || !hasBill) {
+        setErrors([
+          "Con invio al Master allega almeno documento di identità e bolletta/fattura.",
+        ]);
+        return;
+      }
       if (!confirm("Confermi creazione e invio al Master (michele.faruoli@gmail.com)?")) {
         return;
       }
@@ -250,18 +247,71 @@ export function NuovoContrattoForm({
           setErrors(result?.errors ?? ["Errore di salvataggio"]);
           return;
         }
-        setMessage(
-          [result.message, result.emailError].filter(Boolean).join(" — ") || "Salvato",
-        );
-        if (result.contractIds?.[0]) {
-          router.push(`/contratti/${result.contractIds[0]}`);
-          router.refresh();
+        const contractId = result.contractIds?.[0];
+        if (!contractId) {
+          setErrors(["Contratto creato ma ID mancante"]);
+          return;
         }
+
+        if (attachments.length > 0) {
+          const fd = new FormData();
+          for (const a of attachments) {
+            const bin = atob(a.contentBase64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            fd.append("files", new Blob([bytes], { type: a.mimeType }), a.filename);
+            fd.append("docTypes", a.docType);
+          }
+          const up = await fetch(`/api/contracts/${contractId}/attachments`, {
+            method: "POST",
+            body: fd,
+          });
+          const upJson = (await up.json().catch(() => null)) as {
+            success?: boolean;
+            message?: string;
+          } | null;
+          if (!up.ok || !upJson?.success) {
+            setMessage(
+              `Contratto salvato (${contractId}). Upload allegati: ${upJson?.message ?? "parziale"}.`,
+            );
+          }
+        }
+
+        if (sendToMaster && !draft) {
+          const mailRes = await fetch(`/api/contracts/${contractId}/attachments`, {
+            method: "PUT",
+          });
+          const mailJson = (await mailRes.json().catch(() => null)) as {
+            success?: boolean;
+            emailSent?: boolean;
+            message?: string;
+          } | null;
+          if (!mailRes.ok || !mailJson?.success) {
+            setErrors([
+              mailJson?.message ||
+                "Contratto salvato, ma l'email al Master non è partita. Puoi reinviare dalla scheda lavorazione.",
+            ]);
+            router.push(`/lavorazione/${contractId}`);
+            return;
+          }
+          setMessage(
+            mailJson.emailSent
+              ? "Contratto creato e inviato al Master"
+              : mailJson.message || "Contratto salvato",
+          );
+          router.push(`/lavorazione/${contractId}`);
+          router.refresh();
+          return;
+        }
+
+        setMessage(result.message || "Salvato");
+        router.push(`/contratti/${contractId}`);
+        router.refresh();
       } catch (e) {
         const msg =
           e instanceof Error
             ? e.message
-            : "Risposta inattesa dal server (allegati troppo grandi o errore di rete)";
+            : "Risposta inattesa dal server. Se il contratto risulta creato, aprilo da Contratti / In lavorazione.";
         setErrors([msg]);
       }
     });
@@ -560,13 +610,14 @@ export function NuovoContrattoForm({
                 const t = e.target.value as "PRIVATO" | "AZIENDA";
                 setClientType(t);
                 setClassification("");
+                setContractKind(t === "PRIVATO" ? "Domestico" : "Non domestico");
               }}
             >
               <option value="PRIVATO">Privato (domestico)</option>
               <option value="AZIENDA">Business</option>
             </Select>
           </Field>
-          <Field label={clientType === "PRIVATO" ? "Uso / residenza *" : "Classificazione *"}>
+          <Field label={clientType === "PRIVATO" ? "Classificazione *" : "Classificazione *"}>
             <Select
               value={classification}
               onChange={(e) => setClassification(e.target.value)}
@@ -656,26 +707,23 @@ export function NuovoContrattoForm({
           </div>
         )}
 
-        <div className="grid gap-3 md:grid-cols-6">
-          <Field label="CAP">
-            <Input value={zipCode} onChange={(e) => setZipCode(e.target.value)} />
-          </Field>
-          <Field label="Comune">
-            <Input value={city} onChange={(e) => setCity(e.target.value)} />
-          </Field>
-          <Field label="Provincia">
-            <Input value={province} onChange={(e) => setProvince(e.target.value)} />
-          </Field>
-          <Field label="Regione">
-            <Input value={region} onChange={(e) => setRegion(e.target.value)} />
-          </Field>
-          <Field label="Via/Piazza">
-            <Input value={street} onChange={(e) => setStreet(e.target.value)} />
-          </Field>
-          <Field label="Civico">
-            <Input value={streetNumber} onChange={(e) => setStreetNumber(e.target.value)} />
-          </Field>
-        </div>
+        <p className="text-sm font-medium text-slate-700">
+          {clientType === "AZIENDA" ? "Sede legale" : "Indirizzo di residenza"}
+        </p>
+        <CapAddressFields
+          zipCode={zipCode}
+          city={city}
+          province={province}
+          region={region}
+          street={street}
+          streetNumber={streetNumber}
+          onZipChange={setZipCode}
+          onCityChange={setCity}
+          onProvinceChange={setProvince}
+          onRegionChange={setRegion}
+          onStreetChange={setStreet}
+          onStreetNumberChange={setStreetNumber}
+        />
         <Field label="IBAN">
           <Input
             value={iban}
@@ -743,23 +791,43 @@ export function NuovoContrattoForm({
             <Input value={offerCode} onChange={(e) => setOfferCode(e.target.value)} />
           </Field>
           <Field label="Tipo contratto">
-            <Select value={contractKind} onChange={(e) => setContractKind(e.target.value)}>
-              <option>Mercato libero</option>
-              <option>Tutela / servizio regolato</option>
-              <option>Residenziale</option>
-              <option>Business</option>
-              <option>Dual</option>
-              <option>Altro</option>
+            <Select
+              value={contractKind}
+              onChange={(e) => setContractKind(e.target.value)}
+            >
+              {clientType === "PRIVATO" ? (
+                <>
+                  <option value="Domestico">Domestico</option>
+                  <option value="Altri usi">Altri usi</option>
+                </>
+              ) : (
+                <>
+                  <option value="Non domestico">Non domestico</option>
+                  <option value="Altri usi">Altri usi</option>
+                </>
+              )}
             </Select>
           </Field>
           <Field label="Tipo prezzo">
             <Select value={priceType} onChange={(e) => setPriceType(e.target.value)}>
-              <option>Fisso</option>
-              <option>Variabile</option>
-              <option>Indicizzato</option>
-              <option>Altro</option>
+              <option value="Fisso">Fisso</option>
+              <option value="Indicizzato">Indicizzato</option>
             </Select>
           </Field>
+          {priceType === "Indicizzato" ? (
+            <>
+              <Field label="Indice di riferimento">
+                <Select value={priceIndex} onChange={(e) => setPriceIndex(e.target.value)}>
+                  <option value="PUN">PUN (luce)</option>
+                  <option value="PSV">PSV (gas)</option>
+                  <option value="Altro">Altro</option>
+                </Select>
+              </Field>
+              <Field label="Spread">
+                <Input value={spread} onChange={(e) => setSpread(e.target.value)} />
+              </Field>
+            </>
+          ) : null}
           <Field label="Data registrazione">
             <Input value={formatItDate(registrationDate)} readOnly className="bg-slate-50" />
           </Field>
@@ -799,32 +867,21 @@ export function NuovoContrattoForm({
           L&apos;indirizzo di fornitura coincide con residenza / sede legale
         </label>
         {!supplySame ? (
-          <div className="grid gap-3 md:grid-cols-6">
-            <Field label="CAP">
-              <Input value={supplyZip} onChange={(e) => setSupplyZip(e.target.value)} />
-            </Field>
-            <Field label="Comune">
-              <Input value={supplyCity} onChange={(e) => setSupplyCity(e.target.value)} />
-            </Field>
-            <Field label="Provincia">
-              <Input
-                value={supplyProvince}
-                onChange={(e) => setSupplyProvince(e.target.value)}
-              />
-            </Field>
-            <Field label="Regione">
-              <Input value={supplyRegion} onChange={(e) => setSupplyRegion(e.target.value)} />
-            </Field>
-            <Field label="Via">
-              <Input value={supplyStreet} onChange={(e) => setSupplyStreet(e.target.value)} />
-            </Field>
-            <Field label="Civico">
-              <Input
-                value={supplyStreetNumber}
-                onChange={(e) => setSupplyStreetNumber(e.target.value)}
-              />
-            </Field>
-          </div>
+          <CapAddressFields
+            zipCode={supplyZip}
+            city={supplyCity}
+            province={supplyProvince}
+            region={supplyRegion}
+            street={supplyStreet}
+            streetNumber={supplyStreetNumber}
+            onZipChange={setSupplyZip}
+            onCityChange={setSupplyCity}
+            onProvinceChange={setSupplyProvince}
+            onRegionChange={setSupplyRegion}
+            onStreetChange={setSupplyStreet}
+            onStreetNumberChange={setSupplyStreetNumber}
+            zipLabel="CAP fornitura"
+          />
         ) : null}
       </section>
 
@@ -897,7 +954,7 @@ export function NuovoContrattoForm({
         ) : null}
         <div className="grid gap-3 md:grid-cols-2">
           {DOC_TYPE_OPTIONS.map((doc) => (
-            <div key={doc.value} className="rounded-lg border border-dashed border-slate-300 p-3">
+            <div key={doc.value} className="attachment-tile rounded-lg border border-dashed border-slate-300 p-3">
               <p className="mb-2 text-sm font-medium">{doc.label}</p>
               <input
                 type="file"

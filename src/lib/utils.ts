@@ -24,11 +24,15 @@ export function clientDisplayName(client: {
 }
 
 export async function generateContractNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `CTR-${year}-`;
-  // fallback non-sequenziale se usato fuori da createFull
-  const suffix = Math.floor(Math.random() * 900000 + 100000);
-  return `${prefix}${suffix}`;
+  const { allocateContractNumber, syncContractNumberSequenceFromExisting } = await import(
+    "@/lib/contract-number"
+  );
+  try {
+    return await allocateContractNumber();
+  } catch {
+    await syncContractNumberSequenceFromExisting();
+    return allocateContractNumber();
+  }
 }
 
 export function isContractBlocked(status: string): boolean {

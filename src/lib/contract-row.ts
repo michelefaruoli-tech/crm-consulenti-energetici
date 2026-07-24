@@ -56,7 +56,7 @@ export function toContractRow(contract: {
   const op = normalizeOperationType(contract.operationType);
 
   const opLabels = {
-    CAMBIO: "Cambio",
+    CAMBIO: "Switch",
     VOLTURA: "Voltura",
     ATTIVAZIONE: "Attivazione",
   } as const;

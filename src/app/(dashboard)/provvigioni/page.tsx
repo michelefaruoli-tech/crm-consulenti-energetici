@@ -21,8 +21,8 @@ export default async function ProvvigioniPage() {
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const collabFilter = canViewAll ? undefined : session.id;
 
-  // Allinea tracciamento ricorrenze (mesi mancanti)
-  await syncAllRecurringMonths(collabFilter).catch((e) =>
+  // Sync ricorrenze in background non bloccante (evita attese di molti secondi)
+  void syncAllRecurringMonths(collabFilter).catch((e) =>
     console.error("sync recurring", e),
   );
 
@@ -59,6 +59,7 @@ export default async function ProvvigioniPage() {
         },
       },
       orderBy: { updatedAt: "desc" },
+      take: 150,
     }),
     getMissingRecurringAlerts(collabFilter),
   ]);

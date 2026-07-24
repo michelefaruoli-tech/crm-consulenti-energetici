@@ -2,7 +2,7 @@
 export type OperationType = "CAMBIO" | "VOLTURA" | "ATTIVAZIONE";
 
 export const OPERATION_TYPE_LABELS: Record<OperationType, string> = {
-  CAMBIO: "Cambio fornitore",
+  CAMBIO: "Switch",
   VOLTURA: "Voltura",
   ATTIVAZIONE: "Attivazione",
 };

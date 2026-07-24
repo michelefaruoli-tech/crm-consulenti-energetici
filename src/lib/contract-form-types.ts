@@ -98,4 +98,6 @@ export type NewContractPayload = {
   masterNotes?: string;
   services: ContractServiceLine[];
   attachments: ContractFormAttachment[];
+  /** Chiave anti-duplicato (generata dal client per richiesta) */
+  idempotencyKey?: string;
 };

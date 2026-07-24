@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 
-/** Lookup CAP italiano via Zippopotam (senza API key). */
+type Place = {
+  city: string;
+  province: string;
+  region: string;
+  label: string;
+};
+
+/** Lookup CAP italiano: restituisce TUTTE le località (es. 85025 → Melfi). */
 export async function GET(
   _request: Request,
   context: { params: Promise<{ cap: string }> },
@@ -16,21 +23,57 @@ export async function GET(
       next: { revalidate: 86400 },
     });
     if (!res.ok) {
-      return NextResponse.json({ found: false, cap: clean });
+      return NextResponse.json({ found: false, cap: clean, places: [] });
     }
     const data = (await res.json()) as {
-      places?: { "place name"?: string; state?: string; "state abbreviation"?: string }[];
+      places?: {
+        "place name"?: string;
+        state?: string;
+        "state abbreviation"?: string;
+      }[];
     };
-    const place = data.places?.[0];
+
+    const places: Place[] = (data.places ?? []).map((p) => {
+      const city = (p["place name"] ?? "").trim();
+      const province = (p["state abbreviation"] ?? "").trim();
+      const region = (p.state ?? "").trim();
+      return {
+        city,
+        province,
+        region,
+        label: [city, province, region].filter(Boolean).join(" — "),
+      };
+    });
+
+    // Dedup per città+provincia
+    const seen = new Set<string>();
+    const unique = places.filter((p) => {
+      const k = `${p.city}|${p.province}`.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return Boolean(p.city);
+    });
+
+    // Preferisci comuni "principali": ordina per nome più corto / senza frazione tipica
+    unique.sort((a, b) => {
+      const score = (x: Place) =>
+        (x.city.includes("(") ? 2 : 0) + (x.city.includes("-") ? 1 : 0) + x.city.length / 100;
+      return score(a) - score(b);
+    });
+
+    const first = unique[0];
     return NextResponse.json({
-      found: Boolean(place),
+      found: unique.length > 0,
       cap: clean,
-      city: place?.["place name"] ?? "",
-      province: place?.["state abbreviation"] ?? "",
-      region: place?.state ?? "",
+      multi: unique.length > 1,
+      places: unique,
+      // retrocompatibilità: non auto-scegliere se multi
+      city: unique.length === 1 ? first?.city ?? "" : "",
+      province: unique.length === 1 ? first?.province ?? "" : "",
+      region: unique.length === 1 ? first?.region ?? "" : "",
       country: "Italia",
     });
   } catch {
-    return NextResponse.json({ found: false, cap: clean });
+    return NextResponse.json({ found: false, cap: clean, places: [] });
   }
 }

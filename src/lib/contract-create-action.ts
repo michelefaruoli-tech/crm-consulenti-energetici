@@ -10,26 +10,22 @@ import {
   isValidIban,
   type NewContractPayload,
 } from "@/lib/contract-form-types";
-import { clientDisplayName } from "@/lib/utils";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
-import { getMasterEmail, sendMail, textToHtmlParagraphs } from "@/lib/mail";
-import { formatRomeDateTime } from "@/lib/timezone";
+import { getMasterEmail } from "@/lib/mail";
+import {
+  allocateContractNumber,
+  syncContractNumberSequenceFromExisting,
+} from "@/lib/contract-number";
 
 async function nextContractNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `CTR-${year}-`;
-  const latest = await prisma.contract.findFirst({
-    where: { contractNumber: { startsWith: prefix } },
-    orderBy: { contractNumber: "desc" },
-    select: { contractNumber: true },
-  });
-  let seq = 1;
-  if (latest?.contractNumber) {
-    const part = latest.contractNumber.split("-").pop();
-    const n = Number(part);
-    if (Number.isFinite(n)) seq = n + 1;
+  try {
+    return await allocateContractNumber();
+  } catch (e) {
+    // Tabella sequenza assente o non allineata: sync + retry
+    console.error("[nextContractNumber] retry after sync", e);
+    await syncContractNumberSequenceFromExisting();
+    return allocateContractNumber();
   }
-  return `${prefix}${String(seq).padStart(6, "0")}`;
 }
 
 function num(v?: string): number | null {
@@ -110,8 +106,12 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     ["CI_FRONTE", "CI_RETRO"].includes(a.docType),
   );
   const hasBill = payload.attachments.some((a) => a.docType === "BOLLETTA");
-  if (!hasId) errors.push("Allegato documento di identità obbligatorio");
-  if (!hasBill) errors.push("Allegato bolletta/fattura obbligatorio");
+  // Gli allegati possono essere caricati subito dopo via API (evita body troppo grande).
+  // Se non ci sono nell'payload, non blocchiamo qui: il client li invia dopo.
+  if (payload.attachments.length > 0) {
+    if (!hasId) errors.push("Allegato documento di identità obbligatorio");
+    if (!hasBill) errors.push("Allegato bolletta/fattura obbligatorio");
+  }
 
   // IBAN obbligatorio solo con Master + RID
   if (payload.paymentMethod === "RID") {
@@ -122,84 +122,6 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   return errors;
 }
 
-async function sendMasterEmail(opts: {
-  contractId: string;
-  contractNumber: string;
-  subject: string;
-  body: string;
-  html?: string;
-  attachments: { filename: string; content: Buffer; contentType: string }[];
-  sentById: string;
-  payloadHash: string;
-  emailType?: string;
-}): Promise<{ ok: boolean; error?: string; messageId?: string; skipped?: boolean }> {
-  const toEmail = getMasterEmail();
-
-  const existing = await prisma.contractEmailLog.findFirst({
-    where: {
-      contractId: opts.contractId,
-      payloadHash: opts.payloadHash,
-      status: "SENT",
-    },
-  });
-  if (existing) return { ok: true, messageId: existing.messageId ?? undefined };
-
-  const mail = await sendMail({
-    to: toEmail,
-    subject: opts.subject,
-    text: opts.body,
-    html: opts.html ?? textToHtmlParagraphs(opts.body),
-    attachments: opts.attachments,
-  });
-
-  if (mail.skipped) {
-    await prisma.contractEmailLog.create({
-      data: {
-        contractId: opts.contractId,
-        toEmail,
-        subject: opts.subject,
-        status: "SKIPPED_NO_SMTP",
-        emailType: opts.emailType ?? "MASTER_NEW",
-        error: mail.error,
-        sentById: opts.sentById,
-        payloadHash: opts.payloadHash,
-      },
-    });
-    return { ok: false, skipped: true, error: mail.error };
-  }
-
-  if (mail.ok) {
-    await prisma.contractEmailLog.create({
-      data: {
-        contractId: opts.contractId,
-        toEmail,
-        subject: opts.subject,
-        status: "SENT",
-        emailType: opts.emailType ?? "MASTER_NEW",
-        messageId: mail.messageId,
-        sentById: opts.sentById,
-        payloadHash: opts.payloadHash,
-        sentAt: new Date(),
-      },
-    });
-    return { ok: true, messageId: mail.messageId };
-  }
-
-  await prisma.contractEmailLog.create({
-    data: {
-      contractId: opts.contractId,
-      toEmail,
-      subject: opts.subject,
-      status: "ERROR",
-      emailType: opts.emailType ?? "MASTER_NEW",
-      error: mail.error,
-      sentById: opts.sentById,
-      payloadHash: opts.payloadHash,
-    },
-  });
-  return { ok: false, error: mail.error };
-}
-
 export async function createFullContractAction(
   payload: NewContractPayload,
 ): Promise<{
@@ -208,13 +130,22 @@ export async function createFullContractAction(
   contractIds?: string[];
   message?: string;
   emailError?: string;
+  emailSent?: boolean;
+  code?: string;
 }> {
   try {
     return await createFullContractActionInner(payload);
   } catch (e) {
     console.error("[createFullContractAction]", e);
-    const msg = e instanceof Error ? e.message : "Errore imprevisto in salvataggio";
-    return { ok: false, errors: [msg] };
+    const raw = e instanceof Error ? e.message : "Errore imprevisto in salvataggio";
+    const friendly = raw.includes("Contract_contractNumber_key")
+      ? "Non è stato possibile generare il numero del contratto. Riprova."
+      : raw.includes("Unique constraint")
+        ? "Dato già presente. Riprova o aggiorna la pagina."
+        : raw.startsWith("Invalid `prisma")
+          ? "Errore di salvataggio. Riprova tra pochi secondi."
+          : raw.slice(0, 200);
+    return { ok: false, errors: [friendly], code: "CREATE_FAILED" };
   }
 }
 
@@ -226,6 +157,8 @@ async function createFullContractActionInner(
   contractIds?: string[];
   message?: string;
   emailError?: string;
+  emailSent?: boolean;
+  code?: string;
 }> {
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.create")) {
@@ -240,6 +173,27 @@ async function createFullContractActionInner(
   const sendToMaster = Boolean(payload.sendToMaster) && !payload.draft;
   const errors = validatePayload(payload, sendToMaster);
   if (errors.length) return { ok: false, errors };
+
+  if (payload.idempotencyKey?.trim()) {
+    const existing = await prisma.createIdempotency.findUnique({
+      where: { key: payload.idempotencyKey.trim() },
+    });
+    if (existing) {
+      let ids: string[] = [];
+      try {
+        ids = JSON.parse(existing.contractIds) as string[];
+      } catch {
+        ids = [];
+      }
+      return {
+        ok: true,
+        contractIds: ids,
+        message: "Richiesta già elaborata (nessun duplicato creato)",
+        code: "IDEMPOTENT_REPLAY",
+        emailSent: false,
+      };
+    }
+  }
 
   // Cliente
   let clientId = payload.clientId;
@@ -418,70 +372,92 @@ async function createFullContractActionInner(
   let firstId = "";
 
   for (const line of services) {
-    const contractNumber = await nextContractNumber();
-    const podPdr =
-      line.service === "LUCE"
-        ? line.pod?.trim() || null
-        : line.service === "GAS"
-          ? line.pdr?.trim() || null
-          : line.pod?.trim() || line.pdr?.trim() || null;
+    let created: { id: string } | null = null;
+    let attempts = 0;
+    while (!created && attempts < 5) {
+      attempts++;
+      try {
+        const contractNumber = await nextContractNumber();
+        const podPdr =
+          line.service === "LUCE"
+            ? line.pod?.trim() || null
+            : line.service === "GAS"
+              ? line.pdr?.trim() || null
+              : line.pod?.trim() || line.pdr?.trim() || null;
 
-    const created = await prisma.contract.create({
-      data: {
-        contractNumber,
-        clientId,
-        supplierId,
-        collaboratorId,
-        createdById: session.id,
-        status,
-        utilityType: line.service,
-        serviceOther: line.serviceOther || null,
-        operationType: payload.operationType || "SWITCH",
-        operationOther: payload.operationOther || null,
-        productName: payload.productName || null,
-        offerCode: payload.offerCode || null,
-        contractKind: payload.contractKind || null,
-        priceType: payload.priceType || null,
-        pod: line.pod?.trim() || null,
-        pdr: line.pdr?.trim() || null,
-        podPdr,
-        powerKw: num(line.powerKw),
-        annualKwh: num(line.annualKwh),
-        annualSmc: num(line.annualSmc),
-        pricePerKwh: num(payload.pricePerKwh),
-        pricePerSmc: num(payload.pricePerSmc),
-        pcv: num(payload.pcv),
-        spread: num(payload.spread),
-        monthlyFee: num(payload.monthlyFee),
-        oneOffFee: num(payload.oneOffFee),
-        discount: num(payload.discount),
-        economicNotes: payload.economicNotes || null,
-        paymentMethod: payload.paymentMethod || null,
-        ibanHolder: payload.ibanHolder || null,
-        ibanHolderCf: payload.ibanHolderCf || null,
-        invoiceEmail: payload.invoiceEmail || null,
-        supplyClassification: classification,
-        durationMonths: duration,
-        supplyStartDate: supplyStart,
-        expiryDate,
-        insertionDate,
-        sendToMaster,
-        assignedToMaster: sendToMaster,
-        masterEmail,
-        emailIdempotencyKey: idempotencyKey,
-        emailStatus: sendToMaster ? "PENDING" : null,
-        toWork: sendToMaster,
-        notes: payload.notes || null,
-        masterNotes: payload.masterNotes || null,
-        internalNotes: payload.notes || null,
-        technicalJson: JSON.stringify({
-          phoneNumber: line.phoneNumber,
-          migrationCode: line.migrationCode,
-          techNotes: line.techNotes,
-        }),
-        parentContractId: firstId || null,
-      },
-    });
+        created = await prisma.contract.create({
+          data: {
+            contractNumber,
+            clientId,
+            supplierId,
+            collaboratorId,
+            createdById: session.id,
+            status,
+            utilityType: line.service,
+            serviceOther: line.serviceOther || null,
+            operationType: payload.operationType || "SWITCH",
+            operationOther: payload.operationOther || null,
+            productName: payload.productName || null,
+            offerCode: payload.offerCode || null,
+            contractKind: payload.contractKind || null,
+            priceType: payload.priceType || null,
+            pod: line.pod?.trim() || null,
+            pdr: line.pdr?.trim() || null,
+            podPdr,
+            powerKw: num(line.powerKw),
+            annualKwh: num(line.annualKwh),
+            annualSmc: num(line.annualSmc),
+            pricePerKwh: num(payload.pricePerKwh),
+            pricePerSmc: num(payload.pricePerSmc),
+            pcv: num(payload.pcv),
+            spread: num(payload.spread),
+            monthlyFee: num(payload.monthlyFee),
+            oneOffFee: num(payload.oneOffFee),
+            discount: num(payload.discount),
+            economicNotes: payload.economicNotes || null,
+            paymentMethod: payload.paymentMethod || null,
+            ibanHolder: payload.ibanHolder || null,
+            ibanHolderCf: payload.ibanHolderCf || null,
+            invoiceEmail: payload.invoiceEmail || null,
+            supplyClassification: classification,
+            durationMonths: duration,
+            supplyStartDate: supplyStart,
+            expiryDate,
+            insertionDate,
+            sendToMaster,
+            assignedToMaster: sendToMaster,
+            masterEmail,
+            emailIdempotencyKey: idempotencyKey,
+            emailStatus: sendToMaster ? "PENDING" : null,
+            toWork: sendToMaster,
+            notes: payload.notes || null,
+            masterNotes: payload.masterNotes || null,
+            internalNotes: payload.notes || null,
+            technicalJson: JSON.stringify({
+              phoneNumber: line.phoneNumber,
+              migrationCode: line.migrationCode,
+              techNotes: line.techNotes,
+            }),
+            parentContractId: firstId || null,
+          },
+          select: { id: true },
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.includes("Contract_contractNumber_key") && attempts < 5) {
+          await syncContractNumberSequenceFromExisting();
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (!created) {
+      return {
+        ok: false,
+        errors: ["Non è stato possibile generare il numero del contratto. Riprova."],
+        code: "NUMBER_ALLOC_FAILED",
+      };
+    }
 
     if (!firstId) firstId = created.id;
     createdIds.push(created.id);
@@ -508,9 +484,10 @@ async function createFullContractActionInner(
       data: { contractId: created.id, expected: 0 },
     });
 
-    // Allegati solo sul primo contratto (evita payload enorme in multi-servizio)
+    // Allegati piccoli solo sul primo contratto; i grandi arrivano via API upload
     if (created.id === firstId) {
       for (const att of payload.attachments) {
+        if (!att.contentBase64 || att.contentBase64.length > 500_000) continue;
         await prisma.document.create({
           data: {
             contractId: created.id,
@@ -527,136 +504,17 @@ async function createFullContractActionInner(
     }
   }
 
-  let emailError: string | undefined;
-  if (sendToMaster && firstId) {
-    const client = await prisma.client.findUniqueOrThrow({ where: { id: clientId } });
-    const supplier = await prisma.supplier.findUniqueOrThrow({ where: { id: supplierId } });
-    const collab = await prisma.user.findUniqueOrThrow({ where: { id: collaboratorId } });
-    const practices = await prisma.contract.findMany({
-      where: { id: { in: createdIds } },
-      select: {
-        contractNumber: true,
-        utilityType: true,
-        pod: true,
-        pdr: true,
-        operationType: true,
+  if (payload.idempotencyKey?.trim() && createdIds.length) {
+    await prisma.createIdempotency.create({
+      data: {
+        key: payload.idempotencyKey.trim(),
+        contractIds: JSON.stringify(createdIds),
+        userId: session.id,
       },
-    });
-    const firstNumber = practices[0]?.contractNumber ?? "";
-    const subject = `Nuovo contratto da lavorare – ${firstNumber} – ${clientDisplayName(client)} – ${services.map((s) => s.service).join("+")}`;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
-    const body = [
-      "Il contratto è stato inserito nella coda «In lavorazione» del gestionale.",
-      "",
-      `Numero pratica: ${practices.map((c) => c.contractNumber).join(", ")}`,
-      `Data e ora invio: ${formatRomeDateTime(new Date())}`,
-      `Collaboratore: ${collab.name}`,
-      `Inserito da: ${session.name}`,
-      `Cliente: ${clientDisplayName(client)}`,
-      `Tipologia: ${client.type === "AZIENDA" ? "Business" : "Privato"}`,
-      `Ragione sociale: ${client.companyName || "—"}`,
-      `CF: ${client.fiscalCode || "—"}`,
-      `P.IVA: ${client.vatNumber || "—"}`,
-      `Telefono: ${client.phone || "—"}`,
-      `Email: ${client.email || "—"}`,
-      `PEC: ${client.pec || "—"}`,
-      `Residenza/sede: ${[client.street, client.streetNumber, client.zipCode, client.city, client.province].filter(Boolean).join(" ") || client.address || "—"}`,
-      `Fornitura: ${
-        client.addressesMatch
-          ? "(coincide con residenza/sede)"
-          : [client.supplyStreet, client.supplyStreetNumber, client.supplyZipCode, client.supplyCity]
-              .filter(Boolean)
-              .join(" ") || "—"
-      }`,
-      `Servizio: ${services.map((s) => s.service).join(", ")}`,
-      `Tipo operazione: ${payload.operationType || "—"}`,
-      `Fornitore: ${supplier.name}`,
-      `POD: ${services.map((s) => s.pod).filter(Boolean).join(", ") || "—"}`,
-      `PDR: ${services.map((s) => s.pdr).filter(Boolean).join(", ") || "—"}`,
-      `Tipo contratto: ${payload.contractKind || "—"}`,
-      `Tipo prezzo: ${payload.priceType || "—"}`,
-      `Prezzo energia €/kWh: ${payload.pricePerKwh || "—"}`,
-      `Prezzo gas €/Smc: ${payload.pricePerSmc || "—"}`,
-      `PCV: ${payload.pcv || "—"}`,
-      `Spread: ${payload.spread || "—"}`,
-      `Consumi: ${services
-        .map((s) => s.annualKwh || s.annualSmc || "")
-        .filter(Boolean)
-        .join(", ") || "—"}`,
-      `Metodo pagamento: ${payload.paymentMethod || "—"}`,
-      `IBAN: ${payload.paymentMethod === "RID" ? (payload.client.iban ? "presente (protetto)" : "mancante") : "n/d"}`,
-      `Note: ${payload.masterNotes || payload.notes || "—"}`,
-      `Allegati: ${payload.attachments.map((a) => a.filename).join(", ") || "nessuno"}`,
-      `Link scheda: ${appUrl}/lavorazione/${firstId}`,
-      `Link pratica: ${appUrl}/contratti/${firstId}`,
-    ].join("\n");
-
-    const hash = idempotencyKey ?? createHash("sha256")
-      .update(JSON.stringify({ createdIds, subject, sendToMaster: true }))
-      .digest("hex");
-
-    const mailAtts: { filename: string; content: Buffer; contentType: string }[] = [];
-    let mailBytes = 0;
-    for (const a of payload.attachments.slice(0, 6)) {
-      const buf = Buffer.from(a.contentBase64, "base64");
-      if (mailBytes + buf.length > 4 * 1024 * 1024) break;
-      mailBytes += buf.length;
-      mailAtts.push({
-        filename: a.filename,
-        content: buf,
-        contentType: a.mimeType,
-      });
-    }
-
-    const mail = await sendMasterEmail({
-      contractId: firstId,
-      contractNumber: firstNumber,
-      subject,
-      body,
-      attachments: mailAtts,
-      sentById: session.id,
-      payloadHash: hash,
-      emailType: "MASTER_NEW",
-    });
-
-    const now = new Date();
-    if (mail.ok) {
-      await prisma.contract.updateMany({
-        where: { id: { in: createdIds } },
-        data: {
-          status: "IN_LAVORAZIONE",
-          assignedToMaster: true,
-          sendToMaster: true,
-          sentToMasterAt: now,
-          workEmailDate: now,
-          workStatus: "IN_LAVORAZIONE",
-          emailStatus: "SENT",
-          emailMessageId: mail.messageId ?? null,
-          emailAttempts: { increment: 1 },
-          emailLastError: null,
-          masterEmail: getMasterEmail(),
-          emailIdempotencyKey: hash,
-        },
-      });
-    } else {
-      emailError = mail.error;
-      await prisma.contract.updateMany({
-        where: { id: { in: createdIds } },
-        data: {
-          // Contratto resta in coda lavorazione anche se email fallisce
-          status: "IN_LAVORAZIONE",
-          assignedToMaster: true,
-          sendToMaster: true,
-          workStatus: "ERRORE_INVIO",
-          emailStatus: mail.skipped ? "SKIPPED_NO_SMTP" : "ERROR",
-          emailAttempts: { increment: 1 },
-          emailLastError: mail.error ?? "Errore invio",
-          masterEmail: getMasterEmail(),
-          emailIdempotencyKey: hash,
-        },
-      });
-    }
+    }).catch(() => undefined);
   }
+
+  // Email Master inviata dal client via API dopo upload allegati (evita body/timeout Server Action)
 
   await prisma.auditLog.create({
     data: {
@@ -669,6 +527,7 @@ async function createFullContractActionInner(
   });
 
   revalidatePath("/contratti");
+  revalidatePath("/lavorazione");
   revalidatePath("/clienti");
   revalidatePath("/provvigioni");
   revalidatePath("/");
@@ -679,8 +538,9 @@ async function createFullContractActionInner(
     message: payload.draft
       ? "Bozza salvata"
       : sendToMaster
-        ? "Contratto creato e inviato al Master"
+        ? "Contratto creato. Invio email in corso…"
         : `Creat${createdIds.length > 1 ? "i" : "o"} ${createdIds.length} contrat${createdIds.length > 1 ? "ti" : "to"}`,
-    emailError,
+    code: sendToMaster ? "CREATED_PENDING_EMAIL" : "CREATED",
+    emailSent: false,
   };
 }

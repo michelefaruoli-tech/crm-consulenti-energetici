@@ -17,3 +17,18 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* Allegati: hover leggero e accessibile */
+@media (prefers-reduced-motion: no-preference) {
+  .attachment-tile {
+    transition:
+      transform 150ms ease,
+      box-shadow 150ms ease,
+      border-color 150ms ease;
+  }
+  .attachment-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+    border-color: rgb(16 185 129);
+  }
+}

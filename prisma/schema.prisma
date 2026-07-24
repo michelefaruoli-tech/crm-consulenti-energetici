@@ -482,6 +482,19 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
+model ContractNumberSequence {
+  /// Anno (es. 2026)
+  year Int @id
+  last Int @default(0)
+}
+
+model CreateIdempotency {
+  key         String   @id
+  contractIds String
+  userId      String?
+  createdAt   DateTime @default(now())
+}
+
 model BackupLog {
   id        String   @id @default(cuid())
   filename  String

@@ -58,7 +58,7 @@ export const SERVICE_OPTIONS = [
 ] as const;
 
 export const OPERATION_OPTIONS = [
-  { value: "SWITCH", label: "Switch / Cambio" },
+  { value: "SWITCH", label: "Switch" },
   { value: "VOLTURA", label: "Voltura" },
   { value: "ATTIVAZIONE", label: "Attivazione" },
   { value: "SUBENTRO", label: "Subentro" },
