@@ -166,3 +166,192 @@ export async function confirmCommissionAction(formData: FormData): Promise<void>
   revalidatePath(`/contratti`);
   revalidatePath(`/clienti`);
 }
+
+function parseIdList(formData: FormData, key: string): string[] {
+  const raw = String(formData.get(key) ?? "");
+  return [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+}
+
+async function assertCanAccessCommissions(
+  session: { id: string; role: Parameters<typeof hasPermission>[0] },
+  commissionIds: string[],
+) {
+  if (commissionIds.length === 0) throw new Error("Nessuna riga selezionata");
+  if (commissionIds.length > 200) throw new Error("Massimo 200 righe per volta");
+
+  const rows = await prisma.commission.findMany({
+    where: { id: { in: commissionIds } },
+    select: {
+      id: true,
+      contractId: true,
+      contract: { select: { collaboratorId: true, recurrence: true } },
+    },
+  });
+  if (rows.length === 0) throw new Error("Nessuna provvigione trovata");
+
+  const canAll = hasPermission(session.role, "commissions.view_all");
+  for (const r of rows) {
+    if (!canAll && r.contract.collaboratorId !== session.id) {
+      throw new Error("Permesso negato su una o più righe");
+    }
+  }
+  return rows;
+}
+
+/** Segna pagato (collectionDate) su più contratti. */
+export async function bulkMarkPaidAction(formData: FormData): Promise<{ ok: true; count: number }> {
+  const session = await requireSession();
+  const ids = parseIdList(formData, "commissionIds");
+  const rows = await assertCanAccessCommissions(session, ids);
+
+  const monthRaw = String(formData.get("collectionMonth") ?? "").trim();
+  let collectionDate = new Date();
+  if (monthRaw) {
+    const d = parseFlexibleDate(monthRaw);
+    if (!d) throw new Error("Data non valida (usa MM/AAAA)");
+    collectionDate = d;
+  }
+
+  for (const r of rows) {
+    await prisma.contract.update({
+      where: { id: r.contractId },
+      data: {
+        paymentStatus: "Incassato",
+        collectionDate,
+      },
+    });
+  }
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Commission",
+    entityId: rows[0]?.contractId ?? "",
+    details: {
+      source: "bulk_mark_paid",
+      count: rows.length,
+      collectionDate: collectionDate.toISOString().slice(0, 10),
+    },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath("/contratti");
+  return { ok: true, count: rows.length };
+}
+
+/** Conferma gettone (verde) su più contratti — solo Admin/Segreteria. */
+export async function bulkConfirmCommissionsAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number }> {
+  const session = await requireSession();
+  if (!canConfirmCommission(session.role)) {
+    throw new Error("Solo Admin o Segreteria possono confermare il gettone");
+  }
+  const ids = parseIdList(formData, "commissionIds");
+  const rows = await assertCanAccessCommissions(session, ids);
+  const now = new Date();
+
+  for (const r of rows) {
+    await prisma.contract.update({
+      where: { id: r.contractId },
+      data: {
+        commissionConfirmed: true,
+        commissionConfirmedAt: now,
+      },
+    });
+  }
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Commission",
+    entityId: rows[0]?.contractId ?? "",
+    details: { source: "bulk_confirm", count: rows.length },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath("/contratti");
+  return { ok: true, count: rows.length };
+}
+
+/**
+ * Per ogni contratto selezionato ricorrente:
+ * - mode=oldest → paga il mese MISSING più vecchio
+ * - mode=all → paga tutti i mesi MISSING
+ * con settledPeriod = mese del bonifico/rendiconto.
+ */
+export async function bulkPayRecurringAction(
+  formData: FormData,
+): Promise<{ ok: true; monthsPaid: number; contracts: number }> {
+  const session = await requireSession();
+  const ids = parseIdList(formData, "commissionIds");
+  const rows = await assertCanAccessCommissions(session, ids);
+  const mode = String(formData.get("mode") ?? "oldest");
+  const settledRaw = String(formData.get("settledPeriod") ?? "").trim();
+  const settledPeriod = /^\d{4}-\d{2}$/.test(settledRaw)
+    ? settledRaw
+    : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+
+  let monthsPaid = 0;
+  let contractsTouched = 0;
+
+  for (const r of rows) {
+    const missing = await prisma.recurringMonth.findMany({
+      where: { contractId: r.contractId, status: "MISSING" },
+      orderBy: { period: "asc" },
+    });
+    if (missing.length === 0) continue;
+
+    const toPay = mode === "all" ? missing : [missing[0]];
+    contractsTouched += 1;
+
+    for (const m of toPay) {
+      await prisma.recurringMonth.update({
+        where: { id: m.id },
+        data: {
+          status: "PAID",
+          paidAt: new Date(),
+          settledPeriod,
+        },
+      });
+      monthsPaid += 1;
+    }
+
+    const latestPaid = await prisma.recurringMonth.findFirst({
+      where: { contractId: r.contractId, status: "PAID" },
+      orderBy: { period: "desc" },
+      select: { period: true },
+    });
+    if (latestPaid) {
+      const [y, mo] = latestPaid.period.split("-").map(Number);
+      await prisma.contract.update({
+        where: { id: r.contractId },
+        data: {
+          paymentStatus: "Incassato",
+          collectionDate: new Date(y, mo - 1, 1),
+        },
+      });
+    }
+    await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);
+  }
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "RecurringMonth",
+    entityId: settledPeriod,
+    details: {
+      source: "bulk_pay_recurring",
+      mode,
+      settledPeriod,
+      monthsPaid,
+      contracts: contractsTouched,
+    },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  return { ok: true, monthsPaid, contracts: contractsTouched };
+}

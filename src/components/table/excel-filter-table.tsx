@@ -27,6 +27,11 @@ type Props = {
   dense?: boolean;
   /** Classi CSS aggiuntive per riga (es. colori stato) */
   getRowClassName?: (row: Record<string, unknown>) => string | undefined;
+  /** Selezione multipla (checkbox) */
+  selection?: {
+    selectedKeys: Set<string>;
+    onChange: (next: Set<string>) => void;
+  };
 };
 
 export function ExcelFilterTable({
@@ -38,6 +43,7 @@ export function ExcelFilterTable({
   emptyMessage = "Nessun risultato",
   dense = false,
   getRowClassName,
+  selection,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
@@ -140,6 +146,35 @@ export function ExcelFilterTable({
     }
   }
 
+  const filteredKeys = useMemo(() => filtered.map((r) => rowKey(r)), [filtered, rowKey]);
+  const allFilteredSelected =
+    Boolean(selection) &&
+    filteredKeys.length > 0 &&
+    filteredKeys.every((k) => selection!.selectedKeys.has(k));
+  const someFilteredSelected =
+    Boolean(selection) && filteredKeys.some((k) => selection!.selectedKeys.has(k));
+
+  function toggleSelectAllFiltered() {
+    if (!selection) return;
+    const next = new Set(selection.selectedKeys);
+    if (allFilteredSelected) {
+      for (const k of filteredKeys) next.delete(k);
+    } else {
+      for (const k of filteredKeys) next.add(k);
+    }
+    selection.onChange(next);
+  }
+
+  function toggleOne(key: string) {
+    if (!selection) return;
+    const next = new Set(selection.selectedKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    selection.onChange(next);
+  }
+
+  const colSpan = columns.length + (selection ? 1 : 0);
+
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
       {hasAnyFilter ? (
@@ -160,6 +195,20 @@ export function ExcelFilterTable({
       <table className={cn("w-full text-left", dense ? "min-w-0 text-xs" : "min-w-full text-sm")}>
         <thead className="bg-slate-50 text-slate-600">
           <tr>
+            {selection ? (
+              <th className={cn("align-middle", dense ? "px-1.5 py-1.5" : "px-3 py-2")}>
+                <input
+                  type="checkbox"
+                  checked={allFilteredSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+                  }}
+                  onChange={toggleSelectAllFiltered}
+                  title="Seleziona / deseleziona tutte le righe visibili"
+                  aria-label="Seleziona tutte"
+                />
+              </th>
+            ) : null}
             {columns.map((col) => {
               const active = (selected[col.key]?.size ?? 0) > 0;
               return (
@@ -260,23 +309,39 @@ export function ExcelFilterTable({
           {filtered.length === 0 ? (
             <tr>
               <td
-                colSpan={columns.length}
+                colSpan={colSpan}
                 className="px-4 py-8 text-center text-slate-500"
               >
                 {emptyMessage}
               </td>
             </tr>
           ) : (
-            filtered.map((row) => (
+            filtered.map((row) => {
+              const key = rowKey(row);
+              return (
               <tr
-                key={rowKey(row)}
+                key={key}
                 className={cn(
                   "border-t border-slate-100",
                   onRowClick && "cursor-pointer hover:bg-slate-50",
+                  selection?.selectedKeys.has(key) && "bg-emerald-50/60",
                   getRowClassName?.(row),
                 )}
                 onClick={() => onRowClick?.(row)}
               >
+                {selection ? (
+                  <td
+                    className={cn(dense ? "px-1.5 py-1" : "px-3 py-2")}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selection.selectedKeys.has(key)}
+                      onChange={() => toggleOne(key)}
+                      aria-label="Seleziona riga"
+                    />
+                  </td>
+                ) : null}
                 {columns.map((col) => (
                   <td
                     key={col.key}
@@ -318,12 +383,16 @@ export function ExcelFilterTable({
                   </td>
                 ))}
               </tr>
-            ))
+            );
+            })
           )}
         </tbody>
       </table>
       <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
         {filtered.length} di {rows.length} righe
+        {selection && selection.selectedKeys.size > 0
+          ? ` · ${selection.selectedKeys.size} selezionate`
+          : ""}
       </div>
     </div>
   );
