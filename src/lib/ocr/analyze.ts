@@ -358,8 +358,35 @@ async function analyzeWithOpenRouter(
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new ProviderError("OpenRouter non configurato", false, "openrouter");
 
-  const model =
+  const primaryModel =
     process.env.OPENROUTER_OCR_MODEL || "google/gemini-2.0-flash-001";
+  const fallbackModel =
+    process.env.OPENROUTER_OCR_FALLBACK_MODEL || "openrouter/free";
+
+  const models = [primaryModel];
+  if (fallbackModel && fallbackModel !== primaryModel) models.push(fallbackModel);
+
+  let lastError: ProviderError | null = null;
+  for (const model of models) {
+    try {
+      return await analyzeWithOpenRouterModel(files, opts, apiKey, model);
+    } catch (e) {
+      if (e instanceof ProviderError) {
+        lastError = e;
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError ?? new ProviderError("Analisi OpenRouter non riuscita", true, "openrouter");
+}
+
+async function analyzeWithOpenRouterModel(
+  files: OcrFileInput[],
+  opts: { useMistralOcr?: boolean } | undefined,
+  apiKey: string,
+  model: string,
+): Promise<OcrExtracted> {
   // Default gratis; Mistral solo se Admin lo attiva in UI
   const pdfEngine = opts?.useMistralOcr
     ? "mistral-ocr"
@@ -409,10 +436,13 @@ async function analyzeWithOpenRouter(
   const body: Record<string, unknown> = {
     model,
     temperature: 0,
-    response_format: { type: "json_object" },
     messages: [{ role: "user", content }],
     max_tokens: 4000,
   };
+  // Alcuni modelli free non supportano response_format
+  if (!String(model).includes(":free") && model !== "openrouter/free") {
+    body.response_format = { type: "json_object" };
+  }
 
   if (hasPdf) {
     body.plugins = [
@@ -436,21 +466,50 @@ async function analyzeWithOpenRouter(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    console.error("[ocr] openrouter", res.status, errText.slice(0, 300));
+    console.error("[ocr] openrouter", model, res.status, errText.slice(0, 400));
+    let detail = "";
+    try {
+      const parsed = JSON.parse(errText) as {
+        error?: { message?: string } | string;
+        message?: string;
+      };
+      detail =
+        (typeof parsed.error === "string"
+          ? parsed.error
+          : parsed.error?.message) ||
+        parsed.message ||
+        "";
+    } catch {
+      detail = errText.slice(0, 160);
+    }
     if (res.status === 401 || res.status === 403) {
-      throw new ProviderError("Chiave OpenRouter non valida", false, "openrouter");
+      throw new ProviderError(
+        detail || "Chiave OpenRouter non valida",
+        false,
+        "openrouter",
+      );
     }
     if (res.status === 402) {
       throw new ProviderError(
-        "Credito OpenRouter insufficiente (Mistral OCR a pagamento)",
+        detail || "Credito OpenRouter insufficiente",
         false,
         "openrouter",
       );
     }
     if (res.status === 429) {
-      throw new ProviderError("Limite OpenRouter raggiunto", true, "openrouter");
+      throw new ProviderError(
+        detail || "Limite OpenRouter raggiunto",
+        true,
+        "openrouter",
+      );
     }
-    throw new ProviderError("Analisi OpenRouter non riuscita", true, "openrouter");
+    throw new ProviderError(
+      detail
+        ? `OpenRouter (${model}): ${detail}`
+        : `Analisi OpenRouter non riuscita (HTTP ${res.status})`,
+      true,
+      "openrouter",
+    );
   }
 
   const json = (await res.json()) as {
@@ -517,7 +576,7 @@ ${ocrText.slice(0, 20000)}
 
 Trasforma il testo nel JSON richiesto.`;
 
-  // Preferisci Groq testo (limiti alti), poi Gemini testo
+  // Preferisci Groq testo, poi OpenRouter testo, poi Gemini
   if (process.env.GROQ_API_KEY) {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -530,6 +589,33 @@ Trasforma il testo nel JSON richiesto.`;
         temperature: 0,
         response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      return parseAndValidate(json.choices?.[0]?.message?.content ?? "{}");
+    }
+  }
+
+  if (process.env.OPENROUTER_API_KEY) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://crm.fmconsulenza.it",
+        "X-Title": process.env.OPENROUTER_APP_NAME || "CRM Consulenti Energetici",
+      },
+      body: JSON.stringify({
+        model:
+          process.env.OPENROUTER_TEXT_MODEL ||
+          process.env.OPENROUTER_OCR_MODEL ||
+          "google/gemini-2.0-flash-001",
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 4000,
       }),
     });
     if (res.ok) {
@@ -567,7 +653,7 @@ Trasforma il testo nel JSON richiesto.`;
   }
 
   throw new ProviderError(
-    "OCR.space ok ma nessun LLM testo disponibile (serve GROQ_API_KEY o GEMINI_API_KEY)",
+    "OCR.space ok ma nessun LLM testo disponibile (serve GROQ_API_KEY, OPENROUTER_API_KEY o GEMINI_API_KEY)",
     false,
     "ocrspace",
   );
@@ -678,7 +764,12 @@ export async function analyzeDocuments(
   }
 
   throw new Error(
-    `Tutti i provider OCR non disponibili. ${errors.join(" · ")}. Aspetta qualche minuto, aggiungi GROQ_API_KEY / OPENROUTER_API_KEY, oppure compila a mano.`,
+    [
+      `Tutti i provider OCR non disponibili. ${errors.join(" · ")}.`,
+      !process.env.GROQ_API_KEY
+        ? "Manca GROQ_API_KEY su Vercel (gratis: console.groq.com) — è il fallback più utile quando Gemini/OpenAI sono al limite."
+        : "Aspetta qualche minuto che si resettino i limiti, oppure compila a mano.",
+    ].join(" "),
   );
 }
 
