@@ -223,7 +223,8 @@ export async function PUT(
     });
 
     return NextResponse.json({
-      success: true,
+      success: mail.ok,
+      contractSaved: true,
       contractId: contract.id,
       contractNumber: contract.contractNumber,
       emailSent: mail.ok,
@@ -231,9 +232,12 @@ export async function PUT(
       documentsInDb: contract.documents.length,
       message: mail.ok
         ? atts.length
-          ? `Email inviata al Master con ${atts.length} allegat${atts.length === 1 ? "o" : "i"}`
-          : "Email inviata al Master (allegati come link nel testo)"
-        : `Contratto salvato. Email non inviata: ${mail.error ?? "errore SMTP"}`,
+          ? `Contratto creato e inviato al Master con ${atts.length} allegat${atts.length === 1 ? "o" : "i"}.`
+          : "Contratto creato e inviato al Master."
+        : "Il contratto è stato salvato, ma l'email non è stata inviata.",
+      details: mail.ok
+        ? undefined
+        : [{ field: "email", message: mail.error ?? "Errore SMTP" }],
       code: mail.ok ? "OK" : "EMAIL_SEND_FAILED",
     });
   } catch (e) {

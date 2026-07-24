@@ -48,14 +48,24 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
 
 export const MASTER_EMAIL = "michele.faruoli@gmail.com";
 
+/** Tendina Servizio: solo Gas / Luce / Altro (POD e PDR sono campi tecnici). */
 export const SERVICE_OPTIONS = [
   { value: "LUCE", label: "Luce" },
   { value: "GAS", label: "Gas" },
-  { value: "DUAL", label: "Dual Luce e Gas" },
-  { value: "TELEFONIA", label: "Telefonia" },
-  { value: "POS", label: "POS" },
-  { value: "FOTOVOLTAICO", label: "Fotovoltaico" },
   { value: "ALTRO", label: "Altro" },
+] as const;
+
+/** Valori legacy ancora presenti in DB (solo lettura / migrazione). */
+export const LEGACY_SERVICE_VALUES = [
+  "DUAL",
+  "TELEFONIA",
+  "POS",
+  "FOTOVOLTAICO",
+  "POD",
+  "PDR",
+  "POD_PDR",
+  "POD/PDR",
+  "ENERGIA",
 ] as const;
 
 export const OPERATION_OPTIONS = [

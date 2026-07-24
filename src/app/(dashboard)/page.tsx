@@ -25,7 +25,9 @@ export default async function DashboardPage() {
     const [
       totalContracts,
       activeContracts,
-      inProgress,
+      inLavorazioneCount,
+      inAttesaPagamentoCount,
+      koCount,
       expired,
       inLavorazioneList,
       commissions,
@@ -40,15 +42,23 @@ export default async function DashboardPage() {
           ...where,
           sendToMaster: true,
           assignedToMaster: true,
-          status: {
-            in: [
-              "IN_LAVORAZIONE",
-              "IN_ATTESA_PAGAMENTO",
-              "ERRORE_INVIO",
-              "DA_LAVORARE",
-              "INVIATO_AL_MASTER",
-            ],
-          },
+          status: "IN_LAVORAZIONE",
+        },
+      }),
+      prisma.contract.count({
+        where: {
+          ...where,
+          sendToMaster: true,
+          assignedToMaster: true,
+          status: "IN_ATTESA_PAGAMENTO",
+        },
+      }),
+      prisma.contract.count({
+        where: {
+          ...where,
+          sendToMaster: true,
+          assignedToMaster: true,
+          status: "KO",
         },
       }),
       prisma.contract.count({
@@ -63,6 +73,7 @@ export default async function DashboardPage() {
           ...where,
           sendToMaster: true,
           assignedToMaster: true,
+          status: "IN_LAVORAZIONE",
         },
         take: 12,
         select: {
@@ -145,8 +156,18 @@ export default async function DashboardPage() {
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="Contratti totali" value={totalContracts} />
-          <StatCard label="Contratti attivi" value={activeContracts} tone="success" />
-          <StatCard label="In lavorazione" value={inProgress} tone="warning" />
+          <Link href="/lavorazione">
+            <StatCard label="In lavorazione" value={inLavorazioneCount} tone="warning" />
+          </Link>
+          <Link href="/attesa-pagamento">
+            <StatCard label="In attesa di pagamento" value={inAttesaPagamentoCount} tone="warning" />
+          </Link>
+          <Link href="/attivati">
+            <StatCard label="Attivati" value={activeContracts} tone="success" />
+          </Link>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="KO" value={koCount} tone="danger" />
           <StatCard label="Scaduti / da rinnovare" value={expired} tone="danger" />
         </div>
 
@@ -260,6 +281,7 @@ export default async function DashboardPage() {
           </p>
           <ContractsFilterTable
             rows={tableRows}
+            canDelete
             canChangeCollaborator={canChangeCollaborator}
             collaborators={collaborators}
           />

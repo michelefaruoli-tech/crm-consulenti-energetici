@@ -1,8 +1,6 @@
 import Link from "next/link";
-import { loginAction } from "@/lib/actions";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/form";
 import { Zap } from "lucide-react";
+import { LoginForm } from "@/components/auth/login-form";
 
 export default async function LoginPage({
   searchParams,
@@ -30,31 +28,7 @@ export default async function LoginPage({
           </p>
         ) : null}
 
-        <form action={loginAction} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Email</label>
-            <Input
-              type="email"
-              name="email"
-              required
-              placeholder="admin@crm.local"
-              className="border-slate-700 bg-slate-900 text-white"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Password</label>
-            <Input
-              type="password"
-              name="password"
-              required
-              placeholder="••••••••"
-              className="border-slate-700 bg-slate-900 text-white"
-            />
-          </div>
-          <Button type="submit" className="w-full">
-            Accedi
-          </Button>
-        </form>
+        <LoginForm />
 
         <p className="mt-4 text-center text-sm">
           <Link href="/forgot-password" className="text-emerald-400 hover:underline">

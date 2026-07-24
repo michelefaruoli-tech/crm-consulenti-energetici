@@ -182,7 +182,10 @@ export function ClientSheet({
   const [clientType, setClientType] = useState(client.type);
 
   // Blocco 2 state
-  const [utilityType, setUtilityType] = useState(selected?.utilityType ?? "LUCE");
+  const [utilityType, setUtilityType] = useState(() => {
+    const u = (selected?.utilityType ?? "LUCE").toUpperCase();
+    return u === "LUCE" || u === "GAS" || u === "ALTRO" ? u : "ALTRO";
+  });
   const [operationType, setOperationType] = useState(
     selected?.operationType === "CAMBIO" ? "SWITCH" : selected?.operationType ?? "SWITCH",
   );
@@ -203,7 +206,8 @@ export function ClientSheet({
 
   useEffect(() => {
     if (!selected) return;
-    setUtilityType(selected.utilityType ?? "LUCE");
+    const u = (selected.utilityType ?? "LUCE").toUpperCase();
+    setUtilityType(u === "LUCE" || u === "GAS" || u === "ALTRO" ? u : "ALTRO");
     setOperationType(
       selected.operationType === "CAMBIO" ? "SWITCH" : selected.operationType ?? "SWITCH",
     );
@@ -598,7 +602,7 @@ export function ClientSheet({
                 </Field>
               ) : null}
 
-              {(utilityType === "LUCE" || utilityType === "DUAL") && (
+              {utilityType === "LUCE" && (
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label="POD">
                     <Input name="pod" defaultValue={selected.pod ?? selected.podPdr ?? ""} />
@@ -611,7 +615,7 @@ export function ClientSheet({
                   </Field>
                 </div>
               )}
-              {(utilityType === "GAS" || utilityType === "DUAL") && (
+              {utilityType === "GAS" && (
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label="PDR">
                     <Input name="pdr" defaultValue={selected.pdr ?? ""} />
@@ -621,15 +625,10 @@ export function ClientSheet({
                   </Field>
                 </div>
               )}
-              {utilityType !== "LUCE" &&
-              utilityType !== "GAS" &&
-              utilityType !== "DUAL" ? (
+              {utilityType === "ALTRO" ? (
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Identificativo">
-                    <Input name="podPdr" defaultValue={selected.podPdr ?? ""} />
-                  </Field>
-                  <Field label="Descrizione / dettagli">
-                    <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} />
+                  <Field label="Specifica servizio *">
+                    <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} required />
                   </Field>
                 </div>
               ) : null}
@@ -654,8 +653,7 @@ export function ClientSheet({
                     ))}
                   </Select>
                 </Field>
-                {clientType === "AZIENDA" &&
-                (utilityType === "LUCE" || utilityType === "DUAL") ? (
+                {clientType === "AZIENDA" && utilityType === "LUCE" ? (
                   <Field label="Livello di tensione">
                     <Select name="voltageLevel" defaultValue={selected.voltageLevel ?? ""}>
                       <option value="">—</option>

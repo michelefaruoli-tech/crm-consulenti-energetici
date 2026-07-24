@@ -5,10 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
+import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { clientDisplayName, formatDate } from "@/lib/utils";
 import { daysSince } from "@/lib/master-workflow";
 import { formatRomeDateTime } from "@/lib/timezone";
-import { MASTER_WORKFLOW_STATUSES, MASTER_STATUS_LABELS } from "@/lib/master-workflow";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +31,14 @@ export default async function LavorazionePage({
   }
 
   const sp = await searchParams;
+  // Sezione «In lavorazione»: SOLO stato esatto IN_LAVORAZIONE (esclude In attesa pagamento)
   const where = {
     deletedAt: null,
     isHistorical: false,
     sendToMaster: true,
     assignedToMaster: true,
+    status: "IN_LAVORAZIONE" as const,
     ...(canSeeAll ? {} : { collaboratorId: session.id }),
-    ...(sp.status ? { status: sp.status as never } : {}),
     ...(sp.collaboratorId ? { collaboratorId: sp.collaboratorId } : {}),
     ...(sp.supplierId ? { supplierId: sp.supplierId } : {}),
     ...(sp.service ? { utilityType: sp.service } : {}),
@@ -62,7 +63,8 @@ export default async function LavorazionePage({
       : {}),
   };
 
-  const [contracts, collaborators, suppliers, statusCounts] = await Promise.all([
+  const [contracts, collaborators, suppliers, countInLavorazione, countAttesa] =
+    await Promise.all([
     prisma.contract.findMany({
       where,
       include: {
@@ -85,15 +87,23 @@ export default async function LavorazionePage({
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
-    prisma.contract.groupBy({
-      by: ["status"],
+    prisma.contract.count({
       where: {
         deletedAt: null,
         sendToMaster: true,
         assignedToMaster: true,
+        status: "IN_LAVORAZIONE",
         ...(canSeeAll ? {} : { collaboratorId: session.id }),
       },
-      _count: { id: true },
+    }),
+    prisma.contract.count({
+      where: {
+        deletedAt: null,
+        sendToMaster: true,
+        assignedToMaster: true,
+        status: "IN_ATTESA_PAGAMENTO",
+        ...(canSeeAll ? {} : { collaboratorId: session.id }),
+      },
     }),
   ]);
 
@@ -106,26 +116,27 @@ export default async function LavorazionePage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Contratti in lavorazione</h1>
         <p className="text-slate-500">
-          Solo pratiche inviate al Master · non include bozze o registrazioni interne
+          Solo pratiche con stato «In lavorazione». Le pratiche «In attesa di pagamento» sono
+          nella sezione dedicata.
+        </p>
+        <p className="mt-1 text-sm">
+          <Link href="/attesa-pagamento" className="text-emerald-700 underline">
+            Vai a Contratti in attesa di pagamento →
+          </Link>
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {MASTER_WORKFLOW_STATUSES.map((st) => {
-          const count =
-            statusCounts.find((s) => s.status === st)?._count.id ?? 0;
-          return (
-            <div
-              key={st}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
-            >
-              <p className="text-xs text-slate-500">{MASTER_STATUS_LABELS[st]}</p>
-              <p className="text-2xl font-semibold text-slate-900">{count}</p>
-            </div>
-          );
-        })}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <p className="text-xs text-slate-500">In lavorazione</p>
+          <p className="text-2xl font-semibold text-slate-900">{countInLavorazione}</p>
+        </div>
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
+          <p className="text-xs text-amber-800">In attesa di pagamento (altra sezione)</p>
+          <p className="text-2xl font-semibold text-amber-950">{countAttesa}</p>
+        </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
-          <p className="text-xs text-emerald-800">Aggiornate oggi</p>
+          <p className="text-xs text-emerald-800">Aggiornate oggi (lista)</p>
           <p className="text-2xl font-semibold text-emerald-900">{updatedToday}</p>
         </div>
       </div>
@@ -133,16 +144,6 @@ export default async function LavorazionePage({
       <form className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-6">
         <Field label="Ricerca">
           <Input name="q" defaultValue={sp.q ?? ""} placeholder="Pratica, cliente, POD..." />
-        </Field>
-        <Field label="Stato">
-          <Select name="status" defaultValue={sp.status ?? ""}>
-            <option value="">Tutti</option>
-            {MASTER_WORKFLOW_STATUSES.map((st) => (
-              <option key={st} value={st}>
-                {MASTER_STATUS_LABELS[st]}
-              </option>
-            ))}
-          </Select>
         </Field>
         {canSeeAll ? (
           <Field label="Collaboratore">
@@ -171,9 +172,6 @@ export default async function LavorazionePage({
             <option value="">Tutti</option>
             <option value="LUCE">Luce</option>
             <option value="GAS">Gas</option>
-            <option value="TELEFONIA">Telefonia</option>
-            <option value="POS">POS</option>
-            <option value="FOTOVOLTAICO">Fotovoltaico</option>
             <option value="ALTRO">Altro</option>
           </Select>
         </Field>
@@ -253,11 +251,14 @@ export default async function LavorazionePage({
                       {formatRomeDateTime(c.updatedAt)}
                     </td>
                     <td className="px-3 py-2">
-                      <Link href={`/lavorazione/${c.id}`}>
-                        <Button type="button" size="sm" variant="secondary">
-                          Apri scheda
-                        </Button>
-                      </Link>
+                      <div className="flex flex-col items-end gap-1">
+                        <Link href={`/lavorazione/${c.id}`}>
+                          <Button type="button" size="sm" variant="secondary">
+                            Apri scheda
+                          </Button>
+                        </Link>
+                        <DeleteRowButton kind="contract" id={c.id} />
+                      </div>
                     </td>
                   </tr>
                 );

@@ -14,6 +14,8 @@ import {
   updateMasterWorkflowAction,
 } from "@/lib/master-actions";
 import { MasterStatusForm } from "@/components/contracts/master-status-form";
+import { LavorazioneEditForm } from "@/components/contracts/lavorazione-edit-form";
+import { DeleteRowButton } from "@/components/ui/delete-row-button";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +36,7 @@ export default async function LavorazioneSchedaPage({
       client: true,
       supplier: true,
       collaborator: { select: { id: true, name: true, email: true } },
+      createdBy: { select: { name: true } },
       documents: { orderBy: { uploadedAt: "desc" } },
       statusHistory: {
         include: { changedBy: { select: { name: true } } },
@@ -54,6 +57,63 @@ export default async function LavorazioneSchedaPage({
   }
 
   const isAdmin = hasPermission(session.role, "contracts.edit_all");
+  const canEdit =
+    isAdmin ||
+    (hasPermission(session.role, "contracts.edit_own") &&
+      session.id === contract.collaboratorId);
+
+  const editData = {
+    id: contract.id,
+    utilityType: contract.utilityType,
+    serviceOther: contract.serviceOther,
+    operationType: contract.operationType,
+    operationOther: contract.operationOther,
+    pod: contract.pod,
+    pdr: contract.pdr,
+    podPdr: contract.podPdr,
+    productName: contract.productName,
+    offerCode: contract.offerCode,
+    contractKind: contract.contractKind,
+    priceType: contract.priceType,
+    pricePerKwh: contract.pricePerKwh != null ? String(contract.pricePerKwh) : null,
+    pricePerSmc: contract.pricePerSmc != null ? String(contract.pricePerSmc) : null,
+    pcv: contract.pcv != null ? String(contract.pcv) : null,
+    spread: contract.spread != null ? String(contract.spread) : null,
+    monthlyFee: contract.monthlyFee != null ? String(contract.monthlyFee) : null,
+    powerKw: contract.powerKw != null ? String(contract.powerKw) : null,
+    annualKwh: contract.annualKwh != null ? String(contract.annualKwh) : null,
+    annualSmc: contract.annualSmc != null ? String(contract.annualSmc) : null,
+    paymentMethod: contract.paymentMethod,
+    contractIban: contract.contractIban,
+    ibanHolder: contract.ibanHolder,
+    supplyStreet: contract.supplyStreet,
+    supplyStreetNumber: contract.supplyStreetNumber,
+    supplyZipCode: contract.supplyZipCode,
+    supplyCity: contract.supplyCity,
+    supplyProvince: contract.supplyProvince,
+    supplyRegion: contract.supplyRegion,
+    notes: contract.notes,
+    masterNotes: contract.masterNotes,
+    workNotes: contract.workNotes,
+    durationMonths: contract.durationMonths,
+    client: {
+      firstName: contract.client.firstName,
+      lastName: contract.client.lastName,
+      companyName: contract.client.companyName,
+      fiscalCode: contract.client.fiscalCode,
+      vatNumber: contract.client.vatNumber,
+      phone: contract.client.phone,
+      email: contract.client.email,
+      pec: contract.client.pec,
+      iban: contract.client.iban,
+      street: contract.client.street,
+      streetNumber: contract.client.streetNumber,
+      zipCode: contract.client.zipCode,
+      city: contract.client.city,
+      province: contract.client.province,
+      region: contract.client.region,
+    },
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -70,11 +130,12 @@ export default async function LavorazioneSchedaPage({
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href="/lavorazione">
-            <Button variant="secondary">Torna alla dashboard</Button>
+            <Button variant="secondary">Torna alla lista</Button>
           </Link>
           <Link href={`/contratti/${contract.id}`}>
             <Button variant="secondary">Scheda contratto</Button>
           </Link>
+          <DeleteRowButton kind="contract" id={contract.id} />
         </div>
       </div>
 
@@ -85,24 +146,28 @@ export default async function LavorazioneSchedaPage({
       ) : null}
       {sp.ok ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          Aggiornamento salvato.
+          {sp.ok === "email"
+            ? "Contratto creato e inviato al Master."
+            : "Aggiornamento salvato."}
         </div>
       ) : null}
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-4 font-semibold text-slate-900">Riepilogo pratica</h2>
+        <h2 className="mb-4 font-semibold text-slate-900">Dati pratica</h2>
         <dl className="grid gap-3 text-sm md:grid-cols-2">
           <div>
-            <dt className="text-slate-500">Cliente</dt>
-            <dd className="font-medium">{clientDisplayName(contract.client)}</dd>
+            <dt className="text-slate-500">Numero contratto</dt>
+            <dd className="font-medium">{contract.contractNumber}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Collaboratore</dt>
-            <dd>{contract.collaborator.name}</dd>
+            <dt className="text-slate-500">Stato</dt>
+            <dd>
+              <StatusBadge status={contract.status} />
+            </dd>
           </div>
           <div>
-            <dt className="text-slate-500">Inserimento</dt>
-            <dd>{formatRomeDateTime(contract.insertionDate)}</dd>
+            <dt className="text-slate-500">Data creazione</dt>
+            <dd>{formatRomeDateTime(contract.createdAt)}</dd>
           </div>
           <div>
             <dt className="text-slate-500">Invio al Master</dt>
@@ -110,45 +175,35 @@ export default async function LavorazioneSchedaPage({
               {contract.sentToMasterAt
                 ? formatRomeDateTime(contract.sentToMasterAt)
                 : "—"}
-              {contract.emailStatus ? (
-                <span className="ml-2 text-xs text-slate-500">
-                  ({contract.emailStatus}
-                  {contract.emailAttempts ? ` · tentativi ${contract.emailAttempts}` : ""})
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Collaboratore</dt>
+            <dd>{contract.collaborator.name}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Creatore</dt>
+            <dd>{contract.createdBy?.name || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Ultima modifica</dt>
+            <dd>{formatRomeDateTime(contract.updatedAt)}</dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Stato email</dt>
+            <dd>
+              {contract.emailStatus || "—"}
+              {contract.emailAttempts ? ` · tentativi ${contract.emailAttempts}` : ""}
+              {contract.emailLastError ? (
+                <span className="mt-1 block text-xs text-red-600">
+                  {contract.emailLastError}
                 </span>
               ) : null}
             </dd>
           </div>
           <div>
-            <dt className="text-slate-500">Servizio / Operazione</dt>
-            <dd>
-              {contract.utilityType || "—"} · {contract.operationType || "—"}
-            </dd>
-          </div>
-          <div>
             <dt className="text-slate-500">Fornitore</dt>
             <dd>{contract.supplier.name}</dd>
-          </div>
-          <div>
-            <dt className="text-slate-500">POD / PDR</dt>
-            <dd className="text-sm text-slate-900">
-              {contract.podPdr || contract.pod || contract.pdr || "Non indicato"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-slate-500">Recapiti</dt>
-            <dd>
-              {contract.client.phone || "—"} · {contract.client.email || "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-slate-500">Pagamento</dt>
-            <dd>{contract.paymentMethod || "—"}</dd>
-          </div>
-          <div className="md:col-span-2">
-            <dt className="text-slate-500">Note</dt>
-            <dd className="whitespace-pre-wrap">
-              {contract.masterNotes || contract.notes || "—"}
-            </dd>
           </div>
         </dl>
 
@@ -161,6 +216,7 @@ export default async function LavorazioneSchedaPage({
                   <span>
                     {d.filename}
                     {d.docType ? ` · ${d.docType}` : ""}
+                    {d.size ? ` · ${Math.round(d.size / 1024)} KB` : ""}
                   </span>
                   <Link
                     className="text-emerald-700 underline"
@@ -176,6 +232,8 @@ export default async function LavorazioneSchedaPage({
           <p className="mt-4 text-sm text-slate-500">Nessun allegato</p>
         )}
       </section>
+
+      <LavorazioneEditForm data={editData} canEdit={canEdit} />
 
       {isAdmin ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -197,17 +255,17 @@ export default async function LavorazioneSchedaPage({
       ) : (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm text-sm text-slate-600">
           Solo l&apos;amministratore/Master può cambiare lo stato operativo. Puoi
-          consultare lo storico sotto.
+          consultare e modificare i dati sopra, e vedere lo storico sotto.
         </section>
       )}
 
       {isAdmin ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 font-semibold text-slate-900">Reinvio email al Master</h2>
+          <h2 className="mb-3 font-semibold text-slate-900">Reinvia al Master</h2>
           {contract.emailStatus === "SENT" && contract.sentToMasterAt ? (
             <p className="mb-3 text-sm text-slate-600">
-              Ultimo invio: {formatRomeDateTime(contract.sentToMasterAt)}. Il
-              reinvio richiede conferma e motivo (solo admin).
+              Ultimo invio: {formatRomeDateTime(contract.sentToMasterAt)}. Tentativi:{" "}
+              {contract.emailAttempts}.
             </p>
           ) : (
             <p className="mb-3 text-sm text-amber-800">
@@ -222,7 +280,7 @@ export default async function LavorazioneSchedaPage({
             </Field>
             <div className="flex items-end">
               <Button type="submit" variant="secondary">
-                Reinvia email
+                Reinvia al Master
               </Button>
             </div>
           </form>

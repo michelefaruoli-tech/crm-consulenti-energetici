@@ -18,6 +18,29 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
+/* Login: testo e autofill sempre leggibili su sfondo scuro */
+.login-input {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #34d399;
+  background-color: #0f172a !important;
+}
+
+.login-input::placeholder {
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8 !important;
+  opacity: 1;
+}
+
+.login-input:-webkit-autofill,
+.login-input:-webkit-autofill:hover,
+.login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #34d399;
+  box-shadow: 0 0 0 1000px #0f172a inset !important;
+  transition: background-color 99999s ease-out;
+}
+
 /* Allegati: hover leggero e accessibile */
 @media (prefers-reduced-motion: no-preference) {
   .attachment-tile {

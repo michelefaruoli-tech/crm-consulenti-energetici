@@ -15,6 +15,8 @@ import {
   Archive,
   Briefcase,
   Shield,
+  Wallet,
+  CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -23,6 +25,18 @@ import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, roles: "all" as const },
   { href: "/lavorazione", label: "In lavorazione", icon: Briefcase, roles: "all" as const },
+  {
+    href: "/attesa-pagamento",
+    label: "In attesa pagamento",
+    icon: Wallet,
+    roles: "all" as const,
+  },
+  {
+    href: "/attivati",
+    label: "Attivati",
+    icon: CheckCircle2,
+    roles: "all" as const,
+  },
   { href: "/clienti", label: "Clienti", icon: Users, roles: "all" as const },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" as const },
   { href: "/archivio", label: "Archivio", icon: Archive, roles: ["ADMIN", "SEGRETERIA"] as AppRole[] },
@@ -32,8 +46,6 @@ const NAV_ITEMS = [
   { href: "/account", label: "Sicurezza", icon: Shield, roles: "all" as const },
   { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] as AppRole[] },
 ];
-
-// Nota: Utenti è solo ADMIN — collaboratori e commerciali non lo vedono.
 
 export function Sidebar({
   user,

@@ -81,3 +81,25 @@ export function canViewContract(
   if (hasPermission(role, "contracts.edit_all")) return true;
   return userId === collaboratorId;
 }
+
+/** Admin/Segreteria (Master operativo) o proprietario della riga. */
+export function canDeleteContract(
+  role: Role,
+  userId: string,
+  collaboratorId: string,
+): boolean {
+  if (hasPermission(role, "contracts.edit_all")) return true;
+  if (hasPermission(role, "contracts.edit_own") && userId === collaboratorId) return true;
+  return false;
+}
+
+/** Admin/Segreteria oppure creatore del cliente. */
+export function canDeleteClient(
+  role: Role,
+  userId: string,
+  createdById: string | null | undefined,
+): boolean {
+  if (hasPermission(role, "clients.edit_all")) return true;
+  if (createdById && userId === createdById) return true;
+  return false;
+}

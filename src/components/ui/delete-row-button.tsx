@@ -30,8 +30,8 @@ export function DeleteRowButton({
           if (
             !confirm(
               kind === "contract"
-                ? "Vuoi eliminare questo contratto? (archiviazione sicura)"
-                : "Vuoi eliminare questo cliente? I contratti collegati verranno archiviati.",
+                ? "Vuoi eliminare questa riga?\n\nL'operazione archivia il contratto (soft delete) e lo toglie dalla visualizzazione."
+                : "Vuoi eliminare questa riga?\n\nIl cliente e i contratti collegati verranno archiviati.",
             )
           ) {
             return;

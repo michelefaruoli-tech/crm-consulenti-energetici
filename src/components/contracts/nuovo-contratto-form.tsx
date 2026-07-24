@@ -19,7 +19,9 @@ import {
 } from "@/lib/contract-form-types";
 import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
+import { PersistentAlert } from "@/components/ui/persistent-alert";
 import { format } from "date-fns";
+import { Paperclip, X } from "lucide-react";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -244,12 +246,12 @@ export function NuovoContrattoForm({
       try {
         const result = await createFullContractAction(buildPayload(draft));
         if (!result?.ok) {
-          setErrors(result?.errors ?? ["Errore di salvataggio"]);
+          setErrors(result?.errors ?? ["Non è stato possibile salvare il contratto."]);
           return;
         }
         const contractId = result.contractIds?.[0];
         if (!contractId) {
-          setErrors(["Contratto creato ma ID mancante"]);
+          setErrors(["Contratto creato ma ID mancante. Controlla in Contratti / In lavorazione."]);
           return;
         }
 
@@ -275,16 +277,16 @@ export function NuovoContrattoForm({
             saved?: number;
           } | null;
           if (!up.ok || !upJson?.success || !upJson.saved) {
+            // Contratto salvato: NON navigare via, così l'errore resta visibile
             setErrors([
-              `Contratto salvato, ma upload allegati non riuscito (${upJson?.message ?? "errore"}). Apri la scheda e allega di nuovo, poi reinvia email.`,
+              `Il contratto è stato salvato, ma l'upload allegati non è riuscito (${upJson?.message ?? "errore"}). Apri la pratica e allega di nuovo, poi usa «Reinvia al Master».`,
             ]);
-            router.push(`/lavorazione/${contractId}`);
+            setMessage(`Contratto salvato (ID pratica pronto). Vai a /lavorazione/${contractId} se chiudi questo messaggio.`);
             return;
           }
         }
 
         if (sendToMaster && !draft) {
-          // breve attesa per consistenza lettura DB
           await new Promise((r) => setTimeout(r, 400));
           const mailRes = await fetch(`/api/contracts/${contractId}/attachments`, {
             method: "PUT",
@@ -293,23 +295,24 @@ export function NuovoContrattoForm({
             success?: boolean;
             emailSent?: boolean;
             message?: string;
+            code?: string;
             attachmentsInEmail?: number;
           } | null;
-          if (!mailRes.ok || !mailJson?.success) {
+
+          if (!mailRes.ok || !mailJson?.emailSent) {
             setErrors([
               mailJson?.message ||
-                "Contratto salvato, ma l'email al Master non è partita. Puoi reinviare dalla scheda lavorazione.",
+                "Il contratto è stato salvato, ma l'email non è stata inviata. Usa «Reinvia al Master» dalla scheda lavorazione.",
             ]);
-            router.push(`/lavorazione/${contractId}`);
+            setMessage(`Pratica creata. Apri /lavorazione/${contractId} per reinviare l'email.`);
             return;
           }
+
           setMessage(
             mailJson.message ||
-              (mailJson.emailSent
-                ? "Contratto creato e inviato al Master"
-                : "Contratto salvato"),
+              "Contratto creato e inviato al Master.",
           );
-          router.push(`/lavorazione/${contractId}`);
+          router.push(`/lavorazione/${contractId}?ok=email`);
           router.refresh();
           return;
         }
@@ -959,38 +962,63 @@ export function NuovoContrattoForm({
         {sendToMaster ? (
           <p className="text-xs text-amber-800">
             Con invio al Master sono obbligatori: documento di identità e bolletta/fattura (max
-            5MB ciascuno).
+            5MB ciascuno). Un solo click sulla casella apre il selettore file.
           </p>
         ) : null}
         <div className="grid gap-3 md:grid-cols-2">
-          {DOC_TYPE_OPTIONS.map((doc) => (
-            <div key={doc.value} className="attachment-tile rounded-lg border border-dashed border-slate-300 p-3">
-              <p className="mb-2 text-sm font-medium">{doc.label}</p>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                multiple
-                onChange={(e) => void onFilesSelected(e.target.files, doc.value)}
-              />
-            </div>
-          ))}
+          {DOC_TYPE_OPTIONS.map((doc) => {
+            const inputId = `att-${doc.value}`;
+            return (
+              <label
+                key={doc.value}
+                htmlFor={inputId}
+                className="attachment-tile flex cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-4 hover:border-emerald-500 hover:bg-emerald-50/40 focus-within:ring-2 focus-within:ring-emerald-500"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                  <Paperclip className="h-4 w-4 text-emerald-700" aria-hidden />
+                  {doc.label}
+                </span>
+                <span className="text-xs text-slate-500">
+                  Clicca una volta per scegliere PDF o immagine
+                </span>
+                <input
+                  id={inputId}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
+                  multiple
+                  className="sr-only"
+                  onChange={(e) => {
+                    void onFilesSelected(e.target.files, doc.value);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            );
+          })}
         </div>
         {attachments.length > 0 ? (
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-2 text-sm">
             {attachments.map((a) => (
               <li
                 key={a.id}
-                className="flex items-center justify-between rounded bg-slate-50 px-2 py-1"
+                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
               >
-                <span>
-                  {a.filename} ·{" "}
-                  {DOC_TYPE_OPTIONS.find((d) => d.value === a.docType)?.label}
-                </span>
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-slate-900">{a.filename}</p>
+                  <p className="text-xs text-slate-500">
+                    {DOC_TYPE_OPTIONS.find((d) => d.value === a.docType)?.label}
+                    {a.mimeType ? ` · ${a.mimeType}` : ""}
+                    {a.contentBase64
+                      ? ` · ~${Math.max(1, Math.round((a.contentBase64.length * 0.75) / 1024))} KB`
+                      : ""}
+                  </p>
+                </div>
                 <button
                   type="button"
-                  className="text-xs text-red-600"
+                  className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
                   onClick={() => setAttachments((all) => all.filter((x) => x.id !== a.id))}
                 >
+                  <X className="h-3.5 w-3.5" />
                   Elimina
                 </button>
               </li>
@@ -1046,19 +1074,20 @@ export function NuovoContrattoForm({
         </div>
 
         {errors.length > 0 ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-            <p className="font-semibold">Correggi questi errori:</p>
-            <ul className="mt-1 list-disc pl-5">
-              {errors.map((e) => (
-                <li key={e}>{e}</li>
-              ))}
-            </ul>
-          </div>
+          <PersistentAlert
+            title="Salvataggio non completato"
+            messages={errors}
+            tone="error"
+            onClose={() => setErrors([])}
+          />
         ) : null}
         {message ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-            {message}
-          </div>
+          <PersistentAlert
+            title="Informazione"
+            messages={[message]}
+            tone={errors.length ? "warning" : "success"}
+            onClose={() => setMessage(null)}
+          />
         ) : null}
 
         <div className="flex flex-wrap gap-3">

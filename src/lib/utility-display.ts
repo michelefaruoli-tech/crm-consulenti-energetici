@@ -1,19 +1,12 @@
 import { SERVICE_OPTIONS } from "@/lib/constants";
 
-export type UtilityKind =
-  | "LUCE"
-  | "GAS"
-  | "DUAL"
-  | "TELEFONIA"
-  | "POS"
-  | "FOTOVOLTAICO"
-  | "ALTRO";
+export type UtilityKind = "LUCE" | "GAS" | "ALTRO";
 
 export type UtilityDisplay = {
   kind: UtilityKind;
-  /** Etichetta UI: Luce, Gas, Dual Luce e Gas, ... */
+  /** Etichetta UI: Luce, Gas, Altro */
   serviceLabel: string;
-  /** Riga tecnica (POD/PDR/identificativo) senza etichetta vuota */
+  /** Riga tecnica (POD/PDR/identificativo) */
   techLines: string[];
   /** Testo unico per filtri/ordinamento */
   filterText: string;
@@ -22,34 +15,42 @@ export type UtilityDisplay = {
 const LABEL_BY_KIND: Record<UtilityKind, string> = {
   LUCE: "Luce",
   GAS: "Gas",
-  DUAL: "Dual Luce e Gas",
-  TELEFONIA: "Telefonia",
-  POS: "POS",
-  FOTOVOLTAICO: "Fotovoltaico",
   ALTRO: "Altro",
 };
 
-function normalizeUtilityRaw(raw: string | null | undefined): UtilityKind | null {
-  const v = (raw ?? "").trim().toUpperCase().replace(/\s+/g, "_");
+/** Mappa valori legacy / errati → servizio canonico. */
+export function normalizeUtilityRaw(raw: string | null | undefined): UtilityKind | null {
+  const v = (raw ?? "").trim().toUpperCase().replace(/\s+/g, "_").replace(/\//g, "_");
   if (!v) return null;
+
+  // Valori tecnici usati per errore come "servizio"
+  if (v === "POD" || v === "PDR" || v === "POD_PDR" || v === "PODPDR") return null;
+
   if (v === "LUCE" || v === "EE" || v === "ENERGIA" || v === "POWER") return "LUCE";
   if (v === "GAS" || v === "METANO") return "GAS";
+
+  // Legacy → Altro (con eventuale nota in serviceOther)
   if (
     v === "DUAL" ||
     v === "DUAL_LUCE_GAS" ||
     v === "DUAL_LUCE_E_GAS" ||
     v === "LUCE_GAS" ||
-    v === "LUCE_E_GAS"
+    v === "LUCE_E_GAS" ||
+    v === "TELEFONIA" ||
+    v === "TEL" ||
+    v === "POS" ||
+    v === "FOTOVOLTAICO" ||
+    v === "FV" ||
+    v === "SOLARE" ||
+    v === "ALTRO" ||
+    v === "OTHER"
   ) {
-    return "DUAL";
+    return "ALTRO";
   }
-  if (v === "TELEFONIA" || v === "TEL" || v === "FISSA" || v === "MOBILE") return "TELEFONIA";
-  if (v === "POS") return "POS";
-  if (v === "FOTOVOLTAICO" || v === "FV" || v === "SOLARE") return "FOTOVOLTAICO";
-  if (v === "ALTRO" || v === "OTHER") return "ALTRO";
+
   const known = SERVICE_OPTIONS.some((o) => o.value === v);
   if (known) return v as UtilityKind;
-  return null;
+  return "ALTRO";
 }
 
 function looksLikePod(value: string): boolean {
@@ -63,8 +64,8 @@ function looksLikePdr(value: string): boolean {
 }
 
 /**
- * Determina tipo servizio e testo tecnico da mostrare sotto POD/PDR.
- * Fonte primaria: utilityType; fallback su pod/pdr/podPdr.
+ * Determina tipo servizio e testo tecnico.
+ * Fonte primaria: utilityType; non usare POD/PDR come tipo servizio.
  */
 export function resolveUtilityDisplay(input: {
   utilityType?: string | null;
@@ -79,48 +80,44 @@ export function resolveUtilityDisplay(input: {
 
   let kind = normalizeUtilityRaw(input.utilityType);
 
+  // Se utilityType era un codice POD/PDR, ignoralo e inferisci dai campi tecnici
   if (!kind) {
-    const hasPod = Boolean(pod) || looksLikePod(legacy);
-    const hasPdr = Boolean(pdr) || (!pod && looksLikePdr(legacy));
-    if (pod && pdr) kind = "DUAL";
-    else if (hasPod && hasPdr && pod !== pdr) kind = "DUAL";
-    else if (hasPod) kind = "LUCE";
-    else if (hasPdr) kind = "GAS";
-    else if (legacy) {
-      if (looksLikePod(legacy)) kind = "LUCE";
-      else if (looksLikePdr(legacy)) kind = "GAS";
-      else kind = "ALTRO";
-    } else {
-      kind = "ALTRO";
-    }
+    if (pod || looksLikePod(legacy)) kind = "LUCE";
+    else if (pdr || looksLikePdr(legacy)) kind = "GAS";
+    else kind = "ALTRO";
   }
 
   const techLines: string[] = [];
-
-  if (kind === "DUAL") {
-    const podVal = pod || (looksLikePod(legacy) ? legacy : "");
-    const pdrVal = pdr || (looksLikePdr(legacy) && !looksLikePod(legacy) ? legacy : "");
-    if (podVal) techLines.push(`POD: ${podVal}`);
-    if (pdrVal) techLines.push(`PDR: ${pdrVal}`);
-    if (!techLines.length && legacy) techLines.push(legacy);
-  } else if (kind === "LUCE") {
-    const val = pod || legacy;
-    if (val) techLines.push(val);
+  if (kind === "LUCE") {
+    const code = pod || (looksLikePod(legacy) ? legacy : "");
+    if (code) techLines.push(`POD: ${code}`);
   } else if (kind === "GAS") {
-    const val = pdr || legacy;
-    if (val) techLines.push(val);
+    const code = pdr || (looksLikePdr(legacy) ? legacy : "");
+    if (code) techLines.push(`PDR: ${code}`);
   } else {
-    // Telefonia / POS / Fotovoltaico / Altro: identificativo tecnico senza etichetta POD/PDR vuota
-    const val = legacy || pod || pdr || (input.serviceOther ?? "").trim();
-    if (val) techLines.push(val);
+    if (input.serviceOther?.trim()) techLines.push(input.serviceOther.trim());
+    else if (legacy && !looksLikePod(legacy) && !looksLikePdr(legacy)) techLines.push(legacy);
   }
 
-  const serviceLabel = LABEL_BY_KIND[kind];
-  const filterText = [...techLines, serviceLabel].filter(Boolean).join(" ");
+  const serviceLabel =
+    kind === "ALTRO" && input.serviceOther?.trim()
+      ? `Altro (${input.serviceOther.trim()})`
+      : LABEL_BY_KIND[kind];
 
-  return { kind, serviceLabel, techLines, filterText };
+  return {
+    kind,
+    serviceLabel,
+    techLines,
+    filterText: [serviceLabel, ...techLines].join(" "),
+  };
 }
 
-export function utilityServiceLabel(kind: UtilityKind): string {
-  return LABEL_BY_KIND[kind];
+export function serviceOptionsForSelect(current?: string | null) {
+  const base = [...SERVICE_OPTIONS];
+  const cur = (current ?? "").trim().toUpperCase();
+  if (cur && !base.some((o) => o.value === cur)) {
+    // Mostra valore legacy in sola lettura come Altro già selezionato
+    return base;
+  }
+  return base;
 }

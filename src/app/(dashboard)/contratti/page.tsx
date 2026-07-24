@@ -130,7 +130,7 @@ export default async function ContrattiPage({
         <ContractsFilterTable
           rows={rows}
           editable={mode !== "storico"}
-          canDelete={canViewAll}
+          canDelete
           canChangeCollaborator={canChangeCollaborator && mode !== "storico"}
           collaborators={collaborators}
         />
