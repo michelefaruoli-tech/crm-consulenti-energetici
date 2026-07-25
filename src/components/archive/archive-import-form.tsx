@@ -12,7 +12,21 @@ import { Field, Input, Select } from "@/components/ui/form";
 
 type CollaboratorOption = { id: string; name: string; email: string };
 
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 40;
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      // data:application/...;base64,XXXX
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Lettura file fallita"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export function ArchiveImportForm({
   collaborators,
@@ -43,6 +57,18 @@ export function ArchiveImportForm({
   } | null>(null);
   const [importing, setImporting] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
+  /** File in base64: non si perde tra un lotto e l'altro */
+  const [cachedFileB64, setCachedFileB64] = useState<string | null>(null);
+
+  async function cacheFileFromForm(form: HTMLFormElement): Promise<string | null> {
+    if (cachedFileB64) return cachedFileB64;
+    const fileInput = form.elements.namedItem("file") as HTMLInputElement | null;
+    const file = fileInput?.files?.[0];
+    if (!file) return null;
+    const b64 = await fileToBase64(file);
+    setCachedFileB64(b64);
+    return b64;
+  }
 
   function onPreview(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,7 +79,14 @@ export function ArchiveImportForm({
     setInterrupted(false);
     start(async () => {
       try {
-        const result = await previewHistoricalExcelAction(new FormData(form));
+        const b64 = await cacheFileFromForm(form);
+        if (!b64) {
+          setError("Seleziona un file Excel (.xlsx)");
+          return;
+        }
+        const fd = new FormData(form);
+        fd.set("fileBase64", b64);
+        const result = await previewHistoricalExcelAction(fd);
         if (result.error) {
           setPreviewRows(null);
           setSummary(null);
@@ -92,17 +125,20 @@ export function ArchiveImportForm({
       return;
     }
 
-    const fileInput = form.elements.namedItem("file") as HTMLInputElement | null;
-    const file = fileInput?.files?.[0];
-    if (!file) {
-      setError("Seleziona di nuovo il file Excel prima di confermare.");
+    let fileB64 = cachedFileB64;
+    if (!fileB64) {
+      fileB64 = await cacheFileFromForm(form);
+    }
+    if (!fileB64) {
+      setError("Seleziona di nuovo il file Excel, poi rifai Anteprima e Conferma.");
       return;
     }
 
+    const draft = new FormData(form);
     const archiveLabel =
-      String(new FormData(form).get("archiveLabel") ?? "").trim() || previewLabel;
+      String(draft.get("archiveLabel") ?? "").trim() || previewLabel || "Storico";
     const collabId = String(
-      new FormData(form).get("defaultCollaboratorId") ?? defaultCollaboratorId,
+      draft.get("defaultCollaboratorId") ?? defaultCollaboratorId,
     ).trim();
     const skipDup =
       (form.elements.namedItem("skipPodDuplicates") as HTMLInputElement | null)
@@ -110,19 +146,18 @@ export function ArchiveImportForm({
 
     if (
       !window.confirm(
-        `Confermi l’import di ${rowNumbers.length} contratti nel lotto «${archiveLabel}»?`,
+        `Confermi l’import di ${rowNumbers.length} contratti nel lotto «${archiveLabel}»?\n\nLa barra andrà avanti a pacchetti di ${BATCH_SIZE} fino al 100%.`,
       )
     ) {
       return;
     }
 
-    /** Ogni lotto riusa lo stesso File in memoria (il form dopo il 1° invio lo perde). */
     function makeBatchFd(slice: number[], finalize: boolean): FormData {
       const fd = new FormData();
       fd.set("archiveLabel", archiveLabel);
       fd.set("defaultCollaboratorId", collabId);
       if (skipDup) fd.set("skipPodDuplicates", "1");
-      fd.set("file", file!);
+      fd.set("fileBase64", fileB64!);
       fd.set("rowNumbers", JSON.stringify(slice));
       if (finalize) fd.set("finalize", "1");
       return fd;
@@ -175,18 +210,20 @@ export function ArchiveImportForm({
 
       if (failed) {
         setMessage(
-          `Import interrotto: salvati ${imported} contratti` +
+          `Import interrotto a ${lastPercent}%: salvati ${imported} contratti` +
             (skipped ? ` · saltati ${skipped}` : "") +
-            ` (lotto «${label}»). Ripeti l’import con «Salta POD già presenti»: riparte dal resto.`,
+            ` (lotto «${label}»). Rifai Anteprima+Conferma con «Salta POD già presenti» per continuare.`,
         );
       } else {
+        setProgress((p) => (p ? { ...p, percent: 100, done: p.total } : p));
         setMessage(
-          `Import completato: ${imported} contratti` +
+          `Import completato al 100%: ${imported} contratti` +
             (skipped ? ` · saltati ${skipped}` : "") +
             ` nel lotto «${label}».`,
         );
         setPreviewRows(null);
         setSummary(null);
+        setCachedFileB64(null);
         setFileKey((k) => k + 1);
         form.reset();
         router.refresh();
@@ -196,12 +233,10 @@ export function ArchiveImportForm({
       const msg = err instanceof Error ? err.message : "Errore sconosciuto";
       setError(
         msg.includes("fetch")
-          ? `Import interrotto al ${lastPercent}%. Già salvati ${imported} contratti. Ripeti con «Salta POD già presenti».`
+          ? `Connessione interrotta al ${lastPercent}%. Già salvati ${imported}. Rifai con «Salta POD già presenti».`
           : msg,
       );
-      setMessage(
-        `Import parziale: ${imported} contratti già nel lotto «${label}».`,
-      );
+      setMessage(`Import parziale: ${imported} contratti nel lotto «${label}».`);
     } finally {
       setImporting(false);
     }
@@ -209,8 +244,7 @@ export function ArchiveImportForm({
 
   function onCommit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = e.currentTarget;
-    void runImportWithProgress(form);
+    void runImportWithProgress(e.currentTarget);
   }
 
   const busy = pending || importing;
@@ -232,7 +266,14 @@ export function ArchiveImportForm({
           />
         </Field>
         <Field label="File Excel (.xlsx)">
-          <Input name="file" type="file" accept=".xlsx,.xls" required disabled={busy} />
+          <Input
+            name="file"
+            type="file"
+            accept=".xlsx,.xls"
+            required
+            disabled={busy}
+            onChange={() => setCachedFileB64(null)}
+          />
         </Field>
         <Field label="Collaboratore di default *">
           <Select
@@ -277,7 +318,7 @@ export function ArchiveImportForm({
             {pending && !importing ? "Analisi…" : "1. Anteprima"}
           </Button>
           <Button type="submit" disabled={busy || !previewRows}>
-            {importing ? "Import in corso…" : "2. Conferma import"}
+            {importing ? `Import… ${progress?.percent ?? 0}%` : "2. Conferma import"}
           </Button>
         </div>
       </form>
@@ -297,10 +338,10 @@ export function ArchiveImportForm({
           >
             <span className="font-medium">
               {importing
-                ? "Caricamento database…"
+                ? "Caricamento database in corso…"
                 : interrupted
-                  ? "Caricamento interrotto"
-                  : "Caricamento terminato"}
+                  ? "Caricamento interrotto — puoi riprendere"
+                  : "Caricamento terminato al 100%"}
             </span>
             <span className="tabular-nums font-semibold">{progress.percent}%</span>
           </div>
@@ -313,7 +354,7 @@ export function ArchiveImportForm({
               className={`h-full rounded-full transition-all duration-300 ${
                 interrupted ? "bg-amber-500" : "bg-emerald-600"
               }`}
-              style={{ width: `${progress.percent}%` }}
+              style={{ width: `${Math.max(progress.percent, 1)}%` }}
             />
           </div>
           <p

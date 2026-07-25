@@ -153,10 +153,6 @@ async function loadSheetFromForm(formData: FormData): Promise<
   | { ok: true; data: ParsedSheet }
 > {
   const label = String(formData.get("archiveLabel") ?? "").trim() || "Storico importato";
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return { error: "Seleziona un file Excel (.xlsx)" };
-  }
 
   const defaultCollabId = String(formData.get("defaultCollaboratorId") ?? "").trim();
   if (!defaultCollabId) {
@@ -165,7 +161,26 @@ async function loadSheetFromForm(formData: FormData): Promise<
 
   const skipPodDuplicates = String(formData.get("skipPodDuplicates") ?? "") === "1";
 
-  const buffer = Buffer.from(await file.arrayBuffer());
+  // Preferisci base64 (stabile tra i lotti); fallback File/Blob dal form
+  let buffer: Buffer | null = null;
+  const b64 = String(formData.get("fileBase64") ?? "").trim();
+  if (b64) {
+    try {
+      buffer = Buffer.from(b64, "base64");
+    } catch {
+      return { error: "File Excel non valido (base64)" };
+    }
+  } else {
+    const file = formData.get("file");
+    if (file instanceof Blob && file.size > 0) {
+      buffer = Buffer.from(await file.arrayBuffer());
+    }
+  }
+
+  if (!buffer || buffer.length === 0) {
+    return { error: "Seleziona un file Excel (.xlsx)" };
+  }
+
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
   const sheet = workbook.worksheets[0];
