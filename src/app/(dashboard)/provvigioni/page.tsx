@@ -28,20 +28,35 @@ import {
   resolveStornoInfo,
 } from "@/lib/storno-status";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
-import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
+import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
 import { toPeriod } from "@/lib/recurring";
+import type { Prisma } from "@/generated/prisma/client";
 
 export const dynamic = "force-dynamic";
+
+type SearchParams = {
+  page?: string;
+  collab?: string;
+  settled?: string;
+  /** client = cognome+nome su tutto il filtro */
+  sort?: string;
+  dir?: string;
+};
 
 export default async function ProvvigioniPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; collab?: string; settled?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const session = await requireSession();
-  const { page: pageRaw, collab, settled: settledRaw } = await searchParams;
-  const page = parsePage(pageRaw);
+  const {
+    page: pageRaw,
+    collab,
+    settled: settledRaw,
+    sort: sortRaw,
+    dir: dirRaw,
+  } = await searchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
   const canExport = hasPermission(session.role, "reports.export");
@@ -57,12 +72,52 @@ export default async function ProvvigioniPage({
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
 
+  const sortByClient = sortRaw === "client";
+  const sortDir: "asc" | "desc" = dirRaw === "desc" ? "desc" : "asc";
+
+  const orderBy: Prisma.ContractOrderByWithRelationInput[] = sortByClient
+    ? [
+        { client: { lastName: sortDir } },
+        { client: { firstName: sortDir } },
+        { client: { companyName: sortDir } },
+        { id: "asc" },
+      ]
+    : [{ insertionDate: "desc" }, { createdAt: "desc" }, { id: "desc" }];
+
   void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
     console.error("sync recurring", e),
   );
 
+  // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
+  const total = await prisma.contract.count({ where: contractWhere });
+  const pages = pageCount(total);
+  const page = Math.min(parsePage(pageRaw), pages);
+
+  // Crea commissioni mancanti (senza di esse la tabella le nascondeva → “righe vuote”)
+  const missingCommission = await prisma.contract.findMany({
+    where: { ...contractWhere, commission: { is: null } },
+    select: { id: true },
+    take: 500,
+  });
+  if (missingCommission.length > 0) {
+    await Promise.all(
+      missingCommission.map((c) =>
+        prisma.commission
+          .create({
+            data: {
+              contractId: c.id,
+              expected: 0,
+              accrued: 0,
+              received: 0,
+              paid: 0,
+            },
+          })
+          .catch(() => null),
+      ),
+    );
+  }
+
   const [
-    total,
     contracts,
     sumAgg,
     daConfermareCount,
@@ -71,7 +126,6 @@ export default async function ProvvigioniPage({
     collabGroups,
     settledRowsRaw,
   ] = await Promise.all([
-    prisma.contract.count({ where: contractWhere }),
     prisma.contract.findMany({
       where: contractWhere,
       select: {
@@ -108,7 +162,7 @@ export default async function ProvvigioniPage({
           select: { id: true, expected: true, received: true, paid: true },
         },
       },
-      orderBy: [{ insertionDate: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      orderBy,
       skip: pageSkip(page),
       take: PAGE_SIZE,
     }),
@@ -132,7 +186,7 @@ export default async function ProvvigioniPage({
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
-          where: { isHistorical: false, deletedAt: null },
+          where: { deletedAt: null },
           _count: { id: true },
         })
       : Promise.resolve([]),
@@ -244,11 +298,20 @@ export default async function ProvvigioniPage({
 
   const settledRows = settledRowsRaw.map(toSettledRow);
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
-  const queryBase = { collab: collabFilter, settled: settledPeriod };
+  const queryBase = {
+    collab: collabFilter,
+    settled: settledPeriod,
+    sort: sortByClient ? "client" : undefined,
+    dir: sortByClient ? sortDir : undefined,
+  };
   const collabQs = collabFilter ? `&collab=${collabFilter}` : "";
   const exportHref = `/api/provvigioni/export?settled=${settledPeriod}${
     collabFilter ? `&collab=${collabFilter}` : ""
   }`;
+
+  const sortHint = sortByClient
+    ? ` Ordinati per cliente (cognome + nome, ${sortDir === "asc" ? "A→Z" : "Z→A"}) su tutto il filtro.`
+    : " Ordinati per data inserimento.";
 
   return (
     <div className="space-y-6">
@@ -256,13 +319,14 @@ export default async function ProvvigioniPage({
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
           <p className="text-slate-500">
-            {total} contratti attivi
+            {total} contratti
             {selectedCollabName
               ? ` · filtro: ${selectedCollabName}`
               : canViewAll
                 ? ` · accesso ${roleLabel} — tutti i collaboratori`
                 : " · solo i tuoi"}
-            . Ordinati per data inserimento. Colori = storno; bordo = gettone.
+            .{sortHint} Max {PAGE_SIZE} righe per pagina. Colori = storno; bordo =
+            gettone.
             {totals.daConfermare > 0
               ? ` · ${totals.daConfermare} gettoni da confermare.`
               : ""}
@@ -313,41 +377,58 @@ export default async function ProvvigioniPage({
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Totale complessivo (previsto)</p>
+          <p className="text-sm text-slate-500">
+            {selectedCollabName
+              ? `Complessivo — ${selectedCollabName}`
+              : "Totale complessivo (previsto)"}
+          </p>
           <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.complessivo)}</p>
           <p className="mt-1 text-xs text-slate-400">
             {selectedCollabName
-              ? `Solo ${selectedCollabName} (tutte le pagine)`
+              ? `Solo questo collaboratore (tutte le pagine)`
               : "Tutti i collaboratori visibili (tutte le pagine)"}
           </p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm text-emerald-700">Totale ricevuto</p>
+          <p className="text-sm text-emerald-700">
+            {selectedCollabName
+              ? `Ricevuto — ${selectedCollabName}`
+              : "Totale ricevuto"}
+          </p>
           <p className="mt-2 text-2xl font-bold text-emerald-900">
             {formatCurrency(totals.ricevuto)}
           </p>
-          <p className="mt-1 text-xs text-emerald-800/70">
-            {selectedCollabName ? `Filtro: ${selectedCollabName}` : "Stesso filtro della lista"}
-          </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Totale liquidato</p>
+          <p className="text-sm text-slate-500">
+            {selectedCollabName
+              ? `Liquidato — ${selectedCollabName}`
+              : "Totale liquidato"}
+          </p>
           <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.liquidato)}</p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-          <p className="text-sm text-amber-800">Totale da avere</p>
+          <p className="text-sm text-amber-800">
+            {selectedCollabName
+              ? `Da avere — ${selectedCollabName}`
+              : "Totale da avere"}
+          </p>
           <p className="mt-2 text-2xl font-bold text-amber-950">
             {formatCurrency(totals.daAvere)}
           </p>
+          <p className="mt-1 text-xs text-amber-800/70">Ricevuto − liquidato</p>
         </div>
       </div>
 
       <PaginationNav path="/provvigioni" page={page} total={total} query={queryBase} />
 
       <ProvvigioniFilterTable
-        rows={rows.filter((r) => r.commissionId)}
+        rows={rows}
         canDelete
         canConfirm={canConfirm}
+        listQuery={{ collab: collabFilter, settled: settledPeriod }}
+        serverSortKey={sortByClient ? "client" : null}
+        serverSortDir={sortDir}
       />
 
       <PaginationNav path="/provvigioni" page={page} total={total} query={queryBase} />

@@ -20,7 +20,24 @@ export function clientDisplayName(client: {
   if (client.type === "AZIENDA" && client.companyName) {
     return client.companyName;
   }
-  return [client.firstName, client.lastName].filter(Boolean).join(" ") || "Cliente senza nome";
+  // Cognome Nome (uso italiano in elenchi)
+  return [client.lastName, client.firstName].filter(Boolean).join(" ") || "Cliente senza nome";
+}
+
+/** Chiave ordinamento cliente: cognome, nome, ragione sociale */
+export function clientSortKey(client: {
+  type: string;
+  companyName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+}): string {
+  if (client.type === "AZIENDA" && client.companyName) {
+    return client.companyName.toLowerCase();
+  }
+  return [client.lastName, client.firstName]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 export async function generateContractNumber(): Promise<string> {

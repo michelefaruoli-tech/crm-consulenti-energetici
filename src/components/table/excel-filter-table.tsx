@@ -32,6 +32,16 @@ type Props = {
     selectedKeys: Set<string>;
     onChange: (next: Set<string>) => void;
   };
+  /**
+   * Ordinamento lato server (tutto il database filtrato, non solo la pagina).
+   * Se una colonna è in `keys`, il click chiama `onSort` invece di ordinare solo le righe caricate.
+   */
+  serverSort?: {
+    keys: string[];
+    key: string | null;
+    dir: "asc" | "desc";
+    onSort: (key: string) => void;
+  };
 };
 
 export function ExcelFilterTable({
@@ -44,11 +54,16 @@ export function ExcelFilterTable({
   dense = false,
   getRowClassName,
   selection,
+  serverSort,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const serverSortKeys = useMemo(
+    () => new Set(serverSort?.keys ?? []),
+    [serverSort?.keys],
+  );
 
   const optionsByColumn = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -91,7 +106,8 @@ export function ExcelFilterTable({
       }),
     );
 
-    if (sortKey) {
+    // Ordinamento locale solo se la colonna NON è gestita dal server
+    if (sortKey && !serverSortKeys.has(sortKey)) {
       const col = columns.find((c) => c.key === sortKey);
       if (col) {
         list = [...list].sort((a, b) => {
@@ -105,7 +121,7 @@ export function ExcelFilterTable({
       }
     }
     return list;
-  }, [rows, columns, selected, sortKey, sortDir]);
+  }, [rows, columns, selected, sortKey, sortDir, serverSortKeys]);
 
   function toggleValue(colKey: string, value: string) {
     setSelected((prev) => {
@@ -138,12 +154,30 @@ export function ExcelFilterTable({
   const hasAnyFilter = Object.values(selected).some((s) => s && s.size > 0);
 
   function toggleSort(colKey: string) {
+    if (serverSort && serverSortKeys.has(colKey)) {
+      serverSort.onSort(colKey);
+      return;
+    }
     if (sortKey === colKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(colKey);
       setSortDir("asc");
     }
+  }
+
+  function activeSortKey(colKey: string): boolean {
+    if (serverSort && serverSortKeys.has(colKey)) {
+      return serverSort.key === colKey;
+    }
+    return sortKey === colKey;
+  }
+
+  function activeSortDir(colKey: string): "asc" | "desc" {
+    if (serverSort && serverSortKeys.has(colKey) && serverSort.key === colKey) {
+      return serverSort.dir;
+    }
+    return sortDir;
   }
 
   const filteredKeys = useMemo(() => filtered.map((r) => rowKey(r)), [filtered, rowKey]);
@@ -211,6 +245,9 @@ export function ExcelFilterTable({
             ) : null}
             {columns.map((col) => {
               const active = (selected[col.key]?.size ?? 0) > 0;
+              const isSorted = activeSortKey(col.key);
+              const dir = activeSortDir(col.key);
+              const isServerCol = serverSortKeys.has(col.key);
               return (
                 <th
                   key={col.key}
@@ -225,14 +262,16 @@ export function ExcelFilterTable({
                       className="font-medium hover:text-slate-900"
                       onClick={() => toggleSort(col.key)}
                       title={
-                        col.sortKind === "date"
-                          ? "Ordina per data"
-                          : "Ordina A→Z / Z→A"
+                        isServerCol
+                          ? "Ordina su tutto il database (cognome + nome)"
+                          : col.sortKind === "date"
+                            ? "Ordina per data (solo questa pagina)"
+                            : "Ordina A→Z / Z→A (solo questa pagina)"
                       }
                     >
                       {col.label}
-                      {sortKey === col.key
-                        ? sortDir === "asc"
+                      {isSorted
+                        ? dir === "asc"
                           ? col.sortKind === "date"
                             ? " ↑"
                             : " A↑"

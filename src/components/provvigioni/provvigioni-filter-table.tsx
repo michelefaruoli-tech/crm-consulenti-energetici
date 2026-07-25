@@ -14,6 +14,7 @@ import {
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { toPeriod, periodLabel } from "@/lib/recurring";
+import { buildPageHref } from "@/lib/pagination";
 
 export type ProvvigioneRow = {
   id: string;
@@ -37,9 +38,9 @@ export type ProvvigioneRow = {
 
 function shortRecurrence(value: string): string {
   const v = value.toLowerCase();
-  if (v.includes("ricor")) return "Ric";
-  if (v.includes("tantum") || v.includes("una")) return "UT";
-  return value || "UT";
+  if (v.includes("ricor") || v.includes("mensil")) return "Ricor";
+  if (v.includes("tantum") || v.includes("una") || !v.trim()) return "Gettone";
+  return value;
 }
 
 function shortType(value: string): string {
@@ -82,10 +83,17 @@ export function ProvvigioniFilterTable({
   rows,
   canDelete = false,
   canConfirm = false,
+  listQuery,
+  serverSortKey = null,
+  serverSortDir = "asc",
 }: {
   rows: ProvvigioneRow[];
   canDelete?: boolean;
   canConfirm?: boolean;
+  /** Query da preservare quando si ordina Cliente sul database */
+  listQuery?: { collab?: string | null; settled?: string | null };
+  serverSortKey?: string | null;
+  serverSortDir?: "asc" | "desc";
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -98,6 +106,20 @@ export function ProvvigioniFilterTable({
     const d = new Date();
     return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   });
+
+  function onServerSort(key: string) {
+    if (key !== "clientName") return;
+    const nextDir =
+      serverSortKey === "client" && serverSortDir !== "desc" ? "desc" : "asc";
+    router.push(
+      buildPageHref("/provvigioni", {
+        collab: listQuery?.collab,
+        settled: listQuery?.settled,
+        sort: "client",
+        dir: nextDir,
+      }),
+    );
+  }
 
   const selectedCount = selectedKeys.size;
   const selectedIds = useMemo(() => [...selectedKeys], [selectedKeys]);
@@ -123,6 +145,10 @@ export function ProvvigioniFilterTable({
     };
     const field = map[key];
     if (!field) return;
+    if (!row.commissionId) {
+      setError("Questa riga non ha ancora una commissione collegata. Ricarica la pagina.");
+      return;
+    }
 
     const fd = new FormData();
     fd.set("commissionId", String(row.commissionId));
@@ -219,7 +245,7 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "recurrence",
-      label: "Ricorrenza",
+      label: "Tipo",
       getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
       editable: true,
       sortKind: "text",
@@ -260,7 +286,7 @@ export function ProvvigioniFilterTable({
             >
               {ok ? "OK" : "Da conf."}
             </span>
-            {canConfirm && !ok ? (
+            {canConfirm && !ok && String(r.commissionId) ? (
               <ConfirmButton commissionId={String(r.commissionId)} />
             ) : null}
           </div>
@@ -291,7 +317,7 @@ export function ProvvigioniFilterTable({
 
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="text-[11px] text-slate-600">
-            Data pagato (UT)
+            Data pagato (Gettone)
             <input
               className="mt-0.5 block w-28 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
               value={paidMonth}
@@ -413,9 +439,15 @@ export function ProvvigioniFilterTable({
         dense
         rows={rows as unknown as Record<string, unknown>[]}
         columns={columns}
-        rowKey={(r) => String(r.commissionId)}
+        rowKey={(r) => String(r.commissionId || r.id)}
         onCellEdit={onCellEdit}
         selection={{ selectedKeys, onChange: setSelectedKeys }}
+        serverSort={{
+          keys: ["clientName"],
+          key: serverSortKey === "client" ? "clientName" : null,
+          dir: serverSortDir,
+          onSort: onServerSort,
+        }}
         getRowClassName={(r) => {
           const storno = String(r.stornoRowClass ?? "");
           const border = String(r.gettoneBorderClass ?? "");
