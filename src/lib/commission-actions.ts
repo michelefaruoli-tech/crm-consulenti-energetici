@@ -11,19 +11,45 @@ import {
 import { prisma } from "@/lib/prisma";
 import { parseFlexibleDate } from "@/lib/date-parse";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
+import type { Role } from "@/generated/prisma/client";
 
-export async function updateCommissionFieldAction(formData: FormData): Promise<void> {
-  const session = await requireSession();
-  const commissionId = String(formData.get("commissionId") ?? "");
-  const field = String(formData.get("field") ?? "");
-  const value = String(formData.get("value") ?? "");
+type SessionLike = { id: string; role: Role };
 
-  const commission = await prisma.commission.findUnique({
+type CommissionWithContract = {
+  id: string;
+  contractId: string;
+  contract: {
+    id: string;
+    clientId: string;
+    collaboratorId: string;
+    collectionDate: Date | null;
+    deletedAt: Date | null;
+  };
+};
+
+async function loadCommission(commissionId: string) {
+  return prisma.commission.findUnique({
     where: { id: commissionId },
-    include: { contract: true },
+    include: {
+      contract: {
+        select: {
+          id: true,
+          clientId: true,
+          collaboratorId: true,
+          collectionDate: true,
+          deletedAt: true,
+        },
+      },
+    },
   });
-  if (!commission) throw new Error("Provvigione non trovata");
+}
 
+async function applyCommissionField(
+  session: SessionLike,
+  commission: CommissionWithContract,
+  field: string,
+  value: string,
+): Promise<void> {
   const canAll = hasPermission(session.role, "commissions.view_all");
   if (!canAll && commission.contract.collaboratorId !== session.id) {
     throw new Error("Permesso negato");
@@ -45,12 +71,11 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       throw new Error("Puoi modificare solo il gettone previsto");
     }
     await prisma.commission.update({
-      where: { id: commissionId },
+      where: { id: commission.id },
       data: { [field]: amount },
     });
     if (field === "expected") {
       const isAdminGettone = hasPermission(session.role, "commissions.edit_gettone");
-      // Admin/Segreteria → auto-verde; collaboratore → giallo da confermare
       await prisma.contract.update({
         where: { id: commission.contractId },
         data: isAdminGettone
@@ -109,7 +134,7 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
     const raw = value.trim();
     const normalized = /ric/i.test(raw)
       ? "Ricorrente"
-      : /ut|tantum|una/i.test(raw)
+      : /ut|tantum|una|gettone/i.test(raw)
         ? "Una tantum"
         : raw || "Una tantum";
     await prisma.contract.update({
@@ -128,12 +153,6 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       data: { notes: value.trim() || null },
     });
   } else if (field === "stato") {
-    /**
-     * Stato semplificato in Provvigioni:
-     * - «KO / Cessato» → contratto chiuso/KO (riga grigia)
-     * - «Da incassare» → pratica attiva, non ancora pagata
-     * - «Incassato» → pratica attiva e pagata
-     */
     const raw = value.trim().toLowerCase();
     const contractId = commission.contractId;
     if (/ko|cessat|annull|chius/.test(raw)) {
@@ -152,7 +171,6 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       });
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
     } else {
-      // Da incassare (default se testo non riconosciuto ma non vuoto / o esplicito)
       await prisma.contract.update({
         where: { id: contractId },
         data: {
@@ -169,11 +187,158 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       entityId: contractId,
       details: { field: "stato", to: value.trim(), source: "provvigioni_table" },
     });
+  } else if (field === "collaboratorName") {
+    if (!canAll) throw new Error("Solo Admin/Segreteria possono cambiare collaboratore");
+    const raw = value.trim();
+    const user = await prisma.user.findFirst({
+      where: {
+        name: { equals: raw, mode: "insensitive" },
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      },
+      select: { id: true },
+    });
+    if (!user) throw new Error(`Collaboratore non trovato: ${raw}`);
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { collaboratorId: user.id },
+    });
+  } else if (field === "supplierName") {
+    if (!canAll) throw new Error("Solo Admin/Segreteria possono cambiare fornitore");
+    const raw = value.trim();
+    const supplier = await prisma.supplier.findFirst({
+      where: { name: { equals: raw, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (!supplier) throw new Error(`Fornitore non trovato: ${raw}`);
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { supplierId: supplier.id },
+    });
+  } else if (field === "clientType") {
+    const raw = value.trim().toLowerCase();
+    const type =
+      raw.startsWith("bus") || raw.includes("azi") || raw === "b"
+        ? "AZIENDA"
+        : "PRIVATO";
+    await prisma.client.update({
+      where: { id: commission.contract.clientId },
+      data: { type },
+    });
+  } else if (field === "clientName") {
+    const raw = value.trim();
+    if (!raw) throw new Error("Nome cliente vuoto");
+    const client = await prisma.client.findUnique({
+      where: { id: commission.contract.clientId },
+      select: { type: true },
+    });
+    if (!client) throw new Error("Cliente non trovato");
+    if (client.type === "AZIENDA") {
+      await prisma.client.update({
+        where: { id: commission.contract.clientId },
+        data: { companyName: raw },
+      });
+    } else {
+      const parts = raw.split(/\s+/).filter(Boolean);
+      const lastName = parts[0] ?? raw;
+      const firstName = parts.slice(1).join(" ") || null;
+      await prisma.client.update({
+        where: { id: commission.contract.clientId },
+        data: { lastName, firstName },
+      });
+    }
+  } else if (field === "confirmed") {
+    if (!canConfirmCommission(session.role)) {
+      throw new Error("Solo Admin o Segreteria possono confermare il gettone");
+    }
+    const ok = /^(ok|conferm|s[iì]|si|1|true|verde)$/i.test(value.trim());
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: ok
+        ? { commissionConfirmed: true, commissionConfirmedAt: new Date() }
+        : { commissionConfirmed: false, commissionConfirmedAt: null },
+    });
+  } else {
+    throw new Error(`Campo non modificabile: ${field}`);
   }
+}
+
+export async function updateCommissionFieldAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const commissionId = String(formData.get("commissionId") ?? "");
+  const field = String(formData.get("field") ?? "");
+  const value = String(formData.get("value") ?? "");
+
+  const commission = await loadCommission(commissionId);
+  if (!commission) throw new Error("Provvigione non trovata");
+
+  await applyCommissionField(session, commission, field, value);
 
   revalidatePath("/provvigioni");
   revalidatePath("/");
   revalidatePath("/contratti");
+  revalidatePath(`/clienti/${commission.contract.clientId}`);
+}
+
+/**
+ * Salva insieme molte modifiche cella (bozze dalla tabella Provvigioni).
+ * Payload JSON: [{ commissionId, field, value }, ...] — max 500.
+ */
+export async function bulkUpdateCommissionFieldsAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  try {
+    const session = await requireSession();
+    const raw = String(formData.get("changes") ?? "[]");
+    let changes: Array<{ commissionId: string; field: string; value: string }>;
+    try {
+      changes = JSON.parse(raw) as Array<{
+        commissionId: string;
+        field: string;
+        value: string;
+      }>;
+    } catch {
+      return { ok: false, error: "Dati modifiche non validi" };
+    }
+
+    if (!Array.isArray(changes) || changes.length === 0) {
+      return { ok: false, error: "Nessuna modifica da salvare" };
+    }
+    if (changes.length > 500) {
+      return { ok: false, error: "Troppe modifiche (max 500). Salva a gruppi." };
+    }
+
+    let count = 0;
+    const clientIds = new Set<string>();
+    for (const ch of changes) {
+      const commissionId = String(ch.commissionId ?? "").trim();
+      const field = String(ch.field ?? "").trim();
+      if (!commissionId || !field) continue;
+
+      const commission = await loadCommission(commissionId);
+      if (!commission || commission.contract.deletedAt) continue;
+
+      await applyCommissionField(session, commission, field, String(ch.value ?? ""));
+      clientIds.add(commission.contract.clientId);
+      count += 1;
+    }
+
+    if (count === 0) {
+      return { ok: false, error: "Nessuna modifica applicata" };
+    }
+
+    revalidatePath("/provvigioni");
+    revalidatePath("/");
+    revalidatePath("/contratti");
+    for (const id of clientIds) revalidatePath(`/clienti/${id}`);
+
+    return { ok: true, count };
+  } catch (e) {
+    console.error("[bulkUpdateCommissionFieldsAction]", e);
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message.slice(0, 200) : "Salvataggio non riuscito",
+    };
+  }
 }
 
 /** Admin/Segreteria conferma il gettone (riga verde). */

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
@@ -8,8 +7,7 @@ import {
   bulkConfirmCommissionsAction,
   bulkMarkPaidAction,
   bulkPayRecurringAction,
-  confirmCommissionAction,
-  updateCommissionFieldAction,
+  bulkUpdateCommissionFieldsAction,
 } from "@/lib/commission-actions";
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
@@ -23,16 +21,26 @@ import {
 
 export type { ProvvigioneRow };
 
+/** Chiave colonna UI → campo server */
+const FIELD_MAP: Record<string, string> = {
+  clientName: "clientName",
+  podPdr: "podPdr",
+  collaboratorName: "collaboratorName",
+  supplierName: "supplierName",
+  clientType: "clientType",
+  amount: "expected",
+  stato: "stato",
+  recurrence: "recurrence",
+  paymentStatus: "paymentStatus",
+  collectionMonth: "collectionDate",
+  notes: "notes",
+  confirmed: "confirmed",
+};
+
 function shortRecurrence(value: string): string {
   const v = value.toLowerCase();
   if (v.includes("ricor") || v.includes("mensil")) return "Ricor";
   if (v.includes("tantum") || v.includes("una") || !v.trim()) return "Gettone";
-  return value;
-}
-
-function shortType(value: string): string {
-  if (value === "Business") return "Bus";
-  if (value === "Domestico") return "Dom";
   return value;
 }
 
@@ -46,24 +54,39 @@ function settledOptions(): string[] {
   return out;
 }
 
-function ConfirmButton({ commissionId }: { commissionId: string }) {
-  const router = useRouter();
-  return (
-    <button
-      type="button"
-      className="rounded bg-emerald-700 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-800"
-      title="Conferma gettone (passa a verde)"
-      onClick={async (e) => {
-        e.stopPropagation();
-        const fd = new FormData();
-        fd.set("commissionId", commissionId);
-        await confirmCommissionAction(fd);
-        router.refresh();
-      }}
-    >
-      Conferma
-    </button>
-  );
+function rowId(row: { commissionId?: string; id?: string } | Record<string, unknown>) {
+  return String(row.commissionId || row.id || "");
+}
+
+function originalCellValue(row: ProvvigioneRow, key: string): string {
+  switch (key) {
+    case "clientName":
+      return row.clientName ?? "";
+    case "podPdr":
+      return row.podPdr ?? "";
+    case "collaboratorName":
+      return row.collaboratorName ?? "";
+    case "supplierName":
+      return row.supplierName ?? "";
+    case "clientType":
+      return row.clientType ?? "";
+    case "amount":
+      return row.amount ?? "";
+    case "stato":
+      return row.stato ?? "";
+    case "recurrence":
+      return shortRecurrence(row.recurrence ?? "");
+    case "paymentStatus":
+      return String(row.collectionMonth ?? "").trim() ? "Sì" : "No";
+    case "collectionMonth":
+      return row.collectionMonth ?? "";
+    case "notes":
+      return row.notes ?? "";
+    case "confirmed":
+      return row.confirmed ?? "";
+    default:
+      return "";
+  }
 }
 
 export function ProvvigioniFilterTable({
@@ -75,24 +98,26 @@ export function ProvvigioniFilterTable({
   serverSortDir = "asc",
   page = 1,
   collaboratorByName,
+  supplierNames,
 }: {
   rows: ProvvigioneRow[];
   canDelete?: boolean;
   canConfirm?: boolean;
-  /** Query da preservare quando si ordina Cliente sul database */
   listQuery?: { collab?: string | null; settled?: string | null };
   serverSortKey?: string | null;
   serverSortDir?: "asc" | "desc";
-  /** Numero pagina corrente (per resettare i filtri colonna) */
   page?: number;
-  /** Nome collaboratore → id (filtro colonna Collab. sul database) */
   collaboratorByName?: Record<string, string>;
+  /** Nomi fornitori (per modifica colonna Forn.) */
+  supplierNames?: string[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Bozze: rowId → { colonna → valore } */
+  const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
   const settleOpts = useMemo(() => settledOptions(), []);
   const [settledPeriod, setSettledPeriod] = useState(settleOpts[0] ?? toPeriod(new Date()));
   const [paidMonth, setPaidMonth] = useState(() => {
@@ -108,15 +133,27 @@ export function ProvvigioniFilterTable({
     serverSortDir,
   ].join("|");
 
-  // Cambio pagina / collaboratore: deseleziona checkbox (i filtri colonna li azzera ExcelFilterTable)
   useEffect(() => {
     setSelectedKeys(new Set());
+    setDrafts({});
     setMessage(null);
     setError(null);
   }, [filterResetKey]);
 
+  const draftCount = useMemo(() => {
+    let n = 0;
+    for (const cells of Object.values(drafts)) n += Object.keys(cells).length;
+    return n;
+  }, [drafts]);
+
   function onServerSort(key: string) {
     if (key !== "clientName") return;
+    if (draftCount > 0) {
+      const ok = window.confirm(
+        `Hai ${draftCount} modifiche non salvate. Continuando le perdi. Procedere?`,
+      );
+      if (!ok) return;
+    }
     const nextDir =
       serverSortKey === "client" && serverSortDir !== "desc" ? "desc" : "asc";
     router.push(
@@ -131,6 +168,12 @@ export function ProvvigioniFilterTable({
 
   function onServerColumnFilter(columnKey: string, values: string[]) {
     if (columnKey !== "collaboratorName") return;
+    if (draftCount > 0) {
+      const ok = window.confirm(
+        `Hai ${draftCount} modifiche non salvate. Continuando le perdi. Procedere?`,
+      );
+      if (!ok) return;
+    }
     if (values.length === 0) {
       router.push(
         buildPageHref("/provvigioni", {
@@ -159,7 +202,6 @@ export function ProvvigioniFilterTable({
 
   const selectedCount = selectedKeys.size;
   const selectedIds = useMemo(() => [...selectedKeys], [selectedKeys]);
-  /** ID contratto delle righe spuntate (per eliminazione multipla) */
   const selectedContractIds = useMemo(
     () =>
       rows
@@ -168,50 +210,108 @@ export function ProvvigioniFilterTable({
     [rows, selectedKeys],
   );
 
-  async function onCellEdit(row: Record<string, unknown>, key: string, value: string) {
-    if (row.warnOnEdit) {
-      const ok = window.confirm(
-        "Attenzione: questo contratto NON è fuori storno.\n\n" +
-          "Confermi di voler modificare comunque?",
-      );
-      if (!ok) {
-        router.refresh();
-        return;
-      }
-    }
+  const displayRows = useMemo(() => {
+    return rows.map((r) => {
+      const id = rowId(r);
+      const d = drafts[id];
+      if (!d) return r;
+      return { ...r, ...d } as ProvvigioneRow;
+    });
+  }, [rows, drafts]);
 
-    const map: Record<string, string> = {
-      amount: "expected",
-      recurrence: "recurrence",
-      paymentStatus: "paymentStatus",
-      podPdr: "podPdr",
-      collectionMonth: "collectionDate",
-      notes: "notes",
-      stato: "stato",
-    };
-    const field = map[key];
-    if (!field) return;
-    if (!row.commissionId) {
-      setError("Questa riga non ha ancora una commissione collegata. Ricarica la pagina.");
+  function queueDraft(row: Record<string, unknown>, key: string, value: string) {
+    const id = rowId(row);
+    if (!id) return;
+    const base = rows.find((r) => rowId(r) === id);
+    const original = base ? originalCellValue(base, key) : "";
+    setDrafts((prev) => {
+      const nextRow = { ...(prev[id] ?? {}) };
+      if (value === original) {
+        delete nextRow[key];
+      } else {
+        nextRow[key] = value;
+      }
+      const next = { ...prev };
+      if (Object.keys(nextRow).length === 0) delete next[id];
+      else next[id] = nextRow;
+      return next;
+    });
+    setError(null);
+  }
+
+  function getDraftValue(row: Record<string, unknown>, key: string): string {
+    const id = rowId(row);
+    const drafted = drafts[id]?.[key];
+    if (drafted != null) return drafted;
+    const base = rows.find((r) => rowId(r) === id);
+    return base ? originalCellValue(base, key) : String(row[key] ?? "");
+  }
+
+  function isDraftDirty(row: Record<string, unknown>, key: string): boolean {
+    const id = rowId(row);
+    return Boolean(drafts[id] && key in drafts[id]);
+  }
+
+  function discardDrafts() {
+    if (draftCount === 0) return;
+    if (!window.confirm(`Annullare ${draftCount} modifiche non salvate?`)) return;
+    setDrafts({});
+    setMessage("Bozze annullate");
+  }
+
+  function saveAllDrafts() {
+    if (draftCount === 0) {
+      setError("Nessuna modifica in bozza da salvare.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Salvare ${draftCount} modifiche insieme?\n\nLe celle gialle verranno scritte nel database.`,
+      )
+    ) {
       return;
     }
 
-    const fd = new FormData();
-    fd.set("commissionId", String(row.commissionId));
-    fd.set("field", field);
-    fd.set("value", value);
-    await updateCommissionFieldAction(fd);
-    router.refresh();
+    const changes: Array<{ commissionId: string; field: string; value: string }> = [];
+    for (const [id, cells] of Object.entries(drafts)) {
+      for (const [colKey, value] of Object.entries(cells)) {
+        const field = FIELD_MAP[colKey];
+        if (!field) continue;
+        changes.push({ commissionId: id, field, value });
+      }
+    }
+
+    setError(null);
+    setMessage(null);
+    start(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("changes", JSON.stringify(changes));
+        const res = await bulkUpdateCommissionFieldsAction(fd);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        setDrafts({});
+        setMessage(`Salvate ${res.count} modifiche`);
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Errore salvataggio");
+      }
+    });
   }
 
   function runBulk(
     label: string,
-    fn: () => Promise<{
-      ok: true;
-      count?: number;
-      monthsPaid?: number;
-      contracts?: number;
-    } | { ok: false; error: string }>,
+    fn: () => Promise<
+      | {
+          ok: true;
+          count?: number;
+          monthsPaid?: number;
+          contracts?: number;
+        }
+      | { ok: false; error: string }
+    >,
   ) {
     if (selectedCount === 0) {
       setError("Seleziona almeno una riga (checkbox a sinistra).");
@@ -249,16 +349,8 @@ export function ProvvigioniFilterTable({
       key: "clientName",
       label: "Cliente",
       getValue: (r) => String(r.clientName ?? ""),
+      editable: true,
       sortKind: "text",
-      render: (r) => (
-        <Link
-          href={`/clienti/${String(r.clientId)}`}
-          className="font-medium text-emerald-700 hover:underline"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {String(r.clientName)}
-        </Link>
-      ),
     },
     {
       key: "podPdr",
@@ -271,20 +363,22 @@ export function ProvvigioniFilterTable({
       key: "collaboratorName",
       label: "Collab.",
       getValue: (r) => String(r.collaboratorName ?? ""),
+      editable: Boolean(collaboratorByName),
       sortKind: "text",
     },
     {
       key: "supplierName",
       label: "Forn.",
       getValue: (r) => String(r.supplierName ?? ""),
+      editable: Boolean(supplierNames?.length),
       sortKind: "text",
     },
     {
       key: "clientType",
       label: "Tipologia",
       getValue: (r) => String(r.clientType ?? ""),
+      editable: true,
       sortKind: "text",
-      render: (r) => shortType(String(r.clientType ?? "")),
     },
     {
       key: "amount",
@@ -296,22 +390,25 @@ export function ProvvigioniFilterTable({
     {
       key: "stato",
       label: "Stato",
-      getValue: (r) => String(r.stato ?? ""),
+      getValue: (r) => getDraftValue(r, "stato"),
       sortKind: "text",
       render: (r) => {
-        const current = String(r.stato ?? "Da incassare");
+        const current = getDraftValue(r, "stato") || "Da incassare";
         const options = [...PROVVIGIONE_STATO_OPTIONS];
+        const dirty = isDraftDirty(r, "stato");
         return (
           <select
-            className="max-w-[9.5rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-[11px]"
-            value={options.includes(current as (typeof options)[number]) ? current : "Da incassare"}
-            title="Cambia stato contratto / pagamento"
+            className={`max-w-[9.5rem] rounded border px-1 py-0.5 text-[11px] ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={
+              options.includes(current as (typeof options)[number])
+                ? current
+                : "Da incassare"
+            }
+            title="Bozza: cambia e poi Salva tutte"
             onClick={(e) => e.stopPropagation()}
-            onChange={(e) => {
-              const next = e.target.value;
-              if (next === current) return;
-              void onCellEdit(r, "stato", next);
-            }}
+            onChange={(e) => queueDraft(r, "stato", e.target.value)}
           >
             {options.map((o) => (
               <option key={o} value={o}>
@@ -332,7 +429,7 @@ export function ProvvigioniFilterTable({
     {
       key: "paymentStatus",
       label: "Pagato",
-      getValue: (r) => (String(r.collectionMonth ?? "").trim() ? "Sì" : "No"),
+      getValue: (r) => getDraftValue(r, "paymentStatus"),
       editable: true,
       sortKind: "text",
     },
@@ -355,15 +452,16 @@ export function ProvvigioniFilterTable({
       getValue: (r) => String(r.notes ?? ""),
       editable: true,
       sortKind: "text",
-    },    {
+    },
+    {
       key: "confirmed",
-      label: "Gettone",
-      getValue: (r) => String(r.confirmed ?? ""),
+      label: "Conf.",
+      getValue: (r) => getDraftValue(r, "confirmed"),
       sortKind: "text",
       render: (r) => {
-        const ok = String(r.confirmed) === "Confermata";
-        return (
-          <div className="flex flex-wrap items-center gap-1">
+        if (!canConfirm) {
+          const ok = getDraftValue(r, "confirmed") === "Confermata";
+          return (
             <span
               className={
                 ok ? "font-medium text-emerald-800" : "font-medium text-amber-900"
@@ -371,10 +469,23 @@ export function ProvvigioniFilterTable({
             >
               {ok ? "OK" : "Da conf."}
             </span>
-            {canConfirm && !ok && String(r.commissionId) ? (
-              <ConfirmButton commissionId={String(r.commissionId)} />
-            ) : null}
-          </div>
+          );
+        }
+        const current = getDraftValue(r, "confirmed") || "Da confermare";
+        const dirty = isDraftDirty(r, "confirmed");
+        return (
+          <select
+            className={`max-w-[8rem] rounded border px-1 py-0.5 text-[11px] ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={current === "Confermata" ? "Confermata" : "Da confermare"}
+            title="Bozza: cambia e poi Salva tutte"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "confirmed", e.target.value)}
+          >
+            <option value="Da confermare">Da conf.</option>
+            <option value="Confermata">OK</option>
+          </select>
         );
       },
     },
@@ -391,13 +502,41 @@ export function ProvvigioniFilterTable({
 
   return (
     <div className="space-y-2">
+      {draftCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p>
+            <strong>{draftCount}</strong> modifiche in bozza (celle gialle). Non ancora
+            salvate nel database.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={pending}
+              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+              onClick={saveAllDrafts}
+            >
+              Salva tutte le modifiche
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50 disabled:opacity-50"
+              onClick={discardDrafts}
+            >
+              Annulla bozze
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
         <p className="text-xs font-medium text-slate-800">
           Azioni multiple {selectedCount > 0 ? `(${selectedCount} selezionate)` : ""}
         </p>
         <p className="mt-1 text-[11px] text-slate-500">
-          Spunta le righe (o l’intestazione per tutta la pagina filtrata), poi scegli
-          un’azione. Max 200 per volta.
+          Modifica le celle liberamente (restano in bozza gialla), poi{" "}
+          <strong>Salva tutte le modifiche</strong>. Oppure spunta le righe per azioni
+          rapide. Max 200 per azioni multiple / 500 celle per salvataggio bozze.
         </p>
 
         <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -539,21 +678,24 @@ export function ProvvigioniFilterTable({
       </div>
 
       <p className="text-xs text-slate-500">
-        <strong>Stato</strong>: menu a tendina{" "}
-        <strong>KO / Cessato</strong> · <strong>Da incassare</strong> ·{" "}
-        <strong>Incassato</strong> (per correggere le righe grigie importate come
-        chiusi). Pagato: <strong>Sì</strong>/<strong>No</strong>. Data:{" "}
-        <strong>MM/AAAA</strong>. Bordo sinistro = stato gettone (ambra / verde).
+        Celle modificabili = bozza (giallo) finché non salvi.{" "}
+        <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato.{" "}
+        <strong>Tipologia</strong>: Business / Domestico.{" "}
+        <strong>Pagato</strong>: Sì / No. <strong>Data</strong>: MM/AAAA.{" "}
+        <strong>Storno</strong> è solo lettura (si aggiorna dallo Stato).
         {canDelete
-          ? " Elimina (singolo o selezionate) archivia i contratti e li toglie dalla lista."
+          ? " Elimina archivia i contratti."
           : ""}
       </p>
       <ExcelFilterTable
         dense
-        rows={rows as unknown as Record<string, unknown>[]}
+        rows={displayRows as unknown as Record<string, unknown>[]}
         columns={columns}
         rowKey={(r) => String(r.commissionId || r.id)}
-        onCellEdit={onCellEdit}
+        draftMode
+        getDraftValue={getDraftValue}
+        isDraftDirty={isDraftDirty}
+        onCellDraft={queueDraft}
         selection={{ selectedKeys, onChange: setSelectedKeys }}
         resetKey={filterResetKey}
         serverSort={{
@@ -570,11 +712,12 @@ export function ProvvigioniFilterTable({
               }
             : undefined
         }
-        filterOptionsOverride={
-          collaboratorByName
+        filterOptionsOverride={{
+          ...(collaboratorByName
             ? { collaboratorName: Object.keys(collaboratorByName) }
-            : undefined
-        }
+            : {}),
+          ...(supplierNames?.length ? { supplierName: supplierNames } : {}),
+        }}
         getRowClassName={(r) => {
           const storno = String(r.stornoRowClass ?? "");
           const border = String(r.gettoneBorderClass ?? "");
@@ -584,7 +727,7 @@ export function ProvvigioniFilterTable({
       <StornoLegend />
       <p className="text-xs text-slate-500">
         Gettone: bordo ambra = da confermare · bordo verde = confermato
-        {canConfirm ? " · Admin: usa «Conferma» o azione multipla." : ""}
+        {canConfirm ? " · Admin: conferma da colonna Conf. o azione multipla." : ""}
       </p>
     </div>
   );

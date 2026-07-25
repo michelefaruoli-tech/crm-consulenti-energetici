@@ -125,6 +125,7 @@ export default async function ProvvigioniPage({
     sumAgg,
     daConfermareCount,
     collaboratorOptions,
+    supplierOptions,
     missing,
     collabGroups,
     settledRowsRaw,
@@ -184,6 +185,12 @@ export default async function ProvvigioniPage({
           },
           select: { id: true, name: true, active: true },
           orderBy: [{ active: "desc" }, { name: "asc" }],
+        })
+      : Promise.resolve([]),
+    canViewAll
+      ? prisma.supplier.findMany({
+          select: { name: true },
+          orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
     getMissingRecurringAlerts(sessionCollabFilter),
@@ -446,6 +453,9 @@ export default async function ProvvigioniPage({
           canViewAll
             ? Object.fromEntries(collaboratorOptions.map((u) => [u.name, u.id]))
             : undefined
+        }
+        supplierNames={
+          canViewAll ? supplierOptions.map((s) => s.name) : undefined
         }
       />
 

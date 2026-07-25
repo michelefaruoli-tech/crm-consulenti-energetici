@@ -60,6 +60,14 @@ type Props = {
    * Opzioni filtro forzate per colonna (es. tutti i collaboratori, non solo quelli in pagina).
    */
   filterOptionsOverride?: Record<string, string[]>;
+  /**
+   * Modalità bozza: le modifiche restano locali (onCellDraft) finché non salvi.
+   * Gli input sono controllati via getDraftValue.
+   */
+  draftMode?: boolean;
+  getDraftValue?: (row: Record<string, unknown>, key: string) => string;
+  isDraftDirty?: (row: Record<string, unknown>, key: string) => boolean;
+  onCellDraft?: (row: Record<string, unknown>, key: string, value: string) => void;
 };
 
 export function ExcelFilterTable({
@@ -76,6 +84,10 @@ export function ExcelFilterTable({
   resetKey,
   serverColumnFilter,
   filterOptionsOverride,
+  draftMode = false,
+  getDraftValue,
+  isDraftDirty,
+  onCellDraft,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
@@ -455,38 +467,62 @@ export function ExcelFilterTable({
                     />
                   </td>
                 ) : null}
-                {columns.map((col) => (
+                {columns.map((col) => {
+                  const baseVal =
+                    col.getValue(row) === "(vuoto)" ? "" : col.getValue(row);
+                  const displayVal = draftMode && getDraftValue
+                    ? getDraftValue(row, col.key)
+                    : baseVal;
+                  const dirty =
+                    draftMode && isDraftDirty ? isDraftDirty(row, col.key) : false;
+                  return (
                   <td
                     key={col.key}
-                    className={cn(dense ? "px-1.5 py-1" : "px-3 py-2")}
+                    className={cn(
+                      dense ? "px-1.5 py-1" : "px-3 py-2",
+                      dirty && "bg-amber-50",
+                    )}
                     onClick={(e) => {
                       // Solo le celle editabili bloccano il click sulla riga
                       if (col.editable) e.stopPropagation();
                     }}
                   >
-                    {col.editable && onCellEdit ? (
+                    {col.editable && (draftMode ? onCellDraft : onCellEdit) ? (
                       <input
                         className={cn(
-                          "w-full rounded border border-transparent bg-transparent hover:border-slate-200 focus:border-emerald-500 focus:outline-none",
+                          "w-full rounded border bg-transparent focus:border-emerald-500 focus:outline-none",
+                          dirty
+                            ? "border-amber-400"
+                            : "border-transparent hover:border-slate-200",
                           dense ? "min-w-0 px-0.5 py-0.5 text-xs" : "min-w-[10rem] px-1 py-0.5",
                         )}
-                        defaultValue={
-                          col.getValue(row) === "(vuoto)" ? "" : col.getValue(row)
+                        value={draftMode ? displayVal : undefined}
+                        defaultValue={draftMode ? undefined : displayVal}
+                        title={
+                          draftMode
+                            ? "Modifica in bozza — poi premi «Salva tutte le modifiche»"
+                            : "Modifica e premi Invio oppure clicca fuori per salvare"
                         }
-                        title="Modifica e premi Invio oppure clicca fuori per salvare"
+                        onChange={
+                          draftMode && onCellDraft
+                            ? (e) => onCellDraft(row, col.key, e.target.value)
+                            : undefined
+                        }
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") {
+                          if (!draftMode && e.key === "Enter") {
                             (e.target as HTMLInputElement).blur();
                           }
                         }}
-                        onBlur={(e) => {
-                          const next = e.target.value;
-                          const prev =
-                            col.getValue(row) === "(vuoto)" ? "" : col.getValue(row);
-                          if (next !== prev) {
-                            void onCellEdit(row, col.key, next);
-                          }
-                        }}
+                        onBlur={
+                          draftMode || !onCellEdit
+                            ? undefined
+                            : (e) => {
+                                const next = e.target.value;
+                                if (next !== baseVal) {
+                                  void onCellEdit(row, col.key, next);
+                                }
+                              }
+                        }
                       />
                     ) : col.render ? (
                       col.render(row)
@@ -494,7 +530,8 @@ export function ExcelFilterTable({
                       col.getValue(row)
                     )}
                   </td>
-                ))}
+                  );
+                })}
               </tr>
             );
             })
