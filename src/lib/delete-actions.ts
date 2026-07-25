@@ -74,6 +74,75 @@ export async function deleteContractRowAction(
   }
 }
 
+/** Soft-delete multiplo (max 200). Usato da Provvigioni azioni multiple. */
+export async function bulkDeleteContractsAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  try {
+    const session = await requireSession();
+    const raw = String(formData.get("contractIds") ?? "");
+    const ids = [
+      ...new Set(
+        raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 200);
+
+    if (ids.length === 0) {
+      return { ok: false, error: "Nessuna riga selezionata" };
+    }
+
+    const contracts = await prisma.contract.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: {
+        id: true,
+        clientId: true,
+        collaboratorId: true,
+        status: true,
+      },
+    });
+
+    if (contracts.length === 0) {
+      return { ok: false, error: "Nessun contratto valido da eliminare" };
+    }
+
+    let count = 0;
+    const clientIds = new Set<string>();
+    for (const c of contracts) {
+      if (!canDeleteContract(session.role, session.id, c.collaboratorId)) {
+        continue;
+      }
+      await softDeleteContract(c.id, session.id, c.status);
+      clientIds.add(c.clientId);
+      count += 1;
+    }
+
+    if (count === 0) {
+      return {
+        ok: false,
+        error: "Nessun contratto eliminato: permesso negato sulle righe scelte",
+      };
+    }
+
+    revalidatePath("/contratti");
+    revalidatePath("/lavorazione");
+    revalidatePath("/attesa-pagamento");
+    revalidatePath("/provvigioni");
+    revalidatePath("/archivio");
+    revalidatePath("/");
+    for (const clientId of clientIds) {
+      revalidatePath(`/clienti/${clientId}`);
+    }
+
+    return { ok: true, count };
+  } catch (e) {
+    console.error("[bulkDeleteContractsAction]", e);
+    return { ok: false, error: friendlyDbError(e) };
+  }
+}
+
 export async function deleteClientAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   const clientId = String(formData.get("clientId") ?? "");

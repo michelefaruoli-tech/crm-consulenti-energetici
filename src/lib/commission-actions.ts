@@ -122,6 +122,11 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       where: { id: commission.contractId },
       data: { podPdr: value.trim() || null },
     });
+  } else if (field === "notes") {
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { notes: value.trim() || null },
+    });
   }
 
   revalidatePath("/provvigioni");

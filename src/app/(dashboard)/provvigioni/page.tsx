@@ -148,6 +148,7 @@ export default async function ProvvigioniPage({
         stornoEndDate: true,
         operationType: true,
         collaboratorId: true,
+        notes: true,
         client: {
           select: {
             type: true,
@@ -265,6 +266,7 @@ export default async function ProvvigioniPage({
       paymentStatus: paidLabel,
       confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,
+      notes: contract.notes || "",
       stornoLabel: storno.label,
       stornoRowClass: storno.rowClassName,
       warnOnEdit: storno.warnOnEdit,

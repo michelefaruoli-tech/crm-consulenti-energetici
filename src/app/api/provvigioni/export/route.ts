@@ -36,6 +36,7 @@ export async function GET(request: Request) {
       collectionDate: true,
       commissionConfirmed: true,
       insertionDate: true,
+      notes: true,
       client: {
         select: {
           type: true,
@@ -71,6 +72,7 @@ export async function GET(request: Request) {
     { header: "Pagato", key: "pagato", width: 10 },
     { header: "Data incasso", key: "collection", width: 14 },
     { header: "Gettone conf.", key: "confirmed", width: 12 },
+    { header: "Note", key: "notes", width: 40 },
     { header: "Inserimento", key: "insertion", width: 12 },
   ];
 
@@ -89,6 +91,7 @@ export async function GET(request: Request) {
       pagato: c.collectionDate ? "Sì" : "No",
       collection: c.collectionDate ? formatMonthYear(c.collectionDate) : "",
       confirmed: c.commissionConfirmed ? "Sì" : "No",
+      notes: c.notes ?? "",
       insertion: c.insertionDate.toISOString().slice(0, 10),
     });
   }

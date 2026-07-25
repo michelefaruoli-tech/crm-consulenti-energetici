@@ -11,6 +11,7 @@ import {
   confirmCommissionAction,
   updateCommissionFieldAction,
 } from "@/lib/commission-actions";
+import { bulkDeleteContractsAction } from "@/lib/delete-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { toPeriod, periodLabel } from "@/lib/recurring";
@@ -30,6 +31,7 @@ export type ProvvigioneRow = {
   paymentStatus: string;
   confirmed: string;
   collectionMonth: string;
+  notes: string;
   stornoLabel?: string;
   stornoRowClass?: string;
   warnOnEdit?: boolean;
@@ -172,6 +174,14 @@ export function ProvvigioniFilterTable({
 
   const selectedCount = selectedKeys.size;
   const selectedIds = useMemo(() => [...selectedKeys], [selectedKeys]);
+  /** ID contratto delle righe spuntate (per eliminazione multipla) */
+  const selectedContractIds = useMemo(
+    () =>
+      rows
+        .filter((r) => selectedKeys.has(String(r.commissionId || r.id)))
+        .map((r) => r.id),
+    [rows, selectedKeys],
+  );
 
   async function onCellEdit(row: Record<string, unknown>, key: string, value: string) {
     if (row.warnOnEdit) {
@@ -191,6 +201,7 @@ export function ProvvigioniFilterTable({
       paymentStatus: "paymentStatus",
       podPdr: "podPdr",
       collectionMonth: "collectionDate",
+      notes: "notes",
     };
     const field = map[key];
     if (!field) return;
@@ -214,7 +225,7 @@ export function ProvvigioniFilterTable({
       count?: number;
       monthsPaid?: number;
       contracts?: number;
-    }>,
+    } | { ok: false; error: string }>,
   ) {
     if (selectedCount === 0) {
       setError("Seleziona almeno una riga (checkbox a sinistra).");
@@ -228,6 +239,10 @@ export function ProvvigioniFilterTable({
     start(async () => {
       try {
         const result = await fn();
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
         setSelectedKeys(new Set());
         const extra =
           result.monthsPaid != null
@@ -320,6 +335,12 @@ export function ProvvigioniFilterTable({
       sortKind: "text",
     },
     {
+      key: "notes",
+      label: "Note",
+      getValue: (r) => String(r.notes ?? ""),
+      editable: true,
+      sortKind: "text",
+    },    {
       key: "confirmed",
       label: "Gettone",
       getValue: (r) => String(r.confirmed ?? ""),
@@ -463,6 +484,29 @@ export function ProvvigioniFilterTable({
             Paga tutti mesi ric.
           </button>
 
+          {canDelete ? (
+            <button
+              type="button"
+              disabled={pending}
+              className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-800 disabled:opacity-50"
+              title="Archivia (soft delete) tutti i contratti selezionati"
+              onClick={() =>
+                runBulk(
+                  "Elimina le righe selezionate\n\nI contratti vengono archiviati e spariscono da Provvigioni (come Elimina singolo).",
+                  async () => {
+                    const fd = new FormData();
+                    fd.set("contractIds", selectedContractIds.join(","));
+                    const res = await bulkDeleteContractsAction(fd);
+                    if (!res.ok) return res;
+                    return { ok: true as const, count: res.count };
+                  },
+                )
+              }
+            >
+              Elimina selezionate
+            </button>
+          ) : null}
+
           {selectedCount > 0 ? (
             <button
               type="button"
@@ -482,7 +526,9 @@ export function ProvvigioniFilterTable({
       <p className="text-xs text-slate-500">
         Pagato: <strong>Sì</strong>/<strong>No</strong>. Data: <strong>MM/AAAA</strong>.
         Bordo sinistro = stato gettone (ambra / verde).
-        {canDelete ? " Elimina rimuove il contratto (doppioni)." : ""}
+        {canDelete
+          ? " Elimina (singolo o selezionate) archivia i contratti e li toglie dalla lista."
+          : ""}
       </p>
       <ExcelFilterTable
         dense
