@@ -144,6 +144,7 @@ type ParsedSheet = {
     consumi: number;
     storno: number;
     agenzia: number;
+    utility: number;
   };
 };
 
@@ -218,6 +219,7 @@ async function loadSheetFromForm(formData: FormData): Promise<
     consumi: colPrefer("consumi", "consumo", "kwh", "smc"),
     storno: colPrefer("mesi storno", "storno"),
     agenzia: colPrefer("agenzia"),
+    utility: colPrefer("utility", "luce/gas", "commodity"),
   };
 
   if (cols.nome < 0 && cols.cognome < 0 && cols.ragione < 0 && cols.pod < 0) {
@@ -555,6 +557,8 @@ async function importOneHistoricalRow(opts: {
   const consumiRaw = data.cols.consumi > 0 ? cell(row, data.cols.consumi) : "";
   const stornoRaw = data.cols.storno > 0 ? cell(row, data.cols.storno) : "";
   const agenzia = data.cols.agenzia > 0 ? cell(row, data.cols.agenzia) : "";
+  const utilityType =
+    data.cols.utility > 0 ? cell(row, data.cols.utility) : "";
 
   if (!firstName && !lastName && !companyName && !podPdr) return false;
 
@@ -689,6 +693,7 @@ async function importOneHistoricalRow(opts: {
       agency: agenzia || null,
       annualKwh: consumi,
       stornoEndDate,
+      utilityType: utilityType || null,
     },
   });
 
