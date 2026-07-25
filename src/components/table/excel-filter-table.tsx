@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 
 export type FilterColumn = {
@@ -42,6 +42,24 @@ type Props = {
     dir: "asc" | "desc";
     onSort: (key: string) => void;
   };
+  /**
+   * Se cambia (es. collaboratore / pagina), azzera i filtri colonna.
+   * Serve perché in Next.js lo stato client resta al cambio query.
+   */
+  resetKey?: string;
+  /**
+   * Filtri gestiti dal server: invece di ridurre le 100 righe in pagina,
+   * chiamano `onFilter` (es. Collaboratore → ?collab=…).
+   * `values` vuoto = nessun filtro / tutti.
+   */
+  serverColumnFilter?: {
+    keys: string[];
+    onFilter: (columnKey: string, values: string[]) => void;
+  };
+  /**
+   * Opzioni filtro forzate per colonna (es. tutti i collaboratori, non solo quelli in pagina).
+   */
+  filterOptionsOverride?: Record<string, string[]>;
 };
 
 export function ExcelFilterTable({
@@ -55,6 +73,9 @@ export function ExcelFilterTable({
   getRowClassName,
   selection,
   serverSort,
+  resetKey,
+  serverColumnFilter,
+  filterOptionsOverride,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
@@ -64,10 +85,28 @@ export function ExcelFilterTable({
     () => new Set(serverSort?.keys ?? []),
     [serverSort?.keys],
   );
+  const serverFilterKeys = useMemo(
+    () => new Set(serverColumnFilter?.keys ?? []),
+    [serverColumnFilter?.keys],
+  );
+
+  // Cambio collaboratore / pagina → mostra di nuovo tutte le righe caricate (fino a 100)
+  useEffect(() => {
+    setSelected({});
+    setOpenFilter(null);
+    setSortKey(null);
+    setSortDir("asc");
+  }, [resetKey]);
 
   const optionsByColumn = useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const col of columns) {
+      if (filterOptionsOverride?.[col.key]?.length) {
+        map[col.key] = [...filterOptionsOverride[col.key]].sort((a, b) =>
+          a.localeCompare(b, "it"),
+        );
+        continue;
+      }
       const set = new Set<string>();
       for (const row of rows) {
         const v = col.getValue(row) || "(vuoto)";
@@ -76,7 +115,7 @@ export function ExcelFilterTable({
       map[col.key] = [...set].sort((a, b) => a.localeCompare(b, "it"));
     }
     return map;
-  }, [rows, columns]);
+  }, [rows, columns, filterOptionsOverride]);
 
   function sortValue(col: FilterColumn, row: Record<string, unknown>): string | number {
     const raw = col.getValue(row) || "";
@@ -99,6 +138,8 @@ export function ExcelFilterTable({
   const filtered = useMemo(() => {
     let list = rows.filter((row) =>
       columns.every((col) => {
+        // I filtri server non riducono la pagina: ricaricano il database
+        if (serverFilterKeys.has(col.key)) return true;
         const sel = selected[col.key];
         if (!sel || sel.size === 0) return true;
         const v = col.getValue(row) || "(vuoto)";
@@ -121,7 +162,7 @@ export function ExcelFilterTable({
       }
     }
     return list;
-  }, [rows, columns, selected, sortKey, sortDir, serverSortKeys]);
+  }, [rows, columns, selected, sortKey, sortDir, serverSortKeys, serverFilterKeys]);
 
   function toggleValue(colKey: string, value: string) {
     setSelected((prev) => {
@@ -214,8 +255,9 @@ export function ExcelFilterTable({
       {hasAnyFilter ? (
         <div className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <span>
-            Filtri attivi: vedi {filtered.length} di {rows.length} righe. Se mancano
-            collaboratori, probabilmente hai filtrato la colonna Collaboratore.
+            Filtri colonna attivi: vedi {filtered.length} di {rows.length} righe di
+            questa pagina. Per un collaboratore usa i pulsanti sopra (carica fino a
+            100 contratti veri dal database).
           </span>
           <button
             type="button"
@@ -296,23 +338,44 @@ export function ExcelFilterTable({
                   </div>
                   {openFilter === col.key ? (
                     <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-56 overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                      {serverFilterKeys.has(col.key) ? (
+                        <p className="mb-2 text-[10px] leading-snug text-slate-500">
+                          Questo filtro ricarica il database (pagine da 100 righe),
+                          non riduce solo questa pagina.
+                        </p>
+                      ) : null}
                       <div className="mb-2 flex gap-2 text-xs">
                         <button
                           type="button"
                           className="text-emerald-700"
-                          onClick={() => selectAll(col.key)}
+                          onClick={() => {
+                            if (serverFilterKeys.has(col.key) && serverColumnFilter) {
+                              serverColumnFilter.onFilter(col.key, []);
+                              setOpenFilter(null);
+                              return;
+                            }
+                            selectAll(col.key);
+                          }}
                         >
                           Tutti
                         </button>
                         <button
                           type="button"
                           className="text-slate-500"
-                          onClick={() => clearCol(col.key)}
+                          onClick={() => {
+                            if (serverFilterKeys.has(col.key) && serverColumnFilter) {
+                              serverColumnFilter.onFilter(col.key, []);
+                              setOpenFilter(null);
+                              return;
+                            }
+                            clearCol(col.key);
+                          }}
                         >
                           Nessuno
                         </button>
                       </div>
                       {(optionsByColumn[col.key] ?? []).map((opt) => {
+                        const isServerCol = serverFilterKeys.has(col.key);
                         const isActive = (selected[col.key]?.size ?? 0) > 0;
                         return (
                           <label
@@ -321,8 +384,19 @@ export function ExcelFilterTable({
                           >
                             <input
                               type="checkbox"
-                              checked={isActive ? selected[col.key].has(opt) : true}
+                              checked={
+                                isServerCol
+                                  ? false
+                                  : isActive
+                                    ? selected[col.key].has(opt)
+                                    : true
+                              }
                               onChange={() => {
+                                if (isServerCol && serverColumnFilter) {
+                                  serverColumnFilter.onFilter(col.key, [opt]);
+                                  setOpenFilter(null);
+                                  return;
+                                }
                                 if (!isActive) {
                                   setSelected((prev) => ({
                                     ...prev,
@@ -428,7 +502,9 @@ export function ExcelFilterTable({
         </tbody>
       </table>
       <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
-        {filtered.length} di {rows.length} righe
+        {hasAnyFilter
+          ? `Filtrate ${filtered.length} su ${rows.length} caricate in questa pagina`
+          : `Mostrate ${rows.length} righe in questa pagina (pieno = fino a 100)`}
         {selection && selection.selectedKeys.size > 0
           ? ` · ${selection.selectedKeys.size} selezionate`
           : ""}

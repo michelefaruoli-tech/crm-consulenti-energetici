@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
@@ -86,6 +86,8 @@ export function ProvvigioniFilterTable({
   listQuery,
   serverSortKey = null,
   serverSortDir = "asc",
+  page = 1,
+  collaboratorByName,
 }: {
   rows: ProvvigioneRow[];
   canDelete?: boolean;
@@ -94,6 +96,10 @@ export function ProvvigioniFilterTable({
   listQuery?: { collab?: string | null; settled?: string | null };
   serverSortKey?: string | null;
   serverSortDir?: "asc" | "desc";
+  /** Numero pagina corrente (per resettare i filtri colonna) */
+  page?: number;
+  /** Nome collaboratore → id (filtro colonna Collab. sul database) */
+  collaboratorByName?: Record<string, string>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -107,6 +113,21 @@ export function ProvvigioniFilterTable({
     return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   });
 
+  const filterResetKey = [
+    listQuery?.collab ?? "tutti",
+    listQuery?.settled ?? "",
+    String(page),
+    serverSortKey ?? "",
+    serverSortDir,
+  ].join("|");
+
+  // Cambio pagina / collaboratore: deseleziona checkbox (i filtri colonna li azzera ExcelFilterTable)
+  useEffect(() => {
+    setSelectedKeys(new Set());
+    setMessage(null);
+    setError(null);
+  }, [filterResetKey]);
+
   function onServerSort(key: string) {
     if (key !== "clientName") return;
     const nextDir =
@@ -117,6 +138,34 @@ export function ProvvigioniFilterTable({
         settled: listQuery?.settled,
         sort: "client",
         dir: nextDir,
+      }),
+    );
+  }
+
+  function onServerColumnFilter(columnKey: string, values: string[]) {
+    if (columnKey !== "collaboratorName") return;
+    if (values.length === 0) {
+      router.push(
+        buildPageHref("/provvigioni", {
+          settled: listQuery?.settled,
+          sort: serverSortKey === "client" ? "client" : undefined,
+          dir: serverSortKey === "client" ? serverSortDir : undefined,
+        }),
+      );
+      return;
+    }
+    const name = values[0];
+    const id = collaboratorByName?.[name];
+    if (!id) {
+      setError(`Collaboratore non trovato: ${name}`);
+      return;
+    }
+    router.push(
+      buildPageHref("/provvigioni", {
+        collab: id,
+        settled: listQuery?.settled,
+        sort: serverSortKey === "client" ? "client" : undefined,
+        dir: serverSortKey === "client" ? serverSortDir : undefined,
       }),
     );
   }
@@ -442,12 +491,26 @@ export function ProvvigioniFilterTable({
         rowKey={(r) => String(r.commissionId || r.id)}
         onCellEdit={onCellEdit}
         selection={{ selectedKeys, onChange: setSelectedKeys }}
+        resetKey={filterResetKey}
         serverSort={{
           keys: ["clientName"],
           key: serverSortKey === "client" ? "clientName" : null,
           dir: serverSortDir,
           onSort: onServerSort,
         }}
+        serverColumnFilter={
+          collaboratorByName
+            ? {
+                keys: ["collaboratorName"],
+                onFilter: onServerColumnFilter,
+              }
+            : undefined
+        }
+        filterOptionsOverride={
+          collaboratorByName
+            ? { collaboratorName: Object.keys(collaboratorByName) }
+            : undefined
+        }
         getRowClassName={(r) => {
           const storno = String(r.stornoRowClass ?? "");
           const border = String(r.gettoneBorderClass ?? "");

@@ -7,6 +7,7 @@ export function PaginationNav({
   total,
   pageSize = PAGE_SIZE,
   query = {},
+  loadedCount,
 }: {
   path: string;
   page: number;
@@ -14,11 +15,15 @@ export function PaginationNav({
   pageSize?: number;
   /** Altri parametri da preservare (vista, collab, …) — senza `page` */
   query?: Record<string, string | undefined | null>;
+  /** Quante righe ha davvero restituito il server in questa pagina */
+  loadedCount?: number;
 }) {
   const pages = pageCount(total, pageSize);
   const current = Math.min(Math.max(1, page), pages);
   const from = total === 0 ? 0 : (current - 1) * pageSize + 1;
   const to = Math.min(current * pageSize, total);
+  const shown =
+    loadedCount != null ? loadedCount : total === 0 ? 0 : to - from + 1;
 
   function href(p: number) {
     return buildPageHref(path, {
@@ -36,16 +41,20 @@ export function PaginationNav({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
       <p className="text-slate-600">
-        Righe <span className="font-medium text-slate-900">{from}–{to}</span> di{" "}
-        <span className="font-medium text-slate-900">{total}</span>
+        Contratti{" "}
+        <span className="font-medium text-slate-900">
+          {total === 0 ? "0" : `${from}–${from + shown - 1}`}
+        </span>{" "}
+        di <span className="font-medium text-slate-900">{total}</span>
+        {" · "}
+        <span className="font-medium text-slate-900">{shown}</span> in questa pagina
+        (max {pageSize})
         {pages > 1 ? (
           <>
             {" "}
-            · pagina {current}/{pages} · max {pageSize} per pagina
+            · pagina {current}/{pages}
           </>
-        ) : (
-          <> · max {pageSize} per pagina</>
-        )}
+        ) : null}
       </p>
       {pages > 1 ? (
         <nav className="flex flex-wrap items-center gap-1" aria-label="Paginazione">

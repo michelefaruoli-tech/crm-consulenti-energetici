@@ -420,7 +420,13 @@ export default async function ProvvigioniPage({
         </div>
       </div>
 
-      <PaginationNav path="/provvigioni" page={page} total={total} query={queryBase} />
+      <PaginationNav
+        path="/provvigioni"
+        page={page}
+        total={total}
+        query={queryBase}
+        loadedCount={rows.length}
+      />
 
       <ProvvigioniFilterTable
         rows={rows}
@@ -429,9 +435,21 @@ export default async function ProvvigioniPage({
         listQuery={{ collab: collabFilter, settled: settledPeriod }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}
+        page={page}
+        collaboratorByName={
+          canViewAll
+            ? Object.fromEntries(collaboratorOptions.map((u) => [u.name, u.id]))
+            : undefined
+        }
       />
 
-      <PaginationNav path="/provvigioni" page={page} total={total} query={queryBase} />
+      <PaginationNav
+        path="/provvigioni"
+        page={page}
+        total={total}
+        query={queryBase}
+        loadedCount={rows.length}
+      />
     </div>
   );
 }
