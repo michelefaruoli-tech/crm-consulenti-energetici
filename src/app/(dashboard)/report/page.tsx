@@ -8,6 +8,8 @@ import { sendReportEmailAction } from "@/lib/actions";
 import { BackupButton } from "@/components/report/backup-button";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
+import { formatRomeDateTime } from "@/lib/timezone";
+import { getMasterEmail } from "@/lib/mail";
 
 const MONTH_LABELS = [
   "Gennaio",
@@ -40,7 +42,7 @@ export default async function ReportPage({
   const { from, to, collaboratorId, supplierId } = await searchParams;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
 
-  const [collaborators, suppliers] = await Promise.all([
+  const [collaborators, suppliers, recentBackups] = await Promise.all([
     canViewAll
       ? prisma.user.findMany({
           where: { active: true },
@@ -49,7 +51,18 @@ export default async function ReportPage({
         })
       : Promise.resolve([{ id: session.id, name: session.name }]),
     prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    hasPermission(session.role, "backup.manage")
+      ? prisma.backupLog.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        })
+      : Promise.resolve([]),
   ]);
+
+  const backupEmail =
+    process.env.BACKUP_EMAIL?.trim() ||
+    process.env.MASTER_EMAIL?.trim() ||
+    getMasterEmail();
 
   const dateFrom = from ? new Date(from) : new Date(new Date().getFullYear(), 0, 1);
   const dateTo = to ? new Date(to) : new Date();
@@ -237,8 +250,34 @@ export default async function ReportPage({
 
       {hasPermission(session.role, "backup.manage") ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 font-semibold text-slate-900">Backup</h2>
+          <h2 className="mb-2 font-semibold text-slate-900">Backup database (Excel)</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Automatico ogni sera alle ~22:00 (ora italiana), solo se sono stati inseriti
+            nuovi contratti. Destinatario email: {backupEmail}. Qui puoi farlo anche a
+            mano quando vuoi.
+          </p>
           <BackupButton />
+          {recentBackups.length > 0 ? (
+            <div className="mt-6">
+              <h3 className="mb-2 text-sm font-medium text-slate-800">Ultimi backup</h3>
+              <ul className="space-y-1 text-sm text-slate-600">
+                {recentBackups.map((b) => (
+                  <li key={b.id} className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span className="font-mono text-xs text-slate-500">
+                      {formatRomeDateTime(b.createdAt)}
+                    </span>
+                    <span>{b.status}</span>
+                    <span className="truncate text-slate-500">{b.filename}</span>
+                    {b.size != null && b.size > 0 ? (
+                      <span className="text-slate-400">
+                        {(b.size / 1024).toFixed(0)} KB
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>

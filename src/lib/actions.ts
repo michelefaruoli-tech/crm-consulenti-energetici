@@ -853,40 +853,45 @@ export async function deleteAllOtherUsersAction(): Promise<void> {
   revalidatePath("/utenti");
 }
 
-export async function runBackupAction(): Promise<
-  { error: string } | { filename: string; payload: string }
+/** Backup manuale Excel (+ email opzionale). Restituisce base64 per il download. */
+export async function runBackupAction(opts?: {
+  sendEmail?: boolean;
+}): Promise<
+  | { error: string }
+  | {
+      filename: string;
+      /** Excel in base64 (download browser) */
+      payloadBase64: string;
+      emailed: boolean;
+      newContractsToday: number;
+      counts: Record<string, number>;
+      mailError?: string;
+    }
 > {
   const session = await requireSession();
   if (!hasPermission(session.role, "backup.manage")) {
     return { error: "Permesso negato" };
   }
 
-  const filename = `backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-  const [users, clients, contracts, commissions, suppliers] = await Promise.all([
-    prisma.user.findMany({
-      select: { id: true, email: true, name: true, role: true, active: true },
-    }),
-    prisma.client.findMany(),
-    prisma.contract.findMany(),
-    prisma.commission.findMany({ include: { entries: true } }),
-    prisma.supplier.findMany({ include: { services: true, commissionRules: true } }),
-  ]);
-
-  const payload = JSON.stringify(
-    { users, clients, contracts, commissions, suppliers },
-    null,
-    2,
-  );
-
-  await prisma.backupLog.create({
-    data: {
-      filename,
-      size: Buffer.byteLength(payload),
-      status: "SUCCESS",
-    },
+  const { runDbExcelBackup } = await import("@/lib/db-backup-runner");
+  const result = await runDbExcelBackup({
+    mode: "manual",
+    sendEmail: Boolean(opts?.sendEmail),
+    includeBuffer: true,
   });
 
-  return { filename, payload };
+  if (!result.buffer || !result.filename) {
+    return { error: result.error ?? "Backup non riuscito" };
+  }
+
+  return {
+    filename: result.filename,
+    payloadBase64: result.buffer.toString("base64"),
+    emailed: Boolean(result.emailed),
+    newContractsToday: result.newContractsToday ?? 0,
+    counts: result.counts ?? {},
+    mailError: result.error,
+  };
 }
 
 export async function sendReportEmailAction(formData: FormData): Promise<void> {
