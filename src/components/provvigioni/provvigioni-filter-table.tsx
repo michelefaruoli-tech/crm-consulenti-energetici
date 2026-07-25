@@ -16,39 +16,12 @@ import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { toPeriod, periodLabel } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
+import {
+  PROVVIGIONE_STATO_OPTIONS,
+  type ProvvigioneRow,
+} from "@/lib/provvigioni-stato";
 
-export type ProvvigioneRow = {
-  id: string;
-  clientId: string;
-  commissionId: string;
-  clientName: string;
-  podPdr: string;
-  collaboratorName: string;
-  supplierName: string;
-  clientType: string;
-  amount: string;
-  recurrence: string;
-  /** Stato semplificato: KO / Cessato | Da incassare | Incassato */
-  stato: string;
-  paymentStatus: string;
-  confirmed: string;
-  collectionMonth: string;
-  notes: string;
-  stornoLabel?: string;
-  stornoRowClass?: string;
-  warnOnEdit?: boolean;
-  gettoneBorderClass?: string;
-};
-
-/** Tre valori usati in Provvigioni (facilita correzione KO/Cessato sbagliati). */
-export function simplifiedProvvigioneStato(
-  status: string,
-  hasCollectionDate: boolean,
-): string {
-  if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
-  if (hasCollectionDate) return "Incassato";
-  return "Da incassare";
-}
+export type { ProvvigioneRow };
 
 function shortRecurrence(value: string): string {
   const v = value.toLowerCase();
@@ -327,11 +300,11 @@ export function ProvvigioniFilterTable({
       sortKind: "text",
       render: (r) => {
         const current = String(r.stato ?? "Da incassare");
-        const options = ["KO / Cessato", "Da incassare", "Incassato"];
+        const options = [...PROVVIGIONE_STATO_OPTIONS];
         return (
           <select
             className="max-w-[9.5rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-[11px]"
-            value={options.includes(current) ? current : "Da incassare"}
+            value={options.includes(current as (typeof options)[number]) ? current : "Da incassare"}
             title="Cambia stato contratto / pagamento"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {

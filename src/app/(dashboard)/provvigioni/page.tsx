@@ -8,9 +8,11 @@ import { clientDisplayName } from "@/lib/utils";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import {
   ProvvigioniFilterTable,
+} from "@/components/provvigioni/provvigioni-filter-table";
+import {
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
-} from "@/components/provvigioni/provvigioni-filter-table";
+} from "@/lib/provvigioni-stato";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
 import {
   RecurringRendicontoPanel,
