@@ -1,10 +1,15 @@
 /**
- * Converte UT GEN 2026.xlsx nel formato atteso dall'import Archivio CRM.
- * Tutti i contratti → collaboratore "Vito Postaservice".
- * Esclude colonne spurie (password, URL, ecc.).
+ * Converte UT GEN 2026.xlsx → UN solo Excel caricabile in Archivio CRM.
  *
- * Uso:
- *   npx tsx scripts/convert-ut-gen-vito.ts
+ * Riconosce (per nome colonna, non per posizione):
+ *   nome, cognome, telefono, pod/pdr, consumi, caricato/inserimento,
+ *   esecutivo/fornitura, tipo, fornitore, storno, commissioni (data pagamento),
+ *   agenzia, note, prezzo…
+ * Ignora tutto il resto (N, password, URL, colonne vuote…).
+ *
+ * Collaboratore fisso: Vito Postaservice
+ *
+ * Uso: npx tsx scripts/convert-ut-gen-vito.ts
  */
 import ExcelJS from "exceljs";
 import fs from "node:fs";
@@ -14,6 +19,27 @@ const SRC = "C:/Users/miche/Downloads/UT GEN 2026.xlsx";
 const OUT_DIR = "C:/Users/miche/Downloads";
 const OUT_NAME = "UT-GEN-2026-Vito-Postaservice-CRM.xlsx";
 const COLLAB = "Vito Postaservice";
+
+/** Colonne CRM in uscita (ordine fisso, intestazioni riconosciute dall'import). */
+const OUT_HEADERS = [
+  "Nome",
+  "Cognome",
+  "Ragione sociale",
+  "Telefono",
+  "Tipo",
+  "Fornitore",
+  "POD/PDR",
+  "Consumi",
+  "Data inserimento",
+  "Data ingresso fornitura",
+  "Mesi storno",
+  "Pagamento",
+  "Data pagamento",
+  "Gettone",
+  "Agenzia",
+  "Collaboratore",
+  "Note",
+] as const;
 
 function raw(c: ExcelJS.Cell): unknown {
   let v = c.value;
@@ -72,42 +98,59 @@ function formatDate(d: Date | null): string {
 function cleanPhone(v: unknown): string {
   const s = asText(v);
   if (!s) return "";
-  // Solo se sembra un telefono (almeno 6 cifre)
   const digits = s.replace(/\D/g, "");
   if (digits.length < 6) return "";
   return s;
 }
 
-function mapTipo(rawTipo: string, hasCompanyHint: boolean): string {
+function asNumber(v: unknown): number | null {
+  if (v == null || v === "" || v === "-") return null;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v).replace(",", ".").replace(/[^\d.-]/g, "");
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mapTipo(rawTipo: string): string {
   const t = rawTipo.toUpperCase();
-  if (t.includes("BUSINESS") || t.includes("AZIENDA") || t === "BOX" || t.includes("COORPORATE") || t.includes("CORPORATE")) {
+  if (
+    t.includes("BUSINESS") ||
+    t.includes("AZIENDA") ||
+    t === "BOX" ||
+    t.includes("COORPORATE") ||
+    t.includes("CORPORATE")
+  ) {
     return "AZIENDA";
   }
-  if (!t && hasCompanyHint) return "AZIENDA";
   return "PRIVATO";
 }
 
-function parsePagamento(comm: unknown): { pagato: "Sì" | "No"; dataPagamento: string } {
+/** COMMISSIONI: se è una data → pagato quel giorno; ko/vuoto → no. */
+function parseCommissioni(comm: unknown): {
+  pagato: "Sì" | "No";
+  dataPagamento: string;
+  extraNote: string;
+} {
   if (comm == null || comm === "" || comm === "-") {
-    return { pagato: "No", dataPagamento: "" };
+    return { pagato: "No", dataPagamento: "", extraNote: "" };
   }
-  const s = String(comm).trim().toLowerCase();
-  if (s.includes("ko") || s === "0") {
-    return { pagato: "No", dataPagamento: "" };
+  const s = String(comm).trim();
+  const low = s.toLowerCase();
+  if (low.includes("ko")) {
+    return { pagato: "No", dataPagamento: "", extraNote: "Commissioni: KO" };
   }
   const d = asDate(comm);
   if (d) {
-    return { pagato: "Sì", dataPagamento: formatDate(d) };
+    return { pagato: "Sì", dataPagamento: formatDate(d), extraNote: "" };
   }
-  // es. "1 rata" senza data → considerato non liquidato chiaramente
-  return { pagato: "No", dataPagamento: "" };
+  return { pagato: "No", dataPagamento: "", extraNote: `Commissioni: ${s}` };
 }
 
 function normalizeSupplier(name: string): string {
   const n = name.trim();
   if (!n) return "Sconosciuto";
   const upper = n.toUpperCase();
-  // Uniforma casing tipici
   const map: Record<string, string> = {
     ENEL: "Enel",
     PLENITUDE: "Plenitude",
@@ -132,36 +175,127 @@ function normalizeSupplier(name: string): string {
   return map[upper] ?? n;
 }
 
-async function main() {
-  if (!fs.existsSync(SRC)) {
-    throw new Error(`File non trovato: ${SRC}`);
+type ColMap = {
+  nome: number;
+  cognome: number;
+  telefono: number;
+  pod: number;
+  consumi: number;
+  caricato: number;
+  esecutivo: number;
+  tipo: number;
+  fornitore: number;
+  storno: number;
+  commissioni: number;
+  agenzia: number;
+  note: number;
+  prezzo: number;
+};
+
+/** Mappa intestazioni riga 1 → indici colonna (1-based). Ignora voci sconosciute. */
+function detectColumns(sheet: ExcelJS.Worksheet): { cols: ColMap; ignored: string[] } {
+  const headers: string[] = [];
+  sheet.getRow(1).eachCell((c, col) => {
+    headers[col] = asText(raw(c)).toLowerCase();
+  });
+
+  const ignored: string[] = [];
+  const knownPatterns: { key: keyof ColMap; names: string[] }[] = [
+    { key: "cognome", names: ["cognome"] },
+    { key: "nome", names: ["nome"] },
+    { key: "telefono", names: ["telefono", "cellulare", "phone"] },
+    { key: "pod", names: ["pod/pdr", "pod", "pdr"] },
+    { key: "consumi", names: ["consumi", "consumo", "kwh", "smc"] },
+    { key: "caricato", names: ["caricato", "inserimento", "data inserimento"] },
+    { key: "esecutivo", names: ["esecutivo", "fornitura", "ingresso"] },
+    { key: "tipo", names: ["tipo", "tipologia"] },
+    { key: "fornitore", names: ["fornitore", "supplier"] },
+    { key: "storno", names: ["storno"] },
+    { key: "commissioni", names: ["commissioni", "commissione"] },
+    { key: "agenzia", names: ["agenzia"] },
+    { key: "note", names: ["note"] },
+    { key: "prezzo", names: ["prezzzo", "prezzo"] },
+  ];
+
+  const cols: ColMap = {
+    nome: -1,
+    cognome: -1,
+    telefono: -1,
+    pod: -1,
+    consumi: -1,
+    caricato: -1,
+    esecutivo: -1,
+    tipo: -1,
+    fornitore: -1,
+    storno: -1,
+    commissioni: -1,
+    agenzia: -1,
+    note: -1,
+    prezzo: -1,
+  };
+
+  const used = new Set<number>();
+
+  for (const { key, names } of knownPatterns) {
+    // match esatto
+    for (const name of names) {
+      for (let i = 1; i < headers.length; i++) {
+        if (used.has(i)) continue;
+        if ((headers[i] ?? "") === name) {
+          cols[key] = i;
+          used.add(i);
+          break;
+        }
+      }
+      if (cols[key] > 0) break;
+    }
+    if (cols[key] > 0) continue;
+    // includes (evita che "nome" prenda "cognome")
+    for (const name of names) {
+      for (let i = 1; i < headers.length; i++) {
+        if (used.has(i)) continue;
+        const h = headers[i] ?? "";
+        if (!h) continue;
+        if (key === "nome" && h.includes("cognome")) continue;
+        if (h.includes(name)) {
+          cols[key] = i;
+          used.add(i);
+          break;
+        }
+      }
+      if (cols[key] > 0) break;
+    }
   }
+
+  for (let i = 1; i < headers.length; i++) {
+    const h = headers[i];
+    if (!h) continue;
+    if (!used.has(i)) ignored.push(`${i}:${h}`);
+  }
+
+  return { cols, ignored };
+}
+
+function cellAt(row: ExcelJS.Row, col: number): unknown {
+  if (col < 1) return null;
+  return raw(row.getCell(col));
+}
+
+async function main() {
+  if (!fs.existsSync(SRC)) throw new Error(`File non trovato: ${SRC}`);
 
   const srcWb = new ExcelJS.Workbook();
   await srcWb.xlsx.readFile(SRC);
   const src = srcWb.worksheets[0];
   if (!src) throw new Error("Foglio vuoto");
 
+  const { cols, ignored } = detectColumns(src);
+  console.log("Colonne riconosciute:", cols);
+  console.log("Colonne ignorate:", ignored);
+
   const outWb = new ExcelJS.Workbook();
   const out = outWb.addWorksheet("Archivio");
-
-  const headers = [
-    "Nome",
-    "Cognome",
-    "Ragione sociale",
-    "Telefono",
-    "Tipo",
-    "Fornitore",
-    "POD/PDR",
-    "Data inserimento",
-    "Data ingresso fornitura",
-    "Pagamento",
-    "Data pagamento",
-    "Gettone",
-    "Collaboratore",
-    "Note",
-  ];
-  out.addRow(headers);
+  out.addRow([...OUT_HEADERS]);
   out.getRow(1).font = { bold: true };
 
   let written = 0;
@@ -171,30 +305,37 @@ async function main() {
 
   for (let r = 2; r <= src.rowCount; r++) {
     const row = src.getRow(r);
-    const cognome = asText(raw(row.getCell(2)));
-    const nome = asText(raw(row.getCell(3)));
-    const telefono = cleanPhone(raw(row.getCell(4)));
-    const pod = asText(raw(row.getCell(5)));
-    const caricato = asDate(raw(row.getCell(7)));
-    const esecutivo = asDate(raw(row.getCell(8)));
-    const tipoRaw = asText(raw(row.getCell(9)));
-    const fornitore = normalizeSupplier(asText(raw(row.getCell(10))));
-    const noteParts = [
-      asText(raw(row.getCell(14))),
-      asText(raw(row.getCell(15))),
-      asText(raw(row.getCell(13))) ? `Agenzia: ${asText(raw(row.getCell(13)))}` : "",
-    ].filter(Boolean);
-    const { pagato, dataPagamento } = parsePagamento(raw(row.getCell(12)));
+    const cognome = asText(cellAt(row, cols.cognome));
+    const nome = asText(cellAt(row, cols.nome));
+    const telefono = cleanPhone(cellAt(row, cols.telefono));
+    const pod = asText(cellAt(row, cols.pod));
+    const consumi = asNumber(cellAt(row, cols.consumi));
+    const caricato = asDate(cellAt(row, cols.caricato));
+    const esecutivo = asDate(cellAt(row, cols.esecutivo));
+    const tipoRaw = asText(cellAt(row, cols.tipo));
+    const fornitore = normalizeSupplier(asText(cellAt(row, cols.fornitore)));
+    const storno = asNumber(cellAt(row, cols.storno));
+    const agenzia = asText(cellAt(row, cols.agenzia));
+    const noteOrig = asText(cellAt(row, cols.note));
+    const prezzo = asText(cellAt(row, cols.prezzo));
+    const { pagato, dataPagamento, extraNote } = parseCommissioni(
+      cellAt(row, cols.commissioni),
+    );
 
     if (!cognome && !nome && !pod) {
       skipped++;
       continue;
     }
 
-    const tipo = mapTipo(tipoRaw, false);
-    // BUSINESS senza ragione → usa Nome+Cognome come ragione sociale
+    const tipo = mapTipo(tipoRaw);
     const ragione =
       tipo === "AZIENDA" ? [nome, cognome].filter(Boolean).join(" ").trim() : "";
+
+    const noteParts = [
+      noteOrig,
+      prezzo ? `Prezzo/condizioni: ${prezzo}` : "",
+      extraNote,
+    ].filter(Boolean);
 
     if (pagato === "Sì") paid++;
     else unpaid++;
@@ -207,64 +348,40 @@ async function main() {
       tipo,
       fornitore,
       pod,
+      consumi ?? "",
       formatDate(caricato),
       formatDate(esecutivo),
+      storno != null && storno > 0 ? storno : "",
       pagato,
       dataPagamento,
-      "", // gettone assente nel file originale
+      "", // gettone non presente nel file
+      agenzia,
       COLLAB,
-      noteParts.join(" | ").slice(0, 500),
+      noteParts.join(" | ").slice(0, 800),
     ]);
     written++;
   }
 
-  // Larghezze colonne leggibili
-  const widths = [14, 16, 28, 14, 10, 14, 18, 16, 20, 10, 14, 10, 22, 40];
+  const widths = [14, 16, 28, 14, 10, 14, 18, 10, 16, 20, 12, 10, 14, 10, 16, 22, 40];
   widths.forEach((w, i) => {
     out.getColumn(i + 1).width = w;
   });
+  out.views = [{ state: "frozen", ySplit: 1 }];
+  out.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: 1, column: OUT_HEADERS.length },
+  };
 
   const outPath = path.join(OUT_DIR, OUT_NAME);
   await outWb.xlsx.writeFile(outPath);
 
-  // Copia anche in import/ del progetto
   const projectDir = path.join(process.cwd(), "import");
   fs.mkdirSync(projectDir, { recursive: true });
-  const projectOut = path.join(projectDir, OUT_NAME);
-  fs.copyFileSync(outPath, projectOut);
+  fs.copyFileSync(outPath, path.join(projectDir, OUT_NAME));
 
-  // Spezza in pezzi da 250 righe (upload più stabile su Vercel)
-  const CHUNK = 250;
-  const dataRows = out.rowCount - 1;
-  const parts: string[] = [];
-  let part = 1;
-  for (let start = 2; start <= out.rowCount; start += CHUNK) {
-    const end = Math.min(start + CHUNK - 1, out.rowCount);
-    const partWb = new ExcelJS.Workbook();
-    const partSheet = partWb.addWorksheet("Archivio");
-    partSheet.addRow(headers);
-    partSheet.getRow(1).font = { bold: true };
-    for (let r = start; r <= end; r++) {
-      const values = out.getRow(r).values;
-      // ExcelJS values is 1-indexed array
-      const arr = Array.isArray(values) ? values.slice(1) : [];
-      partSheet.addRow(arr);
-    }
-    widths.forEach((w, i) => {
-      partSheet.getColumn(i + 1).width = w;
-    });
-    const partName = `UT-GEN-2026-Vito-parte${part}.xlsx`;
-    const partPath = path.join(OUT_DIR, partName);
-    await partWb.xlsx.writeFile(partPath);
-    fs.copyFileSync(partPath, path.join(projectDir, partName));
-    parts.push(partPath);
-    part++;
-  }
-
-  console.log("OK convertito");
-  console.log("→ completo:", outPath);
-  console.log("→ pezzi:", parts);
-  console.log({ written, skipped, paid, unpaid, collaboratore: COLLAB, dataRows });
+  console.log("\nOK — UN solo file:");
+  console.log("→", outPath);
+  console.log({ written, skipped, paid, unpaid, collaboratore: COLLAB });
 }
 
 main().catch((e) => {

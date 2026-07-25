@@ -117,12 +117,11 @@ export default async function ArchivioPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-2 font-semibold text-slate-900">Importa database già pagati</h2>
         <p className="mb-4 text-sm text-slate-500">
-          Carica un Excel (.xlsx). Prima riga = intestazioni. Colonne consigliate: Nome,
-          Cognome, Ragione sociale, Telefono, Tipo, Fornitore, POD/PDR, Data inserimento,
-          Data ingresso fornitura, Pagamento (Sì/No), Data pagamento, Gettone,
-          Collaboratore. Per file grandi (&gt;250 righe) carica i pezzi separati. Usa
-          l&apos;anteprima prima di confermare. Scegli il collaboratore di default (es. Vito
-          Postaservice).
+          Carica un Excel (.xlsx). Colonne riconosciute: Nome, Cognome, Telefono, Tipo,
+          Fornitore, POD/PDR, Consumi, Data inserimento, Data ingresso fornitura, Mesi
+          storno, Pagamento, Data pagamento, Agenzia, Gettone, Collaboratore, Note. Le
+          altre colonne vengono ignorate. Collaboratore di default: scegli Vito
+          Postaservice.
         </p>
         <ArchiveImportForm
           collaborators={collaborators}

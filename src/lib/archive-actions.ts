@@ -141,6 +141,9 @@ type ParsedSheet = {
     gettone: number;
     collab: number;
     note: number;
+    consumi: number;
+    storno: number;
+    agenzia: number;
   };
 };
 
@@ -212,6 +215,9 @@ async function loadSheetFromForm(formData: FormData): Promise<
     gettone: colPrefer("gettone", "provvigione", "expected"),
     collab: colPrefer("collaboratore", "agente"),
     note: colPrefer("note", "note contratto"),
+    consumi: colPrefer("consumi", "consumo", "kwh", "smc"),
+    storno: colPrefer("mesi storno", "storno"),
+    agenzia: colPrefer("agenzia"),
   };
 
   if (cols.nome < 0 && cols.cognome < 0 && cols.ragione < 0 && cols.pod < 0) {
@@ -400,8 +406,8 @@ export async function previewHistoricalExcelAction(
 /**
  * Import Excel contratti storici (dopo anteprima).
  * Colonne consigliate: Nome, Cognome, Ragione sociale, Telefono, Tipo, Fornitore,
- * POD/PDR, Data inserimento, Data ingresso fornitura, Pagamento, Data pagamento,
- * Gettone, Collaboratore, Note
+ * POD/PDR, Consumi, Data inserimento, Data ingresso fornitura, Mesi storno,
+ * Pagamento, Data pagamento, Gettone, Agenzia, Collaboratore, Note
  */
 export async function importHistoricalExcelAction(
   formData: FormData,
@@ -460,6 +466,10 @@ export async function importHistoricalExcelAction(
     const gettoneRaw = data.cols.gettone > 0 ? cell(row, data.cols.gettone) : "";
     const collabRaw = data.cols.collab > 0 ? cell(row, data.cols.collab) : "";
     const notes = data.cols.note > 0 ? cell(row, data.cols.note) : "";
+    const consumiRaw = data.cols.consumi > 0 ? cell(row, data.cols.consumi) : "";
+    const stornoRaw = data.cols.storno > 0 ? cell(row, data.cols.storno) : "";
+    const agenzia =
+      data.cols.agenzia > 0 ? cell(row, data.cols.agenzia) : "";
 
     const type = mapClientType(tipoRaw || (companyName ? "AZIENDA" : "PRIVATO"));
     const insertionDate = parseDate(dateRaw) ?? new Date();
@@ -468,6 +478,10 @@ export async function importHistoricalExcelAction(
     const paid = paidFlag === true || (paidFlag == null && Boolean(paymentDate));
     const expected =
       Number(String(gettoneRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
+    const consumi =
+      Number(String(consumiRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || null;
+    const stornoMonths =
+      Number(String(stornoRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || null;
     const collab = resolveCollaborator(
       collabRaw,
       users,
@@ -558,6 +572,17 @@ export async function importHistoricalExcelAction(
       supplyFromFile ?? computeSupplyStartDate(insertionDate, op);
     const collectionDate = paid ? paymentDate ?? insertionDate : null;
 
+    let stornoEndDate: Date | null = null;
+    if (stornoMonths && stornoMonths > 0 && supplyStartDate) {
+      stornoEndDate = new Date(supplyStartDate);
+      stornoEndDate.setMonth(stornoEndDate.getMonth() + stornoMonths);
+    }
+
+    const noteParts = [
+      notes,
+      stornoMonths && stornoMonths > 0 ? `Storno: ${stornoMonths} mesi` : "",
+    ].filter(Boolean);
+
     const contract = await prisma.contract.create({
       data: {
         contractNumber,
@@ -578,7 +603,10 @@ export async function importHistoricalExcelAction(
         archiveLabel: data.label,
         commissionConfirmed: paid,
         commissionConfirmedAt: paid ? new Date() : null,
-        notes: notes || null,
+        notes: noteParts.join(" | ") || null,
+        agency: agenzia || null,
+        annualKwh: consumi,
+        stornoEndDate,
       },
     });
 
