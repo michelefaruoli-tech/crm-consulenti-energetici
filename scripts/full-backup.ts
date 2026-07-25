@@ -177,7 +177,6 @@ async function main() {
     execSync(`tar -a -c -f "${zipPath}" ${excludes} .`, {
       cwd: process.cwd(),
       stdio: "inherit",
-      shell: true,
     });
   } catch {
     console.warn("tar fallito, provo Compress-Archive (più lento)…");
