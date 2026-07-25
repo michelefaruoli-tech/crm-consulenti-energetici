@@ -42,10 +42,7 @@ export function ArchiveImportForm({
     skipped: number;
   } | null>(null);
   const [importing, setImporting] = useState(false);
-
-  function buildFd(form: HTMLFormElement): FormData {
-    return new FormData(form);
-  }
+  const [interrupted, setInterrupted] = useState(false);
 
   function onPreview(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,9 +50,10 @@ export function ArchiveImportForm({
     setError(null);
     setMessage(null);
     setProgress(null);
+    setInterrupted(false);
     start(async () => {
       try {
-        const result = await previewHistoricalExcelAction(buildFd(form));
+        const result = await previewHistoricalExcelAction(new FormData(form));
         if (result.error) {
           setPreviewRows(null);
           setSummary(null);
@@ -93,16 +91,46 @@ export function ArchiveImportForm({
       setError("Nessuna riga da importare. Correggi il file o i filtri.");
       return;
     }
+
+    const fileInput = form.elements.namedItem("file") as HTMLInputElement | null;
+    const file = fileInput?.files?.[0];
+    if (!file) {
+      setError("Seleziona di nuovo il file Excel prima di confermare.");
+      return;
+    }
+
+    const archiveLabel =
+      String(new FormData(form).get("archiveLabel") ?? "").trim() || previewLabel;
+    const collabId = String(
+      new FormData(form).get("defaultCollaboratorId") ?? defaultCollaboratorId,
+    ).trim();
+    const skipDup =
+      (form.elements.namedItem("skipPodDuplicates") as HTMLInputElement | null)
+        ?.checked ?? true;
+
     if (
       !window.confirm(
-        `Confermi l’import di ${rowNumbers.length} contratti nel lotto «${previewLabel}»?`,
+        `Confermi l’import di ${rowNumbers.length} contratti nel lotto «${archiveLabel}»?`,
       )
     ) {
       return;
     }
 
+    /** Ogni lotto riusa lo stesso File in memoria (il form dopo il 1° invio lo perde). */
+    function makeBatchFd(slice: number[], finalize: boolean): FormData {
+      const fd = new FormData();
+      fd.set("archiveLabel", archiveLabel);
+      fd.set("defaultCollaboratorId", collabId);
+      if (skipDup) fd.set("skipPodDuplicates", "1");
+      fd.set("file", file!);
+      fd.set("rowNumbers", JSON.stringify(slice));
+      if (finalize) fd.set("finalize", "1");
+      return fd;
+    }
+
     setError(null);
     setMessage(null);
+    setInterrupted(false);
     setImporting(true);
     setProgress({
       percent: 0,
@@ -114,27 +142,30 @@ export function ArchiveImportForm({
 
     let imported = 0;
     let skipped = 0;
-    let label = previewLabel;
+    let label = archiveLabel;
+    let failed = false;
+    let lastPercent = 0;
 
     try {
       for (let i = 0; i < rowNumbers.length; i += BATCH_SIZE) {
         const slice = rowNumbers.slice(i, i + BATCH_SIZE);
-        const fd = buildFd(form);
-        fd.set("rowNumbers", JSON.stringify(slice));
         const isLast = i + BATCH_SIZE >= rowNumbers.length;
-        if (isLast) fd.set("finalize", "1");
-        const batch = await importHistoricalExcelBatchAction(fd);
+        const batch = await importHistoricalExcelBatchAction(
+          makeBatchFd(slice, isLast),
+        );
         if (batch.error) {
           setError(batch.error);
+          setInterrupted(true);
+          failed = true;
           break;
         }
         imported += batch.batchImported;
         skipped += batch.batchSkipped;
         label = batch.label ?? label;
         const done = Math.min(i + slice.length, rowNumbers.length);
-        const percent = Math.round((done / rowNumbers.length) * 100);
+        lastPercent = Math.round((done / rowNumbers.length) * 100);
         setProgress({
-          percent,
+          percent: lastPercent,
           done,
           total: rowNumbers.length,
           imported,
@@ -142,22 +173,34 @@ export function ArchiveImportForm({
         });
       }
 
-      setMessage(
-        `Import completato: ${imported} contratti` +
-          (skipped ? ` · saltati ${skipped}` : "") +
-          ` nel lotto «${label}».`,
-      );
-      setPreviewRows(null);
-      setSummary(null);
-      setFileKey((k) => k + 1);
-      form.reset();
-      router.refresh();
+      if (failed) {
+        setMessage(
+          `Import interrotto: salvati ${imported} contratti` +
+            (skipped ? ` · saltati ${skipped}` : "") +
+            ` (lotto «${label}»). Ripeti l’import con «Salta POD già presenti»: riparte dal resto.`,
+        );
+      } else {
+        setMessage(
+          `Import completato: ${imported} contratti` +
+            (skipped ? ` · saltati ${skipped}` : "") +
+            ` nel lotto «${label}».`,
+        );
+        setPreviewRows(null);
+        setSummary(null);
+        setFileKey((k) => k + 1);
+        form.reset();
+        router.refresh();
+      }
     } catch (err) {
+      setInterrupted(true);
       const msg = err instanceof Error ? err.message : "Errore sconosciuto";
       setError(
         msg.includes("fetch")
-          ? `Import interrotto al ${progress?.percent ?? 0}%. Riprova: le righe già caricate restano (salta POD duplicati).`
+          ? `Import interrotto al ${lastPercent}%. Già salvati ${imported} contratti. Ripeti con «Salta POD già presenti».`
           : msg,
+      );
+      setMessage(
+        `Import parziale: ${imported} contratti già nel lotto «${label}».`,
       );
     } finally {
       setImporting(false);
@@ -189,13 +232,7 @@ export function ArchiveImportForm({
           />
         </Field>
         <Field label="File Excel (.xlsx)">
-          <Input
-            name="file"
-            type="file"
-            accept=".xlsx,.xls"
-            required
-            disabled={busy}
-          />
+          <Input name="file" type="file" accept=".xlsx,.xls" required disabled={busy} />
         </Field>
         <Field label="Collaboratore di default *">
           <Select
@@ -246,20 +283,44 @@ export function ArchiveImportForm({
       </form>
 
       {progress ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <div className="mb-2 flex items-center justify-between text-sm text-emerald-900">
+        <div
+          className={`rounded-xl border p-4 ${
+            interrupted
+              ? "border-amber-200 bg-amber-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+        >
+          <div
+            className={`mb-2 flex items-center justify-between text-sm ${
+              interrupted ? "text-amber-900" : "text-emerald-900"
+            }`}
+          >
             <span className="font-medium">
-              {importing ? "Caricamento database…" : "Caricamento terminato"}
+              {importing
+                ? "Caricamento database…"
+                : interrupted
+                  ? "Caricamento interrotto"
+                  : "Caricamento terminato"}
             </span>
             <span className="tabular-nums font-semibold">{progress.percent}%</span>
           </div>
-          <div className="h-3 overflow-hidden rounded-full bg-emerald-100">
+          <div
+            className={`h-3 overflow-hidden rounded-full ${
+              interrupted ? "bg-amber-100" : "bg-emerald-100"
+            }`}
+          >
             <div
-              className="h-full rounded-full bg-emerald-600 transition-all duration-300"
+              className={`h-full rounded-full transition-all duration-300 ${
+                interrupted ? "bg-amber-500" : "bg-emerald-600"
+              }`}
               style={{ width: `${progress.percent}%` }}
             />
           </div>
-          <p className="mt-2 text-xs text-emerald-800">
+          <p
+            className={`mt-2 text-xs ${
+              interrupted ? "text-amber-800" : "text-emerald-800"
+            }`}
+          >
             {progress.done} / {progress.total} righe · importati {progress.imported}
             {progress.skipped ? ` · saltati ${progress.skipped}` : ""}
           </p>
