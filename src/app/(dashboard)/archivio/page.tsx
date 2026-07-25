@@ -117,11 +117,12 @@ export default async function ArchivioPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-2 font-semibold text-slate-900">Importa database già pagati</h2>
         <p className="mb-4 text-sm text-slate-500">
-          Carica un Excel (.xlsx). Colonne riconosciute: Nome, Cognome, Telefono, Tipo,
-          Fornitore, POD/PDR, Consumi, Data inserimento, Data ingresso fornitura, Mesi
-          storno, Pagamento, Data pagamento, Agenzia, Gettone, Collaboratore, Note. Le
-          altre colonne vengono ignorate. Collaboratore di default: scegli Vito
-          Postaservice.
+          Carica un Excel (.xlsx). Colonne riconosciute: Nome, Cognome, Ragione sociale,
+          Telefono, Tipo, Fornitore, POD/PDR, Utility, Consumi, Data inserimento, Data
+          ingresso fornitura, Mesi storno, Pagamento, Data pagamento, Agenzia, Gettone,
+          Collaboratore, Nome offerta, Operazione, Durata mesi, Scadenza, Note. Le altre
+          colonne vengono ignorate. Collaboratore di default: scegli la persona giusta (o
+          Vizzino / email nel file).
         </p>
         <ArchiveImportForm
           collaborators={collaborators}

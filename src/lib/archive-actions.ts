@@ -145,6 +145,10 @@ type ParsedSheet = {
     storno: number;
     agenzia: number;
     utility: number;
+    offerta: number;
+    operazione: number;
+    durata: number;
+    scadenza: number;
   };
 };
 
@@ -235,6 +239,10 @@ async function loadSheetFromForm(formData: FormData): Promise<
     storno: colPrefer("mesi storno", "storno"),
     agenzia: colPrefer("agenzia"),
     utility: colPrefer("utility", "luce/gas", "commodity"),
+    offerta: colPrefer("nome offerta", "offerta", "prodotto"),
+    operazione: colPrefer("operazione", "tipo operazione"),
+    durata: colPrefer("durata mesi", "durata"),
+    scadenza: colPrefer("scadenza", "data scadenza"),
   };
 
   if (cols.nome < 0 && cols.cognome < 0 && cols.ragione < 0 && cols.pod < 0) {
@@ -574,6 +582,12 @@ async function importOneHistoricalRow(opts: {
   const agenzia = data.cols.agenzia > 0 ? cell(row, data.cols.agenzia) : "";
   const utilityType =
     data.cols.utility > 0 ? cell(row, data.cols.utility) : "";
+  const productName = data.cols.offerta > 0 ? cell(row, data.cols.offerta) : "";
+  const operazioneRaw =
+    data.cols.operazione > 0 ? cell(row, data.cols.operazione) : "";
+  const durataRaw = data.cols.durata > 0 ? cell(row, data.cols.durata) : "";
+  const scadenzaRaw =
+    data.cols.scadenza > 0 ? cell(row, data.cols.scadenza) : "";
 
   if (!firstName && !lastName && !companyName && !podPdr) return false;
 
@@ -667,11 +681,14 @@ async function importOneHistoricalRow(opts: {
   }
 
   const contractNumber = await generateContractNumber();
-  const op = normalizeOperationType("CAMBIO");
+  const op = normalizeOperationType(operazioneRaw || "CAMBIO");
   const supplyFromFile = parseDate(supplyRaw);
   const supplyStartDate =
     supplyFromFile ?? computeSupplyStartDate(insertionDate, op);
   const collectionDate = paid ? paymentDate ?? insertionDate : null;
+  const durationMonths =
+    Number(String(durataRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 12;
+  const expiryDate = parseDate(scadenzaRaw);
 
   let stornoEndDate: Date | null = null;
   if (stornoMonths && stornoMonths > 0 && supplyStartDate) {
@@ -709,6 +726,9 @@ async function importOneHistoricalRow(opts: {
       annualKwh: consumi,
       stornoEndDate,
       utilityType: utilityType || null,
+      productName: productName || null,
+      durationMonths: durationMonths > 0 ? durationMonths : 12,
+      expiryDate,
     },
   });
 
