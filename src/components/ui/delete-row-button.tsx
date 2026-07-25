@@ -8,10 +8,13 @@ export function DeleteRowButton({
   kind,
   id,
   label = "Elimina",
+  compact = false,
 }: {
   kind: "contract" | "client";
   id: string;
   label?: string;
+  /** Solo una X rossa (risparmia spazio in tabella) */
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -22,8 +25,13 @@ export function DeleteRowButton({
       <button
         type="button"
         disabled={pending}
-        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+        className={
+          compact
+            ? "rounded px-1 py-0 text-base font-bold leading-none text-red-600 hover:bg-red-50 disabled:opacity-50"
+            : "rounded px-1.5 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+        }
         title="Archivia / elimina"
+        aria-label="Elimina"
         onClick={(e) => {
           e.stopPropagation();
           setErr(null);
@@ -58,7 +66,7 @@ export function DeleteRowButton({
           });
         }}
       >
-        {pending ? "…" : label}
+        {pending ? "…" : compact ? "×" : label}
       </button>
       {err ? <span className="max-w-[8rem] text-[10px] text-red-600">{err}</span> : null}
     </span>

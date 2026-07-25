@@ -14,6 +14,8 @@ export type FilterColumn = {
   editable?: boolean;
   /** tipo ordinamento: testo A-Z, data, numero */
   sortKind?: "text" | "date" | "number";
+  /** Classi extra sull’input editabile (es. nome cliente in evidenza) */
+  inputClassName?: string;
 };
 
 type Props = {
@@ -495,6 +497,7 @@ export function ExcelFilterTable({
                             ? "border-amber-400"
                             : "border-transparent hover:border-slate-200",
                           dense ? "min-w-0 px-0.5 py-0.5 text-xs" : "min-w-[10rem] px-1 py-0.5",
+                          col.inputClassName,
                         )}
                         value={draftMode ? displayVal : undefined}
                         defaultValue={draftMode ? undefined : displayVal}

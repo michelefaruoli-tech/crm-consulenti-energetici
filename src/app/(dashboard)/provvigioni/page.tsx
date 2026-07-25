@@ -10,6 +10,7 @@ import {
   ProvvigioniFilterTable,
 } from "@/components/provvigioni/provvigioni-filter-table";
 import {
+  defaultGettonePrivato,
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
@@ -204,6 +205,51 @@ export default async function ProvvigioniPage({
     getSettledRecurringForPeriod(settledPeriod, sessionCollabFilter),
   ]);
 
+  // Allinea stato/gettone sulle righe della pagina corrente:
+  // - con data incasso → Incassato (non più KO/Chiuso)
+  // - privati Dolomiti/Plenitude/Enel → gettone 45/60/65 se ancora a 0
+  const alignJobs: Promise<unknown>[] = [];
+  for (const c of contracts) {
+    const hasDate = Boolean(c.collectionDate);
+    if (hasDate && ["KO", "ANNULLATO", "CHIUSO", "IN_ATTESA_PAGAMENTO"].includes(c.status)) {
+      alignJobs.push(
+        prisma.contract
+          .update({
+            where: { id: c.id },
+            data: {
+              status: "PAGATO_DAL_FORNITORE",
+              paymentStatus: "Incassato",
+            },
+          })
+          .then(() => {
+            (c as { status: string }).status = "PAGATO_DAL_FORNITORE";
+            (c as { paymentStatus: string | null }).paymentStatus = "Incassato";
+          })
+          .catch(() => null),
+      );
+    }
+    if (c.client.type === "PRIVATO" && c.commission) {
+      const target = defaultGettonePrivato(c.supplier.name);
+      const current = Number(c.commission.expected ?? 0);
+      if (target != null && current === 0) {
+        alignJobs.push(
+          prisma.commission
+            .update({
+              where: { id: c.commission.id },
+              data: { expected: target },
+            })
+            .then(() => {
+              (c.commission as { expected: unknown }).expected = target;
+            })
+            .catch(() => null),
+        );
+      }
+    }
+  }
+  if (alignJobs.length > 0) {
+    await Promise.all(alignJobs);
+  }
+
   const latestMap = markLatestContractsByPod(
     contracts.map((c) => ({
       id: c.id,
@@ -271,7 +317,12 @@ export default async function ProvvigioniPage({
       collaboratorName: contract.collaborator.name,
       supplierName: contract.supplier.name,
       clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
-      amount: String(Number(item?.expected ?? 0)),
+      amount: String(
+        Number(item?.expected ?? 0) ||
+          (contract.client.type === "PRIVATO"
+            ? defaultGettonePrivato(contract.supplier.name) ?? 0
+            : 0),
+      ),
       recurrence: contract.recurrence || "Una tantum",
       stato: simplifiedProvvigioneStato(contract.status, hasDate),
       paymentStatus: paidLabel,

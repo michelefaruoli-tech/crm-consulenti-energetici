@@ -16,6 +16,7 @@ import { toPeriod, periodLabel } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
   PROVVIGIONE_STATO_OPTIONS,
+  formatCollaboratorShort,
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
 
@@ -351,6 +352,8 @@ export function ProvvigioniFilterTable({
       getValue: (r) => String(r.clientName ?? ""),
       editable: true,
       sortKind: "text",
+      inputClassName:
+        "min-w-[11rem] text-[13px] font-semibold tracking-tight text-slate-900",
     },
     {
       key: "podPdr",
@@ -363,8 +366,36 @@ export function ProvvigioniFilterTable({
       key: "collaboratorName",
       label: "Collab.",
       getValue: (r) => String(r.collaboratorName ?? ""),
-      editable: Boolean(collaboratorByName),
       sortKind: "text",
+      render: (r) => {
+        const full = getDraftValue(r, "collaboratorName");
+        const dirty = isDraftDirty(r, "collaboratorName");
+        if (!collaboratorByName) {
+          return (
+            <span className="whitespace-nowrap text-[11px] text-slate-700">
+              {formatCollaboratorShort(full)}
+            </span>
+          );
+        }
+        const names = Object.keys(collaboratorByName);
+        return (
+          <select
+            className={`max-w-[7.5rem] rounded border px-0.5 py-0.5 text-[11px] ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={full}
+            title={full}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "collaboratorName", e.target.value)}
+          >
+            {names.map((n) => (
+              <option key={n} value={n}>
+                {formatCollaboratorShort(n)}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
     {
       key: "supplierName",
@@ -496,7 +527,9 @@ export function ProvvigioniFilterTable({
       key: "_del",
       label: "",
       getValue: () => "",
-      render: (r) => <DeleteRowButton kind="contract" id={String(r.id)} />,
+      render: (r) => (
+        <DeleteRowButton kind="contract" id={String(r.id)} compact />
+      ),
     });
   }
 
@@ -682,10 +715,10 @@ export function ProvvigioniFilterTable({
         <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato.{" "}
         <strong>Tipologia</strong>: Business / Domestico.{" "}
         <strong>Pagato</strong>: Sì / No. <strong>Data</strong>: MM/AAAA.{" "}
-        <strong>Storno</strong> è solo lettura (si aggiorna dallo Stato).
-        {canDelete
-          ? " Elimina archivia i contratti."
-          : ""}
+        <strong>Storno</strong> è solo lettura (si aggiorna dallo Stato). Privati:
+        gettone Dolomiti 45 · Plenitude 60 · Enel 65 (se era 0). Con data → Stato
+        Incassato.
+        {canDelete ? " × rossa = elimina." : ""}
       </p>
       <ExcelFilterTable
         dense
