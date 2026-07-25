@@ -59,6 +59,12 @@ export function ArchiveImportForm({
   const [interrupted, setInterrupted] = useState(false);
   /** File in base64: non si perde tra un lotto e l'altro */
   const [cachedFileB64, setCachedFileB64] = useState<string | null>(null);
+  const [collabId, setCollabId] = useState(() => {
+    const vizzino = collaborators.find((c) =>
+      c.name.toLowerCase().includes("vizzino"),
+    );
+    return vizzino?.id ?? defaultCollaboratorId;
+  });
 
   async function cacheFileFromForm(form: HTMLFormElement): Promise<string | null> {
     if (cachedFileB64) return cachedFileB64;
@@ -68,6 +74,20 @@ export function ArchiveImportForm({
     const b64 = await fileToBase64(file);
     setCachedFileB64(b64);
     return b64;
+  }
+
+  /** Costruisce FormData e forza sempre collaboratore (i campi disabled non entrano nel form). */
+  function buildImportFd(
+    form: HTMLFormElement,
+    extra?: { fileBase64?: string; rowNumbers?: number[]; finalize?: boolean },
+  ): FormData {
+    const fd = new FormData(form);
+    const fromSelect = String(fd.get("defaultCollaboratorId") ?? "").trim();
+    fd.set("defaultCollaboratorId", fromSelect || collabId || defaultCollaboratorId);
+    if (extra?.fileBase64) fd.set("fileBase64", extra.fileBase64);
+    if (extra?.rowNumbers) fd.set("rowNumbers", JSON.stringify(extra.rowNumbers));
+    if (extra?.finalize) fd.set("finalize", "1");
+    return fd;
   }
 
   function onPreview(e: React.FormEvent<HTMLFormElement>) {
@@ -84,8 +104,7 @@ export function ArchiveImportForm({
           setError("Seleziona un file Excel (.xlsx)");
           return;
         }
-        const fd = new FormData(form);
-        fd.set("fileBase64", b64);
+        const fd = buildImportFd(form, { fileBase64: b64 });
         const result = await previewHistoricalExcelAction(fd);
         if (result.error) {
           setPreviewRows(null);
@@ -134,12 +153,17 @@ export function ArchiveImportForm({
       return;
     }
 
-    const draft = new FormData(form);
+    const draft = buildImportFd(form);
     const archiveLabel =
       String(draft.get("archiveLabel") ?? "").trim() || previewLabel || "Storico";
-    const collabId = String(
-      draft.get("defaultCollaboratorId") ?? defaultCollaboratorId,
-    ).trim();
+    const resolvedCollab =
+      String(draft.get("defaultCollaboratorId") ?? "").trim() ||
+      collabId ||
+      defaultCollaboratorId;
+    if (!resolvedCollab) {
+      setError("Scegli il collaboratore di default (es. Vizzino).");
+      return;
+    }
     const skipDup =
       (form.elements.namedItem("skipPodDuplicates") as HTMLInputElement | null)
         ?.checked ?? true;
@@ -155,7 +179,7 @@ export function ArchiveImportForm({
     function makeBatchFd(slice: number[], finalize: boolean): FormData {
       const fd = new FormData();
       fd.set("archiveLabel", archiveLabel);
-      fd.set("defaultCollaboratorId", collabId);
+      fd.set("defaultCollaboratorId", resolvedCollab);
       if (skipDup) fd.set("skipPodDuplicates", "1");
       fd.set("fileBase64", fileB64!);
       fd.set("rowNumbers", JSON.stringify(slice));
@@ -278,9 +302,10 @@ export function ArchiveImportForm({
         <Field label="Collaboratore di default *">
           <Select
             name="defaultCollaboratorId"
-            defaultValue={defaultCollaboratorId}
+            value={collabId}
             required
             disabled={busy}
+            onChange={(e) => setCollabId(e.target.value)}
           >
             {collaborators.map((c) => (
               <option key={c.id} value={c.id}>
