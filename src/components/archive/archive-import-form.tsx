@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
-  importHistoricalExcelAction,
+  importHistoricalExcelBatchAction,
   previewHistoricalExcelAction,
   type ArchivePreviewRow,
 } from "@/lib/archive-actions";
@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 
 type CollaboratorOption = { id: string; name: string; email: string };
+
+const BATCH_SIZE = 25;
 
 export function ArchiveImportForm({
   collaborators,
@@ -32,6 +34,14 @@ export function ArchiveImportForm({
     total: number;
   } | null>(null);
   const [fileKey, setFileKey] = useState(0);
+  const [progress, setProgress] = useState<{
+    percent: number;
+    done: number;
+    total: number;
+    imported: number;
+    skipped: number;
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   function buildFd(form: HTMLFormElement): FormData {
     return new FormData(form);
@@ -42,6 +52,7 @@ export function ArchiveImportForm({
     const form = e.currentTarget;
     setError(null);
     setMessage(null);
+    setProgress(null);
     start(async () => {
       try {
         const result = await previewHistoricalExcelAction(buildFd(form));
@@ -63,61 +74,103 @@ export function ArchiveImportForm({
         const msg = err instanceof Error ? err.message : "Errore sconosciuto";
         setError(
           msg.includes("fetch")
-            ? "Connessione interrotta (file troppo grande o timeout). Usa un pezzo da max ~250 righe, es. UT-GEN-2026-Vito-parte1.xlsx"
+            ? "Connessione interrotta in anteprima. Riprova tra poco."
             : msg,
         );
       }
     });
   }
 
-  function onCommit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function runImportWithProgress(form: HTMLFormElement) {
     if (!previewRows) {
       setError("Prima fai l’anteprima, poi conferma l’import.");
       return;
     }
-    const importable = previewRows.filter((r) => !r.skip && r.status !== "error").length;
-    if (importable === 0) {
+    const rowNumbers = previewRows
+      .filter((r) => !r.skip && r.status !== "error")
+      .map((r) => r.row);
+    if (rowNumbers.length === 0) {
       setError("Nessuna riga da importare. Correggi il file o i filtri.");
       return;
     }
     if (
       !window.confirm(
-        `Confermi l’import di ${importable} contratti nel lotto «${previewLabel}»?`,
+        `Confermi l’import di ${rowNumbers.length} contratti nel lotto «${previewLabel}»?`,
       )
     ) {
       return;
     }
-    const form = e.currentTarget;
+
     setError(null);
     setMessage(null);
-    start(async () => {
-      try {
-        const result = await importHistoricalExcelAction(buildFd(form));
-        if (result.error) {
-          setError(result.error);
-          return;
-        }
-        setMessage(
-          `Importati ${result.imported ?? 0} contratti` +
-            (result.skipped ? ` · saltati ${result.skipped}` : "") +
-            ` nel lotto «${result.label}».`,
-        );
-        setPreviewRows(null);
-        setSummary(null);
-        setFileKey((k) => k + 1);
-        form.reset();
-        router.refresh();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Errore sconosciuto";
-        setError(
-          msg.includes("fetch")
-            ? "Import interrotto (timeout). Riprova con un pezzo più piccolo (~250 righe)."
-            : msg,
-        );
-      }
+    setImporting(true);
+    setProgress({
+      percent: 0,
+      done: 0,
+      total: rowNumbers.length,
+      imported: 0,
+      skipped: 0,
     });
+
+    let imported = 0;
+    let skipped = 0;
+    let label = previewLabel;
+
+    try {
+      for (let i = 0; i < rowNumbers.length; i += BATCH_SIZE) {
+        const slice = rowNumbers.slice(i, i + BATCH_SIZE);
+        const fd = buildFd(form);
+        fd.set("rowNumbers", JSON.stringify(slice));
+        const isLast = i + BATCH_SIZE >= rowNumbers.length;
+        if (isLast) fd.set("finalize", "1");
+        const batch = await importHistoricalExcelBatchAction(fd);
+        if (batch.error) {
+          setError(batch.error);
+          break;
+        }
+        imported += batch.batchImported;
+        skipped += batch.batchSkipped;
+        label = batch.label ?? label;
+        const done = Math.min(i + slice.length, rowNumbers.length);
+        const percent = Math.round((done / rowNumbers.length) * 100);
+        setProgress({
+          percent,
+          done,
+          total: rowNumbers.length,
+          imported,
+          skipped,
+        });
+      }
+
+      setMessage(
+        `Import completato: ${imported} contratti` +
+          (skipped ? ` · saltati ${skipped}` : "") +
+          ` nel lotto «${label}».`,
+      );
+      setPreviewRows(null);
+      setSummary(null);
+      setFileKey((k) => k + 1);
+      form.reset();
+      router.refresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Errore sconosciuto";
+      setError(
+        msg.includes("fetch")
+          ? `Import interrotto al ${progress?.percent ?? 0}%. Riprova: le righe già caricate restano (salta POD duplicati).`
+          : msg,
+      );
+    } finally {
+      setImporting(false);
+    }
   }
+
+  function onCommit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    void runImportWithProgress(form);
+  }
+
+  const busy = pending || importing;
 
   return (
     <div className="space-y-4">
@@ -132,13 +185,25 @@ export function ArchiveImportForm({
             required
             placeholder="Es. Pagati 2024 - Enel"
             defaultValue=""
+            disabled={busy}
           />
         </Field>
         <Field label="File Excel (.xlsx)">
-          <Input name="file" type="file" accept=".xlsx,.xls" required />
+          <Input
+            name="file"
+            type="file"
+            accept=".xlsx,.xls"
+            required
+            disabled={busy}
+          />
         </Field>
         <Field label="Collaboratore di default *">
-          <Select name="defaultCollaboratorId" defaultValue={defaultCollaboratorId} required>
+          <Select
+            name="defaultCollaboratorId"
+            defaultValue={defaultCollaboratorId}
+            required
+            disabled={busy}
+          >
             {collaborators.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({c.email})
@@ -147,7 +212,13 @@ export function ArchiveImportForm({
           </Select>
         </Field>
         <label className="flex items-center gap-2 text-sm text-slate-700 md:pb-2">
-          <input type="checkbox" name="skipPodDuplicates" value="1" defaultChecked />
+          <input
+            type="checkbox"
+            name="skipPodDuplicates"
+            value="1"
+            defaultChecked
+            disabled={busy}
+          />
           Salta righe con POD/PDR già presente (o doppio nel file)
         </label>
 
@@ -155,19 +226,45 @@ export function ArchiveImportForm({
           <Button
             type="button"
             variant="secondary"
-            disabled={pending}
+            disabled={busy}
             onClick={(ev) => {
               const form = (ev.target as HTMLElement).closest("form");
-              if (form) onPreview({ preventDefault() {}, currentTarget: form } as React.FormEvent<HTMLFormElement>);
+              if (form) {
+                onPreview({
+                  preventDefault() {},
+                  currentTarget: form,
+                } as React.FormEvent<HTMLFormElement>);
+              }
             }}
           >
-            {pending ? "Analisi…" : "1. Anteprima"}
+            {pending && !importing ? "Analisi…" : "1. Anteprima"}
           </Button>
-          <Button type="submit" disabled={pending || !previewRows}>
-            {pending ? "Import…" : "2. Conferma import"}
+          <Button type="submit" disabled={busy || !previewRows}>
+            {importing ? "Import in corso…" : "2. Conferma import"}
           </Button>
         </div>
       </form>
+
+      {progress ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <div className="mb-2 flex items-center justify-between text-sm text-emerald-900">
+            <span className="font-medium">
+              {importing ? "Caricamento database…" : "Caricamento terminato"}
+            </span>
+            <span className="tabular-nums font-semibold">{progress.percent}%</span>
+          </div>
+          <div className="h-3 overflow-hidden rounded-full bg-emerald-100">
+            <div
+              className="h-full rounded-full bg-emerald-600 transition-all duration-300"
+              style={{ width: `${progress.percent}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-emerald-800">
+            {progress.done} / {progress.total} righe · importati {progress.imported}
+            {progress.skipped ? ` · saltati ${progress.skipped}` : ""}
+          </p>
+        </div>
+      ) : null}
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {message ? <p className="text-sm text-slate-700">{message}</p> : null}
@@ -181,7 +278,7 @@ export function ArchiveImportForm({
         </p>
       ) : null}
 
-      {previewRows && previewRows.length > 0 ? (
+      {previewRows && previewRows.length > 0 && !importing ? (
         <div className="max-h-80 overflow-auto rounded-xl border border-slate-200">
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 bg-slate-50 text-slate-600">

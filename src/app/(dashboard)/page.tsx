@@ -25,13 +25,19 @@ export default async function DashboardPage({
     session.role,
     "contracts.change_collaborator_dashboard",
   );
-  const where = canViewAll
+  const whereActive = canViewAll
     ? { isHistorical: false, deletedAt: null }
     : { collaboratorId: session.id, isHistorical: false, deletedAt: null };
+  const whereAll = canViewAll
+    ? { deletedAt: null }
+    : { collaboratorId: session.id, deletedAt: null };
+  const where = whereActive;
 
   try {
     const [
       totalContracts,
+      totalAllContracts,
+      totalArchiveContracts,
       inLavorazioneCount,
       completatoCount,
       koCount,
@@ -43,7 +49,13 @@ export default async function DashboardPage({
       recentContracts,
       collaboratorOptions,
     ] = await Promise.all([
-      prisma.contract.count({ where }),
+      prisma.contract.count({ where: whereActive }),
+      prisma.contract.count({ where: whereAll }),
+      prisma.contract.count({
+        where: canViewAll
+          ? { isHistorical: true, deletedAt: null }
+          : { collaboratorId: session.id, isHistorical: true, deletedAt: null },
+      }),
       prisma.contract.count({
         where: {
           ...where,
@@ -106,7 +118,7 @@ export default async function DashboardPage({
       hasPermission(session.role, "stats.full")
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
-            where: { deletedAt: null, isHistorical: false },
+            where: { deletedAt: null },
             _count: { id: true },
             orderBy: { _count: { id: "desc" } },
             take: 20,
@@ -189,16 +201,20 @@ export default async function DashboardPage({
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Contratti totali" value={totalContracts} />
+          <StatCard label="Contratti totali" value={totalAllContracts} />
+          <StatCard label="Attivi (operativi)" value={totalContracts} />
+          <Link href="/archivio">
+            <StatCard label="In archivio" value={totalArchiveContracts} />
+          </Link>
           <Link href="/lavorazione">
             <StatCard label="In lavorazione" value={inLavorazioneCount} tone="warning" />
           </Link>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Link href="/contratti">
             <StatCard label="Completati" value={completatoCount} tone="success" />
           </Link>
           <StatCard label="KO" value={koCount} tone="danger" />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Link href="/lavorazione">
             <StatCard label="Email da reinviare" value={emailFailedCount} tone="danger" />
           </Link>

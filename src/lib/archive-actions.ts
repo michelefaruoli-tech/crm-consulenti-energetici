@@ -404,31 +404,68 @@ export async function previewHistoricalExcelAction(
 }
 
 /**
- * Import Excel contratti storici (dopo anteprima).
- * Colonne consigliate: Nome, Cognome, Ragione sociale, Telefono, Tipo, Fornitore,
- * POD/PDR, Consumi, Data inserimento, Data ingresso fornitura, Mesi storno,
- * Pagamento, Data pagamento, Gettone, Agenzia, Collaboratore, Note
+ * Import a lotti (barra di avanzamento).
+ * FormData: campi file come anteprima + rowNumbers = JSON array di numeri riga Excel.
  */
-export async function importHistoricalExcelAction(
+export async function importHistoricalExcelBatchAction(
   formData: FormData,
-): Promise<{ error?: string; imported?: number; skipped?: number; label?: string }> {
+): Promise<{
+  error?: string;
+  label?: string;
+  batchImported: number;
+  batchSkipped: number;
+  batchSize: number;
+  done: boolean;
+}> {
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.edit_all")) {
-    return { error: "Solo admin/segreteria può importare lo storico" };
+    return {
+      error: "Solo admin/segreteria può importare lo storico",
+      batchImported: 0,
+      batchSkipped: 0,
+      batchSize: 0,
+      done: true,
+    };
   }
 
   const loaded = await loadSheetFromForm(formData);
-  if ("error" in loaded) return { error: loaded.error };
+  if ("error" in loaded) {
+    return {
+      error: loaded.error,
+      batchImported: 0,
+      batchSkipped: 0,
+      batchSize: 0,
+      done: true,
+    };
+  }
   const data = loaded.data;
 
-  const { rows: preview } = await buildPreviewRows(data, session.id);
-  const importable = preview.filter((r) => !r.skip && r.status !== "error");
-  if (importable.length === 0) {
+  let rowNumbers: number[] = [];
+  try {
+    const raw = String(formData.get("rowNumbers") ?? "[]");
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      rowNumbers = parsed
+        .map((n) => Number(n))
+        .filter((n) => Number.isFinite(n) && n >= 2);
+    }
+  } catch {
     return {
-      error: "Nessuna riga importabile. Controlla errori/doppioni nell’anteprima.",
+      error: "Elenco righe non valido",
+      batchImported: 0,
+      batchSkipped: 0,
+      batchSize: 0,
+      done: true,
+    };
+  }
+
+  if (rowNumbers.length === 0) {
+    return {
       label: data.label,
-      imported: 0,
-      skipped: preview.length,
+      batchImported: 0,
+      batchSkipped: 0,
+      batchSize: 0,
+      done: true,
     };
   }
 
@@ -442,190 +479,275 @@ export async function importHistoricalExcelAction(
   const defaultUser = users.find((u) => u.id === data.defaultCollabId);
   const defaultName = defaultUser?.name ?? "Default";
 
-  let imported = 0;
-  let skipped = preview.length - importable.length;
+  let batchImported = 0;
+  let batchSkipped = 0;
 
-  for (const p of importable) {
-    const row = data.sheet.getRow(p.row);
-    const firstName = data.cols.nome > 0 ? cell(row, data.cols.nome) : "";
-    const lastName = data.cols.cognome > 0 ? cell(row, data.cols.cognome) : "";
-    const companyName = data.cols.ragione > 0 ? cell(row, data.cols.ragione) : "";
-    const tipoRaw = data.cols.tipo > 0 ? cell(row, data.cols.tipo) : "";
-    const supplierName =
-      (data.cols.fornitore > 0 ? cell(row, data.cols.fornitore) : "") || "Sconosciuto";
-    const podPdr = data.cols.pod > 0 ? cell(row, data.cols.pod) : "";
-    const dateRaw = data.cols.data > 0 ? cell(row, data.cols.data) : "";
-    const supplyRaw =
-      data.cols.dataFornitura > 0 ? cell(row, data.cols.dataFornitura) : "";
-    const pagamentoRaw =
-      data.cols.pagamento > 0 ? cell(row, data.cols.pagamento) : "";
-    const dataPagamentoRaw =
-      data.cols.dataPagamento > 0 ? cell(row, data.cols.dataPagamento) : "";
-    const telefono =
-      data.cols.telefono > 0 ? cell(row, data.cols.telefono) : "";
-    const gettoneRaw = data.cols.gettone > 0 ? cell(row, data.cols.gettone) : "";
-    const collabRaw = data.cols.collab > 0 ? cell(row, data.cols.collab) : "";
-    const notes = data.cols.note > 0 ? cell(row, data.cols.note) : "";
-    const consumiRaw = data.cols.consumi > 0 ? cell(row, data.cols.consumi) : "";
-    const stornoRaw = data.cols.storno > 0 ? cell(row, data.cols.storno) : "";
-    const agenzia =
-      data.cols.agenzia > 0 ? cell(row, data.cols.agenzia) : "";
-
-    const type = mapClientType(tipoRaw || (companyName ? "AZIENDA" : "PRIVATO"));
-    const insertionDate = parseDate(dateRaw) ?? new Date();
-    const paymentDate = parseDate(dataPagamentoRaw);
-    const paidFlag = parsePaidFlag(pagamentoRaw);
-    const paid = paidFlag === true || (paidFlag == null && Boolean(paymentDate));
-    const expected =
-      Number(String(gettoneRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
-    const consumi =
-      Number(String(consumiRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || null;
-    const stornoMonths =
-      Number(String(stornoRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || null;
-    const collab = resolveCollaborator(
-      collabRaw,
+  for (const rowNum of rowNumbers) {
+    const ok = await importOneHistoricalRow({
+      data,
+      previewRow: {
+        row: rowNum,
+        status: "ok",
+        messages: [],
+        clientLabel: "",
+        type: "PRIVATO",
+        supplierName: "",
+        podPdr: "",
+        gettone: 0,
+        collaboratorName: defaultName,
+        collaboratorId: data.defaultCollabId,
+        insertionDate: "",
+        skip: false,
+      },
+      sessionId: session.id,
       users,
-      data.defaultCollabId,
       defaultName,
-    );
+    });
+    if (ok) batchImported += 1;
+    else batchSkipped += 1;
+  }
 
-    // Re-check POD al commit (race / skip)
-    const podKey = normalizePodKey(podPdr);
-    if (podKey && data.skipPodDuplicates) {
-      const existing = await prisma.contract.findFirst({
-        where: {
-          deletedAt: null,
-          OR: [{ podPdr: podPdr }, { podPdr: podKey }, { pod: podKey }, { pdr: podKey }],
-        },
-        select: { id: true },
-      });
-      if (existing) {
-        skipped += 1;
-        continue;
-      }
-    }
+  const finalize = String(formData.get("finalize") ?? "") === "1";
+  if (finalize) {
+    revalidatePath("/archivio");
+    revalidatePath("/report");
+    revalidatePath("/contratti");
+    revalidatePath("/");
+    revalidatePath("/provvigioni");
+  }
 
-    const supplierCode =
-      supplierName
-        .toUpperCase()
-        .replace(/[^A-Z0-9]+/g, "_")
-        .slice(0, 40) || "SCONOSCIUTO";
+  return {
+    label: data.label,
+    batchImported,
+    batchSkipped,
+    batchSize: rowNumbers.length,
+    done: finalize,
+  };
+}
 
-    let supplier = await prisma.supplier.findFirst({
+async function importOneHistoricalRow(opts: {
+  data: ParsedSheet;
+  previewRow: ArchivePreviewRow;
+  sessionId: string;
+  users: CollabUser[];
+  defaultName: string;
+}): Promise<boolean> {
+  const { data, previewRow: p, sessionId, users, defaultName } = opts;
+  const row = data.sheet.getRow(p.row);
+  const firstName = data.cols.nome > 0 ? cell(row, data.cols.nome) : "";
+  const lastName = data.cols.cognome > 0 ? cell(row, data.cols.cognome) : "";
+  const companyName = data.cols.ragione > 0 ? cell(row, data.cols.ragione) : "";
+  const tipoRaw = data.cols.tipo > 0 ? cell(row, data.cols.tipo) : "";
+  const supplierName =
+    (data.cols.fornitore > 0 ? cell(row, data.cols.fornitore) : "") || "Sconosciuto";
+  const podPdr = data.cols.pod > 0 ? cell(row, data.cols.pod) : "";
+  const dateRaw = data.cols.data > 0 ? cell(row, data.cols.data) : "";
+  const supplyRaw =
+    data.cols.dataFornitura > 0 ? cell(row, data.cols.dataFornitura) : "";
+  const pagamentoRaw =
+    data.cols.pagamento > 0 ? cell(row, data.cols.pagamento) : "";
+  const dataPagamentoRaw =
+    data.cols.dataPagamento > 0 ? cell(row, data.cols.dataPagamento) : "";
+  const telefono = data.cols.telefono > 0 ? cell(row, data.cols.telefono) : "";
+  const gettoneRaw = data.cols.gettone > 0 ? cell(row, data.cols.gettone) : "";
+  const collabRaw = data.cols.collab > 0 ? cell(row, data.cols.collab) : "";
+  const notes = data.cols.note > 0 ? cell(row, data.cols.note) : "";
+  const consumiRaw = data.cols.consumi > 0 ? cell(row, data.cols.consumi) : "";
+  const stornoRaw = data.cols.storno > 0 ? cell(row, data.cols.storno) : "";
+  const agenzia = data.cols.agenzia > 0 ? cell(row, data.cols.agenzia) : "";
+
+  if (!firstName && !lastName && !companyName && !podPdr) return false;
+
+  const type = mapClientType(tipoRaw || (companyName ? "AZIENDA" : "PRIVATO"));
+  const insertionDate = parseDate(dateRaw) ?? new Date();
+  const paymentDate = parseDate(dataPagamentoRaw);
+  const paidFlag = parsePaidFlag(pagamentoRaw);
+  const paid = paidFlag === true || (paidFlag == null && Boolean(paymentDate));
+  const expected =
+    Number(String(gettoneRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
+  const consumi =
+    Number(String(consumiRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || null;
+  const stornoMonths =
+    Number(String(stornoRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || null;
+  const collab = resolveCollaborator(
+    collabRaw,
+    users,
+    data.defaultCollabId,
+    defaultName,
+  );
+
+  const podKey = normalizePodKey(podPdr);
+  if (podKey && data.skipPodDuplicates) {
+    const existing = await prisma.contract.findFirst({
       where: {
-        OR: [{ code: supplierCode }, { name: { equals: supplierName, mode: "insensitive" } }],
+        deletedAt: null,
+        OR: [{ podPdr: podPdr }, { podPdr: podKey }, { pod: podKey }, { pdr: podKey }],
+      },
+      select: { id: true },
+    });
+    if (existing) return false;
+  }
+
+  const supplierCode =
+    supplierName
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .slice(0, 40) || "SCONOSCIUTO";
+
+  let supplier = await prisma.supplier.findFirst({
+    where: {
+      OR: [{ code: supplierCode }, { name: { equals: supplierName, mode: "insensitive" } }],
+    },
+  });
+  if (!supplier) {
+    supplier = await prisma.supplier.create({
+      data: {
+        name: supplierName || "Sconosciuto",
+        code: `${supplierCode}_${Date.now()}`.slice(0, 50),
       },
     });
-    if (!supplier) {
-      supplier = await prisma.supplier.create({
-        data: {
-          name: supplierName || "Sconosciuto",
-          code: `${supplierCode}_${Date.now()}`.slice(0, 50),
-        },
-      });
-    }
+  }
 
-    // Riusa cliente se possibile (evita anagrafiche duplicate)
-    let client =
-      type === "PRIVATO" && (firstName || lastName)
+  let client =
+    type === "PRIVATO" && (firstName || lastName)
+      ? await prisma.client.findFirst({
+          where: {
+            deletedAt: null,
+            type: "PRIVATO",
+            firstName: firstName || null,
+            lastName: lastName || null,
+          },
+        })
+      : type === "AZIENDA" && (companyName || firstName)
         ? await prisma.client.findFirst({
             where: {
               deletedAt: null,
-              type: "PRIVATO",
-              firstName: firstName || null,
-              lastName: lastName || null,
+              type: "AZIENDA",
+              companyName: companyName || firstName || undefined,
             },
           })
-        : type === "AZIENDA" && (companyName || firstName)
-          ? await prisma.client.findFirst({
-              where: {
-                deletedAt: null,
-                type: "AZIENDA",
-                companyName: companyName || firstName || undefined,
-              },
-            })
-          : null;
+        : null;
 
-    if (!client) {
-      client = await prisma.client.create({
-        data: {
-          type,
-          firstName: type === "PRIVATO" ? firstName || null : null,
-          lastName: type === "PRIVATO" ? lastName || null : null,
-          companyName:
-            type === "AZIENDA" ? companyName || firstName || null : companyName || null,
-          phone: telefono || null,
-          createdById: session.id,
-        },
-      });
-    } else if (telefono && !client.phone) {
-      await prisma.client.update({
-        where: { id: client.id },
-        data: { phone: telefono },
-      });
-    }
-
-    const contractNumber = await generateContractNumber();
-    const op = normalizeOperationType("CAMBIO");
-    const supplyFromFile = parseDate(supplyRaw);
-    const supplyStartDate =
-      supplyFromFile ?? computeSupplyStartDate(insertionDate, op);
-    const collectionDate = paid ? paymentDate ?? insertionDate : null;
-
-    let stornoEndDate: Date | null = null;
-    if (stornoMonths && stornoMonths > 0 && supplyStartDate) {
-      stornoEndDate = new Date(supplyStartDate);
-      stornoEndDate.setMonth(stornoEndDate.getMonth() + stornoMonths);
-    }
-
-    const noteParts = [
-      notes,
-      stornoMonths && stornoMonths > 0 ? `Storno: ${stornoMonths} mesi` : "",
-    ].filter(Boolean);
-
-    const contract = await prisma.contract.create({
+  if (!client) {
+    client = await prisma.client.create({
       data: {
-        contractNumber,
-        externalId: `hist-${data.label}-${p.row}-${Date.now()}`.slice(0, 80),
-        clientId: client.id,
-        collaboratorId: collab.id,
-        createdById: session.id,
-        supplierId: supplier.id,
-        status: "CHIUSO",
-        podPdr: podPdr || null,
-        insertionDate,
-        supplyStartDate,
-        operationType: op,
-        paymentStatus: paid ? "Incassato" : "Da incassare",
-        paymentDate: paid ? paymentDate ?? null : null,
-        collectionDate,
-        isHistorical: true,
-        archiveLabel: data.label,
-        commissionConfirmed: paid,
-        commissionConfirmedAt: paid ? new Date() : null,
-        notes: noteParts.join(" | ") || null,
-        agency: agenzia || null,
-        annualKwh: consumi,
-        stornoEndDate,
+        type,
+        firstName: type === "PRIVATO" ? firstName || null : null,
+        lastName: type === "PRIVATO" ? lastName || null : null,
+        companyName:
+          type === "AZIENDA" ? companyName || firstName || null : companyName || null,
+        phone: telefono || null,
+        createdById: sessionId,
       },
     });
-
-    // Sempre commission (anche gettone 0)
-    await prisma.commission.create({
-      data: {
-        contractId: contract.id,
-        expected,
-        received: paid ? expected : 0,
-        paid: paid ? expected : 0,
-        accrued: paid ? expected : 0,
-      },
+  } else if (telefono && !client.phone) {
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { phone: telefono },
     });
+  }
 
-    imported += 1;
+  const contractNumber = await generateContractNumber();
+  const op = normalizeOperationType("CAMBIO");
+  const supplyFromFile = parseDate(supplyRaw);
+  const supplyStartDate =
+    supplyFromFile ?? computeSupplyStartDate(insertionDate, op);
+  const collectionDate = paid ? paymentDate ?? insertionDate : null;
+
+  let stornoEndDate: Date | null = null;
+  if (stornoMonths && stornoMonths > 0 && supplyStartDate) {
+    stornoEndDate = new Date(supplyStartDate);
+    stornoEndDate.setMonth(stornoEndDate.getMonth() + stornoMonths);
+  }
+
+  const noteParts = [
+    notes,
+    stornoMonths && stornoMonths > 0 ? `Storno: ${stornoMonths} mesi` : "",
+  ].filter(Boolean);
+
+  const contract = await prisma.contract.create({
+    data: {
+      contractNumber,
+      externalId: `hist-${data.label}-${p.row}-${Date.now()}`.slice(0, 80),
+      clientId: client.id,
+      collaboratorId: collab.id,
+      createdById: sessionId,
+      supplierId: supplier.id,
+      status: "CHIUSO",
+      podPdr: podPdr || null,
+      insertionDate,
+      supplyStartDate,
+      operationType: op,
+      paymentStatus: paid ? "Incassato" : "Da incassare",
+      paymentDate: paid ? paymentDate ?? null : null,
+      collectionDate,
+      isHistorical: true,
+      archiveLabel: data.label,
+      commissionConfirmed: paid,
+      commissionConfirmedAt: paid ? new Date() : null,
+      notes: noteParts.join(" | ") || null,
+      agency: agenzia || null,
+      annualKwh: consumi,
+      stornoEndDate,
+    },
+  });
+
+  await prisma.commission.create({
+    data: {
+      contractId: contract.id,
+      expected,
+      received: paid ? expected : 0,
+      paid: paid ? expected : 0,
+      accrued: paid ? expected : 0,
+    },
+  });
+
+  return true;
+}
+
+/**
+ * Import Excel completo (compatibilità). Preferire i lotti con barra progresso.
+ */
+export async function importHistoricalExcelAction(
+  formData: FormData,
+): Promise<{ error?: string; imported?: number; skipped?: number; label?: string }> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "contracts.edit_all")) {
+    return { error: "Solo admin/segreteria può importare lo storico" };
+  }
+
+  const loaded = await loadSheetFromForm(formData);
+  if ("error" in loaded) return { error: loaded.error };
+  const data = loaded.data;
+  const { rows: preview } = await buildPreviewRows(data, session.id);
+  const importable = preview.filter((r) => !r.skip && r.status !== "error");
+  if (importable.length === 0) {
+    return {
+      error: "Nessuna riga importabile.",
+      label: data.label,
+      imported: 0,
+      skipped: preview.length,
+    };
+  }
+
+  let imported = 0;
+  let skipped = preview.length - importable.length;
+  const BATCH = 30;
+  for (let i = 0; i < importable.length; i += BATCH) {
+    const slice = importable.slice(i, i + BATCH).map((r) => r.row);
+    const fd = formData;
+    fd.set("rowNumbers", JSON.stringify(slice));
+    const batch = await importHistoricalExcelBatchAction(fd);
+    if (batch.error) return { error: batch.error, imported, skipped, label: data.label };
+    imported += batch.batchImported;
+    skipped += batch.batchSkipped;
   }
 
   revalidatePath("/archivio");
   revalidatePath("/report");
   revalidatePath("/contratti");
+  revalidatePath("/");
+  revalidatePath("/provvigioni");
   return { imported, skipped, label: data.label };
 }
+
