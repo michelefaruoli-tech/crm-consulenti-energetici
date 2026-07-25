@@ -709,7 +709,7 @@ async function importOneHistoricalRow(opts: {
       collaboratorId: collab.id,
       createdById: sessionId,
       supplierId: supplier.id,
-      status: "CHIUSO",
+      status: paid ? "PAGATO_DAL_FORNITORE" : "IN_ATTESA_PAGAMENTO",
       podPdr: podPdr || null,
       insertionDate,
       supplyStartDate,

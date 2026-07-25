@@ -127,6 +127,48 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
       where: { id: commission.contractId },
       data: { notes: value.trim() || null },
     });
+  } else if (field === "stato") {
+    /**
+     * Stato semplificato in Provvigioni:
+     * - «KO / Cessato» → contratto chiuso/KO (riga grigia)
+     * - «Da incassare» → pratica attiva, non ancora pagata
+     * - «Incassato» → pratica attiva e pagata
+     */
+    const raw = value.trim().toLowerCase();
+    const contractId = commission.contractId;
+    if (/ko|cessat|annull|chius/.test(raw)) {
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: { status: "KO" },
+      });
+    } else if (/incass/.test(raw) && !/da\s*incass/.test(raw) && !/^no$/.test(raw)) {
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+          status: "PAGATO_DAL_FORNITORE",
+          paymentStatus: "Incassato",
+          collectionDate: commission.contract.collectionDate ?? new Date(),
+        },
+      });
+      await syncRecurringMonthsForContract(contractId).catch(() => undefined);
+    } else {
+      // Da incassare (default se testo non riconosciuto ma non vuoto / o esplicito)
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+          status: "IN_ATTESA_PAGAMENTO",
+          paymentStatus: "Da incassare",
+          collectionDate: null,
+        },
+      });
+    }
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: contractId,
+      details: { field: "stato", to: value.trim(), source: "provvigioni_table" },
+    });
   }
 
   revalidatePath("/provvigioni");

@@ -8,6 +8,7 @@ import { clientDisplayName } from "@/lib/utils";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import {
   ProvvigioniFilterTable,
+  simplifiedProvvigioneStato,
   type ProvvigioneRow,
 } from "@/components/provvigioni/provvigioni-filter-table";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
@@ -263,6 +264,7 @@ export default async function ProvvigioniPage({
       clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
       amount: String(Number(item?.expected ?? 0)),
       recurrence: contract.recurrence || "Una tantum",
+      stato: simplifiedProvvigioneStato(contract.status, hasDate),
       paymentStatus: paidLabel,
       confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,

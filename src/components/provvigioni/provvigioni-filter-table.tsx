@@ -28,6 +28,8 @@ export type ProvvigioneRow = {
   clientType: string;
   amount: string;
   recurrence: string;
+  /** Stato semplificato: KO / Cessato | Da incassare | Incassato */
+  stato: string;
   paymentStatus: string;
   confirmed: string;
   collectionMonth: string;
@@ -37,6 +39,16 @@ export type ProvvigioneRow = {
   warnOnEdit?: boolean;
   gettoneBorderClass?: string;
 };
+
+/** Tre valori usati in Provvigioni (facilita correzione KO/Cessato sbagliati). */
+export function simplifiedProvvigioneStato(
+  status: string,
+  hasCollectionDate: boolean,
+): string {
+  if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
+  if (hasCollectionDate) return "Incassato";
+  return "Da incassare";
+}
 
 function shortRecurrence(value: string): string {
   const v = value.toLowerCase();
@@ -202,6 +214,7 @@ export function ProvvigioniFilterTable({
       podPdr: "podPdr",
       collectionMonth: "collectionDate",
       notes: "notes",
+      stato: "stato",
     };
     const field = map[key];
     if (!field) return;
@@ -306,6 +319,35 @@ export function ProvvigioniFilterTable({
       getValue: (r) => String(r.amount ?? ""),
       editable: true,
       sortKind: "number",
+    },
+    {
+      key: "stato",
+      label: "Stato",
+      getValue: (r) => String(r.stato ?? ""),
+      sortKind: "text",
+      render: (r) => {
+        const current = String(r.stato ?? "Da incassare");
+        const options = ["KO / Cessato", "Da incassare", "Incassato"];
+        return (
+          <select
+            className="max-w-[9.5rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-[11px]"
+            value={options.includes(current) ? current : "Da incassare"}
+            title="Cambia stato contratto / pagamento"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next === current) return;
+              void onCellEdit(r, "stato", next);
+            }}
+          >
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
     {
       key: "recurrence",
@@ -524,8 +566,11 @@ export function ProvvigioniFilterTable({
       </div>
 
       <p className="text-xs text-slate-500">
-        Pagato: <strong>Sì</strong>/<strong>No</strong>. Data: <strong>MM/AAAA</strong>.
-        Bordo sinistro = stato gettone (ambra / verde).
+        <strong>Stato</strong>: menu a tendina{" "}
+        <strong>KO / Cessato</strong> · <strong>Da incassare</strong> ·{" "}
+        <strong>Incassato</strong> (per correggere le righe grigie importate come
+        chiusi). Pagato: <strong>Sì</strong>/<strong>No</strong>. Data:{" "}
+        <strong>MM/AAAA</strong>. Bordo sinistro = stato gettone (ambra / verde).
         {canDelete
           ? " Elimina (singolo o selezionate) archivia i contratti e li toglie dalla lista."
           : ""}
