@@ -21,6 +21,10 @@ export type ArchivePreviewRow = {
   collaboratorName: string;
   collaboratorId: string;
   insertionDate: string;
+  supplyStartDate?: string;
+  paid?: boolean;
+  paymentDate?: string;
+  phone?: string;
   skip: boolean;
 };
 
@@ -57,8 +61,28 @@ function parseDate(value: string): Date | null {
 
 function mapClientType(value: string): "PRIVATO" | "AZIENDA" {
   const v = value.toUpperCase();
-  if (v.includes("BUSINESS") || v.includes("AZIENDA") || v === "BOX") return "AZIENDA";
+  if (
+    v.includes("BUSINESS") ||
+    v.includes("AZIENDA") ||
+    v === "BOX" ||
+    v.includes("CORPORATE") ||
+    v.includes("COORPORATE")
+  ) {
+    return "AZIENDA";
+  }
   return "PRIVATO";
+}
+
+function parsePaidFlag(raw: string): boolean | null {
+  const v = raw.trim().toLowerCase();
+  if (!v) return null;
+  if (["sì", "si", "yes", "y", "1", "true", "pagato", "incassato", "ok"].includes(v)) {
+    return true;
+  }
+  if (["no", "n", "0", "false", "ko", "non pagato", "da incassare"].includes(v)) {
+    return false;
+  }
+  return null;
 }
 
 type CollabUser = { id: string; name: string; email: string };
@@ -110,8 +134,13 @@ type ParsedSheet = {
     fornitore: number;
     pod: number;
     data: number;
+    dataFornitura: number;
+    pagamento: number;
+    dataPagamento: number;
+    telefono: number;
     gettone: number;
     collab: number;
+    note: number;
   };
 };
 
@@ -146,24 +175,43 @@ async function loadSheetFromForm(formData: FormData): Promise<
       .toLowerCase();
   });
 
-  function col(...names: string[]): number {
-    for (let i = 1; i < headers.length; i++) {
-      const h = headers[i] ?? "";
-      if (names.some((n) => h.includes(n))) return i;
+  /** Preferisce match esatto, poi includes (ordine = priorità). */
+  function colPrefer(...names: string[]): number {
+    for (const name of names) {
+      for (let i = 1; i < headers.length; i++) {
+        if ((headers[i] ?? "") === name) return i;
+      }
+    }
+    for (const name of names) {
+      for (let i = 1; i < headers.length; i++) {
+        const h = headers[i] ?? "";
+        if (h.includes(name)) return i;
+      }
     }
     return -1;
   }
 
   const cols = {
-    nome: col("nome", "cliente"),
-    cognome: col("cognome"),
-    ragione: col("ragione", "azienda", "company"),
-    tipo: col("tipo", "tipologia", "domestico", "business"),
-    fornitore: col("fornitore", "supplier"),
-    pod: col("pod", "pdr"),
-    data: col("data", "inserimento", "incasso"),
-    gettone: col("gettone", "provvigione", "importo", "expected"),
-    collab: col("collaboratore", "agente"),
+    nome: colPrefer("nome"),
+    cognome: colPrefer("cognome"),
+    ragione: colPrefer("ragione sociale", "ragione", "azienda", "company"),
+    tipo: colPrefer("tipo", "tipologia"),
+    fornitore: colPrefer("fornitore", "supplier"),
+    pod: colPrefer("pod/pdr", "pod", "pdr"),
+    data: colPrefer("data inserimento", "inserimento", "caricato", "data"),
+    dataFornitura: colPrefer(
+      "data ingresso fornitura",
+      "ingresso fornitura",
+      "data fornitura",
+      "esecutivo",
+      "inizio fornitura",
+    ),
+    pagamento: colPrefer("pagamento", "pagato"),
+    dataPagamento: colPrefer("data pagamento", "data incasso"),
+    telefono: colPrefer("telefono", "cellulare", "phone"),
+    gettone: colPrefer("gettone", "provvigione", "expected"),
+    collab: colPrefer("collaboratore", "agente"),
+    note: colPrefer("note", "note contratto"),
   };
 
   if (cols.nome < 0 && cols.cognome < 0 && cols.ragione < 0 && cols.pod < 0) {
@@ -223,6 +271,14 @@ async function buildPreviewRows(
       (data.cols.fornitore > 0 ? cell(row, data.cols.fornitore) : "") || "Sconosciuto";
     const podPdr = data.cols.pod > 0 ? cell(row, data.cols.pod) : "";
     const dateRaw = data.cols.data > 0 ? cell(row, data.cols.data) : "";
+    const supplyRaw =
+      data.cols.dataFornitura > 0 ? cell(row, data.cols.dataFornitura) : "";
+    const pagamentoRaw =
+      data.cols.pagamento > 0 ? cell(row, data.cols.pagamento) : "";
+    const dataPagamentoRaw =
+      data.cols.dataPagamento > 0 ? cell(row, data.cols.dataPagamento) : "";
+    const telefono =
+      data.cols.telefono > 0 ? cell(row, data.cols.telefono) : "";
     const gettoneRaw = data.cols.gettone > 0 ? cell(row, data.cols.gettone) : "";
     const collabRaw = data.cols.collab > 0 ? cell(row, data.cols.collab) : "";
 
@@ -234,6 +290,10 @@ async function buildPreviewRows(
 
     const type = mapClientType(tipoRaw || (companyName ? "AZIENDA" : "PRIVATO"));
     const insertionDate = parseDate(dateRaw) ?? new Date();
+    const supplyStartDate = parseDate(supplyRaw);
+    const paymentDate = parseDate(dataPagamentoRaw);
+    const paidFlag = parsePaidFlag(pagamentoRaw);
+    const paid = paidFlag === true || (paidFlag == null && Boolean(paymentDate));
     const gettone =
       Number(String(gettoneRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
 
@@ -298,6 +358,12 @@ async function buildPreviewRows(
       collaboratorName: collab.name,
       collaboratorId: collab.id,
       insertionDate: insertionDate.toISOString().slice(0, 10),
+      supplyStartDate: supplyStartDate
+        ? supplyStartDate.toISOString().slice(0, 10)
+        : undefined,
+      paid,
+      paymentDate: paymentDate ? paymentDate.toISOString().slice(0, 10) : undefined,
+      phone: telefono || undefined,
       skip,
     });
   }
@@ -332,8 +398,10 @@ export async function previewHistoricalExcelAction(
 }
 
 /**
- * Import Excel contratti già pagati → archivio storico (dopo anteprima).
- * Colonne: Nome, Cognome, Ragione sociale, Tipo, Fornitore, POD/PDR, Data, Gettone, Collaboratore
+ * Import Excel contratti storici (dopo anteprima).
+ * Colonne consigliate: Nome, Cognome, Ragione sociale, Telefono, Tipo, Fornitore,
+ * POD/PDR, Data inserimento, Data ingresso fornitura, Pagamento, Data pagamento,
+ * Gettone, Collaboratore, Note
  */
 export async function importHistoricalExcelAction(
   formData: FormData,
@@ -381,11 +449,23 @@ export async function importHistoricalExcelAction(
       (data.cols.fornitore > 0 ? cell(row, data.cols.fornitore) : "") || "Sconosciuto";
     const podPdr = data.cols.pod > 0 ? cell(row, data.cols.pod) : "";
     const dateRaw = data.cols.data > 0 ? cell(row, data.cols.data) : "";
+    const supplyRaw =
+      data.cols.dataFornitura > 0 ? cell(row, data.cols.dataFornitura) : "";
+    const pagamentoRaw =
+      data.cols.pagamento > 0 ? cell(row, data.cols.pagamento) : "";
+    const dataPagamentoRaw =
+      data.cols.dataPagamento > 0 ? cell(row, data.cols.dataPagamento) : "";
+    const telefono =
+      data.cols.telefono > 0 ? cell(row, data.cols.telefono) : "";
     const gettoneRaw = data.cols.gettone > 0 ? cell(row, data.cols.gettone) : "";
     const collabRaw = data.cols.collab > 0 ? cell(row, data.cols.collab) : "";
+    const notes = data.cols.note > 0 ? cell(row, data.cols.note) : "";
 
     const type = mapClientType(tipoRaw || (companyName ? "AZIENDA" : "PRIVATO"));
     const insertionDate = parseDate(dateRaw) ?? new Date();
+    const paymentDate = parseDate(dataPagamentoRaw);
+    const paidFlag = parsePaidFlag(pagamentoRaw);
+    const paid = paidFlag === true || (paidFlag == null && Boolean(paymentDate));
     const expected =
       Number(String(gettoneRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 0;
     const collab = resolveCollaborator(
@@ -460,14 +540,23 @@ export async function importHistoricalExcelAction(
           lastName: type === "PRIVATO" ? lastName || null : null,
           companyName:
             type === "AZIENDA" ? companyName || firstName || null : companyName || null,
+          phone: telefono || null,
           createdById: session.id,
         },
+      });
+    } else if (telefono && !client.phone) {
+      await prisma.client.update({
+        where: { id: client.id },
+        data: { phone: telefono },
       });
     }
 
     const contractNumber = await generateContractNumber();
     const op = normalizeOperationType("CAMBIO");
-    const supplyStartDate = computeSupplyStartDate(insertionDate, op);
+    const supplyFromFile = parseDate(supplyRaw);
+    const supplyStartDate =
+      supplyFromFile ?? computeSupplyStartDate(insertionDate, op);
+    const collectionDate = paid ? paymentDate ?? insertionDate : null;
 
     const contract = await prisma.contract.create({
       data: {
@@ -482,12 +571,14 @@ export async function importHistoricalExcelAction(
         insertionDate,
         supplyStartDate,
         operationType: op,
-        paymentStatus: "Incassato",
-        collectionDate: insertionDate,
+        paymentStatus: paid ? "Incassato" : "Da incassare",
+        paymentDate: paid ? paymentDate ?? null : null,
+        collectionDate,
         isHistorical: true,
         archiveLabel: data.label,
-        commissionConfirmed: true,
-        commissionConfirmedAt: new Date(),
+        commissionConfirmed: paid,
+        commissionConfirmedAt: paid ? new Date() : null,
+        notes: notes || null,
       },
     });
 
@@ -496,9 +587,9 @@ export async function importHistoricalExcelAction(
       data: {
         contractId: contract.id,
         expected,
-        received: expected,
-        paid: expected,
-        accrued: expected,
+        received: paid ? expected : 0,
+        paid: paid ? expected : 0,
+        accrued: paid ? expected : 0,
       },
     });
 

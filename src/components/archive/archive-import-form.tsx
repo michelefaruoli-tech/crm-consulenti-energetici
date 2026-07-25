@@ -43,19 +43,30 @@ export function ArchiveImportForm({
     setError(null);
     setMessage(null);
     start(async () => {
-      const result = await previewHistoricalExcelAction(buildFd(form));
-      if (result.error) {
+      try {
+        const result = await previewHistoricalExcelAction(buildFd(form));
+        if (result.error) {
+          setPreviewRows(null);
+          setSummary(null);
+          setError(result.error);
+          return;
+        }
+        setPreviewRows(result.rows ?? []);
+        setPreviewLabel(result.label ?? "");
+        setSummary(result.summary ?? null);
+        setMessage(
+          `Anteprima «${result.label}»: ${result.summary?.ok ?? 0} ok · ${result.summary?.warning ?? 0} avvisi · ${result.summary?.error ?? 0} errori/saltate`,
+        );
+      } catch (err) {
         setPreviewRows(null);
         setSummary(null);
-        setError(result.error);
-        return;
+        const msg = err instanceof Error ? err.message : "Errore sconosciuto";
+        setError(
+          msg.includes("fetch")
+            ? "Connessione interrotta (file troppo grande o timeout). Usa un pezzo da max ~250 righe, es. UT-GEN-2026-Vito-parte1.xlsx"
+            : msg,
+        );
       }
-      setPreviewRows(result.rows ?? []);
-      setPreviewLabel(result.label ?? "");
-      setSummary(result.summary ?? null);
-      setMessage(
-        `Anteprima «${result.label}»: ${result.summary?.ok ?? 0} ok · ${result.summary?.warning ?? 0} avvisi · ${result.summary?.error ?? 0} errori/saltate`,
-      );
     });
   }
 
@@ -81,21 +92,30 @@ export function ArchiveImportForm({
     setError(null);
     setMessage(null);
     start(async () => {
-      const result = await importHistoricalExcelAction(buildFd(form));
-      if (result.error) {
-        setError(result.error);
-        return;
+      try {
+        const result = await importHistoricalExcelAction(buildFd(form));
+        if (result.error) {
+          setError(result.error);
+          return;
+        }
+        setMessage(
+          `Importati ${result.imported ?? 0} contratti` +
+            (result.skipped ? ` · saltati ${result.skipped}` : "") +
+            ` nel lotto «${result.label}».`,
+        );
+        setPreviewRows(null);
+        setSummary(null);
+        setFileKey((k) => k + 1);
+        form.reset();
+        router.refresh();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Errore sconosciuto";
+        setError(
+          msg.includes("fetch")
+            ? "Import interrotto (timeout). Riprova con un pezzo più piccolo (~250 righe)."
+            : msg,
+        );
       }
-      setMessage(
-        `Importati ${result.imported ?? 0} contratti` +
-          (result.skipped ? ` · saltati ${result.skipped}` : "") +
-          ` nel lotto «${result.label}».`,
-      );
-      setPreviewRows(null);
-      setSummary(null);
-      setFileKey((k) => k + 1);
-      form.reset();
-      router.refresh();
     });
   }
 
@@ -171,6 +191,7 @@ export function ArchiveImportForm({
                 <th className="px-2 py-1.5">Cliente</th>
                 <th className="px-2 py-1.5">POD</th>
                 <th className="px-2 py-1.5">Collab.</th>
+                <th className="px-2 py-1.5">Pagato</th>
                 <th className="px-2 py-1.5">Gettone</th>
                 <th className="px-2 py-1.5">Note</th>
               </tr>
@@ -194,6 +215,7 @@ export function ArchiveImportForm({
                   <td className="px-2 py-1">{r.clientLabel}</td>
                   <td className="px-2 py-1">{r.podPdr || "—"}</td>
                   <td className="px-2 py-1">{r.collaboratorName}</td>
+                  <td className="px-2 py-1">{r.paid ? "Sì" : "No"}</td>
                   <td className="px-2 py-1">{r.gettone.toFixed(2)}</td>
                   <td className="px-2 py-1 text-slate-600">
                     {r.messages.join(" · ") || "—"}
