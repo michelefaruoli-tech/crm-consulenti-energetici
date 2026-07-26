@@ -23,7 +23,8 @@ export function AdminSetPasswordButton({
     e.preventDefault();
     setError(null);
     setMessage(null);
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     fd.set("userId", userId);
 
     start(async () => {
@@ -33,7 +34,7 @@ export function AdminSetPasswordButton({
         return;
       }
       setMessage(res.message ?? "Password aggiornata");
-      e.currentTarget.reset();
+      form.reset();
       setOpen(false);
     });
   }
