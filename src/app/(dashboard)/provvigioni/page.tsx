@@ -119,9 +119,12 @@ export default async function ProvvigioniPage({
     { id: "desc" },
   ];
 
-  void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
-    console.error("sync recurring", e),
-  );
+  // Sync mesi ricorrenti PRIMA di leggere gli alert (altrimenti il riquadro sopra resta vuoto/incompleto)
+  try {
+    await syncAllRecurringMonths(sessionCollabFilter);
+  } catch (e) {
+    console.error("sync recurring", e);
+  }
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
   const total = await prisma.contract.count({ where: contractWhere });
@@ -489,6 +492,8 @@ export default async function ProvvigioniPage({
     supplierName: m.contract.supplier.name,
     clientName: clientDisplayName(m.contract.client),
   }));
+  const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
+  const otherRecurringCount = Math.max(0, countRicorrenti - missingContractCount);
 
   const settledRows = settledRowsRaw.map(toSettledRow);
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
@@ -675,7 +680,10 @@ export default async function ProvvigioniPage({
         </div>
       ) : null}
 
-      <RecurringMissingPanel alerts={alertRows} />
+      <RecurringMissingPanel
+        alerts={alertRows}
+        otherRecurringCount={otherRecurringCount}
+      />
 
       <ProvvigioniTrashPanel
         rows={deletedRecent.map((c) => ({

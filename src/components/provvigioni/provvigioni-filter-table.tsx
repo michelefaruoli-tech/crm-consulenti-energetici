@@ -553,10 +553,11 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "collectionMonth",
-      label: "Data",
+      label: "Incasso",
       getValue: (r) => String(r.collectionMonth ?? ""),
       editable: true,
       sortKind: "date",
+      // Data incasso gettone (non inizio fornitura)
     },
     {
       key: "stornoFlag",

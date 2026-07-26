@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { isRecurring, monthsBetween, normalizeRecurrence, toPeriod } from "@/lib/recurring";
+import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 /**
  * Per contratti ricorrenti genera i mesi di competenza da inizio fornitura → oggi.
@@ -20,6 +21,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       recurrence: true,
       insertionDate: true,
       supplyStartDate: true,
+      operationType: true,
       collectionDate: true,
       status: true,
       commission: { select: { expected: true } },
@@ -51,8 +53,10 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  // Conteggio mesi da inizio fornitura (non dalla data incasso gettone)
-  const startDate = contract.supplyStartDate ?? contract.insertionDate;
+  // Stessa logica della scheda: supplyStart salvato, altrimenti calcolato da inserimento+operazione
+  const startDate =
+    contract.supplyStartDate ??
+    computeSupplyStartDate(contract.insertionDate, contract.operationType);
   const start = toPeriod(startDate);
   const now = toPeriod(new Date());
   const periods = monthsBetween(start, now);

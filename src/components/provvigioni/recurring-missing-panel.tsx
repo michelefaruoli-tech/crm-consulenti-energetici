@@ -24,14 +24,30 @@ function defaultSettledOptions(): string[] {
   return out;
 }
 
-export function RecurringMissingPanel({ alerts }: { alerts: MissingAlert[] }) {
+export function RecurringMissingPanel({
+  alerts,
+  otherRecurringCount = 0,
+}: {
+  alerts: MissingAlert[];
+  /** Quanti contratti R esistono ma non hanno mesi MISSING (inizio recente / già ok) */
+  otherRecurringCount?: number;
+}) {
   const settledOptions = useMemo(() => defaultSettledOptions(), []);
   const [settledPeriod, setSettledPeriod] = useState(settledOptions[0] ?? toPeriod(new Date()));
 
   if (alerts.length === 0) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-        Nessun mese di competenza mancante sulle ricorrenze.
+      <div className="space-y-2">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Nessun mese di competenza in ritardo sulle ricorrenze.
+        </div>
+        {otherRecurringCount > 0 ? (
+          <p className="text-xs text-slate-600">
+            Hai comunque <strong>{otherRecurringCount}</strong> contratti ricorrenti (R) in elenco:
+            non compaiono qui perché non hanno mesi passati ancora da pagare (inizio fornitura
+            recente, oppure mesi già segnati Pagato/Chiuso).
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -49,9 +65,18 @@ export function RecurringMissingPanel({ alerts }: { alerts: MissingAlert[] }) {
         Ricorrenze: mesi di competenza non pagati ({alerts.length})
       </h2>
       <p className="mt-1 text-xs text-amber-900/80">
-        La competenza (es. aprile) non è il mese del bonifico. Quando segni «Pagato», scegli sotto
-        il <strong>mese del rendiconto</strong> (es. luglio = quando è arrivato il pagamento).
+        Qui vedi solo i contratti R con <strong>mesi già scaduti e non pagati</strong> (es. mag/giu),
+        non tutti i ricorrenti della tabella sotto. La competenza non è il mese del bonifico: quando
+        segni «Pagato», scegli sotto il <strong>mese del rendiconto</strong>.
       </p>
+      {otherRecurringCount > 0 ? (
+        <p className="mt-1 text-xs text-amber-900/70">
+          Altri <strong>{otherRecurringCount}</strong> contratti R in tabella non compaiono qui
+          (inizio fornitura ancora nel mese corrente, oppure senza mesi in ritardo). La colonna{" "}
+          <strong>Data</strong> sotto è la data <em>incasso gettone</em>, non l&apos;inizio
+          fornitura.
+        </p>
+      ) : null}
 
       <label className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-950">
         <span className="font-medium">Mese rendiconto / bonifico:</span>
