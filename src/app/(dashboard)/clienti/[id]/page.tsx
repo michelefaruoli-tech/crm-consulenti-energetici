@@ -231,6 +231,56 @@ export default async function ClienteDetailPage({
   };
   });
 
+  // Stesso nome in anagrafica = possibili clienti duplicati (es. 2 «IL DECORATORE»)
+  const orSameIdentity = [
+    client.companyName
+      ? {
+          companyName: {
+            equals: client.companyName,
+            mode: "insensitive" as const,
+          },
+        }
+      : null,
+    client.fiscalCode
+      ? {
+          fiscalCode: {
+            equals: client.fiscalCode,
+            mode: "insensitive" as const,
+          },
+        }
+      : null,
+    client.vatNumber
+      ? {
+          vatNumber: {
+            equals: client.vatNumber,
+            mode: "insensitive" as const,
+          },
+        }
+      : null,
+  ].filter(Boolean) as object[];
+
+  const duplicateClients =
+    orSameIdentity.length > 0
+      ? await prisma.client.findMany({
+          where: {
+            id: { not: client.id },
+            deletedAt: null,
+            OR: orSameIdentity,
+          },
+          select: {
+            id: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+            type: true,
+            _count: {
+              select: { contracts: { where: { deletedAt: null } } },
+            },
+          },
+          take: 8,
+        })
+      : [];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -238,7 +288,8 @@ export default async function ClienteDetailPage({
           <h1 className="text-2xl font-bold text-slate-900">{clientDisplayName(client)}</h1>
           <p className="text-slate-500">
             {client.type === "AZIENDA" ? "Business" : "Privato"} · Creato da{" "}
-            {client.createdBy.name}
+            {client.createdBy.name} · {sheetContracts.length} contrat
+            {sheetContracts.length === 1 ? "to" : "ti"}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -255,6 +306,35 @@ export default async function ClienteDetailPage({
           ) : null}
         </div>
       </div>
+
+      {duplicateClients.length > 0 ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-medium">
+            Attenzione: esistono altre anagrafiche con lo stesso nome / CF / P.IVA.
+          </p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            In Provvigioni puoi vedere contratti di clienti diversi omonimi. Apri anche queste
+            schede:
+          </p>
+          <ul className="mt-2 space-y-1">
+            {duplicateClients.map((d) => (
+              <li key={d.id}>
+                <Link
+                  href={`/clienti/${d.id}`}
+                  className="font-medium text-emerald-800 underline"
+                >
+                  {clientDisplayName(d)}
+                </Link>
+                <span className="text-xs text-amber-900/70">
+                  {" "}
+                  · {d._count.contracts} contrat
+                  {d._count.contracts === 1 ? "to" : "ti"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <ClientSheet
         client={{

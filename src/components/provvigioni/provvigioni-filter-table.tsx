@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
@@ -414,8 +415,35 @@ export function ProvvigioniFilterTable({
       key: "podPdr",
       label: "POD / PDR",
       getValue: (r) => String(r.podPdr ?? ""),
-      editable: true,
+      // Non editabile: clic = apri scheda contratto (sulla scheda cliente)
+      editable: false,
       sortKind: "text",
+      render: (r) => {
+        const row = r as unknown as ProvvigioneRow;
+        const pod = String(row.podPdr ?? "").trim();
+        if (!pod) {
+          return (
+            <Link
+              href={`/clienti/${row.clientId}?contratto=${row.id}`}
+              className="text-[11px] font-medium text-emerald-700 underline"
+              title="Apri contratto (POD assente)"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Apri contratto
+            </Link>
+          );
+        }
+        return (
+          <Link
+            href={`/clienti/${row.clientId}?contratto=${row.id}`}
+            className="font-mono text-[11px] font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
+            title="Apri scheda contratto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {pod}
+          </Link>
+        );
+      },
     },
     {
       key: "collaboratorName",

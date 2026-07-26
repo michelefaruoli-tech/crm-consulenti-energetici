@@ -441,7 +441,7 @@ export default async function ProvvigioniPage({
       clientId: contract.clientId,
       commissionId: item?.id ?? "",
       clientName: clientDisplayName(contract.client),
-      podPdr: contract.podPdr || "",
+      podPdr: contract.podPdr || contract.pod || contract.pdr || "",
       collaboratorName: contract.collaborator.name,
       supplierName: contract.supplier.name,
       clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
