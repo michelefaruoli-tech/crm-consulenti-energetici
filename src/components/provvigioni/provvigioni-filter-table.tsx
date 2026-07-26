@@ -38,14 +38,19 @@ const FIELD_MAP: Record<string, string> = {
   stornoMonth: "stornoDate",
   stornoAmount: "stornoAmount",
   notes: "notes",
-  confirmed: "confirmed",
 };
 
 function shortRecurrence(value: string): string {
+  const v = value.toLowerCase().trim();
+  if (v === "r" || v.includes("ricor") || v.includes("mensil")) return "R";
+  // G = Gettone / una tantum
+  return "G";
+}
+
+function shortClientType(value: string): string {
   const v = value.toLowerCase();
-  if (v.includes("ricor") || v.includes("mensil")) return "Ricor";
-  if (v.includes("tantum") || v.includes("una") || !v.trim()) return "Gettone";
-  return value;
+  if (v.startsWith("bus") || v.includes("azi") || v === "b") return "Bus";
+  return "Dom";
 }
 
 function settledOptions(): string[] {
@@ -73,7 +78,7 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
     case "supplierName":
       return row.supplierName ?? "";
     case "clientType":
-      return row.clientType ?? "";
+      return shortClientType(row.clientType ?? "");
     case "operationType":
       return row.operationType ?? "";
     case "stato":
@@ -90,8 +95,6 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return row.stornoAmount ?? "";
     case "notes":
       return row.notes ?? "";
-    case "confirmed":
-      return row.confirmed ?? "";
     default:
       return "";
   }
@@ -449,10 +452,11 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "clientType",
-      label: "Tipologia",
-      getValue: (r) => String(r.clientType ?? ""),
+      label: "Tip.",
+      getValue: (r) => shortClientType(String(r.clientType ?? "")),
       editable: true,
       sortKind: "text",
+      inputClassName: "max-w-[3rem] text-center",
     },
     {
       key: "operationType",
@@ -524,10 +528,11 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "recurrence",
-      label: "Ricorr.",
+      label: "R/G",
       getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
       editable: true,
       sortKind: "text",
+      inputClassName: "max-w-[2.5rem] text-center font-semibold",
     },
     {
       key: "collectionMonth",
@@ -595,53 +600,11 @@ export function ProvvigioniFilterTable({
       sortKind: "number",
     },
     {
-      key: "rischio",
-      label: "Rischio",
-      getValue: (r) => String(r.stornoLabel ?? ""),
-      sortKind: "text",
-    },
-    {
       key: "notes",
       label: "Note",
       getValue: (r) => String(r.notes ?? ""),
       editable: true,
       sortKind: "text",
-    },
-    {
-      key: "confirmed",
-      label: "Conf.",
-      getValue: (r) => getDraftValue(r, "confirmed"),
-      sortKind: "text",
-      render: (r) => {
-        if (!canConfirm) {
-          const ok = getDraftValue(r, "confirmed") === "Confermata";
-          return (
-            <span
-              className={
-                ok ? "font-medium text-emerald-800" : "font-medium text-amber-900"
-              }
-            >
-              {ok ? "OK" : "Da conf."}
-            </span>
-          );
-        }
-        const current = getDraftValue(r, "confirmed") || "Da confermare";
-        const dirty = isDraftDirty(r, "confirmed");
-        return (
-          <select
-            className={`max-w-[8rem] rounded border px-1 py-0.5 text-[11px] ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
-            }`}
-            value={current === "Confermata" ? "Confermata" : "Da confermare"}
-            title="Bozza: cambia e poi Salva tutte"
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => queueDraft(r, "confirmed", e.target.value)}
-          >
-            <option value="Da confermare">Da conf.</option>
-            <option value="Confermata">OK</option>
-          </select>
-        );
-      },
     },
   ];
 
@@ -834,15 +797,13 @@ export function ProvvigioniFilterTable({
       </div>
 
       <p className="text-xs text-slate-500">
-        Celle modificabili = bozza (giallo) finché non salvi.{" "}
-        <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato (con Data
-        incasso). <strong>Storno</strong> + <strong>Data storno</strong> +{" "}
-        <strong>Gettone storno</strong> (di solito = gettone incassato).{" "}
-        <strong>Tipo op.</strong>: Switch, Voltura, Cessazione…{" "}
-        <strong>Ricorr.</strong>: Gettone / Ricorrente.{" "}
-        <strong>Rischio</strong>: periodo storno fornitore (solo lettura).{" "}
-        Fornitore / Stato / Tipologia filtrano su tutto il database. Privati:
-        gettone Dolomiti 45 · Plenitude 60 · Enel 65 (nei totali in alto).
+        Celle modificabili = bozza (giallo) finché non salvi. Usa le frecce{" "}
+        <strong>← →</strong> sotto la tabella per scorrere.{" "}
+        <strong>R/G</strong>: R = ricorrente · G = gettone (una tantum).{" "}
+        <strong>Tip.</strong>: Dom / Bus.{" "}
+        <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato.{" "}
+        <strong>Storno</strong> + data + importo. Fornitore / Stato / Tip. filtrano
+        su tutto il database. Privati: Dolomiti 45 · Plenitude 60 · Enel 65.
         {canDelete ? " × rossa = elimina." : ""}
       </p>
       <ExcelFilterTable
@@ -907,7 +868,7 @@ export function ProvvigioniFilterTable({
       <StornoLegend />
       <p className="text-xs text-slate-500">
         Gettone: bordo ambra = da confermare · bordo verde = confermato
-        {canConfirm ? " · Admin: conferma da colonna Conf. o azione multipla." : ""}
+        {canConfirm ? " · Admin: usa «Conferma gettone» nelle azioni multiple." : ""}
       </p>
     </div>
   );

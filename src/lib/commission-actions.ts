@@ -149,9 +149,9 @@ async function applyCommissionField(
     }
   } else if (field === "recurrence") {
     const raw = value.trim();
-    const normalized = /ric/i.test(raw)
+    const normalized = /^r$/i.test(raw) || /ric/i.test(raw)
       ? "Ricorrente"
-      : /ut|tantum|una|gettone/i.test(raw)
+      : /^g$/i.test(raw) || /ut|tantum|una|gettone/i.test(raw)
         ? "Una tantum"
         : raw || "Una tantum";
     await prisma.contract.update({
@@ -320,7 +320,10 @@ async function applyCommissionField(
   } else if (field === "clientType") {
     const raw = value.trim().toLowerCase();
     const type =
-      raw.startsWith("bus") || raw.includes("azi") || raw === "b"
+      raw === "bus" ||
+      raw.startsWith("bus") ||
+      raw.includes("azi") ||
+      raw === "b"
         ? "AZIENDA"
         : "PRIVATO";
     await prisma.client.update({

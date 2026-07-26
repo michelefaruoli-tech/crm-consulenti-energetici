@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 
 export type FilterColumn = {
@@ -265,9 +265,16 @@ export function ExcelFilterTable({
   }
 
   const colSpan = columns.length + (selection ? 1 : 0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  function scrollTable(dir: "left" | "right") {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === "left" ? -280 : 280, behavior: "smooth" });
+  }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
       {hasAnyFilter ? (
         <div className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <span>
@@ -284,7 +291,42 @@ export function ExcelFilterTable({
           </button>
         </div>
       ) : null}
-      <table className={cn("w-full text-left", dense ? "min-w-0 text-xs" : "min-w-full text-sm")}>
+
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-1.5">
+        <p className="text-[11px] text-slate-500">
+          Scorri la tabella a sinistra / destra se non vedi tutte le colonne
+        </p>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+            title="Scorri a sinistra"
+            onClick={() => scrollTable("left")}
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+            title="Scorri a destra"
+            onClick={() => scrollTable("right")}
+          >
+            →
+          </button>
+        </div>
+      </div>
+
+      <div
+        ref={scrollRef}
+        className="overflow-x-scroll overscroll-x-contain"
+        style={{ scrollbarGutter: "stable" }}
+      >
+      <table
+        className={cn(
+          "text-left",
+          dense ? "min-w-[1200px] text-xs" : "min-w-[1200px] text-sm",
+        )}
+      >
         <thead className="bg-slate-50 text-slate-600">
           <tr>
             {selection ? (
@@ -554,13 +596,35 @@ export function ExcelFilterTable({
           )}
         </tbody>
       </table>
-      <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
-        {hasAnyFilter
-          ? `Filtrate ${filtered.length} su ${rows.length} caricate in questa pagina`
-          : `Mostrate ${rows.length} righe in questa pagina (pieno = fino a 100)`}
-        {selection && selection.selectedKeys.size > 0
-          ? ` · ${selection.selectedKeys.size} selezionate`
-          : ""}
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
+        <p className="text-xs text-slate-500">
+          {hasAnyFilter
+            ? `Filtrate ${filtered.length} su ${rows.length} caricate in questa pagina`
+            : `Mostrate ${rows.length} righe in questa pagina (pieno = fino a 100)`}
+          {selection && selection.selectedKeys.size > 0
+            ? ` · ${selection.selectedKeys.size} selezionate`
+            : ""}
+        </p>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+            title="Scorri a sinistra"
+            onClick={() => scrollTable("left")}
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+            title="Scorri a destra"
+            onClick={() => scrollTable("right")}
+          >
+            →
+          </button>
+        </div>
       </div>
     </div>
   );
