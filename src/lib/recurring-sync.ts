@@ -46,10 +46,17 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     contract.status === "ANNULLATO" ||
     contract.status === "KO"
   ) {
-    await prisma.recurringMonth.updateMany({
+    // Neon HTTP: niente updateMany (usa transaction interna). Chiudi uno per uno.
+    const open = await prisma.recurringMonth.findMany({
       where: { contractId, status: { in: ["PENDING", "MISSING"] } },
-      data: { status: "CLOSED" },
+      select: { id: true },
     });
+    for (const row of open) {
+      await prisma.recurringMonth.update({
+        where: { id: row.id },
+        data: { status: "CLOSED" },
+      });
+    }
     return;
   }
 
