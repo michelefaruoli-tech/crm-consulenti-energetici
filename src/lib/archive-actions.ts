@@ -633,23 +633,40 @@ async function importOneHistoricalRow(opts: {
     if (existing) return false;
   }
 
+  const { canonicalSupplierName } = await import("@/lib/supplier-merge");
+  const supplierCanon = canonicalSupplierName(supplierName) || supplierName || "Sconosciuto";
   const supplierCode =
-    supplierName
+    supplierCanon
       .toUpperCase()
       .replace(/[^A-Z0-9]+/g, "_")
       .slice(0, 40) || "SCONOSCIUTO";
 
   let supplier = await prisma.supplier.findFirst({
     where: {
-      OR: [{ code: supplierCode }, { name: { equals: supplierName, mode: "insensitive" } }],
+      active: true,
+      OR: [
+        { name: { equals: supplierCanon, mode: "insensitive" } },
+        ...(supplierCanon === "Enel"
+          ? [{ name: { startsWith: "Enel", mode: "insensitive" as const } }]
+          : supplierCanon === "Edison"
+            ? [{ name: { startsWith: "Edison", mode: "insensitive" as const } }]
+            : []),
+        { code: supplierCode },
+      ],
     },
+    orderBy: { name: "asc" },
   });
   if (!supplier) {
     supplier = await prisma.supplier.create({
       data: {
-        name: supplierName || "Sconosciuto",
+        name: supplierCanon,
         code: `${supplierCode}_${Date.now()}`.slice(0, 50),
       },
+    });
+  } else if (supplier.name !== supplierCanon) {
+    await prisma.supplier.update({
+      where: { id: supplier.id },
+      data: { name: supplierCanon },
     });
   }
 

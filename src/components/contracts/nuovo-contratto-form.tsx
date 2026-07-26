@@ -25,7 +25,8 @@ import {
 } from "@/components/contracts/service-contract-blocks";
 import type { OcrApplyPayload } from "@/lib/ocr/schema";
 import { format } from "date-fns";
-import { Paperclip, X } from "lucide-react";
+import { AttachmentDropZone } from "@/components/contracts/attachment-drop-zone";
+import { X } from "lucide-react";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -784,35 +785,14 @@ export function NuovoContrattoForm({
           </p>
         ) : null}
         <div className="grid gap-3 md:grid-cols-2">
-          {DOC_TYPE_OPTIONS.map((doc) => {
-            const inputId = `att-${doc.value}`;
-            return (
-              <label
-                key={doc.value}
-                htmlFor={inputId}
-                className="attachment-tile flex cursor-pointer flex-col gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-4 hover:border-emerald-500 hover:bg-emerald-50/40 focus-within:ring-2 focus-within:ring-emerald-500"
-              >
-                <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                  <Paperclip className="h-4 w-4 text-emerald-700" aria-hidden />
-                  {doc.label}
-                </span>
-                <span className="text-xs text-slate-500">
-                  Clicca una volta per scegliere PDF o immagine
-                </span>
-                <input
-                  id={inputId}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
-                  multiple
-                  className="sr-only"
-                  onChange={(e) => {
-                    void onFilesSelected(e.target.files, doc.value);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            );
-          })}
+          {DOC_TYPE_OPTIONS.map((doc) => (
+            <AttachmentDropZone
+              key={doc.value}
+              title={doc.label}
+              hint="1) Trascina · 2) Scegli file · 3) Foto (telefono)"
+              onAdd={(files) => void onFilesSelected(files, doc.value)}
+            />
+          ))}
         </div>
         {attachments.length > 0 ? (
           <ul className="space-y-2 text-sm">

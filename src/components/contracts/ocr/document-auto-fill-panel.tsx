@@ -9,6 +9,7 @@ import type {
   OcrApplyPayload,
   OcrExtracted,
 } from "@/lib/ocr/schema";
+import { AttachmentDropZone } from "@/components/contracts/attachment-drop-zone";
 import { humanizeOcrError, ocrFileKindHint } from "@/lib/ocr/messages";
 
 type LocalFile = {
@@ -566,30 +567,12 @@ function DropZone({
   onRemove: (id: string) => void;
 }) {
   return (
-    <div
-      className="rounded-lg border border-slate-200 bg-white p-4"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        onAdd(e.dataTransfer.files);
-      }}
-    >
-      <p className="font-medium text-slate-900">{title}</p>
-      <p className="mb-3 text-xs text-slate-500">{hint}</p>
-      <Field label="Seleziona file (consigliato: foto)">
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp,.pdf,application/pdf"
-          multiple
-          className="block w-full text-sm"
-          onChange={(e) => onAdd(e.target.files)}
-        />
-      </Field>
+    <AttachmentDropZone title={title} hint={hint} onAdd={onAdd}>
       <ul className="mt-3 space-y-2">
         {files.map((f) => (
           <li
             key={f.id}
-            className="flex items-center justify-between gap-2 rounded border border-slate-100 px-2 py-1 text-xs"
+            className="flex items-center justify-between gap-2 rounded border border-slate-100 bg-white px-2 py-1 text-xs"
           >
             <div className="min-w-0">
               <p className="truncate font-medium">{f.file.name}</p>
@@ -617,6 +600,6 @@ function DropZone({
           </li>
         ))}
       </ul>
-    </div>
+    </AttachmentDropZone>
   );
 }

@@ -1,0 +1,178 @@
+import { prisma } from "@/lib/prisma";
+
+/**
+ * Normalizza il nome fornitore (ignora maiuscole / varianti commerciali).
+ * Enel / Enel Energia / ENEL BOX → «Enel»
+ * Edison / Edison Energia → «Edison»
+ */
+export function canonicalSupplierName(raw: string): string {
+  const n = String(raw ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!n) return n;
+  const key = n
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  // Enel (+ Energia, Box, Enel X, …)
+  if (
+    key === "enel" ||
+    key.startsWith("enel ") ||
+    key.startsWith("enelenergia") ||
+    key.startsWith("enelbox")
+  ) {
+    return "Enel";
+  }
+
+  // Edison (+ Energia)
+  if (
+    key === "edison" ||
+    key.startsWith("edison ") ||
+    key.startsWith("edisonenergia")
+  ) {
+    return "Edison";
+  }
+
+  return n;
+}
+
+export type MergeSuppliersResult = {
+  groups: Array<{
+    canonical: string;
+    keptId: string;
+    keptName: string;
+    mergedIds: string[];
+    contractsMoved: number;
+    rulesMoved: number;
+    deactivated: number;
+  }>;
+};
+
+/**
+ * Unisce in DB i fornitori con stesso nome canonico (Enel*, Edison*).
+ * Tiene quello con più contratti (a parità, nome esatto «Enel»/«Edison»).
+ */
+export async function mergeDuplicateSuppliers(): Promise<MergeSuppliersResult> {
+  const all = await prisma.supplier.findMany({
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      active: true,
+      stornoMonths: true,
+      email: true,
+      _count: { select: { contracts: true, commissionRules: true } },
+    },
+  });
+
+  const byCanon = new Map<string, typeof all>();
+  for (const s of all) {
+    const canon = canonicalSupplierName(s.name);
+    if (canon !== "Enel" && canon !== "Edison") continue;
+    const list = byCanon.get(canon) ?? [];
+    list.push(s);
+    byCanon.set(canon, list);
+  }
+
+  const groups: MergeSuppliersResult["groups"] = [];
+
+  for (const [canonical, list] of byCanon) {
+    if (list.length < 2) {
+      // Rinomina comunque se è una sola variante (es. solo «Enel Energia»)
+      const only = list[0];
+      if (only && only.name !== canonical) {
+        await prisma.supplier.update({
+          where: { id: only.id },
+          data: { name: canonical },
+        });
+        groups.push({
+          canonical,
+          keptId: only.id,
+          keptName: canonical,
+          mergedIds: [],
+          contractsMoved: 0,
+          rulesMoved: 0,
+          deactivated: 0,
+        });
+      }
+      continue;
+    }
+
+    list.sort((a, b) => {
+      const exactA = a.name === canonical ? 1 : 0;
+      const exactB = b.name === canonical ? 1 : 0;
+      if (exactB !== exactA) return exactB - exactA;
+      if (b._count.contracts !== a._count.contracts) {
+        return b._count.contracts - a._count.contracts;
+      }
+      return b._count.commissionRules - a._count.commissionRules;
+    });
+
+    const keep = list[0]!;
+    const others = list.slice(1);
+    let contractsMoved = 0;
+    let rulesMoved = 0;
+
+    for (const other of others) {
+      const c = await prisma.contract.updateMany({
+        where: { supplierId: other.id },
+        data: { supplierId: keep.id },
+      });
+      contractsMoved += c.count;
+
+      const rules = await prisma.commissionRule.updateMany({
+        where: { supplierId: other.id },
+        data: { supplierId: keep.id },
+      });
+      rulesMoved += rules.count;
+
+      await prisma.service.updateMany({
+        where: { supplierId: other.id },
+        data: { supplierId: keep.id },
+      });
+
+      // Disattiva e rinomina per non ricomparire in elenco
+      await prisma.supplier.update({
+        where: { id: other.id },
+        data: {
+          active: false,
+          name: `${other.name} (unito in ${canonical})`,
+          code: `${other.code}_MERGED_${Date.now()}`.slice(0, 60),
+        },
+      });
+    }
+
+    if (keep.name !== canonical || !keep.active) {
+      await prisma.supplier.update({
+        where: { id: keep.id },
+        data: {
+          name: canonical,
+          active: true,
+          // Conserva storno se il keep non lo ha ma un duplicato sì
+          ...(keep.stornoMonths == null
+            ? {
+                stornoMonths:
+                  others.find((o) => o.stornoMonths != null)?.stornoMonths ??
+                  undefined,
+              }
+            : {}),
+        },
+      });
+    }
+
+    groups.push({
+      canonical,
+      keptId: keep.id,
+      keptName: canonical,
+      mergedIds: others.map((o) => o.id),
+      contractsMoved,
+      rulesMoved,
+      deactivated: others.length,
+    });
+  }
+
+  return { groups };
+}

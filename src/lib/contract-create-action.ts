@@ -337,16 +337,36 @@ async function createFullContractActionInner(
   }): Promise<string | null> {
     if (opts.supplierId) return opts.supplierId;
     if (!opts.supplierName?.trim()) return null;
-    const name = opts.supplierName.trim();
+    const name = canonicalSupplierName(opts.supplierName.trim());
     const code =
       name
         .toUpperCase()
         .replace(/[^A-Z0-9]+/g, "_")
         .slice(0, 30) || "FORN";
     const existing = await prisma.supplier.findFirst({
-      where: { name: { equals: name, mode: "insensitive" } },
+      where: {
+        active: true,
+        OR: [
+          { name: { equals: name, mode: "insensitive" } },
+          // Match varianti già unificate (Enel Energia → Enel)
+          ...(name === "Enel"
+            ? [{ name: { startsWith: "Enel", mode: "insensitive" as const } }]
+            : name === "Edison"
+              ? [{ name: { startsWith: "Edison", mode: "insensitive" as const } }]
+              : []),
+        ],
+      },
+      orderBy: { name: "asc" },
     });
-    if (existing) return existing.id;
+    if (existing) {
+      if (existing.name !== name) {
+        await prisma.supplier.update({
+          where: { id: existing.id },
+          data: { name },
+        });
+      }
+      return existing.id;
+    }
     const created = await prisma.supplier.create({
       data: { name, code: `${code}_${Date.now().toString(36)}` },
     });

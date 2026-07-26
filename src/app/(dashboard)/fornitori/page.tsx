@@ -21,6 +21,7 @@ export default async function FornitoriPage() {
   if (!hasPermission(session.role, "suppliers.manage")) redirect("/");
 
   const suppliers = await prisma.supplier.findMany({
+    where: { active: true },
     include: {
       commissionRules: {
         where: { active: true },

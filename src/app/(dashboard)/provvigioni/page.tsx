@@ -269,6 +269,7 @@ export default async function ProvvigioniPage({
         })
       : Promise.resolve([]),
     prisma.supplier.findMany({
+      where: { active: true },
       select: { name: true },
       orderBy: { name: "asc" },
     }),

@@ -15,6 +15,7 @@ import {
 } from "@/lib/supply-dates";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { writeClientHistoryBatch } from "@/lib/audit";
+import { canonicalSupplierName } from "@/lib/supplier-merge";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "");
@@ -552,10 +553,47 @@ export async function createSupplierAction(formData: FormData): Promise<void> {
     throw new Error("Gettone non valido");
   }
 
+  const nameRaw = String(formData.get("name") ?? "").trim();
+  const name = canonicalSupplierName(nameRaw) || nameRaw;
+  const codeRaw = String(formData.get("code") ?? "").trim();
+  const code =
+    codeRaw.toUpperCase() ||
+    name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .slice(0, 30);
+
+  // Se esiste già Enel/Edison (o variante), riusa quello
+  const existing = await prisma.supplier.findFirst({
+    where: {
+      active: true,
+      OR: [
+        { name: { equals: name, mode: "insensitive" } },
+        ...(name === "Enel"
+          ? [{ name: { startsWith: "Enel", mode: "insensitive" as const } }]
+          : name === "Edison"
+            ? [{ name: { startsWith: "Edison", mode: "insensitive" as const } }]
+            : []),
+      ],
+    },
+  });
+  if (existing) {
+    await prisma.supplier.update({
+      where: { id: existing.id },
+      data: {
+        name,
+        email: String(formData.get("email") ?? "") || existing.email,
+        stornoMonths: stornoMonths ?? existing.stornoMonths,
+      },
+    });
+    revalidatePath("/fornitori");
+    return;
+  }
+
   const supplier = await prisma.supplier.create({
     data: {
-      name: String(formData.get("name") ?? ""),
-      code: String(formData.get("code") ?? "").toUpperCase(),
+      name,
+      code,
       email: String(formData.get("email") ?? "") || null,
       stornoMonths,
     },
@@ -588,7 +626,8 @@ export async function updateSupplierListinoAction(formData: FormData): Promise<v
   const supplierId = String(formData.get("supplierId") ?? "");
   if (!supplierId) throw new Error("Fornitore mancante");
 
-  const name = String(formData.get("name") ?? "").trim();
+  const nameRaw = String(formData.get("name") ?? "").trim();
+  const name = canonicalSupplierName(nameRaw) || nameRaw;
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
   const email = String(formData.get("email") ?? "").trim() || null;
   const activeRaw = String(formData.get("active") ?? "true").trim().toLowerCase();
