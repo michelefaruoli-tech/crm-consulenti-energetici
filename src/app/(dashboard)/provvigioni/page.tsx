@@ -598,7 +598,21 @@ export default async function ProvvigioniPage({
         </div>
       </div>
 
-      <HeliosImportPanel />
+      {/* Banner server: deve vedersi anche se il client component fallisce */}
+      <div
+        id="helios-import"
+        className="rounded-xl border-2 border-sky-500 bg-sky-100 p-4 shadow-sm"
+      >
+        <p className="text-base font-bold text-sky-950">
+          Importa rendiconto Helios (Excel)
+        </p>
+        <p className="mt-1 text-sm text-sky-900">
+          Carica il file tipo Provvigioni_Aprile_2026_… per segnare i mesi pagati.
+        </p>
+        <div className="mt-3">
+          <HeliosImportPanel embedded />
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <Link
