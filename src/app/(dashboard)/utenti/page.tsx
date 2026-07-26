@@ -112,22 +112,22 @@ export default async function UtentiPage() {
                 <td className="px-4 py-3">{user.email}</td>
                 <td className="px-4 py-3">
                   <div className="space-y-1">
-                    <p>{ROLE_LABELS[user.role as AppRole]}</p>
+                    <p>{ROLE_LABELS[user.role as AppRole] ?? String(user.role)}</p>
                     {user.role === "BACKOFFICE" ? (
                       <>
                         <p className="text-xs text-slate-500">
                           Fornitori:{" "}
-                          {user.supplierScopes.length
+                          {user.supplierScopes?.length
                             ? user.supplierScopes
-                                .map((s) => s.supplier.name)
+                                .map((s) => s.supplier?.name ?? "?")
                                 .join(", ")
                             : "nessuno (non vede contratti)"}
                         </p>
                         <p className="text-xs text-slate-500">
                           Collab:{" "}
-                          {user.collaboratorScopes.length
+                          {user.collaboratorScopes?.length
                             ? user.collaboratorScopes
-                                .map((c) => c.collaborator.name)
+                                .map((c) => c.collaborator?.name ?? "?")
                                 .join(", ")
                             : "tutti"}
                         </p>
@@ -139,12 +139,12 @@ export default async function UtentiPage() {
                           }}
                           suppliers={suppliers}
                           collaborators={collaborators}
-                          selectedSupplierIds={user.supplierScopes.map(
+                          selectedSupplierIds={(user.supplierScopes ?? []).map(
                             (s) => s.supplierId,
                           )}
-                          selectedCollaboratorIds={user.collaboratorScopes.map(
-                            (c) => c.collaboratorId,
-                          )}
+                          selectedCollaboratorIds={(
+                            user.collaboratorScopes ?? []
+                          ).map((c) => c.collaboratorId)}
                         />
                       </>
                     ) : null}

@@ -175,7 +175,9 @@ export function Sidebar({
 
       <div className="border-t border-slate-800 p-4">
         <p className="truncate text-sm font-medium">{user.name}</p>
-        <p className="text-xs text-slate-400">{ROLE_LABELS[user.role]}</p>
+        <p className="text-xs text-slate-400">
+          {ROLE_LABELS[user.role] ?? user.role}
+        </p>
         <p className="mt-0.5 truncate text-xs text-slate-500">{user.email}</p>
       </div>
     </>
