@@ -9,6 +9,7 @@ import { PaginationNav } from "@/components/ui/pagination-nav";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { StatusBadge } from "@/components/ui/badge";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
+import { sumProvvigioniTotals } from "@/lib/provvigioni-filters";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ export default async function DashboardPage({
       emailFailedCount,
       expired,
       inLavorazioneList,
-      commissions,
+      moneyTotals,
       topCollaborators,
       recentContracts,
       collaboratorOptions,
@@ -111,10 +112,11 @@ export default async function DashboardPage({
         },
         orderBy: [{ sentToMasterAt: "desc" }, { createdAt: "desc" }],
       }),
-      prisma.commission.aggregate({
-        where: canViewAll ? {} : { contract: { collaboratorId: session.id } },
-        _sum: { expected: true, received: true, paid: true },
-      }),
+      sumProvvigioniTotals(
+        canViewAll
+          ? { deletedAt: null }
+          : { deletedAt: null, collaboratorId: session.id },
+      ),
       hasPermission(session.role, "stats.full")
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
@@ -221,20 +223,37 @@ export default async function DashboardPage({
           <StatCard label="Scaduti / da rinnovare" value={expired} tone="danger" />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <StatCard
-            label="Provvigioni previste"
-            value={formatCurrency(Number(commissions._sum.expected ?? 0))}
-          />
-          <StatCard
-            label="Provvigioni ricevute"
-            value={formatCurrency(Number(commissions._sum.received ?? 0))}
-            tone="success"
-          />
-          <StatCard
-            label="Provvigioni liquidate"
-            value={formatCurrency(Number(commissions._sum.paid ?? 0))}
-          />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Link href="/provvigioni">
+            <StatCard
+              label="Provvigioni complessive"
+              value={formatCurrency(moneyTotals.complessivo)}
+              hint="Ricevute + da incassare"
+            />
+          </Link>
+          <Link href="/provvigioni?stato=Incassato">
+            <StatCard
+              label="Ricevute (incassate)"
+              value={formatCurrency(moneyTotals.incassato)}
+              tone="success"
+              hint="Con data di incasso"
+            />
+          </Link>
+          <Link href="/provvigioni?stato=Da%20incassare">
+            <StatCard
+              label="Da incassare"
+              value={formatCurrency(moneyTotals.daIncassare)}
+              tone="warning"
+              hint="Senza data di incasso"
+            />
+          </Link>
+          <Link href="/provvigioni?vista=ricorrente">
+            <StatCard
+              label="Ricorrenti mensili"
+              value={formatCurrency(moneyTotals.ricorrenti)}
+              hint="Somma gettoni contratti R"
+            />
+          </Link>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
