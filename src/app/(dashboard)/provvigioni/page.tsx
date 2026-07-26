@@ -60,7 +60,7 @@ type SearchParams = {
   dir?: string;
   /** Cerca cliente / POD */
   q?: string;
-  /** gettoni (default) | ricorrente | tutti */
+  /** tutti (default) | gettoni | ricorrente */
   vista?: string;
 };
 
@@ -90,10 +90,11 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
+  // Default = tutti (gettoni + ricorrenti), così non “scompaiono” clienti R
   const vista =
-    vistaRaw === "ricorrente" || vistaRaw === "tutti" ? vistaRaw : "gettoni";
+    vistaRaw === "ricorrente" || vistaRaw === "gettoni" ? vistaRaw : "tutti";
   const recurrenceMode =
-    vista === "ricorrente" ? "only" : vista === "tutti" ? "all" : "exclude";
+    vista === "ricorrente" ? "only" : vista === "gettoni" ? "exclude" : "all";
 
   const contractWhere = buildProvvigioniContractWhere({
     canViewAll,
@@ -500,7 +501,7 @@ export default async function ProvvigioniPage({
     stato,
     tipologia,
     q,
-    vista: vista === "gettoni" ? undefined : vista,
+    vista: vista === "tutti" ? undefined : vista,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
@@ -522,7 +523,7 @@ export default async function ProvvigioniPage({
     stato ? `stato=${encodeURIComponent(stato)}` : null,
     tipologia ? `tipologia=${encodeURIComponent(tipologia)}` : null,
     q ? `q=${encodeURIComponent(q)}` : null,
-    vista !== "gettoni" ? `vista=${vista}` : null,
+    vista !== "tutti" ? `vista=${vista}` : null,
   ]
     .filter(Boolean)
     .map((p) => `&${p}`)
@@ -534,7 +535,7 @@ export default async function ProvvigioniPage({
   if (stato) exportParams.set("stato", stato);
   if (tipologia) exportParams.set("tipologia", tipologia);
   if (q) exportParams.set("q", q);
-  if (vista !== "gettoni") exportParams.set("vista", vista);
+  if (vista !== "tutti") exportParams.set("vista", vista);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
   function vistaHref(nextVista: "gettoni" | "ricorrente" | "tutti") {
@@ -545,7 +546,7 @@ export default async function ProvvigioniPage({
       ...(stato ? { stato } : {}),
       ...(tipologia ? { tipologia } : {}),
       ...(q ? { q } : {}),
-      ...(nextVista !== "gettoni" ? { vista: nextVista } : {}),
+      ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
   }
 
@@ -584,6 +585,16 @@ export default async function ProvvigioniPage({
 
       <div className="flex flex-wrap gap-2">
         <Link
+          href={vistaHref("tutti")}
+          className={
+            vista === "tutti"
+              ? "rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+              : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          }
+        >
+          Tutti ({countGettoni + countRicorrenti})
+        </Link>
+        <Link
           href={vistaHref("gettoni")}
           className={
             vista === "gettoni"
@@ -603,16 +614,6 @@ export default async function ProvvigioniPage({
         >
           Ricorrente ({countRicorrenti})
         </Link>
-        <Link
-          href={vistaHref("tutti")}
-          className={
-            vista === "tutti"
-              ? "rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white"
-              : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          }
-        >
-          Tutti ({countGettoni + countRicorrenti})
-        </Link>
       </div>
 
       <form className="flex flex-wrap gap-2" action="/provvigioni" method="get">
@@ -625,13 +626,13 @@ export default async function ProvvigioniPage({
         {tipologia ? (
           <input type="hidden" name="tipologia" value={tipologia} />
         ) : null}
-        {vista !== "gettoni" ? (
+        {vista !== "tutti" ? (
           <input type="hidden" name="vista" value={vista} />
         ) : null}
         <input
           name="q"
           defaultValue={q ?? ""}
-          placeholder="Cerca cliente, CF, P.IVA o POD…"
+          placeholder="Cerca cliente, CF, P.IVA o POD… (es. Mecca, Moschetta)"
           className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
         />
         <Button type="submit" variant="secondary">
@@ -656,7 +657,7 @@ export default async function ProvvigioniPage({
               ...(stato ? { stato } : {}),
               ...(tipologia ? { tipologia } : {}),
               ...(q ? { q } : {}),
-              ...(vista !== "gettoni" ? { vista } : {}),
+              ...(vista !== "tutti" ? { vista } : {}),
             }).toString()}`}
             className={
               !collabFilter
@@ -676,7 +677,7 @@ export default async function ProvvigioniPage({
                 ...(stato ? { stato } : {}),
                 ...(tipologia ? { tipologia } : {}),
                 ...(q ? { q } : {}),
-                ...(vista !== "gettoni" ? { vista } : {}),
+                ...(vista !== "tutti" ? { vista } : {}),
               }).toString()}`}
               className={
                 collabFilter === c.id
@@ -756,7 +757,7 @@ export default async function ProvvigioniPage({
           stato,
           tipologia,
           q,
-          vista: vista === "gettoni" ? undefined : vista,
+          vista: vista === "tutti" ? undefined : vista,
         }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}

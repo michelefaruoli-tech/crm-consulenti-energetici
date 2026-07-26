@@ -25,9 +25,9 @@ export type ProvvigioniFilters = {
   q?: string | null;
   /**
    * Scheda:
-   * - exclude = gettoni/una tantum (nasconde R) — default per snellire
+   * - all = tutti (default)
+   * - exclude = solo gettoni/una tantum (nasconde R)
    * - only = solo ricorrenti
-   * - all = tutti
    */
   recurrenceMode?: "exclude" | "only" | "all" | null;
 };
@@ -52,7 +52,7 @@ export function buildProvvigioniContractWhere(
   const stato = f.stato?.trim() || undefined;
   const tipologia = f.tipologia?.trim() || undefined;
   const q = f.q?.trim() || undefined;
-  const recurrenceMode = f.recurrenceMode ?? "exclude";
+  const recurrenceMode = f.recurrenceMode ?? "all";
 
   const and: Prisma.ContractWhereInput[] = [];
 

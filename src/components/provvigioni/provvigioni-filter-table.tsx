@@ -154,7 +154,7 @@ export function ProvvigioniFilterTable({
     listQuery?.stato ?? "",
     listQuery?.tipologia ?? "",
     listQuery?.q ?? "",
-    listQuery?.vista ?? "gettoni",
+    listQuery?.vista ?? "tutti",
     String(page),
     serverSortKey ?? "",
     serverSortDir,
