@@ -53,7 +53,7 @@ function fromAddress(): string {
 
 /** Invio email lato server. Mai chiamare dal client. */
 export async function sendMail(opts: {
-  to: string;
+  to: string | string[];
   subject: string;
   text: string;
   html?: string;
@@ -68,11 +68,18 @@ export async function sendMail(opts: {
     };
   }
 
+  const to = Array.isArray(opts.to)
+    ? opts.to.map((e) => e.trim()).filter(Boolean).join(", ")
+    : opts.to.trim();
+  if (!to) {
+    return { ok: false, error: "Nessun destinatario email" };
+  }
+
   try {
     const transporter = nodemailer.createTransport(smtpOptions());
     const info = await transporter.sendMail({
       from: fromAddress(),
-      to: opts.to,
+      to,
       subject: opts.subject,
       text: opts.text,
       html: opts.html,

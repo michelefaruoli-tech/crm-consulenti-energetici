@@ -12,6 +12,8 @@ export type Permission =
   | "contracts.change_status"
   | "contracts.change_collaborator_dashboard"
   | "contracts.change_collaborator"
+  /** Backoffice: vede/lavora solo fornitori (e collab) assegnati */
+  | "contracts.work_scoped"
   | "clients.edit_all"
   | "clients.create"
   | "documents.manage"
@@ -55,6 +57,14 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "reports.export",
     "reports.email",
   ],
+  BACKOFFICE: [
+    "contracts.work_scoped",
+    "contracts.change_status",
+    "clients.create",
+    "documents.manage",
+    "commissions.view_all",
+    "reports.export",
+  ],
   COLLABORATORE: [
     "contracts.edit_own",
     "contracts.create",
@@ -82,6 +92,8 @@ export function canViewContract(
   collaboratorId: string,
 ): boolean {
   if (hasPermission(role, "contracts.edit_all")) return true;
+  // Backoffice: usare userCanAccessContract (async) con supplierId
+  if (hasPermission(role, "contracts.work_scoped")) return false;
   return userId === collaboratorId;
 }
 

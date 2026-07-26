@@ -42,6 +42,9 @@ export default async function ReportPage({
   const { from, to, collaboratorId, supplierId } = await searchParams;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
 
+  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const visibility = await contractVisibilityWhere(session);
+
   const [collaborators, suppliers, recentBackups] = await Promise.all([
     canViewAll
       ? prisma.user.findMany({
@@ -49,7 +52,16 @@ export default async function ReportPage({
           orderBy: { name: "asc" },
           select: { id: true, name: true },
         })
-      : Promise.resolve([{ id: session.id, name: session.name }]),
+      : hasPermission(session.role, "contracts.work_scoped")
+        ? prisma.user.findMany({
+            where: {
+              active: true,
+              role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+            },
+            orderBy: { name: "asc" },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve([{ id: session.id, name: session.name }]),
     prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     hasPermission(session.role, "backup.manage")
       ? prisma.backupLog.findMany({
@@ -68,11 +80,8 @@ export default async function ReportPage({
   const dateTo = to ? new Date(to) : new Date();
 
   const contractWhere = {
-    ...(canViewAll
-      ? collaboratorId
-        ? { collaboratorId }
-        : {}
-      : { collaboratorId: session.id }),
+    ...visibility,
+    ...(collaboratorId ? { collaboratorId } : {}),
     ...(supplierId ? { supplierId } : {}),
     insertionDate: { gte: dateFrom, lte: dateTo },
   };

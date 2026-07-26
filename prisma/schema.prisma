@@ -10,6 +10,7 @@ datasource db {
 enum Role {
   ADMIN
   SEGRETERIA
+  BACKOFFICE
   COLLABORATORE
   COMMERCIALE
 }
@@ -68,6 +69,12 @@ model User {
   emailLogsSent    ContractEmailLog[]      @relation("EmailSentBy")
   passwordResetTokens PasswordResetToken[]
   securityEvents   UserSecurityEvent[]
+  /// Fornitori che questo utente (es. Backoffice) può vedere/lavorare
+  supplierScopes   UserSupplierScope[]
+  /// Collaboratori “coperti” da questo backoffice (vuoto = tutti i collab di quei fornitori)
+  collaboratorScopes UserCollaboratorScope[] @relation("BackofficeUser")
+  /// Dove questo utente compare come collaboratore nello scope di un backoffice
+  scopedByBackoffices UserCollaboratorScope[] @relation("ScopedCollaborator")
 }
 
 model Client {
@@ -138,6 +145,29 @@ model Supplier {
   services        Service[]
   commissionRules CommissionRule[]
   contracts       Contract[]
+  userScopes      UserSupplierScope[]
+}
+
+/// Scope fornitori per utente (Backoffice Enel vede solo Enel, ecc.)
+model UserSupplierScope {
+  userId     String
+  supplierId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@id([userId, supplierId])
+  @@index([supplierId])
+}
+
+/// Scope collaboratori opzionale: se presenti, il backoffice vede solo quei collab
+model UserCollaboratorScope {
+  userId         String
+  collaboratorId String
+  user           User @relation("BackofficeUser", fields: [userId], references: [id], onDelete: Cascade)
+  collaborator   User @relation("ScopedCollaborator", fields: [collaboratorId], references: [id], onDelete: Cascade)
+
+  @@id([userId, collaboratorId])
+  @@index([collaboratorId])
 }
 
 model Service {

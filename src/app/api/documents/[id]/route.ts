@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { canViewContract, hasPermission } from "@/lib/permissions";
+import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { userCanAccessContract } from "@/lib/user-scope";
 
 export async function GET(
   _request: Request,
@@ -16,7 +17,9 @@ export async function GET(
 
   const doc = await prisma.document.findUnique({
     where: { id },
-    include: { contract: { select: { collaboratorId: true } } },
+    include: {
+      contract: { select: { collaboratorId: true, supplierId: true } },
+    },
   });
   if (!doc) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -25,7 +28,7 @@ export async function GET(
   if (doc.contract) {
     const ok =
       hasPermission(session.role, "contracts.edit_all") ||
-      canViewContract(session.role, session.id, doc.contract.collaboratorId);
+      (await userCanAccessContract(session, doc.contract));
     if (!ok) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

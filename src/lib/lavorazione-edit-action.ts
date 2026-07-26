@@ -36,14 +36,19 @@ export async function updateLavorazioneContractAction(
       return { ok: false, error: "Contratto non trovato" };
     }
     if (!canViewContract(session.role, session.id, contract.collaboratorId)) {
-      return { ok: false, error: "Permesso negato" };
+      // Backoffice / scope
+      const { userCanAccessContract } = await import("@/lib/user-scope");
+      if (!(await userCanAccessContract(session, contract))) {
+        return { ok: false, error: "Permesso negato" };
+      }
     }
 
     const canEditAll = hasPermission(session.role, "contracts.edit_all");
+    const canWorkScoped = hasPermission(session.role, "contracts.work_scoped");
     const canEditOwn =
       hasPermission(session.role, "contracts.edit_own") &&
       session.id === contract.collaboratorId;
-    if (!canEditAll && !canEditOwn) {
+    if (!canEditAll && !canEditOwn && !canWorkScoped) {
       return { ok: false, error: "Non puoi modificare questa pratica" };
     }
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth";
-import { canViewContract, hasPermission } from "@/lib/permissions";
+import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,8 @@ export default async function LavorazioneSchedaPage({
   });
 
   if (!contract || contract.deletedAt) notFound();
-  if (!canViewContract(session.role, session.id, contract.collaboratorId)) {
+  const { userCanAccessContract } = await import("@/lib/user-scope");
+  if (!(await userCanAccessContract(session, contract))) {
     redirect("/lavorazione");
   }
   if (!contract.sendToMaster || !contract.assignedToMaster) {
@@ -58,8 +59,10 @@ export default async function LavorazioneSchedaPage({
   }
 
   const isAdmin = hasPermission(session.role, "contracts.edit_all");
+  const canWorkScoped = hasPermission(session.role, "contracts.work_scoped");
   const canEdit =
     isAdmin ||
+    canWorkScoped ||
     (hasPermission(session.role, "contracts.edit_own") &&
       session.id === contract.collaboratorId);
 

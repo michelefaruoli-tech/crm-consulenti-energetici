@@ -28,6 +28,8 @@ export type ProvvigioniFilters = {
    * - only = solo ricorrenti
    */
   recurrenceMode?: "exclude" | "only" | "all" | null;
+  /** Scope backoffice / collaboratore (AND aggiuntivo) */
+  visibility?: Prisma.ContractWhereInput | null;
 };
 
 /** Filtro Prisma: contratti ricorrenti (R in Provvigioni). */
@@ -57,6 +59,10 @@ export function buildProvvigioniContractWhere(
     { deletedAt: null },
     { isHistorical: false },
   ];
+
+  if (f.visibility && Object.keys(f.visibility).length > 0) {
+    and.push(f.visibility);
+  }
 
   if (supplierName) {
     and.push({

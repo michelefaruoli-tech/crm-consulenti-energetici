@@ -5,12 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/form";
-import { ROLE_LABELS } from "@/lib/constants";
+import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { DeleteAllUsersButton } from "@/components/utenti/delete-all-users-button";
 import { AdminSetPasswordButton } from "@/components/utenti/admin-set-password-button";
+import { CreateUserForm } from "@/components/utenti/create-user-form";
+import { EditUserScopesForm } from "@/components/utenti/edit-user-scopes-form";
 import {
-  createUserAction,
   deleteUserAction,
   restoreUserAction,
   restoreAllDeletedUsersAction,
@@ -20,7 +20,7 @@ export default async function UtentiPage() {
   const session = await requireSession();
   if (!hasPermission(session.role, "users.manage")) redirect("/");
 
-  const [users, deletedUsers] = await Promise.all([
+  const [users, deletedUsers, suppliers, collaborators] = await Promise.all([
     prisma.user.findMany({
       where: { active: true },
       orderBy: { createdAt: "desc" },
@@ -31,6 +31,13 @@ export default async function UtentiPage() {
         role: true,
         active: true,
         createdAt: true,
+        supplierScopes: { select: { supplierId: true, supplier: { select: { name: true } } } },
+        collaboratorScopes: {
+          select: {
+            collaboratorId: true,
+            collaborator: { select: { name: true } },
+          },
+        },
       },
     }),
     prisma.user.findMany({
@@ -44,6 +51,19 @@ export default async function UtentiPage() {
         updatedAt: true,
       },
     }),
+    prisma.supplier.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.user.findMany({
+      where: {
+        active: true,
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
   ]);
 
   return (
@@ -51,7 +71,9 @@ export default async function UtentiPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Utenti</h1>
-          <p className="text-slate-500">Gestione accessi e ruoli</p>
+          <p className="text-slate-500">
+            Gestione accessi, ruoli e scope Backoffice (fornitori / collaboratori)
+          </p>
         </div>
         <DeleteAllUsersButton />
       </div>
@@ -59,38 +81,13 @@ export default async function UtentiPage() {
       <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         Non puoi eliminare l&apos;account con cui sei collegato. Gli utenti
         eliminati non spariscono dal database: restano disattivati e li puoi
-        ripristinare qui sotto. &quot;Elimina tutti tranne me&quot; richiede due
-        conferme (finestra + digita <strong>ELIMINA TUTTI</strong>). Con{" "}
-        <strong>Nuova password</strong> l&apos;admin può aggiornare la password
-        di un collaboratore (poi va comunicata a voce/WhatsApp).
+        ripristinare qui sotto. Per i <strong>Backoffice</strong>: assegna i
+        fornitori (es. Enel, oppure Dolomiti + Edison). Quando arriva un
+        contratto «da lavorare» di quel fornitore, l&apos;email parte a te
+        (Admin) <strong>e</strong> ai backoffice di quel fornitore.
       </p>
 
-      <form
-        action={createUserAction}
-        className="grid max-w-3xl gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2"
-      >
-        <Field label="Nome">
-          <Input name="name" required />
-        </Field>
-        <Field label="Email">
-          <Input name="email" type="email" required />
-        </Field>
-        <Field label="Password">
-          <Input name="password" type="password" required minLength={6} />
-        </Field>
-        <Field label="Ruolo">
-          <Select name="role" defaultValue="COLLABORATORE">
-            {Object.entries(ROLE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <div className="md:col-span-2">
-          <Button type="submit">Crea utente</Button>
-        </div>
-      </form>
+      <CreateUserForm suppliers={suppliers} collaborators={collaborators} />
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
@@ -98,14 +95,14 @@ export default async function UtentiPage() {
             <tr>
               <th className="px-4 py-3">Nome</th>
               <th className="px-4 py-3">Email</th>
-              <th className="px-4 py-3">Ruolo</th>
+              <th className="px-4 py-3">Ruolo / scope</th>
               <th className="px-4 py-3">Stato</th>
               <th className="px-4 py-3">Azioni</th>
             </tr>
           </thead>
           <tbody>
             {users.map((user) => (
-              <tr key={user.id} className="border-t border-slate-100">
+              <tr key={user.id} className="border-t border-slate-100 align-top">
                 <td className="px-4 py-3 font-medium">
                   {user.name}
                   {user.id === session.id ? (
@@ -113,7 +110,46 @@ export default async function UtentiPage() {
                   ) : null}
                 </td>
                 <td className="px-4 py-3">{user.email}</td>
-                <td className="px-4 py-3">{ROLE_LABELS[user.role]}</td>
+                <td className="px-4 py-3">
+                  <div className="space-y-1">
+                    <p>{ROLE_LABELS[user.role as AppRole]}</p>
+                    {user.role === "BACKOFFICE" ? (
+                      <>
+                        <p className="text-xs text-slate-500">
+                          Fornitori:{" "}
+                          {user.supplierScopes.length
+                            ? user.supplierScopes
+                                .map((s) => s.supplier.name)
+                                .join(", ")
+                            : "nessuno (non vede contratti)"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Collab:{" "}
+                          {user.collaboratorScopes.length
+                            ? user.collaboratorScopes
+                                .map((c) => c.collaborator.name)
+                                .join(", ")
+                            : "tutti"}
+                        </p>
+                        <EditUserScopesForm
+                          user={{
+                            id: user.id,
+                            name: user.name,
+                            role: user.role as AppRole,
+                          }}
+                          suppliers={suppliers}
+                          collaborators={collaborators}
+                          selectedSupplierIds={user.supplierScopes.map(
+                            (s) => s.supplierId,
+                          )}
+                          selectedCollaboratorIds={user.collaboratorScopes.map(
+                            (c) => c.collaboratorId,
+                          )}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                </td>
                 <td className="px-4 py-3">
                   {user.active ? "Attivo" : "Disattivo"}
                 </td>
@@ -189,7 +225,9 @@ export default async function UtentiPage() {
                     <td className="max-w-xs truncate px-4 py-3 font-mono text-xs text-slate-500">
                       {user.email}
                     </td>
-                    <td className="px-4 py-3">{ROLE_LABELS[user.role]}</td>
+                    <td className="px-4 py-3">
+                      {ROLE_LABELS[user.role as AppRole] ?? user.role}
+                    </td>
                     <td className="px-4 py-3">
                       <form action={restoreUserAction}>
                         <input type="hidden" name="userId" value={user.id} />

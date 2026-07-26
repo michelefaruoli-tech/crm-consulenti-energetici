@@ -38,7 +38,7 @@ const NAV_ITEMS: Array<{
     href: "/lavorazione",
     label: "In lavorazione",
     icon: Briefcase,
-    roles: ["ADMIN", "SEGRETERIA"],
+    roles: ["ADMIN", "SEGRETERIA", "BACKOFFICE"],
   },
   { href: "/clienti", label: "Clienti", icon: Users, roles: "all" },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" },
@@ -59,7 +59,7 @@ const NAV_ITEMS: Array<{
     href: "/report",
     label: "Report",
     icon: BarChart3,
-    roles: ["ADMIN", "SEGRETERIA", "COLLABORATORE", "COMMERCIALE"],
+    roles: ["ADMIN", "SEGRETERIA", "BACKOFFICE", "COLLABORATORE", "COMMERCIALE"],
   },
   {
     href: "/backup",

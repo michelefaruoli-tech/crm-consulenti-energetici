@@ -12,10 +12,11 @@ export async function GET() {
     return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
   }
 
-  const canViewAll = hasPermission(session.role, "contracts.edit_all");
+  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const visibility = await contractVisibilityWhere(session);
 
   const contracts = await prisma.contract.findMany({
-    where: canViewAll ? {} : { collaboratorId: session.id },
+    where: visibility,
     include: {
       client: true,
       supplier: true,

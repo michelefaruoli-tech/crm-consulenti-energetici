@@ -1,4 +1,9 @@
-export type AppRole = "ADMIN" | "SEGRETERIA" | "COLLABORATORE" | "COMMERCIALE";
+export type AppRole =
+  | "ADMIN"
+  | "SEGRETERIA"
+  | "BACKOFFICE"
+  | "COLLABORATORE"
+  | "COMMERCIALE";
 
 export type AppContractStatus =
   | "BOZZA"
@@ -22,6 +27,7 @@ export type AppContractStatus =
 export const ROLE_LABELS: Record<AppRole, string> = {
   ADMIN: "Amministratore",
   SEGRETERIA: "Segreteria",
+  BACKOFFICE: "Backoffice",
   COLLABORATORE: "Collaboratore",
   COMMERCIALE: "Commerciale",
 };

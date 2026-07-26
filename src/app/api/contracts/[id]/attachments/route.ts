@@ -3,6 +3,10 @@ import { getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getMasterEmail, sendMail, textToHtmlParagraphs } from "@/lib/mail";
+import {
+  formatEmailList,
+  getLavorazioneNotifyEmails,
+} from "@/lib/user-scope";
 import { clientDisplayName } from "@/lib/utils";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { createHash } from "node:crypto";
@@ -371,8 +375,10 @@ export async function PUT(
     }
 
     const attemptAt = new Date();
+    const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
+    const toEmail = formatEmailList(recipients);
     const mail = await sendMail({
-      to: getMasterEmail(),
+      to: recipients,
       subject,
       text: body,
       html: textToHtmlParagraphs(body),
@@ -390,7 +396,7 @@ export async function PUT(
     await prisma.contractEmailLog.create({
       data: {
         contractId: contract.id,
-        toEmail: getMasterEmail(),
+        toEmail,
         subject,
         status: mail.ok ? "SENT" : mail.skipped ? "SKIPPED_NO_SMTP" : "ERROR",
         emailType: "MASTER_NEW",
@@ -415,7 +421,7 @@ export async function PUT(
         emailIdempotencyKey: hash,
         sentToMasterAt: mail.ok ? attemptAt : contract.sentToMasterAt,
         workEmailDate: mail.ok ? attemptAt : contract.workEmailDate,
-        masterEmail: getMasterEmail(),
+        masterEmail: toEmail || getMasterEmail(),
       },
     });
 

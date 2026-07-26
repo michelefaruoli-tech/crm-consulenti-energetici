@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
-import { canViewContract, hasPermission } from "@/lib/permissions";
+import { hasPermission } from "@/lib/permissions";
 import { clientDisplayName, formatDate, formatDateTime } from "@/lib/utils";
 import { formatCurrency } from "@/lib/commission";
 import { StatusBadge } from "@/components/ui/badge";
@@ -53,7 +53,8 @@ export default async function ContrattoDetailPage({
   });
 
   if (!contract) notFound();
-  if (!canViewContract(session.role, session.id, contract.collaboratorId)) {
+  const { userCanAccessContract } = await import("@/lib/user-scope");
+  if (!(await userCanAccessContract(session, contract))) {
     redirect("/contratti");
   }
 

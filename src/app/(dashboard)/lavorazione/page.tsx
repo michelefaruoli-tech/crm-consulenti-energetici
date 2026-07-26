@@ -11,6 +11,7 @@ import { daysSince } from "@/lib/master-workflow";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@/generated/prisma/client";
+import { contractVisibilityWhere } from "@/lib/user-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -29,15 +30,17 @@ export default async function LavorazionePage({
 }) {
   const session = await requireSession();
   const canSeeAll = hasPermission(session.role, "contracts.edit_all");
-  if (!canSeeAll && !hasPermission(session.role, "contracts.create")) {
+  const canWorkScoped = hasPermission(session.role, "contracts.work_scoped");
+  if (!canSeeAll && !canWorkScoped && !hasPermission(session.role, "contracts.create")) {
     redirect("/");
   }
 
   const sp = await searchParams;
   const vistaKo = sp.vista === "ko";
+  const visibility = await contractVisibilityWhere(session);
 
   const filterExtras: Prisma.ContractWhereInput = {
-    ...(canSeeAll ? {} : { collaboratorId: session.id }),
+    ...visibility,
     ...(sp.collaboratorId ? { collaboratorId: sp.collaboratorId } : {}),
     ...(sp.supplierId ? { supplierId: sp.supplierId } : {}),
     ...(sp.service ? { utilityType: sp.service } : {}),
@@ -84,7 +87,7 @@ export default async function LavorazionePage({
 
   const scopeBase: Prisma.ContractWhereInput = {
     deletedAt: null,
-    ...(canSeeAll ? {} : { collaboratorId: session.id }),
+    ...visibility,
   };
 
   const [contracts, collaborators, suppliers, countInLavorazione, countKo] =

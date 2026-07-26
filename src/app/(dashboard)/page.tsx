@@ -26,12 +26,14 @@ export default async function DashboardPage({
     session.role,
     "contracts.change_collaborator_dashboard",
   );
-  const whereActive = canViewAll
-    ? { isHistorical: false, deletedAt: null }
-    : { collaboratorId: session.id, isHistorical: false, deletedAt: null };
-  const whereAll = canViewAll
-    ? { deletedAt: null }
-    : { collaboratorId: session.id, deletedAt: null };
+  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const visibility = await contractVisibilityWhere(session);
+  const whereActive = {
+    isHistorical: false as const,
+    deletedAt: null as null,
+    ...visibility,
+  };
+  const whereAll = { deletedAt: null as null, ...visibility };
   const where = whereActive;
 
   try {

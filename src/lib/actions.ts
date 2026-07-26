@@ -820,21 +820,105 @@ export async function createUserAction(formData: FormData): Promise<void> {
     throw new Error("Permesso negato");
   }
 
+  const role = String(formData.get("role") ?? "COLLABORATORE") as
+    | "ADMIN"
+    | "SEGRETERIA"
+    | "BACKOFFICE"
+    | "COLLABORATORE"
+    | "COMMERCIALE";
+
+  const supplierIds = formData
+    .getAll("supplierIds")
+    .map((v) => String(v))
+    .filter(Boolean);
+  const collaboratorIds = formData
+    .getAll("collaboratorIds")
+    .map((v) => String(v))
+    .filter(Boolean);
+
   const { hashPassword } = await import("@/lib/auth");
-  await prisma.user.create({
+  const user = await prisma.user.create({
     data: {
-      email: String(formData.get("email") ?? ""),
-      name: String(formData.get("name") ?? ""),
-      role: String(formData.get("role") ?? "COLLABORATORE") as
-        | "ADMIN"
-        | "SEGRETERIA"
-        | "COLLABORATORE"
-        | "COMMERCIALE",
+      email: String(formData.get("email") ?? "").trim().toLowerCase(),
+      name: String(formData.get("name") ?? "").trim(),
+      role,
       password: await hashPassword(String(formData.get("password") ?? "")),
+      ...(role === "BACKOFFICE" && supplierIds.length
+        ? {
+            supplierScopes: {
+              create: supplierIds.map((supplierId) => ({ supplierId })),
+            },
+          }
+        : {}),
+      ...(role === "BACKOFFICE" && collaboratorIds.length
+        ? {
+            collaboratorScopes: {
+              create: collaboratorIds.map((collaboratorId) => ({
+                collaboratorId,
+              })),
+            },
+          }
+        : {}),
     },
   });
 
+  void user;
   revalidatePath("/utenti");
+}
+
+/** Aggiorna fornitori/collaboratori visibili per un Backoffice. */
+export async function updateUserScopesAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: boolean }> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    return { error: "Permesso negato" };
+  }
+
+  const userId = String(formData.get("userId") ?? "");
+  if (!userId) return { error: "Utente mancante" };
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !user.active) return { error: "Utente non trovato" };
+  if (user.role !== "BACKOFFICE") {
+    return { error: "Lo scope si applica solo al ruolo Backoffice" };
+  }
+
+  const supplierIds = formData
+    .getAll("supplierIds")
+    .map((v) => String(v))
+    .filter(Boolean);
+  const collaboratorIds = formData
+    .getAll("collaboratorIds")
+    .map((v) => String(v))
+    .filter(Boolean);
+
+  await prisma.$transaction([
+    prisma.userSupplierScope.deleteMany({ where: { userId } }),
+    prisma.userCollaboratorScope.deleteMany({ where: { userId } }),
+    ...(supplierIds.length
+      ? [
+          prisma.userSupplierScope.createMany({
+            data: supplierIds.map((supplierId) => ({ userId, supplierId })),
+            skipDuplicates: true,
+          }),
+        ]
+      : []),
+    ...(collaboratorIds.length
+      ? [
+          prisma.userCollaboratorScope.createMany({
+            data: collaboratorIds.map((collaboratorId) => ({
+              userId,
+              collaboratorId,
+            })),
+            skipDuplicates: true,
+          }),
+        ]
+      : []),
+  ]);
+
+  revalidatePath("/utenti");
+  return { ok: true };
 }
 
 /** Elimina un utente: sempre soft-delete (libera email) per evitare errori FK. */

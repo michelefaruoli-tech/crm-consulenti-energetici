@@ -8,7 +8,12 @@ import { requireSession, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
-import { getMasterEmail, sendMail, textToHtmlParagraphs } from "@/lib/mail";
+import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
+import {
+  formatEmailList,
+  getLavorazioneNotifyEmails,
+  userCanAccessContract,
+} from "@/lib/user-scope";
 import {
   KO_REASON_OPTIONS,
   validateMasterTransition,
@@ -50,6 +55,9 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     hasPermission(session.role, "contracts.change_status") ||
     hasPermission(session.role, "contracts.edit_all");
   if (!isAdmin) {
+    redirect(`/lavorazione/${contractId}?error=permesso`);
+  }
+  if (!(await userCanAccessContract(session, contract))) {
     redirect(`/lavorazione/${contractId}?error=permesso`);
   }
   if (!contract.sendToMaster || !contract.assignedToMaster) {
@@ -234,8 +242,10 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     }
   }
 
+  const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
+  const toEmail = formatEmailList(recipients);
   const mail = await sendMail({
-    to: getMasterEmail(),
+    to: recipients,
     subject,
     text: body,
     html: textToHtmlParagraphs(body),
@@ -245,7 +255,7 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
   await prisma.contractEmailLog.create({
     data: {
       contractId,
-      toEmail: getMasterEmail(),
+      toEmail,
       subject,
       status: mail.ok ? "SENT" : mail.skipped ? "SKIPPED_NO_SMTP" : "ERROR",
       emailType: "MASTER_RESEND",

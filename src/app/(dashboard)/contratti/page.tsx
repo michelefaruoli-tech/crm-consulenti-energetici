@@ -34,13 +34,13 @@ export default async function ContrattiPage({
   const collabFilter =
     canViewAll && collab && collab !== "tutti" ? collab : undefined;
 
+  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const visibility = await contractVisibilityWhere(session);
+
   const where = {
     deletedAt: null as null,
-    ...(canViewAll
-      ? collabFilter
-        ? { collaboratorId: collabFilter }
-        : {}
-      : { collaboratorId: session.id }),
+    ...visibility,
+    ...(collabFilter ? { collaboratorId: collabFilter } : {}),
     ...(mode === "attivi"
       ? { isHistorical: false as const }
       : mode === "storico"

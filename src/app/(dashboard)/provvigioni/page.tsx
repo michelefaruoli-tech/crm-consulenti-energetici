@@ -85,6 +85,10 @@ export default async function ProvvigioniPage({
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
   const canExport = hasPermission(session.role, "reports.export");
+  const isScoped = hasPermission(session.role, "contracts.work_scoped");
+
+  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const visibility = await contractVisibilityWhere(session);
 
   const supplier = supplierRaw?.trim() || undefined;
   const stato = statoRaw?.trim() || undefined;
@@ -95,7 +99,8 @@ export default async function ProvvigioniPage({
   const recurrenceMode = vista === "ricorrente" ? "only" : "all";
 
   const contractWhere = buildProvvigioniContractWhere({
-    canViewAll,
+    // Backoffice: non forzare collaboratorId = sé (usa solo visibility)
+    canViewAll: canViewAll || isScoped,
     sessionUserId: session.id,
     collab,
     supplier,
@@ -103,10 +108,15 @@ export default async function ProvvigioniPage({
     tipologia,
     q,
     recurrenceMode,
+    visibility,
   });
   const collabFilter =
-    canViewAll && collab && collab !== "tutti" ? collab : undefined;
-  const sessionCollabFilter = canViewAll ? collabFilter : session.id;
+    (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
+  const sessionCollabFilter = isScoped
+    ? undefined
+    : canViewAll
+      ? collabFilter
+      : session.id;
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
 
