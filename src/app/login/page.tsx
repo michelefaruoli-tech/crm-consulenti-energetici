@@ -10,7 +10,7 @@ export default async function LoginPage({
   const { error } = await searchParams;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 px-4">
       <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950/80 p-8 shadow-2xl backdrop-blur">
         <div className="mb-8 flex items-center gap-3">
           <div className="rounded-xl bg-emerald-500 p-3 text-white">
@@ -22,7 +22,11 @@ export default async function LoginPage({
           </div>
         </div>
 
-        {error ? (
+        {error === "blocked" ? (
+          <p className="mb-4 rounded-lg border border-amber-900 bg-amber-950/50 px-3 py-2 text-sm text-amber-200">
+            Troppi tentativi di accesso. Riprova tra circa 15 minuti.
+          </p>
+        ) : error ? (
           <p className="mb-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
             Credenziali non valide
           </p>
@@ -33,6 +37,11 @@ export default async function LoginPage({
         <p className="mt-4 text-center text-sm">
           <Link href="/forgot-password" className="text-emerald-400 hover:underline">
             Password dimenticata?
+          </Link>
+        </p>
+        <p className="mt-6 text-center text-xs text-slate-500">
+          <Link href="/privacy" className="hover:text-slate-300 hover:underline">
+            Informativa privacy
           </Link>
         </p>
       </div>

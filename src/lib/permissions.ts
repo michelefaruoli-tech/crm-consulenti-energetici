@@ -22,7 +22,8 @@ export type Permission =
   | "commissions.edit_gettone"
   | "commissions.edit_own_gettone"
   | "reports.export"
-  | "reports.email";
+  | "reports.email"
+  | "security.view";
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [
@@ -43,6 +44,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "commissions.edit_gettone",
     "reports.export",
     "reports.email",
+    "security.view",
   ],
   SEGRETERIA: [
     "contracts.edit_all",

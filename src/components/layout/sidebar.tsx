@@ -20,6 +20,7 @@ import {
   X,
   PlusCircle,
   HardDrive,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -67,7 +68,13 @@ const NAV_ITEMS: Array<{
     icon: HardDrive,
     roles: ["ADMIN"],
   },
-  { href: "/account", label: "Sicurezza", icon: Shield, roles: "all" },
+  {
+    href: "/sicurezza",
+    label: "Eventi sicurezza",
+    icon: ShieldAlert,
+    roles: ["ADMIN"],
+  },
+  { href: "/account", label: "Account", icon: Shield, roles: "all" },
   { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] },
 ];
 

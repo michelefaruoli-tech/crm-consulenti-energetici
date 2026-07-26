@@ -8,10 +8,26 @@ import { Button } from "@/components/ui/button";
 export function LoginForm() {
   const emailId = useId();
   const passwordId = useId();
+  const honeypotId = useId();
   const [showPassword, setShowPassword] = useState(false);
 
   return (
     <form action={loginAction} className="space-y-4">
+      {/* Honeypot anti-bot: nascosto a umani, i bot lo compilano */}
+      <div
+        aria-hidden="true"
+        className="absolute left-[-10000px] top-auto h-px w-px overflow-hidden"
+      >
+        <label htmlFor={honeypotId}>Sito web</label>
+        <input
+          id={honeypotId}
+          type="text"
+          name="website"
+          tabIndex={-1}
+          autoComplete="off"
+        />
+      </div>
+
       <div>
         <label htmlFor={emailId} className="mb-1 block text-sm font-medium text-slate-300">
           Email

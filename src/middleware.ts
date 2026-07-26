@@ -8,6 +8,7 @@ const PUBLIC_PATHS = [
   "/api/cron",
   "/forgot-password",
   "/reset-password",
+  "/privacy",
 ];
 
 function getSecret() {

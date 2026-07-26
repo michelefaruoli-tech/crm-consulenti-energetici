@@ -4,6 +4,11 @@ import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { Role } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
+import { getRequestMeta } from "@/lib/request-meta";
+import {
+  isAuthRateLimited,
+  logSecurityEvent,
+} from "@/lib/security-log";
 
 const SESSION_COOKIE = "crm_session";
 const SESSION_DURATION = 60 * 60 * 24 * 7;
@@ -92,13 +97,43 @@ export async function requireSession(): Promise<SessionUser> {
 }
 
 export async function login(email: string, password: string) {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const meta = await getRequestMeta();
+  const normalized = email.trim().toLowerCase();
+
+  const limited = await isAuthRateLimited({
+    email: normalized,
+    ipAddress: meta.ipAddress,
+  });
+  if (limited.blocked) {
+    await logSecurityEvent({
+      eventType: "LOGIN_BLOCKED",
+      email: normalized,
+      details: limited.reason,
+      meta,
+    });
+    return { error: limited.reason ?? "Troppi tentativi. Riprova più tardi." };
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: normalized } });
   if (!user || !user.active) {
+    await logSecurityEvent({
+      eventType: "LOGIN_FAILED",
+      email: normalized,
+      details: "utente assente o disattivo",
+      meta,
+    });
     return { error: "Credenziali non valide" };
   }
 
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) {
+    await logSecurityEvent({
+      eventType: "LOGIN_FAILED",
+      userId: user.id,
+      email: normalized,
+      details: "password errata",
+      meta,
+    });
     return { error: "Credenziali non valide" };
   }
 
@@ -116,6 +151,13 @@ export async function login(email: string, password: string) {
       entity: "User",
       entityId: user.id,
     },
+  });
+
+  await logSecurityEvent({
+    eventType: "LOGIN",
+    userId: user.id,
+    email: user.email,
+    meta,
   });
 
   return { success: true };

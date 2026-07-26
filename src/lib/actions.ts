@@ -18,11 +18,31 @@ import { writeClientHistoryBatch } from "@/lib/audit";
 import { canonicalSupplierName } from "@/lib/supplier-merge";
 
 export async function loginAction(formData: FormData): Promise<void> {
+  const { isHoneypotFilled, logSecurityEvent } = await import("@/lib/security-log");
+  const { getRequestMeta } = await import("@/lib/request-meta");
+
+  if (isHoneypotFilled(formData)) {
+    const meta = await getRequestMeta();
+    await logSecurityEvent({
+      eventType: "HONEYPOT",
+      email: String(formData.get("email") ?? "").trim().toLowerCase(),
+      details: "campo honeypot compilato (probabile bot)",
+      meta,
+    });
+    // Finta risposta lenta: non rivelare il blocco
+    await new Promise((r) => setTimeout(r, 800));
+    redirect("/login?error=1");
+  }
+
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const result = await login(email, password);
   if (result.error) {
-    redirect("/login?error=1");
+    const q =
+      result.error.includes("Troppi") || result.error.includes("15 minuti")
+        ? "blocked"
+        : "1";
+    redirect(`/login?error=${q}`);
   }
   redirect("/");
 }

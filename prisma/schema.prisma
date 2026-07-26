@@ -529,16 +529,22 @@ model PasswordResetToken {
 
 model UserSecurityEvent {
   id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// PASSWORD_CHANGED | PASSWORD_RESET_REQUESTED | PASSWORD_RESET_COMPLETED | LOGIN
+  /// Null se login fallito con email sconosciuta / honeypot
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// LOGIN | LOGIN_FAILED | LOGIN_BLOCKED | HONEYPOT | PASSWORD_CHANGED | PASSWORD_RESET_REQUESTED | PASSWORD_RESET_COMPLETED
   eventType String
+  /// Email tentata (anche se utente non trovato)
+  email     String?
+  details   String?
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
 
   @@index([userId])
   @@index([eventType])
+  @@index([ipAddress, createdAt])
+  @@index([createdAt])
 }
 
 model ClientHistory {

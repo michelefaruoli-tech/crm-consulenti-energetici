@@ -319,12 +319,17 @@ export async function changeOwnPasswordAction(
       passwordChangedAt: new Date(),
     },
   });
-  await prisma.userSecurityEvent.create({
-    data: {
-      userId: session.id,
+  {
+    const { logSecurityEvent } = await import("@/lib/security-log");
+    const { getRequestMeta } = await import("@/lib/request-meta");
+    await logSecurityEvent({
       eventType: "PASSWORD_CHANGED",
-    },
-  });
+      userId: session.id,
+      email: session.email,
+      details: "cambio password da account",
+      meta: await getRequestMeta(),
+    });
+  }
   await prisma.auditLog.create({
     data: {
       userId: session.id,
@@ -340,17 +345,59 @@ export async function changeOwnPasswordAction(
 export async function requestPasswordResetAction(
   formData: FormData,
 ): Promise<{ ok: boolean; message: string }> {
-  const email = String(formData.get("email") ?? "")
-    .trim()
-    .toLowerCase();
+  const { isHoneypotFilled, isAuthRateLimited, logSecurityEvent } =
+    await import("@/lib/security-log");
+  const { getRequestMeta } = await import("@/lib/request-meta");
+  const meta = await getRequestMeta();
+
   // Risposta generica anti-enumerazione
   const generic =
     "Se l'indirizzo è registrato, riceverai un'email con il link di reset (valido 1 ora).";
 
+  if (isHoneypotFilled(formData)) {
+    await logSecurityEvent({
+      eventType: "HONEYPOT",
+      email: String(formData.get("email") ?? "").trim().toLowerCase(),
+      details: "forgot-password honeypot",
+      meta,
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    return { ok: true, message: generic };
+  }
+
+  const email = String(formData.get("email") ?? "")
+    .trim()
+    .toLowerCase();
+
+  const limited = await isAuthRateLimited({
+    email,
+    ipAddress: meta.ipAddress,
+  });
+  if (limited.blocked) {
+    await logSecurityEvent({
+      eventType: "PASSWORD_RESET_BLOCKED",
+      email,
+      details: limited.reason,
+      meta,
+    });
+    return {
+      ok: false,
+      message: limited.reason ?? "Troppi tentativi. Riprova tra 15 minuti.",
+    };
+  }
+
   const user = await prisma.user.findFirst({
     where: { email: { equals: email, mode: "insensitive" }, active: true },
   });
-  if (!user) return { ok: true, message: generic };
+  if (!user) {
+    await logSecurityEvent({
+      eventType: "PASSWORD_RESET_REQUESTED",
+      email,
+      details: "email non trovata (risposta generica inviata)",
+      meta,
+    });
+    return { ok: true, message: generic };
+  }
 
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -359,8 +406,11 @@ export async function requestPasswordResetAction(
   await prisma.passwordResetToken.create({
     data: { userId: user.id, tokenHash, expiresAt },
   });
-  await prisma.userSecurityEvent.create({
-    data: { userId: user.id, eventType: "PASSWORD_RESET_REQUESTED" },
+  await logSecurityEvent({
+    eventType: "PASSWORD_RESET_REQUESTED",
+    userId: user.id,
+    email: user.email,
+    meta,
   });
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
@@ -416,11 +466,12 @@ export async function resetPasswordWithTokenAction(
     where: { id: row.id },
     data: { usedAt: new Date() },
   });
-  await prisma.userSecurityEvent.create({
-    data: {
-      userId: row.userId,
-      eventType: "PASSWORD_RESET_COMPLETED",
-    },
+  const { logSecurityEvent } = await import("@/lib/security-log");
+  const { getRequestMeta } = await import("@/lib/request-meta");
+  await logSecurityEvent({
+    eventType: "PASSWORD_RESET_COMPLETED",
+    userId: row.userId,
+    meta: await getRequestMeta(),
   });
 
   return { ok: true, message: "Password reimpostata. Ora puoi accedere." };
@@ -485,12 +536,17 @@ export async function adminSetUserPasswordAction(
       passwordChangedAt: new Date(),
     },
   });
-  await prisma.userSecurityEvent.create({
-    data: {
-      userId: user.id,
+  {
+    const { logSecurityEvent } = await import("@/lib/security-log");
+    const { getRequestMeta } = await import("@/lib/request-meta");
+    await logSecurityEvent({
       eventType: "PASSWORD_CHANGED",
-    },
-  });
+      userId: user.id,
+      email: user.email,
+      details: `impostata da admin ${session.email}`,
+      meta: await getRequestMeta(),
+    });
+  }
   await prisma.auditLog.create({
     data: {
       userId: session.id,
