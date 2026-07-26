@@ -48,7 +48,7 @@ export function HeliosImportPanel() {
   const router = useRouter();
   const months = useMemo(() => monthOptions(), []);
   const [pending, start] = useTransition();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [fileKey, setFileKey] = useState(0);
   const [fileName, setFileName] = useState("");
   const [fileB64, setFileB64] = useState<string | null>(null);
@@ -155,7 +155,10 @@ export function HeliosImportPanel() {
   const willPayRows = preview?.filter((r) => r.status === "will_pay") ?? [];
 
   return (
-    <div className="rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3">
+    <div
+      id="helios-import"
+      className="rounded-xl border-2 border-sky-300 bg-sky-50 px-4 py-3 shadow-sm"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-sky-950">
