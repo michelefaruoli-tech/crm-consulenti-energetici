@@ -252,9 +252,13 @@ export default async function ReportPage({
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-2 font-semibold text-slate-900">Backup database (Excel)</h2>
           <p className="mb-4 text-sm text-slate-500">
-            Automatico ogni sera alle ~22:00 (ora italiana), solo se sono stati inseriti
-            nuovi contratti. Destinatario email: {backupEmail}. Qui puoi farlo anche a
-            mano quando vuoi.
+            Automatico ogni sera alle ~22:00 (ora italiana),{" "}
+            <strong>sempre</strong> (anche senza nuovi contratti). Destinatario:{" "}
+            {backupEmail}. Per snapshot «versione funzionante» e ripristino vai a{" "}
+            <Link href="/backup" className="text-emerald-700 underline">
+              Backup
+            </Link>
+            .
           </p>
           <BackupButton />
           {recentBackups.length > 0 ? (

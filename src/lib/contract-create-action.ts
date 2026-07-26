@@ -17,6 +17,7 @@ import {
   allocateContractNumber,
   syncContractNumberSequenceFromExisting,
 } from "@/lib/contract-number";
+import { canonicalSupplierName } from "@/lib/supplier-merge";
 
 async function nextContractNumber(): Promise<string> {
   try {
@@ -651,6 +652,20 @@ async function createFullContractActionInner(
       details: JSON.stringify({ createdIds, draft: payload.draft, sendToMaster }),
     },
   });
+
+  // Avviso email admin a ogni nuovo contratto reale (non bozze)
+  if (!payload.draft && createdIds.length > 0) {
+    void import("@/lib/notify-admin-contracts")
+      .then(({ notifyAdminNewContracts }) =>
+        notifyAdminNewContracts({
+          source: "nuovo_contratto",
+          contractIds: createdIds,
+          byUserName: session.name,
+          note: sendToMaster ? "Inviato in coda Master" : undefined,
+        }),
+      )
+      .catch((e) => console.error("[notifyAdminNewContracts]", e));
+  }
 
   revalidatePath("/contratti");
   revalidatePath("/lavorazione");

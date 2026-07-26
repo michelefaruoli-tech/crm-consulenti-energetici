@@ -5,7 +5,11 @@ import {
   buildFullDbExcelBuffer,
   countNewContractsToday,
 } from "@/lib/db-backup-excel";
+import { buildFullDbJsonDump } from "@/lib/db-json-backup";
 import { formatRomeDateTime, romeDateString, romeDayBounds } from "@/lib/timezone";
+
+/** Limite allegato JSON via email (SMTP/Gmail ~25MB totali). */
+const MAX_JSON_EMAIL_BYTES = 18 * 1024 * 1024;
 
 export type DbBackupResult = {
   ok: boolean;
@@ -20,6 +24,9 @@ export type DbBackupResult = {
   error?: string;
   /** Solo per download manuale */
   buffer?: Buffer;
+  jsonFilename?: string;
+  jsonIncludedInEmail?: boolean;
+  gitHash?: string;
 };
 
 function backupRecipient(): string {
@@ -44,7 +51,7 @@ async function alreadyEmailedToday(reportDate: string): Promise<boolean> {
 
 /**
  * Backup Excel completo + email.
- * - Cron automatico: solo se ci sono nuovi contratti oggi e non già inviato.
+ * - Cron automatico: ogni sera (salta solo se già inviato oggi, salvo force).
  * - Manuale: sempre genera il file; email se sendEmail=true.
  */
 export async function runDbExcelBackup(opts: {
@@ -57,22 +64,6 @@ export async function runDbExcelBackup(opts: {
   const { count: newContractsToday } = await countNewContractsToday(reportDate);
 
   if (opts.mode === "cron" && !opts.force) {
-    if (newContractsToday === 0) {
-      await prisma.backupLog.create({
-        data: {
-          filename: `skip-${reportDate}-no-new.xlsx`,
-          size: 0,
-          status: "SKIPPED_NO_NEW",
-        },
-      });
-      return {
-        ok: true,
-        skipped: true,
-        reason: "no_new_contracts",
-        newContractsToday: 0,
-        reportDate,
-      };
-    }
     if (await alreadyEmailedToday(reportDate)) {
       return {
         ok: true,
@@ -92,7 +83,7 @@ export async function runDbExcelBackup(opts: {
   if (wantEmail) {
     const to = backupRecipient();
     const lines = [
-      `Backup automatico database CRM – ${reportDate}`,
+      `Backup GIORNALIERO database CRM – ${reportDate}`,
       `Generato: ${formatRomeDateTime(new Date())}`,
       "",
       `Nuovi contratti oggi: ${newContractsToday}`,
@@ -108,16 +99,17 @@ export async function runDbExcelBackup(opts: {
       "05 Fornitori · 06 Servizi · 07 Listino · 08 Utenti · 09 Storico stati · 10 Allegati",
       "",
       "Nel foglio Contratti trovi: data inserimento, ingresso fornitura, date pagamento,",
-      "se è pagato, gettoni, anagrafica cliente collegata.",
+      "se è pagato / da pagare, gettoni, anagrafica cliente collegata.",
       "Nel foglio Clienti trovi TUTTI i dati anagrafici (non si perdono).",
       "",
       "Nota: le password utenti e i file binari (foto/PDF) non sono nell'Excel;",
       "l'elenco allegati è nel foglio 10 (solo nomi).",
+      "Il codice del sito resta su GitHub (ripristino versione = git checkout).",
     ];
     const body = lines.join("\n");
     const mail = await sendMail({
       to,
-      subject: `Backup CRM ${reportDate} – ${excel.counts.contracts} contratti${
+      subject: `Backup giornaliero CRM ${reportDate} – ${excel.counts.contracts} contratti${
         newContractsToday > 0 ? ` (+${newContractsToday} oggi)` : ""
       }`,
       text: body,
@@ -173,5 +165,127 @@ export async function runDbExcelBackup(opts: {
     emailed,
     error: mailError,
     buffer: opts.includeBuffer ? excel.buffer : undefined,
+  };
+}
+
+/**
+ * Snapshot «versione funzionante»: Excel dati + JSON completo → email.
+ * Serve se qualcosa si rompe: hai i dati e il riferimento alla versione codice (git).
+ */
+export async function runWorkingSnapshot(opts: {
+  note?: string;
+  sendEmail?: boolean;
+  includeExcelBuffer?: boolean;
+}): Promise<DbBackupResult> {
+  const reportDate = romeDateString();
+  const note =
+    opts.note?.trim() ||
+    `Versione funzionante salvata il ${formatRomeDateTime(new Date())}`;
+
+  const [excel, json] = await Promise.all([
+    buildFullDbExcelBuffer(),
+    buildFullDbJsonDump(note),
+  ]);
+
+  const { count: newContractsToday } = await countNewContractsToday(reportDate);
+  const wantEmail = opts.sendEmail !== false;
+  let emailed = false;
+  let mailError: string | undefined;
+  const jsonInEmail = json.buffer.length <= MAX_JSON_EMAIL_BYTES;
+
+  if (wantEmail) {
+    const to = backupRecipient();
+    const lines = [
+      `VERSIONE FUNZIONANTE CRM – punto di ripristino`,
+      `Generato: ${formatRomeDateTime(new Date())}`,
+      `Nota: ${note}`,
+      `Commit codice (git): ${json.gitHash}`,
+      "",
+      `Clienti: ${excel.counts.clients}`,
+      `Contratti: ${excel.counts.contracts}`,
+      `Provvigioni: ${excel.counts.commissions}`,
+      "",
+      "Allegati:",
+      `1) Excel (${excel.filename}) — tutti i contratti pagati/da pagare, clienti, ecc.`,
+      jsonInEmail
+        ? `2) JSON (${json.filename}) — dump completo DB (senza foto/PDF binari).`
+        : `2) JSON troppo grande per email (${(json.buffer.length / 1024 / 1024).toFixed(1)} MB). Usa sul PC: npm run snapshot`,
+      "",
+      "COME TORNARE INDIETRO:",
+      "• DATI: tieni questo Excel/JSON. Puoi reimportare da Archivio o chiedere ripristino.",
+      "• CODICE (sito): su GitHub fai checkout del commit indicato sopra.",
+      "• Ogni sera ricevi già il backup Excel giornaliero automatico.",
+    ];
+    const body = lines.join("\n");
+    const attachments: {
+      filename: string;
+      content: Buffer;
+      contentType?: string;
+    }[] = [
+      {
+        filename: excel.filename,
+        content: excel.buffer,
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+    ];
+    if (jsonInEmail) {
+      attachments.push({
+        filename: json.filename,
+        content: json.buffer,
+        contentType: "application/json",
+      });
+    }
+
+    const mail = await sendMail({
+      to,
+      subject: `CRM · Versione funzionante ${reportDate} (${excel.counts.contracts} contratti)`,
+      text: body,
+      html: textToHtmlParagraphs(body),
+      attachments,
+    });
+
+    if (mail.ok) {
+      emailed = true;
+      await prisma.backupLog.create({
+        data: {
+          filename: `WORKING|${excel.filename}|${json.filename}|${json.gitHash}|${note.slice(0, 120)}`,
+          size: excel.buffer.length + (jsonInEmail ? json.buffer.length : 0),
+          status: "WORKING",
+        },
+      });
+    } else {
+      mailError = mail.error ?? "Invio email fallito";
+      await prisma.backupLog.create({
+        data: {
+          filename: `WORKING|${excel.filename}|${json.filename}`,
+          size: excel.buffer.length,
+          status: mail.skipped ? "SKIPPED_NO_SMTP" : "ERROR",
+        },
+      });
+    }
+  } else {
+    await prisma.backupLog.create({
+      data: {
+        filename: `WORKING|${excel.filename}|${json.filename}|${json.gitHash}`,
+        size: excel.buffer.length,
+        status: "WORKING_LOCAL",
+      },
+    });
+  }
+
+  return {
+    ok: wantEmail ? emailed : true,
+    filename: excel.filename,
+    jsonFilename: json.filename,
+    jsonIncludedInEmail: jsonInEmail,
+    gitHash: json.gitHash,
+    size: excel.buffer.length,
+    newContractsToday,
+    reportDate,
+    counts: excel.counts,
+    emailed,
+    error: mailError,
+    buffer: opts.includeExcelBuffer ? excel.buffer : undefined,
   };
 }

@@ -5,9 +5,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Backup Excel fine giornata → email al master.
- * Solo se oggi sono stati inseriti nuovi contratti (salvo ?force=1).
- * Vercel Cron: Authorization Bearer CRON_SECRET
+ * Backup Excel GIORNALIERO → email (sempre, anche senza nuovi contratti).
+ * Vercel Cron ~22:00 Italia. Authorization Bearer CRON_SECRET
  */
 function authorize(request: Request): boolean {
   const secret = process.env.CRON_SECRET?.trim();
@@ -23,12 +22,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const url = new URL(request.url);
-  const force = url.searchParams.get("force") === "1";
-
+  // Sempre: punto di ripristino dati ogni sera (salta solo se già inviato oggi).
   const result = await runDbExcelBackup({
     mode: "cron",
-    force,
+    force: false,
   });
 
   return NextResponse.json(result, {

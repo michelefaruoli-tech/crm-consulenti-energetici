@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   PlusCircle,
+  HardDrive,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -59,6 +60,12 @@ const NAV_ITEMS: Array<{
     label: "Report",
     icon: BarChart3,
     roles: ["ADMIN", "SEGRETERIA", "COLLABORATORE", "COMMERCIALE"],
+  },
+  {
+    href: "/backup",
+    label: "Backup",
+    icon: HardDrive,
+    roles: ["ADMIN"],
   },
   { href: "/account", label: "Sicurezza", icon: Shield, roles: "all" },
   { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] },

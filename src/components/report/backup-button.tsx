@@ -55,11 +55,10 @@ export function BackupButton() {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
-        Scarica un Excel <strong>completo</strong> con tutti i dati del CRM, divisi per
-        categoria (Clienti, Contratti con tutte le date e se pagato, Provvigioni,
-        Ricorrenze, Fornitori, Listino, Utenti, Storico, Allegati). Ogni sera, se ci
-        sono stati nuovi contratti, lo stesso file viene inviato automaticamente via
-        email.
+        Scarica un Excel <strong>completo</strong> con tutti i dati del CRM
+        (Clienti, Contratti pagati/da pagare, Provvigioni, ecc.). Ogni sera alle
+        ~22 ricevi lo stesso file via email in automatico. Per salvare una
+        «versione funzionante» completa apri la pagina Backup.
       </p>
       <label className="flex items-center gap-2 text-sm text-slate-700">
         <input

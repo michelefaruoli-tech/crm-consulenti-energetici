@@ -551,6 +551,33 @@ export async function importHistoricalExcelBatchAction(
     revalidatePath("/contratti");
     revalidatePath("/");
     revalidatePath("/provvigioni");
+
+    // Email admin: contratti appena importati (ultime 3 ore, storici)
+    try {
+      const since = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      const recent = await prisma.contract.findMany({
+        where: {
+          createdAt: { gte: since },
+          isHistorical: true,
+        },
+        select: { id: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
+      if (recent.length > 0) {
+        const { notifyAdminNewContracts } = await import(
+          "@/lib/notify-admin-contracts"
+        );
+        void notifyAdminNewContracts({
+          source: "import_archivio",
+          contractIds: recent.map((c) => c.id),
+          byUserName: session.name,
+          note: `Import Archivio «${data.label}» — ultimo lotto: ${batchImported} importati, ${batchSkipped} saltati`,
+        });
+      }
+    } catch (e) {
+      console.error("[notifyAdminNewContracts archive]", e);
+    }
   }
 
   return {

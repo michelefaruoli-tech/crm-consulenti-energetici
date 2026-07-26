@@ -1030,6 +1030,107 @@ export async function runBackupAction(opts?: {
   };
 }
 
+/** Salva «versione funzionante» (Excel + JSON via email). */
+export async function runWorkingSnapshotAction(opts?: {
+  note?: string;
+  sendEmail?: boolean;
+}): Promise<
+  | { error: string }
+  | {
+      filename: string;
+      payloadBase64: string;
+      emailed: boolean;
+      counts: Record<string, number>;
+      gitHash?: string;
+      jsonFilename?: string;
+      jsonIncludedInEmail?: boolean;
+      mailError?: string;
+    }
+> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "backup.manage")) {
+    return { error: "Permesso negato" };
+  }
+
+  const { runWorkingSnapshot } = await import("@/lib/db-backup-runner");
+  const result = await runWorkingSnapshot({
+    note: opts?.note,
+    sendEmail: opts?.sendEmail !== false,
+    includeExcelBuffer: true,
+  });
+
+  if (!result.buffer || !result.filename) {
+    return { error: result.error ?? "Snapshot non riuscito" };
+  }
+
+  revalidatePath("/backup");
+  revalidatePath("/report");
+
+  return {
+    filename: result.filename,
+    payloadBase64: result.buffer.toString("base64"),
+    emailed: Boolean(result.emailed),
+    counts: result.counts ?? {},
+    gitHash: result.gitHash,
+    jsonFilename: result.jsonFilename,
+    jsonIncludedInEmail: result.jsonIncludedInEmail,
+    mailError: result.error,
+  };
+}
+
+/**
+ * «Carica ultima funzionante»: Excel fresco dello stato attuale + email,
+ * con riferimento all’ultimo snapshot WORKING.
+ */
+export async function resendWorkingBackupAction(): Promise<
+  | { error: string }
+  | {
+      filename: string;
+      payloadBase64: string;
+      emailed: boolean;
+      lastWorkingAt?: string;
+      lastWorkingNote?: string;
+      mailError?: string;
+      counts: Record<string, number>;
+    }
+> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "backup.manage")) {
+    return { error: "Permesso negato" };
+  }
+
+  const lastWorking = await prisma.backupLog.findFirst({
+    where: { status: { in: ["WORKING", "WORKING_LOCAL"] } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const { runDbExcelBackup } = await import("@/lib/db-backup-runner");
+  const result = await runDbExcelBackup({
+    mode: "manual",
+    sendEmail: true,
+    includeBuffer: true,
+  });
+
+  if (!result.buffer || !result.filename) {
+    return { error: result.error ?? "Backup non riuscito" };
+  }
+
+  revalidatePath("/backup");
+
+  const noteParts = lastWorking?.filename?.split("|") ?? [];
+  return {
+    filename: result.filename,
+    payloadBase64: result.buffer.toString("base64"),
+    emailed: Boolean(result.emailed),
+    lastWorkingAt: lastWorking
+      ? lastWorking.createdAt.toISOString()
+      : undefined,
+    lastWorkingNote: noteParts[4] || noteParts[0] || undefined,
+    mailError: result.error,
+    counts: result.counts ?? {},
+  };
+}
+
 export async function sendReportEmailAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "reports.email")) {
