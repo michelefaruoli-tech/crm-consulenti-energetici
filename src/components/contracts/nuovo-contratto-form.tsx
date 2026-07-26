@@ -133,7 +133,7 @@ export function NuovoContrattoForm({
     }[]
   >([]);
 
-  const registrationDate = useMemo(() => new Date(), []);
+  const [registrationDate, setRegistrationDate] = useState(() => new Date());
   const computedSupplyStart = useMemo(
     () => computeSupplyStartDate(registrationDate, operationType),
     [registrationDate, operationType],
@@ -217,6 +217,7 @@ export function NuovoContrattoForm({
         : suppliers.find((s) => s.id === supplierId)?.name,
       operationType,
       operationOther,
+      insertionDate: formatItDate(registrationDate),
       supplySameAsResidence: supplySame,
       supplyStreet,
       supplyStreetNumber,
@@ -1018,7 +1019,18 @@ export function NuovoContrattoForm({
             </>
           ) : null}
           <Field label="Data registrazione">
-            <Input value={formatItDate(registrationDate)} readOnly className="bg-slate-50" />
+            <Input
+              type="date"
+              value={format(registrationDate, "yyyy-MM-dd")}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) return;
+                const [y, m, d] = v.split("-").map(Number);
+                if (!y || !m || !d) return;
+                setRegistrationDate(new Date(y, m - 1, d));
+              }}
+              title="Puoi modificare la data di registrazione della pratica"
+            />
           </Field>
           <Field label="Ingresso fornitura (calcolato)">
             <Input

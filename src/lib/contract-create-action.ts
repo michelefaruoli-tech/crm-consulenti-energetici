@@ -11,6 +11,7 @@ import {
   type NewContractPayload,
 } from "@/lib/contract-form-types";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
+import { parseFlexibleDate } from "@/lib/date-parse";
 import { getMasterEmail } from "@/lib/mail";
 import {
   allocateContractNumber,
@@ -335,7 +336,8 @@ async function createFullContractActionInner(
     return { ok: false, errors: ["Cliente o fornitore mancante"] };
   }
 
-  const insertionDate = new Date();
+  const insertionDate =
+    parseFlexibleDate(payload.insertionDate ?? "") ?? new Date();
   // Data ingresso calcolata dalla data registrazione + tipo operazione (mai inserita a mano)
   const supplyStart = computeSupplyStartDate(insertionDate, payload.operationType);
   const duration = payload.durationMonths || 12;

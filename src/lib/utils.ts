@@ -24,20 +24,21 @@ export function clientDisplayName(client: {
   return [client.lastName, client.firstName].filter(Boolean).join(" ") || "Cliente senza nome";
 }
 
-/** Chiave ordinamento cliente: cognome, nome, ragione sociale */
+/** Chiave ordinamento cliente unica A→Z (senza split Domestico/Business). */
 export function clientSortKey(client: {
-  type: string;
+  type?: string;
   companyName?: string | null;
   firstName?: string | null;
   lastName?: string | null;
 }): string {
-  if (client.type === "AZIENDA" && client.companyName) {
-    return client.companyName.toLowerCase();
-  }
-  return [client.lastName, client.firstName]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+  const company = (client.companyName ?? "").trim();
+  const person = [client.lastName, client.firstName].filter(Boolean).join(" ").trim();
+  return (company || person || clientDisplayName({
+    type: client.type ?? "PRIVATO",
+    companyName: client.companyName,
+    firstName: client.firstName,
+    lastName: client.lastName,
+  })).toLocaleLowerCase("it");
 }
 
 export async function generateContractNumber(): Promise<string> {

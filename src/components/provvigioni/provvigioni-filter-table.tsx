@@ -15,6 +15,7 @@ import { StornoLegend } from "@/components/ui/storno-legend";
 import { toPeriod, periodLabel } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
+  PROVVIGIONE_OPERATION_OPTIONS,
   PROVVIGIONE_STATO_OPTIONS,
   formatCollaboratorShort,
   type ProvvigioneRow,
@@ -29,11 +30,13 @@ const FIELD_MAP: Record<string, string> = {
   collaboratorName: "collaboratorName",
   supplierName: "supplierName",
   clientType: "clientType",
-  amount: "expected",
+  operationType: "operationType",
   stato: "stato",
   recurrence: "recurrence",
-  paymentStatus: "paymentStatus",
   collectionMonth: "collectionDate",
+  stornoFlag: "storno",
+  stornoMonth: "stornoDate",
+  stornoAmount: "stornoAmount",
   notes: "notes",
   confirmed: "confirmed",
 };
@@ -71,16 +74,20 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return row.supplierName ?? "";
     case "clientType":
       return row.clientType ?? "";
-    case "amount":
-      return row.amount ?? "";
+    case "operationType":
+      return row.operationType ?? "";
     case "stato":
       return row.stato ?? "";
     case "recurrence":
       return shortRecurrence(row.recurrence ?? "");
-    case "paymentStatus":
-      return String(row.collectionMonth ?? "").trim() ? "Sì" : "No";
     case "collectionMonth":
       return row.collectionMonth ?? "";
+    case "stornoFlag":
+      return row.stornoFlag ?? "No";
+    case "stornoMonth":
+      return row.stornoMonth ?? "";
+    case "stornoAmount":
+      return row.stornoAmount ?? "";
     case "notes":
       return row.notes ?? "";
     case "confirmed":
@@ -104,12 +111,18 @@ export function ProvvigioniFilterTable({
   rows: ProvvigioneRow[];
   canDelete?: boolean;
   canConfirm?: boolean;
-  listQuery?: { collab?: string | null; settled?: string | null };
+  listQuery?: {
+    collab?: string | null;
+    settled?: string | null;
+    supplier?: string | null;
+    stato?: string | null;
+    tipologia?: string | null;
+  };
   serverSortKey?: string | null;
   serverSortDir?: "asc" | "desc";
   page?: number;
   collaboratorByName?: Record<string, string>;
-  /** Nomi fornitori (per modifica colonna Forn.) */
+  /** Nomi fornitori (per modifica colonna Forn. e filtro server) */
   supplierNames?: string[];
 }) {
   const router = useRouter();
@@ -129,6 +142,9 @@ export function ProvvigioniFilterTable({
   const filterResetKey = [
     listQuery?.collab ?? "tutti",
     listQuery?.settled ?? "",
+    listQuery?.supplier ?? "",
+    listQuery?.stato ?? "",
+    listQuery?.tipologia ?? "",
     String(page),
     serverSortKey ?? "",
     serverSortDir,
@@ -147,20 +163,34 @@ export function ProvvigioniFilterTable({
     return n;
   }, [drafts]);
 
+  function baseQuery(extra: Record<string, string | undefined | null> = {}) {
+    return {
+      collab: listQuery?.collab,
+      settled: listQuery?.settled,
+      supplier: listQuery?.supplier,
+      stato: listQuery?.stato,
+      tipologia: listQuery?.tipologia,
+      sort: serverSortKey === "client" ? "client" : undefined,
+      dir: serverSortKey === "client" ? serverSortDir : undefined,
+      ...extra,
+    };
+  }
+
+  function confirmLeaveDrafts(): boolean {
+    if (draftCount <= 0) return true;
+    return window.confirm(
+      `Hai ${draftCount} modifiche non salvate. Continuando le perdi. Procedere?`,
+    );
+  }
+
   function onServerSort(key: string) {
     if (key !== "clientName") return;
-    if (draftCount > 0) {
-      const ok = window.confirm(
-        `Hai ${draftCount} modifiche non salvate. Continuando le perdi. Procedere?`,
-      );
-      if (!ok) return;
-    }
+    if (!confirmLeaveDrafts()) return;
     const nextDir =
       serverSortKey === "client" && serverSortDir !== "desc" ? "desc" : "asc";
     router.push(
       buildPageHref("/provvigioni", {
-        collab: listQuery?.collab,
-        settled: listQuery?.settled,
+        ...baseQuery(),
         sort: "client",
         dir: nextDir,
       }),
@@ -168,37 +198,50 @@ export function ProvvigioniFilterTable({
   }
 
   function onServerColumnFilter(columnKey: string, values: string[]) {
-    if (columnKey !== "collaboratorName") return;
-    if (draftCount > 0) {
-      const ok = window.confirm(
-        `Hai ${draftCount} modifiche non salvate. Continuando le perdi. Procedere?`,
-      );
-      if (!ok) return;
+    if (!confirmLeaveDrafts()) return;
+
+    const value = values[0] ?? "";
+
+    if (columnKey === "collaboratorName") {
+      if (values.length === 0) {
+        router.push(buildPageHref("/provvigioni", baseQuery({ collab: null })));
+        return;
+      }
+      const id = collaboratorByName?.[value];
+      if (!id) {
+        setError(`Collaboratore non trovato: ${value}`);
+        return;
+      }
+      router.push(buildPageHref("/provvigioni", baseQuery({ collab: id })));
+      return;
     }
-    if (values.length === 0) {
+
+    if (columnKey === "supplierName") {
       router.push(
         buildPageHref("/provvigioni", {
-          settled: listQuery?.settled,
-          sort: serverSortKey === "client" ? "client" : undefined,
-          dir: serverSortKey === "client" ? serverSortDir : undefined,
+          ...baseQuery({ supplier: values.length ? value : null }),
         }),
       );
       return;
     }
-    const name = values[0];
-    const id = collaboratorByName?.[name];
-    if (!id) {
-      setError(`Collaboratore non trovato: ${name}`);
+
+    if (columnKey === "stato") {
+      router.push(
+        buildPageHref("/provvigioni", {
+          ...baseQuery({ stato: values.length ? value : null }),
+        }),
+      );
       return;
     }
-    router.push(
-      buildPageHref("/provvigioni", {
-        collab: id,
-        settled: listQuery?.settled,
-        sort: serverSortKey === "client" ? "client" : undefined,
-        dir: serverSortKey === "client" ? serverSortDir : undefined,
-      }),
-    );
+
+    if (columnKey === "clientType") {
+      router.push(
+        buildPageHref("/provvigioni", {
+          ...baseQuery({ tipologia: values.length ? value : null }),
+        }),
+      );
+      return;
+    }
   }
 
   const selectedCount = selectedKeys.size;
@@ -412,11 +455,40 @@ export function ProvvigioniFilterTable({
       sortKind: "text",
     },
     {
-      key: "amount",
-      label: "Gettone",
-      getValue: (r) => String(r.amount ?? ""),
-      editable: true,
-      sortKind: "number",
+      key: "operationType",
+      label: "Tipo op.",
+      getValue: (r) => getDraftValue(r, "operationType"),
+      sortKind: "text",
+      render: (r) => {
+        const current = getDraftValue(r, "operationType") || "Switch";
+        const options = [...PROVVIGIONE_OPERATION_OPTIONS];
+        const dirty = isDraftDirty(r, "operationType");
+        const value = options.includes(
+          current as (typeof options)[number],
+        )
+          ? current
+          : current;
+        return (
+          <select
+            className={`max-w-[9.5rem] rounded border px-1 py-0.5 text-[11px] ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={value}
+            title="Tipo operazione: Switch, Voltura, Cessazione…"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "operationType", e.target.value)}
+          >
+            {!options.includes(current as (typeof options)[number]) && current ? (
+              <option value={current}>{current}</option>
+            ) : null}
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
     {
       key: "stato",
@@ -452,15 +524,8 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "recurrence",
-      label: "Tipo",
+      label: "Ricorr.",
       getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
-      editable: true,
-      sortKind: "text",
-    },
-    {
-      key: "paymentStatus",
-      label: "Pagato",
-      getValue: (r) => getDraftValue(r, "paymentStatus"),
       editable: true,
       sortKind: "text",
     },
@@ -472,8 +537,66 @@ export function ProvvigioniFilterTable({
       sortKind: "date",
     },
     {
-      key: "stornoLabel",
+      key: "stornoFlag",
       label: "Storno",
+      getValue: (r) => getDraftValue(r, "stornoFlag"),
+      sortKind: "text",
+      render: (r) => {
+        const current = getDraftValue(r, "stornoFlag") || "No";
+        const dirty = isDraftDirty(r, "stornoFlag");
+        return (
+          <select
+            className={`max-w-[4.5rem] rounded border px-1 py-0.5 text-[11px] ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={current === "Sì" ? "Sì" : "No"}
+            title="Segna storno gettone (importo = gettone incassato)"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const v = e.target.value;
+              queueDraft(r, "stornoFlag", v);
+              if (v === "Sì") {
+                const amount = String(r.amount ?? "").trim();
+                if (amount && !getDraftValue(r, "stornoAmount")) {
+                  queueDraft(r, "stornoAmount", amount);
+                }
+                if (!getDraftValue(r, "stornoMonth")) {
+                  const d = new Date();
+                  queueDraft(
+                    r,
+                    "stornoMonth",
+                    `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`,
+                  );
+                }
+              } else {
+                queueDraft(r, "stornoMonth", "");
+                queueDraft(r, "stornoAmount", "");
+              }
+            }}
+          >
+            <option value="No">No</option>
+            <option value="Sì">Sì</option>
+          </select>
+        );
+      },
+    },
+    {
+      key: "stornoMonth",
+      label: "Data storno",
+      getValue: (r) => getDraftValue(r, "stornoMonth"),
+      editable: true,
+      sortKind: "date",
+    },
+    {
+      key: "stornoAmount",
+      label: "Gettone storno",
+      getValue: (r) => getDraftValue(r, "stornoAmount"),
+      editable: true,
+      sortKind: "number",
+    },
+    {
+      key: "rischio",
+      label: "Rischio",
       getValue: (r) => String(r.stornoLabel ?? ""),
       sortKind: "text",
     },
@@ -712,12 +835,14 @@ export function ProvvigioniFilterTable({
 
       <p className="text-xs text-slate-500">
         Celle modificabili = bozza (giallo) finché non salvi.{" "}
-        <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato.{" "}
-        <strong>Tipologia</strong>: Business / Domestico.{" "}
-        <strong>Pagato</strong>: Sì / No. <strong>Data</strong>: MM/AAAA.{" "}
-        <strong>Storno</strong> è solo lettura (si aggiorna dallo Stato). Privati:
-        gettone Dolomiti 45 · Plenitude 60 · Enel 65 (se era 0). Con data → Stato
-        Incassato.
+        <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato (con Data
+        incasso). <strong>Storno</strong> + <strong>Data storno</strong> +{" "}
+        <strong>Gettone storno</strong> (di solito = gettone incassato).{" "}
+        <strong>Tipo op.</strong>: Switch, Voltura, Cessazione…{" "}
+        <strong>Ricorr.</strong>: Gettone / Ricorrente.{" "}
+        <strong>Rischio</strong>: periodo storno fornitore (solo lettura).{" "}
+        Fornitore / Stato / Tipologia filtrano su tutto il database. Privati:
+        gettone Dolomiti 45 · Plenitude 60 · Enel 65 (nei totali in alto).
         {canDelete ? " × rossa = elimina." : ""}
       </p>
       <ExcelFilterTable
@@ -737,19 +862,41 @@ export function ProvvigioniFilterTable({
           dir: serverSortDir,
           onSort: onServerSort,
         }}
-        serverColumnFilter={
-          collaboratorByName
-            ? {
-                keys: ["collaboratorName"],
-                onFilter: onServerColumnFilter,
-              }
-            : undefined
-        }
+        serverColumnFilter={{
+          keys: [
+            ...(collaboratorByName ? (["collaboratorName"] as const) : []),
+            "supplierName",
+            "stato",
+            "clientType",
+          ],
+          onFilter: onServerColumnFilter,
+          activeValues: {
+            ...(listQuery?.collab && collaboratorByName
+              ? {
+                  collaboratorName: [
+                    Object.entries(collaboratorByName).find(
+                      ([, id]) => id === listQuery.collab,
+                    )?.[0] ?? "",
+                  ].filter(Boolean),
+                }
+              : {}),
+            ...(listQuery?.supplier
+              ? { supplierName: [listQuery.supplier] }
+              : {}),
+            ...(listQuery?.stato ? { stato: [listQuery.stato] } : {}),
+            ...(listQuery?.tipologia
+              ? { clientType: [listQuery.tipologia] }
+              : {}),
+          },
+        }}
         filterOptionsOverride={{
           ...(collaboratorByName
             ? { collaboratorName: Object.keys(collaboratorByName) }
             : {}),
           ...(supplierNames?.length ? { supplierName: supplierNames } : {}),
+          stato: [...PROVVIGIONE_STATO_OPTIONS],
+          clientType: ["Business", "Domestico"],
+          operationType: [...PROVVIGIONE_OPERATION_OPTIONS],
         }}
         getRowClassName={(r) => {
           const storno = String(r.stornoRowClass ?? "");

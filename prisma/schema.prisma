@@ -366,6 +366,10 @@ model Commission {
   accrued    Decimal  @default(0) @db.Decimal(10, 2)
   received   Decimal  @default(0) @db.Decimal(10, 2)
   paid       Decimal  @default(0) @db.Decimal(10, 2)
+  /// Data in cui il gettone è stato stornato (clawback)
+  stornoDate   DateTime?
+  /// Importo gettone da stornare (di norma = gettone incassato)
+  stornoAmount Decimal? @db.Decimal(10, 2)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

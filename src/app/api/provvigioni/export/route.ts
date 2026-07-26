@@ -18,12 +18,18 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const collab = url.searchParams.get("collab");
   const settledPeriod = url.searchParams.get("settled")?.trim() || "";
+  const supplier = url.searchParams.get("supplier");
+  const stato = url.searchParams.get("stato");
+  const tipologia = url.searchParams.get("tipologia");
   const canViewAll = hasPermission(session.role, "commissions.view_all");
 
   const contractWhere = buildProvvigioniContractWhere({
     canViewAll,
     sessionUserId: session.id,
     collab,
+    supplier,
+    stato,
+    tipologia,
   });
 
   const contracts = await prisma.contract.findMany({

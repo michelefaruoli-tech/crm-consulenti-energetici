@@ -11,6 +11,14 @@ import {
 import { prisma } from "@/lib/prisma";
 import { parseFlexibleDate } from "@/lib/date-parse";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
+import {
+  effectiveGettone,
+  operationTypeFromLabel,
+} from "@/lib/provvigioni-stato";
+import {
+  computeSupplyStartDate,
+  normalizeOperationType,
+} from "@/lib/supply-dates";
 import type { Role } from "@/generated/prisma/client";
 
 type SessionLike = { id: string; role: Role };
@@ -18,12 +26,18 @@ type SessionLike = { id: string; role: Role };
 type CommissionWithContract = {
   id: string;
   contractId: string;
+  expected: unknown;
+  stornoDate: Date | null;
+  stornoAmount: unknown;
   contract: {
     id: string;
     clientId: string;
     collaboratorId: string;
     collectionDate: Date | null;
+    insertionDate: Date;
     deletedAt: Date | null;
+    client: { type: string };
+    supplier: { name: string };
   };
 };
 
@@ -37,7 +51,10 @@ async function loadCommission(commissionId: string) {
           clientId: true,
           collaboratorId: true,
           collectionDate: true,
+          insertionDate: true,
           deletedAt: true,
+          client: { select: { type: true } },
+          supplier: { select: { name: true } },
         },
       },
     },
@@ -142,6 +159,92 @@ async function applyCommissionField(
       data: { recurrence: normalized },
     });
     await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
+  } else if (field === "operationType") {
+    const mapped = operationTypeFromLabel(value);
+    // Per date fornitura usiamo la normalizzazione storica (Switch/Voltura/Attivazione)
+    const forSupply = normalizeOperationType(mapped);
+    const supplyStartDate = computeSupplyStartDate(
+      commission.contract.insertionDate,
+      forSupply,
+    );
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { operationType: mapped, supplyStartDate },
+    });
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: commission.contractId,
+      details: {
+        field: "operationType",
+        to: mapped,
+        source: "provvigioni_table",
+      },
+    });
+  } else if (field === "storno") {
+    const raw = value.trim().toLowerCase();
+    const on = /^(s[iì]|si|yes|1|storn)/i.test(raw);
+    if (!on) {
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: { stornoDate: null, stornoAmount: null },
+      });
+    } else {
+      const amount = effectiveGettone({
+        expected: Number(commission.expected ?? 0),
+        clientType: commission.contract.client.type,
+        supplierName: commission.contract.supplier.name,
+      });
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: {
+          stornoDate: commission.stornoDate ?? new Date(),
+          stornoAmount: amount,
+        },
+      });
+    }
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Commission",
+      entityId: commission.contractId,
+      details: { field: "storno", to: value.trim(), source: "provvigioni_table" },
+    });
+  } else if (field === "stornoDate") {
+    const raw = value.trim();
+    if (!raw) {
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: { stornoDate: null, stornoAmount: null },
+      });
+    } else {
+      const d = parseFlexibleDate(raw);
+      if (!d) throw new Error("Data storno non valida (usa MM/AAAA o GG/MM/AAAA)");
+      const amount =
+        Number(commission.stornoAmount ?? 0) ||
+        effectiveGettone({
+          expected: Number(commission.expected ?? 0),
+          clientType: commission.contract.client.type,
+          supplierName: commission.contract.supplier.name,
+        });
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: { stornoDate: d, stornoAmount: amount },
+      });
+    }
+  } else if (field === "stornoAmount") {
+    const amount = Number(value.replace(",", ".")) || 0;
+    await prisma.commission.update({
+      where: { id: commission.id },
+      data: {
+        stornoAmount: amount,
+        stornoDate:
+          amount > 0
+            ? (commission.stornoDate ?? new Date())
+            : null,
+      },
+    });
   } else if (field === "podPdr") {
     await prisma.contract.update({
       where: { id: commission.contractId },

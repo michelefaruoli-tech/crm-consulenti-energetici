@@ -218,6 +218,80 @@ async function softDeleteContract(
   });
 }
 
+/** Ripristina un contratto eliminato per errore (toglie deletedAt). */
+export async function restoreContractRowAction(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const session = await requireSession();
+    const contractId = String(formData.get("contractId") ?? "");
+    if (!contractId) return { ok: false, error: "Contratto mancante" };
+
+    const contract = await prisma.contract.findUnique({
+      where: { id: contractId },
+      select: {
+        id: true,
+        clientId: true,
+        collaboratorId: true,
+        deletedAt: true,
+        status: true,
+      },
+    });
+    if (!contract) return { ok: false, error: "Contratto non trovato" };
+    if (!contract.deletedAt) {
+      return { ok: false, error: "Questo contratto non è nel cestino" };
+    }
+    if (!canDeleteContract(session.role, session.id, contract.collaboratorId)) {
+      return { ok: false, error: "Non puoi ripristinare questo contratto" };
+    }
+
+    let previousStatus = "INSERITO";
+    const audit = await prisma.auditLog.findFirst({
+      where: {
+        entity: "Contract",
+        entityId: contractId,
+        action: "SOFT_DELETE",
+      },
+      orderBy: { createdAt: "desc" },
+      select: { details: true },
+    });
+    if (audit?.details) {
+      try {
+        const parsed = JSON.parse(audit.details) as { previousStatus?: string };
+        if (parsed.previousStatus && parsed.previousStatus !== "ANNULLATO") {
+          previousStatus = parsed.previousStatus;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: { deletedAt: null, status: previousStatus as never },
+    });
+    await writeAuditLog({
+      userId: session.id,
+      action: "RESTORE",
+      entity: "Contract",
+      entityId: contractId,
+      details: { restoredStatus: previousStatus },
+    });
+
+    revalidatePath("/contratti");
+    revalidatePath("/lavorazione");
+    revalidatePath("/attesa-pagamento");
+    revalidatePath("/provvigioni");
+    revalidatePath("/archivio");
+    revalidatePath("/");
+    revalidatePath(`/clienti/${contract.clientId}`);
+    return { ok: true };
+  } catch (e) {
+    console.error("[restoreContractRowAction]", e);
+    return { ok: false, error: friendlyDbError(e) };
+  }
+}
+
 /** Soft-delete senza $transaction (Neon HTTP non le supporta). */
 async function softDeleteClient(clientId: string, userId: string): Promise<void> {
   const now = new Date();

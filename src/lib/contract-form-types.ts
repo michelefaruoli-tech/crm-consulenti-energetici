@@ -77,6 +77,8 @@ export type NewContractPayload = {
   supplyRegion?: string;
   supplyClassification?: string;
   supplyStartDate?: string;
+  /** Data registrazione pratica (GG/MM/AAAA o ISO). Default: oggi. */
+  insertionDate?: string;
   durationMonths: number;
   productName?: string;
   offerCode?: string;

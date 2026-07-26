@@ -57,6 +57,8 @@ type Props = {
   serverColumnFilter?: {
     keys: string[];
     onFilter: (columnKey: string, values: string[]) => void;
+    /** Valori attivi da URL (es. fornitore Enel) per evidenziare il filtro */
+    activeValues?: Record<string, string[]>;
   };
   /**
    * Opzioni filtro forzate per colonna (es. tutti i collaboratori, non solo quelli in pagina).
@@ -269,9 +271,9 @@ export function ExcelFilterTable({
       {hasAnyFilter ? (
         <div className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <span>
-            Filtri colonna attivi: vedi {filtered.length} di {rows.length} righe di
-            questa pagina. Per un collaboratore usa i pulsanti sopra (carica fino a
-            100 contratti veri dal database).
+            Filtri locali attivi: vedi {filtered.length} di {rows.length} righe di
+            questa pagina. Fornitore, Stato e Tipologia ricaricano invece
+            tutto il database (come Collaboratore).
           </span>
           <button
             type="button"
@@ -300,7 +302,10 @@ export function ExcelFilterTable({
               </th>
             ) : null}
             {columns.map((col) => {
-              const active = (selected[col.key]?.size ?? 0) > 0;
+              const serverActive =
+                (serverColumnFilter?.activeValues?.[col.key]?.length ?? 0) > 0;
+              const active =
+                (selected[col.key]?.size ?? 0) > 0 || serverActive;
               const isSorted = activeSortKey(col.key);
               const dir = activeSortDir(col.key);
               const isServerCol = serverSortKeys.has(col.key);
@@ -391,6 +396,10 @@ export function ExcelFilterTable({
                       {(optionsByColumn[col.key] ?? []).map((opt) => {
                         const isServerCol = serverFilterKeys.has(col.key);
                         const isActive = (selected[col.key]?.size ?? 0) > 0;
+                        const serverChecked =
+                          serverColumnFilter?.activeValues?.[col.key]?.includes(
+                            opt,
+                          ) ?? false;
                         return (
                           <label
                             key={opt}
@@ -400,14 +409,18 @@ export function ExcelFilterTable({
                               type="checkbox"
                               checked={
                                 isServerCol
-                                  ? false
+                                  ? serverChecked
                                   : isActive
                                     ? selected[col.key].has(opt)
                                     : true
                               }
                               onChange={() => {
                                 if (isServerCol && serverColumnFilter) {
-                                  serverColumnFilter.onFilter(col.key, [opt]);
+                                  if (serverChecked) {
+                                    serverColumnFilter.onFilter(col.key, []);
+                                  } else {
+                                    serverColumnFilter.onFilter(col.key, [opt]);
+                                  }
                                   setOpenFilter(null);
                                   return;
                                 }

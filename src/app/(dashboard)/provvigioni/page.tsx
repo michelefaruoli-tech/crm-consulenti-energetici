@@ -4,16 +4,12 @@ import { requireSession } from "@/lib/auth";
 import { canConfirmCommission, hasPermission } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/commission";
 import { formatMonthYear } from "@/lib/date-parse";
-import { clientDisplayName } from "@/lib/utils";
+import { clientDisplayName, clientSortKey } from "@/lib/utils";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import {
   ProvvigioniFilterTable,
 } from "@/components/provvigioni/provvigioni-filter-table";
-import {
-  defaultGettonePrivato,
-  simplifiedProvvigioneStato,
-  type ProvvigioneRow,
-} from "@/lib/provvigioni-stato";
+import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
 import {
   RecurringRendicontoPanel,
@@ -33,9 +29,19 @@ import {
 } from "@/lib/storno-status";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
-import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
+import {
+  buildProvvigioniContractWhere,
+  sumProvvigioniTotals,
+} from "@/lib/provvigioni-filters";
 import { toPeriod } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
+import {
+  defaultGettonePrivato,
+  effectiveGettone,
+  operationTypeLabel,
+  simplifiedProvvigioneStato,
+  type ProvvigioneRow,
+} from "@/lib/provvigioni-stato";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +49,12 @@ type SearchParams = {
   page?: string;
   collab?: string;
   settled?: string;
+  /** Nome fornitore (es. Enel) — filtro su tutto il DB */
+  supplier?: string;
+  /** Incassato | Da incassare | KO / Cessato */
+  stato?: string;
+  /** Business | Domestico */
+  tipologia?: string;
   /** client = cognome+nome su tutto il filtro */
   sort?: string;
   dir?: string;
@@ -58,6 +70,9 @@ export default async function ProvvigioniPage({
     page: pageRaw,
     collab,
     settled: settledRaw,
+    supplier: supplierRaw,
+    stato: statoRaw,
+    tipologia: tipologiaRaw,
     sort: sortRaw,
     dir: dirRaw,
   } = await searchParams;
@@ -65,10 +80,17 @@ export default async function ProvvigioniPage({
   const canConfirm = canConfirmCommission(session.role);
   const canExport = hasPermission(session.role, "reports.export");
 
+  const supplier = supplierRaw?.trim() || undefined;
+  const stato = statoRaw?.trim() || undefined;
+  const tipologia = tipologiaRaw?.trim() || undefined;
+
   const contractWhere = buildProvvigioniContractWhere({
     canViewAll,
     sessionUserId: session.id,
     collab,
+    supplier,
+    stato,
+    tipologia,
   });
   const collabFilter =
     canViewAll && collab && collab !== "tutti" ? collab : undefined;
@@ -79,14 +101,11 @@ export default async function ProvvigioniPage({
   const sortByClient = sortRaw === "client";
   const sortDir: "asc" | "desc" = dirRaw === "desc" ? "desc" : "asc";
 
-  const orderBy: Prisma.ContractOrderByWithRelationInput[] = sortByClient
-    ? [
-        { client: { lastName: sortDir } },
-        { client: { firstName: sortDir } },
-        { client: { companyName: sortDir } },
-        { id: "asc" },
-      ]
-    : [{ insertionDate: "desc" }, { createdAt: "desc" }, { id: "desc" }];
+  const defaultOrderBy: Prisma.ContractOrderByWithRelationInput[] = [
+    { insertionDate: "desc" },
+    { createdAt: "desc" },
+    { id: "desc" },
+  ];
 
   void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
     console.error("sync recurring", e),
@@ -121,39 +140,56 @@ export default async function ProvvigioniPage({
     );
   }
 
-  const [
-    contracts,
-    sumAgg,
-    daConfermareCount,
-    collaboratorOptions,
-    supplierOptions,
-    missing,
-    collabGroups,
-    settledRowsRaw,
-  ] = await Promise.all([
-    prisma.contract.findMany({
+  const contractSelect = {
+    id: true,
+    clientId: true,
+    supplierId: true,
+    status: true,
+    paymentStatus: true,
+    recurrence: true,
+    podPdr: true,
+    pod: true,
+    pdr: true,
+    collectionDate: true,
+    commissionConfirmed: true,
+    supplyStartDate: true,
+    insertionDate: true,
+    createdAt: true,
+    expiryDate: true,
+    durationMonths: true,
+    stornoEndDate: true,
+    operationType: true,
+    collaboratorId: true,
+    notes: true,
+    client: {
+      select: {
+        type: true,
+        companyName: true,
+        firstName: true,
+        lastName: true,
+      },
+    },
+    collaborator: { select: { id: true, name: true } },
+    supplier: { select: { id: true, name: true, stornoMonths: true } },
+    commission: {
+      select: {
+        id: true,
+        expected: true,
+        received: true,
+        paid: true,
+        stornoDate: true,
+        stornoAmount: true,
+      },
+    },
+  } as const;
+
+  // Ordinamento cliente: A→Z unico (Domestico e Business mescolati per nome)
+  let pageContractIds: string[] | null = null;
+  if (sortByClient) {
+    const light = await prisma.contract.findMany({
       where: contractWhere,
       select: {
         id: true,
-        clientId: true,
-        supplierId: true,
-        status: true,
-        paymentStatus: true,
-        recurrence: true,
-        podPdr: true,
-        pod: true,
-        pdr: true,
-        collectionDate: true,
-        commissionConfirmed: true,
-        supplyStartDate: true,
-        insertionDate: true,
-        createdAt: true,
-        expiryDate: true,
-        durationMonths: true,
-        stornoEndDate: true,
-        operationType: true,
-        collaboratorId: true,
-        notes: true,
         client: {
           select: {
             type: true,
@@ -162,20 +198,47 @@ export default async function ProvvigioniPage({
             lastName: true,
           },
         },
-        collaborator: { select: { id: true, name: true } },
-        supplier: { select: { id: true, name: true, stornoMonths: true } },
-        commission: {
-          select: { id: true, expected: true, received: true, paid: true },
-        },
       },
-      orderBy,
-      skip: pageSkip(page),
-      take: PAGE_SIZE,
-    }),
-    prisma.commission.aggregate({
-      where: { contract: contractWhere },
-      _sum: { expected: true, received: true, paid: true },
-    }),
+    });
+    light.sort((a, b) => {
+      const cmp = clientSortKey(a.client).localeCompare(
+        clientSortKey(b.client),
+        "it",
+        { sensitivity: "base", numeric: true },
+      );
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    pageContractIds = light
+      .slice(pageSkip(page), pageSkip(page) + PAGE_SIZE)
+      .map((r) => r.id);
+  }
+
+  const [
+    contractsRaw,
+    moneyTotals,
+    daConfermareCount,
+    collaboratorOptions,
+    supplierOptions,
+    missing,
+    collabGroups,
+    settledRowsRaw,
+    deletedRecent,
+  ] = await Promise.all([
+    pageContractIds
+      ? pageContractIds.length === 0
+        ? Promise.resolve([])
+        : prisma.contract.findMany({
+            where: { id: { in: pageContractIds } },
+            select: contractSelect,
+          })
+      : prisma.contract.findMany({
+          where: contractWhere,
+          select: contractSelect,
+          orderBy: defaultOrderBy,
+          skip: pageSkip(page),
+          take: PAGE_SIZE,
+        }),
+    sumProvvigioniTotals(contractWhere),
     prisma.contract.count({
       where: { ...contractWhere, commissionConfirmed: false },
     }),
@@ -188,12 +251,10 @@ export default async function ProvvigioniPage({
           orderBy: [{ active: "desc" }, { name: "asc" }],
         })
       : Promise.resolve([]),
-    canViewAll
-      ? prisma.supplier.findMany({
-          select: { name: true },
-          orderBy: { name: "asc" },
-        })
-      : Promise.resolve([]),
+    prisma.supplier.findMany({
+      select: { name: true },
+      orderBy: { name: "asc" },
+    }),
     getMissingRecurringAlerts(sessionCollabFilter),
     canViewAll
       ? prisma.contract.groupBy({
@@ -203,7 +264,37 @@ export default async function ProvvigioniPage({
         })
       : Promise.resolve([]),
     getSettledRecurringForPeriod(settledPeriod, sessionCollabFilter),
+    prisma.contract.findMany({
+      where: {
+        deletedAt: { not: null },
+        ...(canViewAll ? {} : { collaboratorId: session.id }),
+      },
+      select: {
+        id: true,
+        deletedAt: true,
+        podPdr: true,
+        client: {
+          select: {
+            type: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        supplier: { select: { name: true } },
+        collaborator: { select: { name: true } },
+      },
+      orderBy: { deletedAt: "desc" },
+      take: 30,
+    }),
   ]);
+
+  const contracts =
+    pageContractIds == null
+      ? contractsRaw
+      : pageContractIds
+          .map((id) => contractsRaw.find((c) => c.id === id))
+          .filter((c): c is (typeof contractsRaw)[number] => Boolean(c));
 
   // Allinea stato/gettone sulle righe della pagina corrente:
   // - con data incasso → Incassato (non più KO/Chiuso)
@@ -276,14 +367,10 @@ export default async function ProvvigioniPage({
     })),
   );
 
-  const expected = Number(sumAgg._sum.expected ?? 0);
-  const received = Number(sumAgg._sum.received ?? 0);
-  const paidAmt = Number(sumAgg._sum.paid ?? 0);
   const totals = {
-    complessivo: expected,
-    ricevuto: received,
-    liquidato: paidAmt,
-    daAvere: Math.max(received - paidAmt, 0),
+    complessivo: moneyTotals.complessivo,
+    daIncassare: moneyTotals.daIncassare,
+    ricorrenti: moneyTotals.ricorrenti,
     daConfermare: daConfermareCount,
   };
 
@@ -318,16 +405,21 @@ export default async function ProvvigioniPage({
       supplierName: contract.supplier.name,
       clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
       amount: String(
-        Number(item?.expected ?? 0) ||
-          (contract.client.type === "PRIVATO"
-            ? defaultGettonePrivato(contract.supplier.name) ?? 0
-            : 0),
+        effectiveGettone({
+          expected: Number(item?.expected ?? 0),
+          clientType: contract.client.type,
+          supplierName: contract.supplier.name,
+        }),
       ),
+      operationType: operationTypeLabel(contract.operationType),
       recurrence: contract.recurrence || "Una tantum",
       stato: simplifiedProvvigioneStato(contract.status, hasDate),
       paymentStatus: paidLabel,
       confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,
+      stornoFlag: item?.stornoDate ? "Sì" : "No",
+      stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
+      stornoAmount: item?.stornoAmount != null ? String(Number(item.stornoAmount)) : "",
       notes: contract.notes || "",
       stornoLabel: storno.label,
       stornoRowClass: storno.rowClassName,
@@ -365,16 +457,37 @@ export default async function ProvvigioniPage({
   const queryBase = {
     collab: collabFilter,
     settled: settledPeriod,
+    supplier,
+    stato,
+    tipologia,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
-  const collabQs = collabFilter ? `&collab=${collabFilter}` : "";
-  const exportHref = `/api/provvigioni/export?settled=${settledPeriod}${
-    collabFilter ? `&collab=${collabFilter}` : ""
-  }`;
+  const filterHints = [
+    selectedCollabName ? `collab. ${selectedCollabName}` : null,
+    supplier ? `fornitore ${supplier}` : null,
+    stato ? `stato ${stato}` : null,
+    tipologia ? `tipologia ${tipologia}` : null,
+  ].filter(Boolean);
+  const collabQs = [
+    collabFilter ? `collab=${encodeURIComponent(collabFilter)}` : null,
+    supplier ? `supplier=${encodeURIComponent(supplier)}` : null,
+    stato ? `stato=${encodeURIComponent(stato)}` : null,
+    tipologia ? `tipologia=${encodeURIComponent(tipologia)}` : null,
+  ]
+    .filter(Boolean)
+    .map((p) => `&${p}`)
+    .join("");
+  const exportParams = new URLSearchParams();
+  exportParams.set("settled", settledPeriod);
+  if (collabFilter) exportParams.set("collab", collabFilter);
+  if (supplier) exportParams.set("supplier", supplier);
+  if (stato) exportParams.set("stato", stato);
+  if (tipologia) exportParams.set("tipologia", tipologia);
+  const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
   const sortHint = sortByClient
-    ? ` Ordinati per cliente (cognome + nome, ${sortDir === "asc" ? "A→Z" : "Z→A"}) su tutto il filtro.`
+    ? ` Ordinati per cliente A→Z unico (${sortDir === "asc" ? "A→Z" : "Z→A"}), Domestico e Business insieme.`
     : " Ordinati per data inserimento.";
 
   return (
@@ -384,12 +497,13 @@ export default async function ProvvigioniPage({
           <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
           <p className="text-slate-500">
             {total} contratti
-            {selectedCollabName
-              ? ` · filtro: ${selectedCollabName}`
+            {filterHints.length
+              ? ` · filtro: ${filterHints.join(" · ")}`
               : canViewAll
                 ? ` · accesso ${roleLabel} — tutti i collaboratori`
                 : " · solo i tuoi"}
-            .{sortHint} Max {PAGE_SIZE} righe per pagina. Colori = storno; bordo =
+            .{sortHint} Max {PAGE_SIZE} righe per pagina. I filtri Fornitore /
+            Stato / Tipologia cercano in tutto il database. Colori = storno; bordo =
             gettone.
             {totals.daConfermare > 0
               ? ` · ${totals.daConfermare} gettoni da confermare.`
@@ -406,7 +520,12 @@ export default async function ProvvigioniPage({
       {canViewAll ? (
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
-            href={`/provvigioni?settled=${settledPeriod}`}
+            href={`/provvigioni?${new URLSearchParams({
+              settled: settledPeriod,
+              ...(supplier ? { supplier } : {}),
+              ...(stato ? { stato } : {}),
+              ...(tipologia ? { tipologia } : {}),
+            }).toString()}`}
             className={
               !collabFilter
                 ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
@@ -418,7 +537,13 @@ export default async function ProvvigioniPage({
           {collabCounts.map((c) => (
             <Link
               key={c.id}
-              href={`/provvigioni?collab=${c.id}&settled=${settledPeriod}`}
+              href={`/provvigioni?${new URLSearchParams({
+                collab: c.id,
+                settled: settledPeriod,
+                ...(supplier ? { supplier } : {}),
+                ...(stato ? { stato } : {}),
+                ...(tipologia ? { tipologia } : {}),
+              }).toString()}`}
               className={
                 collabFilter === c.id
                   ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
@@ -433,54 +558,48 @@ export default async function ProvvigioniPage({
 
       <RecurringMissingPanel alerts={alertRows} />
 
+      <ProvvigioniTrashPanel
+        rows={deletedRecent.map((c) => ({
+          id: c.id,
+          clientName: clientDisplayName(c.client),
+          supplierName: c.supplier.name,
+          collaboratorName: c.collaborator.name,
+          podPdr: c.podPdr || "",
+          deletedAt: c.deletedAt?.toISOString() ?? "",
+        }))}
+      />
+
       <RecurringRendicontoPanel
         settledPeriod={settledPeriod}
         rows={settledRows}
         collabQuery={collabQs}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            {selectedCollabName
-              ? `Complessivo — ${selectedCollabName}`
-              : "Totale complessivo (previsto)"}
-          </p>
+          <p className="text-sm text-slate-500">Complessivo</p>
           <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.complessivo)}</p>
           <p className="mt-1 text-xs text-slate-400">
-            {selectedCollabName
-              ? `Solo questo collaboratore (tutte le pagine)`
-              : "Tutti i collaboratori visibili (tutte le pagine)"}
+            Incassato + da incassare (tutto il filtro)
           </p>
-        </div>
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm text-emerald-700">
-            {selectedCollabName
-              ? `Ricevuto — ${selectedCollabName}`
-              : "Totale ricevuto"}
-          </p>
-          <p className="mt-2 text-2xl font-bold text-emerald-900">
-            {formatCurrency(totals.ricevuto)}
-          </p>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            {selectedCollabName
-              ? `Liquidato — ${selectedCollabName}`
-              : "Totale liquidato"}
-          </p>
-          <p className="mt-2 text-2xl font-bold">{formatCurrency(totals.liquidato)}</p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-          <p className="text-sm text-amber-800">
-            {selectedCollabName
-              ? `Da avere — ${selectedCollabName}`
-              : "Totale da avere"}
-          </p>
+          <p className="text-sm text-amber-800">Da incassare</p>
           <p className="mt-2 text-2xl font-bold text-amber-950">
-            {formatCurrency(totals.daAvere)}
+            {formatCurrency(totals.daIncassare)}
           </p>
-          <p className="mt-1 text-xs text-amber-800/70">Ricevuto − liquidato</p>
+          <p className="mt-1 text-xs text-amber-800/70">
+            Solo senza data di incasso · somma gettoni
+          </p>
+        </div>
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
+          <p className="text-sm text-sky-800">Ricorrenti mensili</p>
+          <p className="mt-2 text-2xl font-bold text-sky-950">
+            {formatCurrency(totals.ricorrenti)}
+          </p>
+          <p className="mt-1 text-xs text-sky-800/70">
+            Solo contratti ricorrenti · somma gettoni
+          </p>
         </div>
       </div>
 
@@ -496,7 +615,13 @@ export default async function ProvvigioniPage({
         rows={rows}
         canDelete
         canConfirm={canConfirm}
-        listQuery={{ collab: collabFilter, settled: settledPeriod }}
+        listQuery={{
+          collab: collabFilter,
+          settled: settledPeriod,
+          supplier,
+          stato,
+          tipologia,
+        }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}
         page={page}
@@ -505,9 +630,7 @@ export default async function ProvvigioniPage({
             ? Object.fromEntries(collaboratorOptions.map((u) => [u.name, u.id]))
             : undefined
         }
-        supplierNames={
-          canViewAll ? supplierOptions.map((s) => s.name) : undefined
-        }
+        supplierNames={supplierOptions.map((s) => s.name)}
       />
 
       <PaginationNav

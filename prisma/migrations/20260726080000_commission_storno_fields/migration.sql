@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Commission" ADD COLUMN IF NOT EXISTS "stornoDate" TIMESTAMP(3);
+ALTER TABLE "Commission" ADD COLUMN IF NOT EXISTS "stornoAmount" DECIMAL(10,2);
