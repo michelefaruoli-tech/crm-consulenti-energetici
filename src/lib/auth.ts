@@ -114,7 +114,9 @@ export async function login(email: string, password: string) {
     return { error: limited.reason ?? "Troppi tentativi. Riprova più tardi." };
   }
 
-  const user = await prisma.user.findUnique({ where: { email: normalized } });
+  const user = await prisma.user.findFirst({
+    where: { email: { equals: normalized, mode: "insensitive" } },
+  });
   if (!user || !user.active) {
     await logSecurityEvent({
       eventType: "LOGIN_FAILED",
@@ -130,7 +132,7 @@ export async function login(email: string, password: string) {
     await logSecurityEvent({
       eventType: "LOGIN_FAILED",
       userId: user.id,
-      email: normalized,
+      email: user.email,
       details: "password errata",
       meta,
     });

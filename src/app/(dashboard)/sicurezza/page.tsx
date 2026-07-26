@@ -5,6 +5,8 @@ import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { formatRomeDateTime } from "@/lib/timezone";
 
+export const dynamic = "force-dynamic";
+
 const EVENT_LABELS: Record<string, string> = {
   LOGIN: "Login riuscito",
   LOGIN_FAILED: "Login fallito",
@@ -44,15 +46,31 @@ export default async function SicurezzaPage() {
     }),
   ]);
 
+  const lastFail = events.find((e) => e.eventType === "LOGIN_FAILED");
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Eventi sicurezza</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Accessi, tentativi falliti, reset password. Solo Admin. Ultime 100
-          righe.
+          Qui vedi i login sbagliati (password errata), i login ok, i reset
+          password. Solo Admin. Aggiorna la pagina (F5) dopo un tentativo.
         </p>
       </div>
+
+      {lastFail ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+          <strong>Ultimo login fallito:</strong>{" "}
+          {formatRomeDateTime(lastFail.createdAt)} —{" "}
+          {lastFail.email || lastFail.user?.email || "email sconosciuta"}
+          {lastFail.details ? ` (${lastFail.details})` : ""}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Nessun login fallito in elenco. Prova ad accedere con password sbagliata
+          da un’altra scheda, poi torna qui e premi F5.
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-center shadow-sm">
@@ -69,7 +87,7 @@ export default async function SicurezzaPage() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
@@ -84,59 +102,72 @@ export default async function SicurezzaPage() {
             {events.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
-                  Nessun evento ancora. Appariranno ai prossimi login.
+                  Nessun evento ancora.
                 </td>
               </tr>
             ) : (
-              events.map((e) => (
-                <tr key={e.id} className="border-t border-slate-100 align-top">
-                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-500">
-                    {formatRomeDateTime(e.createdAt)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={
-                        e.eventType.includes("FAIL") ||
-                        e.eventType.includes("BLOCK") ||
-                        e.eventType === "HONEYPOT"
-                          ? "font-medium text-rose-700"
-                          : e.eventType === "LOGIN"
-                            ? "font-medium text-emerald-700"
-                            : "text-slate-800"
-                      }
-                    >
-                      {EVENT_LABELS[e.eventType] ?? e.eventType}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div>{e.email || e.user?.email || "—"}</div>
-                    {e.user?.name ? (
-                      <div className="text-xs text-slate-500">{e.user.name}</div>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-500">
-                    {e.ipAddress || "—"}
-                  </td>
-                  <td className="max-w-xs truncate px-3 py-2 text-xs text-slate-500">
-                    {e.details || e.userAgent?.slice(0, 60) || "—"}
-                  </td>
-                </tr>
-              ))
+              events.map((e) => {
+                const isFail =
+                  e.eventType.includes("FAIL") ||
+                  e.eventType.includes("BLOCK") ||
+                  e.eventType === "HONEYPOT";
+                return (
+                  <tr
+                    key={e.id}
+                    className={`border-t border-slate-100 align-top ${
+                      isFail ? "bg-rose-50/40" : ""
+                    }`}
+                  >
+                    <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-500">
+                      {formatRomeDateTime(e.createdAt)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          isFail
+                            ? "font-medium text-rose-700"
+                            : e.eventType === "LOGIN"
+                              ? "font-medium text-emerald-700"
+                              : "text-slate-800"
+                        }
+                      >
+                        {EVENT_LABELS[e.eventType] ?? e.eventType}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div>{e.email || e.user?.email || "—"}</div>
+                      {e.user?.name ? (
+                        <div className="text-xs text-slate-500">{e.user.name}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-500">
+                      {e.ipAddress || "—"}
+                    </td>
+                    <td className="max-w-xs px-3 py-2 text-xs text-slate-600">
+                      {e.details || "—"}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
       <p className="text-sm text-slate-500">
-        Vedi anche{" "}
+        Nota: nella schermata di login compare solo «Credenziali non valide» (non
+        dice se è email o password), per non aiutare chi prova a entrare. Il
+        dettaglio «password errata» lo vedi solo qui.
+      </p>
+
+      <p className="text-sm text-slate-500">
         <Link href="/privacy" className="text-emerald-700 underline">
           Informativa privacy
-        </Link>{" "}
-        (pubblica) e{" "}
+        </Link>
+        {" · "}
         <Link href="/account" className="text-emerald-700 underline">
-          Account
-        </Link>{" "}
-        per cambiare la tua password.
+          Account (cambio password)
+        </Link>
       </p>
     </div>
   );
