@@ -826,11 +826,21 @@ export async function deleteUserAction(formData: FormData): Promise<void> {
   revalidatePath("/utenti");
 }
 
-/** Disattiva tutti gli altri utenti (tiene solo quello loggato). */
-export async function deleteAllOtherUsersAction(): Promise<void> {
+/**
+ * Disattiva tutti gli altri utenti (tiene solo quello loggato).
+ * Richiede conferma esplicita nel form: confirmText = "ELIMINA TUTTI"
+ */
+export async function deleteAllOtherUsersAction(formData: FormData): Promise<void> {
   const session = await requireSession();
   if (!hasPermission(session.role, "users.manage")) {
     throw new Error("Permesso negato");
+  }
+
+  const confirmText = String(formData.get("confirmText") ?? "").trim();
+  if (confirmText !== "ELIMINA TUTTI") {
+    throw new Error(
+      'Conferma non valida: digita esattamente "ELIMINA TUTTI" per procedere',
+    );
   }
 
   const others = await prisma.user.findMany({
@@ -846,6 +856,93 @@ export async function deleteAllOtherUsersAction(): Promise<void> {
         active: false,
         email: `deleted_${now}_${user.id}_${user.email}`,
         name: `[Eliminato] ${user.name}`,
+      },
+    });
+  }
+
+  revalidatePath("/utenti");
+}
+
+/** Recupera email originale dopo soft-delete. */
+function recoverDeletedUserEmail(userId: string, email: string): string {
+  const bulk = email.match(new RegExp(`^deleted_\\d+_${userId}_(.+)$`));
+  if (bulk?.[1]) return bulk[1];
+  const single = email.match(/^deleted_\d+_(.+)$/);
+  if (single?.[1]) return single[1];
+  return email;
+}
+
+function recoverDeletedUserName(name: string): string {
+  return name.replace(/^(\[Eliminato\]\s*)+/i, "").trim() || name;
+}
+
+/** Ripristina un utente soft-deleted (active=false). */
+export async function restoreUserAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    throw new Error("Permesso negato");
+  }
+
+  const userId = String(formData.get("userId") ?? "");
+  if (!userId) throw new Error("Utente non specificato");
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new Error("Utente non trovato");
+  if (user.active) throw new Error("Utente già attivo");
+
+  const restoredEmail = recoverDeletedUserEmail(user.id, user.email);
+  const restoredName = recoverDeletedUserName(user.name);
+
+  const conflict = await prisma.user.findFirst({
+    where: { email: restoredEmail, id: { not: user.id } },
+    select: { id: true },
+  });
+  if (conflict) {
+    throw new Error(
+      `Impossibile ripristinare: l'email ${restoredEmail} è già usata da un altro account`,
+    );
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      active: true,
+      email: restoredEmail,
+      name: restoredName,
+    },
+  });
+
+  revalidatePath("/utenti");
+}
+
+/** Ripristina tutti gli utenti soft-deleted. */
+export async function restoreAllDeletedUsersAction(): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    throw new Error("Permesso negato");
+  }
+
+  const deleted = await prisma.user.findMany({
+    where: { active: false },
+    select: { id: true, email: true, name: true },
+  });
+
+  for (const user of deleted) {
+    const restoredEmail = recoverDeletedUserEmail(user.id, user.email);
+    const restoredName = recoverDeletedUserName(user.name);
+
+    const conflict = await prisma.user.findFirst({
+      where: { email: restoredEmail, id: { not: user.id } },
+      select: { id: true },
+    });
+    if (conflict) continue;
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        active: true,
+        email: restoredEmail,
+        name: restoredName,
       },
     });
   }
