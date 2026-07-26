@@ -172,16 +172,10 @@ export async function parseHeliosProvvigioniBuffer(
   return { ok: true, lines };
 }
 
-async function loadHeliosContractsByPod() {
-  const helios = await prisma.supplier.findFirst({
-    where: { name: { equals: "Helios", mode: "insensitive" } },
-    select: { id: true },
-  });
-  if (!helios) return { error: "Fornitore Helios non trovato nel CRM" as const };
-
-  const contracts = await prisma.contract.findMany({
+async function loadHeliosContractList(supplierId: string) {
+  return prisma.contract.findMany({
     where: {
-      supplierId: helios.id,
+      supplierId,
       deletedAt: null,
       isHistorical: false,
     },
@@ -203,8 +197,24 @@ async function loadHeliosContractsByPod() {
       },
     },
   });
+}
 
-  const byPod = new Map<string, typeof contracts>();
+type HeliosContractRow = Awaited<ReturnType<typeof loadHeliosContractList>>[number];
+
+async function loadHeliosContractsByPod(): Promise<
+  | { ok: true; byPod: Map<string, HeliosContractRow[]> }
+  | { ok: false; error: string }
+> {
+  const helios = await prisma.supplier.findFirst({
+    where: { name: { equals: "Helios", mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (!helios) {
+    return { ok: false, error: "Fornitore Helios non trovato nel CRM" };
+  }
+
+  const contracts = await loadHeliosContractList(helios.id);
+  const byPod = new Map<string, HeliosContractRow[]>();
   for (const c of contracts) {
     const key = normalizePodKey(c.podPdr || c.pod || c.pdr);
     if (!key) continue;
@@ -212,7 +222,7 @@ async function loadHeliosContractsByPod() {
     list.push(c);
     byPod.set(key, list);
   }
-  return { byPod };
+  return { ok: true, byPod };
 }
 
 function buildPreviewRows(
@@ -244,17 +254,18 @@ function buildPreviewRows(
       };
     }
     if (matches.length > 1) {
+      const first = matches[0]!;
       return {
         excelRow: line.excelRow,
         pod: line.pod,
         intestatario: line.intestatario,
         baseAmount: line.baseAmount,
         status: "ambiguous" as const,
-        contractId: matches[0].id,
-        clientName: clientDisplayName(matches[0].client),
+        contractId: first.id,
+        clientName: clientDisplayName(first.client),
       };
     }
-    const c = matches[0];
+    const c = matches[0]!;
     const month = c.recurringMonths.find((m) => m.period === competencePeriod);
     const already = month?.status === "PAID";
     return {
@@ -262,7 +273,7 @@ function buildPreviewRows(
       pod: line.pod,
       intestatario: line.intestatario,
       baseAmount: line.baseAmount,
-      status: (already ? "already_paid" : "will_pay") as const,
+      status: already ? ("already_paid" as const) : ("will_pay" as const),
       contractId: c.id,
       clientName: clientDisplayName(c.client),
     };
@@ -305,7 +316,9 @@ export async function previewHeliosProvvigioniAction(
   if (!parsed.ok) return parsed;
 
   const map = await loadHeliosContractsByPod();
-  if ("error" in map) return { ok: false, error: map.error };
+  if (!map.ok) {
+    return { ok: false, error: map.error };
+  }
 
   const rows = buildPreviewRows(parsed.lines, map.byPod, competencePeriod);
   return {
@@ -353,7 +366,7 @@ export async function applyHeliosProvvigioniAction(
   if (!parsed.ok) return parsed;
 
   const map = await loadHeliosContractsByPod();
-  if ("error" in map) return { ok: false, error: map.error };
+  if (!map.ok) return { ok: false, error: map.error };
 
   const preview = buildPreviewRows(parsed.lines, map.byPod, competencePeriod);
   const amountByPod = new Map(parsed.lines.map((l) => [l.pod, l.baseAmount]));
