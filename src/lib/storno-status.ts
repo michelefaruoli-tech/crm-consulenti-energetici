@@ -4,8 +4,8 @@
  * Colori (richiesta UI):
  * - giallo       — Da incassare
  * - teal chiaro  — Ricorrente (distinto dal lime fuori storno)
- * - arancio      — A ~1 mese dai 2 mesi di contratto (inizio fornitura + 2 mesi)
- * - rosso chiaro — In periodo storno
+ * - arancio      — Da incassare e a ~1 mese dai 2 mesi di contratto
+ * - rosso chiaro — Incassato e ancora in periodo storno (es. Dolomiti 8 mesi da ingresso)
  * - grigio       — KO / Cessato
  * - lime         — Fuori storno
  * - testo rosso  — A ~1 mese dalla fine storno
@@ -173,18 +173,6 @@ export function resolveStornoInfo(input: {
     };
   }
 
-  // ~1 mese prima dei 2 mesi di contratto (inizio fornitura + 2 mesi)
-  if (isApproachingTwoMonthsContract(input.supplyStartDate, now)) {
-    return {
-      kind: "verso_due_mesi",
-      label: "Verso 2 mesi (-1 mese)",
-      rowClassName: `border-l-4 border-orange-500 bg-orange-100 ${ROW_TEXT}`,
-      stornoEndDate: stornoEnd,
-      isFuoriStorno: false,
-      warnOnEdit: true,
-    };
-  }
-
   // Ricorrente: teal chiaro (non scuro), ben distinto dal lime «fuori storno»
   if (isRecurring(input.recurrence)) {
     return {
@@ -197,8 +185,20 @@ export function resolveStornoInfo(input: {
     };
   }
 
-  // Non ancora pagato → da incassare (giallo + testo scuro)
+  // Non ancora pagato
   if (!isPaid(input.collectionDate)) {
+    // Arancio solo su «da incassare»: ~1 mese ai 2 mesi di contratto
+    // (NON deve sovrascrivere il rosso storno sui già incassati)
+    if (isApproachingTwoMonthsContract(input.supplyStartDate, now)) {
+      return {
+        kind: "verso_due_mesi",
+        label: "Verso 2 mesi (-1 mese)",
+        rowClassName: `border-l-4 border-orange-500 bg-orange-100 ${ROW_TEXT}`,
+        stornoEndDate: stornoEnd,
+        isFuoriStorno: false,
+        warnOnEdit: true,
+      };
+    }
     return {
       kind: "da_pagare",
       label: "Da incassare",
@@ -392,9 +392,9 @@ export const STORNO_LEGEND = [
   { label: "Da incassare", className: "bg-yellow-200 ring-yellow-500" },
   { label: "Ricorrente", className: "bg-teal-50 ring-teal-500" },
   { label: "Fuori storno (si può cambiare)", className: "bg-lime-200 ring-lime-500" },
-  { label: "Verso 2 mesi (-1)", className: "bg-orange-200 ring-orange-500" },
+  { label: "Verso 2 mesi (solo da incassare)", className: "bg-orange-200 ring-orange-500" },
   { label: "Fine storno (~1 mese) — testo rosso", className: "bg-rose-100 ring-red-500" },
-  { label: "In periodo storno (non cambiare)", className: "bg-red-200 ring-red-400" },
+  { label: "In periodo storno (incassato)", className: "bg-red-200 ring-red-400" },
   { label: "KO / Cessato", className: "bg-slate-300 ring-slate-500" },
 ] as const;
 
