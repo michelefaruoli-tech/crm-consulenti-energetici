@@ -424,3 +424,74 @@ export async function adminSendPasswordResetAction(formData: FormData): Promise<
   await requestPasswordResetAction(fd);
   redirect("/utenti?ok=reset_inviato");
 }
+
+/**
+ * Admin/Segreteria imposta direttamente una nuova password per un utente
+ * (senza email di reset). Utile per collaboratori senza casella email.
+ */
+export async function adminSetUserPasswordAction(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    return { ok: false, error: "Permesso negato" };
+  }
+
+  const userId = String(formData.get("userId") ?? "").trim();
+  const next = String(formData.get("newPassword") ?? "");
+  const confirm = String(formData.get("confirmPassword") ?? "");
+  const minLen = Number(process.env.PASSWORD_MIN_LENGTH ?? 8);
+
+  if (!userId) return { ok: false, error: "Utente non specificato" };
+  if (next.length < minLen) {
+    return {
+      ok: false,
+      error: `La password deve avere almeno ${minLen} caratteri`,
+    };
+  }
+  if (next !== confirm) {
+    return { ok: false, error: "Password e conferma non coincidono" };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, name: true, active: true },
+  });
+  if (!user) return { ok: false, error: "Utente non trovato" };
+  if (!user.active) {
+    return { ok: false, error: "Utente disattivato: ripristinalo prima" };
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      password: await hashPassword(next),
+      passwordChangedAt: new Date(),
+    },
+  });
+  await prisma.userSecurityEvent.create({
+    data: {
+      userId: user.id,
+      eventType: "PASSWORD_CHANGED",
+    },
+  });
+  await prisma.auditLog.create({
+    data: {
+      userId: session.id,
+      action: "PASSWORD_SET_BY_ADMIN",
+      entity: "User",
+      entityId: user.id,
+      details: JSON.stringify({
+        targetEmail: user.email,
+        targetName: user.name,
+        byAdminId: session.id,
+      }),
+    },
+  });
+
+  revalidatePath("/utenti");
+  return {
+    ok: true,
+    message: `Password aggiornata per ${user.name}. Comunicala al collaboratore.`,
+  };
+}

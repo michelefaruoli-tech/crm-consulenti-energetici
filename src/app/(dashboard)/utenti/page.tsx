@@ -1,9 +1,3 @@
-import {
-  createUserAction,
-  deleteUserAction,
-  restoreUserAction,
-  restoreAllDeletedUsersAction,
-} from "@/lib/actions";
 import { adminSendPasswordResetAction } from "@/lib/master-actions";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
@@ -14,6 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { ROLE_LABELS } from "@/lib/constants";
 import { DeleteAllUsersButton } from "@/components/utenti/delete-all-users-button";
+import { AdminSetPasswordButton } from "@/components/utenti/admin-set-password-button";
+import {
+  createUserAction,
+  deleteUserAction,
+  restoreUserAction,
+  restoreAllDeletedUsersAction,
+} from "@/lib/actions";
 
 export default async function UtentiPage() {
   const session = await requireSession();
@@ -59,7 +60,9 @@ export default async function UtentiPage() {
         Non puoi eliminare l&apos;account con cui sei collegato. Gli utenti
         eliminati non spariscono dal database: restano disattivati e li puoi
         ripristinare qui sotto. &quot;Elimina tutti tranne me&quot; richiede due
-        conferme (finestra + digita <strong>ELIMINA TUTTI</strong>).
+        conferme (finestra + digita <strong>ELIMINA TUTTI</strong>). Con{" "}
+        <strong>Nuova password</strong> l&apos;admin può aggiornare la password
+        di un collaboratore (poi va comunicata a voce/WhatsApp).
       </p>
 
       <form
@@ -124,6 +127,10 @@ export default async function UtentiPage() {
                       </Link>
                     ) : (
                       <>
+                        <AdminSetPasswordButton
+                          userId={user.id}
+                          userName={user.name}
+                        />
                         <form action={adminSendPasswordResetAction}>
                           <input type="hidden" name="userId" value={user.id} />
                           <Button type="submit" size="sm" variant="secondary">
