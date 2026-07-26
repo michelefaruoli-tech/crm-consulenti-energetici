@@ -33,24 +33,16 @@ export function clientSortKey(client: {
 }): string {
   const company = (client.companyName ?? "").trim();
   const person = [client.lastName, client.firstName].filter(Boolean).join(" ").trim();
-  return (company || person || clientDisplayName({
-    type: client.type ?? "PRIVATO",
-    companyName: client.companyName,
-    firstName: client.firstName,
-    lastName: client.lastName,
-  })).toLocaleLowerCase("it");
-}
-
-export async function generateContractNumber(): Promise<string> {
-  const { allocateContractNumber, syncContractNumberSequenceFromExisting } = await import(
-    "@/lib/contract-number"
-  );
-  try {
-    return await allocateContractNumber();
-  } catch {
-    await syncContractNumberSequenceFromExisting();
-    return allocateContractNumber();
-  }
+  return (
+    company ||
+    person ||
+    clientDisplayName({
+      type: client.type ?? "PRIVATO",
+      companyName: client.companyName,
+      firstName: client.firstName,
+      lastName: client.lastName,
+    })
+  ).toLocaleLowerCase("it");
 }
 
 export function isContractBlocked(status: string): boolean {

@@ -41,3 +41,13 @@ export async function syncContractNumberSequenceFromExisting(): Promise<void> {
     DO UPDATE SET "last" = GREATEST("ContractNumberSequence"."last", EXCLUDED."last")
   `;
 }
+
+/** Genera numero contratto (solo server). Con retry se la sequenza non è allineata. */
+export async function generateContractNumber(): Promise<string> {
+  try {
+    return await allocateContractNumber();
+  } catch {
+    await syncContractNumberSequenceFromExisting();
+    return allocateContractNumber();
+  }
+}

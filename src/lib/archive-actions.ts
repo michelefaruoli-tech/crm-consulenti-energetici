@@ -5,7 +5,7 @@ import ExcelJS from "exceljs";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { generateContractNumber } from "@/lib/utils";
+import { generateContractNumber } from "@/lib/contract-number";
 import { computeSupplyStartDate, normalizeOperationType } from "@/lib/supply-dates";
 import { normalizePodKey } from "@/lib/storno-status";
 

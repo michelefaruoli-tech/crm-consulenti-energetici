@@ -8,7 +8,7 @@ import { login, destroySession, requireSession } from "@/lib/auth";
 import { calculateExpectedCommission } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { generateContractNumber } from "@/lib/utils";
+import { generateContractNumber } from "@/lib/contract-number";
 import {
   computeSupplyStartDate,
   normalizeOperationType,
