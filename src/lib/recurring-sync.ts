@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { isRecurring, monthsBetween, toPeriod } from "@/lib/recurring";
+import { isRecurring, monthsBetween, normalizeRecurrence, toPeriod } from "@/lib/recurring";
 
 /**
- * Per contratti ricorrenti genera i mesi di competenza da inizio → oggi.
+ * Per contratti ricorrenti genera i mesi di competenza da inizio fornitura → oggi.
  *
  * Fonte di verità sullo stato = riga RecurringMonth (non collectionDate).
  * - PAID / CLOSED / ERROR_UNPAID esistenti non vengono sovrascritti
@@ -25,9 +25,25 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       commission: { select: { expected: true } },
     },
   });
-  if (!contract || !isRecurring(contract.recurrence)) return;
+  if (!contract) return;
 
-  if (contract.status === "CHIUSO" || contract.status === "ANNULLATO") {
+  // Allinea etichetta R/G (es. «R » → «Ricorrente») così i filtri scheda funzionano
+  const normalized = normalizeRecurrence(contract.recurrence);
+  if (contract.recurrence?.trim() !== normalized) {
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: { recurrence: normalized },
+    });
+    contract.recurrence = normalized;
+  }
+
+  if (!isRecurring(contract.recurrence)) return;
+
+  if (
+    contract.status === "CHIUSO" ||
+    contract.status === "ANNULLATO" ||
+    contract.status === "KO"
+  ) {
     await prisma.recurringMonth.updateMany({
       where: { contractId, status: { in: ["PENDING", "MISSING"] } },
       data: { status: "CLOSED" },
@@ -35,8 +51,8 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  const startDate =
-    contract.supplyStartDate ?? contract.collectionDate ?? contract.insertionDate;
+  // Conteggio mesi da inizio fornitura (non dalla data incasso gettone)
+  const startDate = contract.supplyStartDate ?? contract.insertionDate;
   const start = toPeriod(startDate);
   const now = toPeriod(new Date());
   const periods = monthsBetween(start, now);
@@ -53,7 +69,6 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
         existing.status === "ERROR_UNPAID" ||
         existing.status === "PAID")
     ) {
-      // Aggiorna solo amount se manca
       if (amount != null && existing.amount == null) {
         await prisma.recurringMonth.update({
           where: { id: existing.id },
@@ -88,6 +103,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   }
 }
 
+/** Normalizza etichette R e sync mesi per tutti i ricorrenti (o un collaboratore). */
 export async function syncAllRecurringMonths(collaboratorId?: string): Promise<number> {
   const contracts = await prisma.contract.findMany({
     where: {
@@ -96,17 +112,38 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       ...(collaboratorId ? { collaboratorId } : {}),
       OR: [
         { recurrence: { equals: "R", mode: "insensitive" } },
-        { recurrence: { contains: "Ricor", mode: "insensitive" } },
+        { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
+        { recurrence: { contains: "ricor", mode: "insensitive" } },
         { recurrence: { contains: "mensil", mode: "insensitive" } },
+        // Varianti corte / spazi che altrimenti non entrano nel filtro scheda
+        { recurrence: { startsWith: "R", mode: "insensitive" } },
       ],
     },
-    select: { id: true },
+    select: { id: true, recurrence: true },
   });
 
-  for (const c of contracts) {
+  // Passata extra: etichette strane (solo «r», spazi) non catturate da startsWith se minuscole già ok
+  const maybeR = await prisma.contract.findMany({
+    where: {
+      isHistorical: false,
+      deletedAt: null,
+      ...(collaboratorId ? { collaboratorId } : {}),
+      recurrence: { not: null },
+      id: { notIn: contracts.map((c) => c.id) },
+    },
+    select: { id: true, recurrence: true },
+    take: 2000,
+  });
+  const extra = maybeR.filter((c) => isRecurring(c.recurrence));
+  const all = [...contracts, ...extra];
+  const seen = new Set<string>();
+
+  for (const c of all) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
     await syncRecurringMonthsForContract(c.id);
   }
-  return contracts.length;
+  return seen.size;
 }
 
 export async function getMissingRecurringAlerts(collaboratorId?: string) {

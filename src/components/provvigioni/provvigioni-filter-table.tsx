@@ -572,7 +572,7 @@ export function ProvvigioniFilterTable({
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={current === "Sì" ? "Sì" : "No"}
-            title="Segna storno gettone (importo = gettone incassato)"
+            title="Segna storno: gettone a compensazione (negativo)"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {
               const v = e.target.value;
@@ -580,7 +580,12 @@ export function ProvvigioniFilterTable({
               if (v === "Sì") {
                 const amount = String(r.amount ?? "").trim();
                 if (amount && !getDraftValue(r, "stornoAmount")) {
-                  queueDraft(r, "stornoAmount", amount);
+                  const n = Number(amount.replace(",", ".")) || 0;
+                  queueDraft(
+                    r,
+                    "stornoAmount",
+                    n > 0 ? String(-Math.abs(n)) : "0",
+                  );
                 }
                 if (!getDraftValue(r, "stornoMonth")) {
                   const d = new Date();
@@ -677,13 +682,13 @@ export function ProvvigioniFilterTable({
 
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="text-[11px] text-slate-600">
-            Data pagato (Gettone)
+            Data incassato
             <input
               className="mt-0.5 block w-28 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
               value={paidMonth}
               onChange={(e) => setPaidMonth(e.target.value)}
               placeholder="MM/AAAA"
-              title="Usata per «Segna pagato» (una tantum / riepilogo)"
+              title="Usata per «Segna incassato» (selezione multipla)"
             />
           </label>
           <button
@@ -691,7 +696,7 @@ export function ProvvigioniFilterTable({
             disabled={pending}
             className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
             onClick={() =>
-              runBulk("Segna pagato", async () => {
+              runBulk("Segna incassato", async () => {
                 const fd = new FormData();
                 fd.set("commissionIds", selectedIds.join(","));
                 fd.set("collectionMonth", paidMonth);
@@ -699,7 +704,7 @@ export function ProvvigioniFilterTable({
               })
             }
           >
-            Segna pagato
+            Segna incassato
           </button>
 
           {canConfirm ? (
@@ -708,7 +713,7 @@ export function ProvvigioniFilterTable({
               disabled={pending}
               className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-800 disabled:opacity-50"
               onClick={() =>
-                runBulk("Conferma gettoni", async () => {
+                runBulk("Conferma gettone", async () => {
                   const fd = new FormData();
                   fd.set("commissionIds", selectedIds.join(","));
                   return bulkConfirmCommissionsAction(fd);
@@ -737,10 +742,10 @@ export function ProvvigioniFilterTable({
             type="button"
             disabled={pending}
             className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800 disabled:opacity-50"
-            title="Per ogni contratto ricorrente: paga il mese competenza MISSING più vecchio"
+            title="Incassa il mese di competenza più vecchio ancora mancante (dopo l’inizio fornitura i mesi si contano da soli)"
             onClick={() =>
               runBulk(
-                `Ricorrenze: 1 mese mancante → rendiconto ${periodLabel(settledPeriod)}`,
+                `Incassa 1 mese ric. → rendiconto ${periodLabel(settledPeriod)}`,
                 async () => {
                   const fd = new FormData();
                   fd.set("commissionIds", selectedIds.join(","));
@@ -751,16 +756,16 @@ export function ProvvigioniFilterTable({
               )
             }
           >
-            Paga 1 mese ric.
+            Incassa 1 mese ric.
           </button>
           <button
             type="button"
             disabled={pending}
             className="rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950 disabled:opacity-50"
-            title="Paga TUTTI i mesi MISSING dei selezionati con lo stesso rendiconto"
+            title="Incassa tutti i mesi di competenza ancora mancanti (contati da inizio fornitura)"
             onClick={() =>
               runBulk(
-                `Ricorrenze: TUTTI i mesi mancanti → rendiconto ${periodLabel(settledPeriod)}`,
+                `Incassa mesi ric. mancanti → rendiconto ${periodLabel(settledPeriod)}`,
                 async () => {
                   const fd = new FormData();
                   fd.set("commissionIds", selectedIds.join(","));
@@ -771,7 +776,7 @@ export function ProvvigioniFilterTable({
               )
             }
           >
-            Paga tutti mesi ric.
+            Incassa mesi ric. mancanti
           </button>
 
           {canDelete ? (

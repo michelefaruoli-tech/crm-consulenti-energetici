@@ -23,10 +23,8 @@ export async function GET(request: Request) {
   const tipologia = url.searchParams.get("tipologia");
   const q = url.searchParams.get("q");
   const vistaRaw = url.searchParams.get("vista");
-  const vista =
-    vistaRaw === "ricorrente" || vistaRaw === "gettoni" ? vistaRaw : "tutti";
-  const recurrenceMode =
-    vista === "ricorrente" ? "only" : vista === "gettoni" ? "exclude" : "all";
+  const vista = vistaRaw === "ricorrente" ? "ricorrente" : "tutti";
+  const recurrenceMode = vista === "ricorrente" ? "only" : "all";
   const canViewAll = hasPermission(session.role, "commissions.view_all");
 
   const contractWhere = buildProvvigioniContractWhere({

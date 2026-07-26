@@ -60,7 +60,7 @@ type SearchParams = {
   dir?: string;
   /** Cerca cliente / POD */
   q?: string;
-  /** tutti (default) | gettoni | ricorrente */
+  /** tutti (default) | ricorrente */
   vista?: string;
 };
 
@@ -90,11 +90,9 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
-  // Default = tutti (gettoni + ricorrenti), così non “scompaiono” clienti R
-  const vista =
-    vistaRaw === "ricorrente" || vistaRaw === "gettoni" ? vistaRaw : "tutti";
-  const recurrenceMode =
-    vista === "ricorrente" ? "only" : vista === "gettoni" ? "exclude" : "all";
+  // Default = tutti. Scheda Ricorrente = solo R. (gettoni legacy → tutti)
+  const vista = vistaRaw === "ricorrente" ? "ricorrente" : "tutti";
+  const recurrenceMode = vista === "ricorrente" ? "only" : "all";
 
   const contractWhere = buildProvvigioniContractWhere({
     canViewAll,
@@ -511,11 +509,7 @@ export default async function ProvvigioniPage({
     stato ? `stato ${stato}` : null,
     tipologia ? `tipologia ${tipologia}` : null,
     q ? `cerca «${q}»` : null,
-    vista === "ricorrente"
-      ? "scheda Ricorrente"
-      : vista === "tutti"
-        ? "tutti (gettoni+R)"
-        : "scheda Gettoni",
+    vista === "ricorrente" ? "scheda Ricorrente" : "tutti (gettoni+R)",
   ].filter(Boolean);
   const collabQs = [
     collabFilter ? `collab=${encodeURIComponent(collabFilter)}` : null,
@@ -538,7 +532,7 @@ export default async function ProvvigioniPage({
   if (vista !== "tutti") exportParams.set("vista", vista);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
-  function vistaHref(nextVista: "gettoni" | "ricorrente" | "tutti") {
+  function vistaHref(nextVista: "ricorrente" | "tutti") {
     return `/provvigioni?${new URLSearchParams({
       settled: settledPeriod,
       ...(collabFilter ? { collab: collabFilter } : {}),
@@ -593,16 +587,6 @@ export default async function ProvvigioniPage({
           }
         >
           Tutti ({countGettoni + countRicorrenti})
-        </Link>
-        <Link
-          href={vistaHref("gettoni")}
-          className={
-            vista === "gettoni"
-              ? "rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
-              : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
-          }
-        >
-          Gettoni ({countGettoni})
         </Link>
         <Link
           href={vistaHref("ricorrente")}

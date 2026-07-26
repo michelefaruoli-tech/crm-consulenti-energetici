@@ -11,6 +11,8 @@
  * - testo rosso  — A ~1 mese dalla fine storno
  */
 
+import { isRecurring as isRecurringCanonical } from "@/lib/recurring";
+
 export type StornoKind =
   | "cessato"
   | "scaduto"
@@ -60,10 +62,7 @@ export function normalizePodKey(podPdr: string | null | undefined): string {
 }
 
 export function isRecurring(recurrence: string | null | undefined): boolean {
-  const r = String(recurrence ?? "").trim();
-  if (!r) return false;
-  if (/^r$/i.test(r)) return true;
-  return /ricor|mensil/i.test(r);
+  return isRecurringCanonical(recurrence);
 }
 
 export function addMonths(date: Date, months: number): Date {

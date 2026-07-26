@@ -3,6 +3,8 @@
  * sia dal Client Component (tabella). Non mettere "use client" qui.
  */
 
+import { isRecurring } from "@/lib/recurring";
+
 export type ProvvigioneRow = {
   id: string;
   clientId: string;
@@ -124,10 +126,7 @@ export function effectiveGettone(opts: {
 }
 
 export function isRecurringMonthly(recurrence: string | null | undefined): boolean {
-  const r = (recurrence ?? "").trim().toLowerCase();
-  if (!r) return false;
-  if (r === "r") return true;
-  return r.includes("ricorr") || r.includes("mensil");
+  return isRecurring(recurrence);
 }
 
 /**

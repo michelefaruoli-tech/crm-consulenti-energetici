@@ -35,7 +35,8 @@ export type ProvvigioniFilters = {
 /** Filtro Prisma: contratti ricorrenti (R in Provvigioni). */
 export const recurringWhereOr: Prisma.ContractWhereInput[] = [
   { recurrence: { equals: "R", mode: "insensitive" } },
-  { recurrence: { contains: "Ricor", mode: "insensitive" } },
+  { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
+  { recurrence: { contains: "ricor", mode: "insensitive" } },
   { recurrence: { contains: "mensil", mode: "insensitive" } },
 ];
 

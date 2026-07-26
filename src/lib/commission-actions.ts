@@ -148,12 +148,8 @@ async function applyCommissionField(
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     }
   } else if (field === "recurrence") {
-    const raw = value.trim();
-    const normalized = /^r$/i.test(raw) || /ric/i.test(raw)
-      ? "Ricorrente"
-      : /^g$/i.test(raw) || /ut|tantum|una|gettone/i.test(raw)
-        ? "Una tantum"
-        : raw || "Una tantum";
+    const { normalizeRecurrence } = await import("@/lib/recurring");
+    const normalized = normalizeRecurrence(value);
     await prisma.contract.update({
       where: { id: commission.contractId },
       data: { recurrence: normalized },
@@ -191,16 +187,19 @@ async function applyCommissionField(
         data: { stornoDate: null, stornoAmount: null },
       });
     } else {
-      const amount = effectiveGettone({
-        expected: Number(commission.expected ?? 0),
-        clientType: commission.contract.client.type,
-        supplierName: commission.contract.supplier.name,
-      });
+      // Compensazione: gettone storno in negativo
+      const amount = Math.abs(
+        effectiveGettone({
+          expected: Number(commission.expected ?? 0),
+          clientType: commission.contract.client.type,
+          supplierName: commission.contract.supplier.name,
+        }),
+      );
       await prisma.commission.update({
         where: { id: commission.id },
         data: {
           stornoDate: commission.stornoDate ?? new Date(),
-          stornoAmount: amount,
+          stornoAmount: amount > 0 ? -amount : 0,
         },
       });
     }
@@ -221,28 +220,30 @@ async function applyCommissionField(
     } else {
       const d = parseFlexibleDate(raw);
       if (!d) throw new Error("Data storno non valida (usa MM/AAAA o GG/MM/AAAA)");
-      const amount =
-        Number(commission.stornoAmount ?? 0) ||
-        effectiveGettone({
-          expected: Number(commission.expected ?? 0),
-          clientType: commission.contract.client.type,
-          supplierName: commission.contract.supplier.name,
-        });
+      const existing = Number(commission.stornoAmount ?? 0);
+      const base = Math.abs(
+        existing ||
+          effectiveGettone({
+            expected: Number(commission.expected ?? 0),
+            clientType: commission.contract.client.type,
+            supplierName: commission.contract.supplier.name,
+          }),
+      );
       await prisma.commission.update({
         where: { id: commission.id },
-        data: { stornoDate: d, stornoAmount: amount },
+        data: { stornoDate: d, stornoAmount: base > 0 ? -base : 0 },
       });
     }
   } else if (field === "stornoAmount") {
     const amount = Number(value.replace(",", ".")) || 0;
+    // Accetta negativo; se positivo lo converte in compensazione (-)
+    const signed = amount === 0 ? 0 : amount < 0 ? amount : -Math.abs(amount);
     await prisma.commission.update({
       where: { id: commission.id },
       data: {
-        stornoAmount: amount,
+        stornoAmount: signed === 0 ? null : signed,
         stornoDate:
-          amount > 0
-            ? (commission.stornoDate ?? new Date())
-            : null,
+          signed !== 0 ? (commission.stornoDate ?? new Date()) : null,
       },
     });
   } else if (field === "podPdr") {
@@ -259,10 +260,41 @@ async function applyCommissionField(
     const raw = value.trim().toLowerCase();
     const contractId = commission.contractId;
     if (/ko|cessat|annull|chius/.test(raw)) {
+      const wasPaid = Boolean(commission.contract.collectionDate);
       await prisma.contract.update({
         where: { id: contractId },
         data: { status: "KO" },
       });
+      if (!wasPaid) {
+        // KO / cessato mai incassato → gettone 0
+        await prisma.commission.update({
+          where: { id: commission.id },
+          data: {
+            expected: 0,
+            received: 0,
+            paid: 0,
+            stornoDate: null,
+            stornoAmount: null,
+          },
+        });
+      } else {
+        // Già incassato → storno sì + gettone compensazione negativo
+        const amt = Math.abs(
+          effectiveGettone({
+            expected: Number(commission.expected ?? 0),
+            clientType: commission.contract.client.type,
+            supplierName: commission.contract.supplier.name,
+          }),
+        );
+        await prisma.commission.update({
+          where: { id: commission.id },
+          data: {
+            stornoDate: commission.stornoDate ?? new Date(),
+            stornoAmount: amt > 0 ? -amt : 0,
+          },
+        });
+      }
+      await syncRecurringMonthsForContract(contractId).catch(() => undefined);
     } else if (/incass/.test(raw) && !/da\s*incass/.test(raw) && !/^no$/.test(raw)) {
       await prisma.contract.update({
         where: { id: contractId },
@@ -516,7 +548,7 @@ async function assertCanAccessCommissions(
   return rows;
 }
 
-/** Segna pagato (collectionDate) su più contratti. */
+/** Segna incassato (collectionDate) su più contratti. */
 export async function bulkMarkPaidAction(formData: FormData): Promise<{ ok: true; count: number }> {
   const session = await requireSession();
   const ids = parseIdList(formData, "commissionIds");
@@ -536,8 +568,10 @@ export async function bulkMarkPaidAction(formData: FormData): Promise<{ ok: true
       data: {
         paymentStatus: "Incassato",
         collectionDate,
+        status: "PAGATO_DAL_FORNITORE",
       },
     });
+    await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);
   }
 
   await writeAuditLog({
@@ -546,7 +580,7 @@ export async function bulkMarkPaidAction(formData: FormData): Promise<{ ok: true
     entity: "Commission",
     entityId: rows[0]?.contractId ?? "",
     details: {
-      source: "bulk_mark_paid",
+      source: "bulk_mark_incassato",
       count: rows.length,
       collectionDate: collectionDate.toISOString().slice(0, 10),
     },

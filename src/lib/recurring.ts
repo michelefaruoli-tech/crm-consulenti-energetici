@@ -59,7 +59,19 @@ export const RECURRING_STATUS_LABELS: Record<string, string> = {
 export function isRecurring(recurrence: string | null | undefined): boolean {
   const r = (recurrence ?? "").trim();
   if (!r) return false;
-  // In Provvigioni la colonna R/G usa «R» come abbreviazione di ricorrente
+  // Colonna R/G in Provvigioni: «R» / «Ricorrente» / «mensile»
   if (/^r$/i.test(r)) return true;
   return /ricor|mensil/i.test(r);
+}
+
+/** Valore canonico da salvare in DB (evita «R » o varianti che rompono i filtri). */
+export function normalizeRecurrence(
+  raw: string | null | undefined,
+): "Ricorrente" | "Una tantum" {
+  const v = (raw ?? "").trim();
+  if (!v) return "Una tantum";
+  if (isRecurring(v)) return "Ricorrente";
+  if (/^g$/i.test(v) || /ut|tantum|una|gettone/i.test(v)) return "Una tantum";
+  // Default conservativo: se non riconosciuto come R, è gettone
+  return "Una tantum";
 }
