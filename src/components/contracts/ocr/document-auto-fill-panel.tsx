@@ -201,7 +201,7 @@ export function DocumentAutoFillPanel({
   onAttachFiles: (
     files: Array<{ file: File; docType: string }>,
   ) => void;
-  /** Solo Admin: può attivare Mistral OCR (a pagamento) */
+  /** Può attivare Mistral OCR sui PDF (a pagamento) */
   canUseMistralOcr?: boolean;
 }) {
   const [identityFiles, setIdentityFiles] = useState<LocalFile[]>([]);
@@ -400,7 +400,7 @@ export function DocumentAutoFillPanel({
               onChange={(e) => setUseMistralOcr(e.target.checked)}
             />
             <span>
-              Solo Admin · PDF difficili: attiva <strong>Mistral OCR</strong> (a pagamento)
+              PDF difficili: attiva <strong>Mistral OCR</strong> (a pagamento)
             </span>
           </label>
         ) : canUseMistralOcr ? (
@@ -411,7 +411,7 @@ export function DocumentAutoFillPanel({
               checked={useMistralOcr}
               onChange={(e) => setUseMistralOcr(e.target.checked)}
             />
-            Mistral OCR (Admin, a pagamento)
+            Mistral OCR (a pagamento)
           </label>
         ) : null}
       </div>

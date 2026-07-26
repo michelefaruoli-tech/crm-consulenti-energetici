@@ -77,6 +77,8 @@ export async function updateClientContractBlockAction(formData: FormData): Promi
     contractIban = normalizeIban(contractIban);
   }
 
+  const supplierId = clean(formData.get("supplierId"));
+
   const addressesMatch = formData.get("addressesMatch") === "on" || formData.get("addressesMatch") === "true";
 
   let supplyStreet = clean(formData.get("supplyStreet"));
@@ -146,6 +148,7 @@ export async function updateClientContractBlockAction(formData: FormData): Promi
     supplyCountry,
     supplyAddress,
     technicalJson: clean(formData.get("technicalJson")),
+    ...(supplierId ? { supplierId } : {}),
   };
 
   await prisma.contract.update({ where: { id: contractId }, data });

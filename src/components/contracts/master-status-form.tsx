@@ -5,11 +5,16 @@ import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import {
   KO_REASON_OPTIONS,
+  MASTER_OUTCOME_STATUSES,
   MASTER_STATUS_LABELS,
-  MASTER_WORKFLOW_STATUSES,
   type MasterWorkflowStatus,
 } from "@/lib/master-workflow";
 
+/**
+ * Form esito lavorazione Master.
+ * Tre scelte: In pagamento · Richiesta integrazione · KO
+ * (+ opzione «In lavorazione» per rimettere in coda).
+ */
 export function MasterStatusForm({
   contractId,
   currentStatus,
@@ -19,11 +24,15 @@ export function MasterStatusForm({
   currentStatus: string;
   action: (formData: FormData) => Promise<void>;
 }) {
-  const [status, setStatus] = useState(
-    currentStatus === "IN_ATTESA_PAGAMENTO" || currentStatus === "ATTIVATO"
-      ? "COMPLETATO"
-      : currentStatus,
-  );
+  const initial =
+    currentStatus === "IN_LAVORAZIONE" ||
+    currentStatus === "IN_ATTESA_PAGAMENTO" ||
+    currentStatus === "DOCUMENTAZIONE_INCOMPLETA" ||
+    currentStatus === "KO"
+      ? currentStatus
+      : "IN_LAVORAZIONE";
+
+  const [status, setStatus] = useState(initial);
   const [koReason, setKoReason] = useState("");
 
   return (
@@ -39,10 +48,18 @@ export function MasterStatusForm({
       className="space-y-4"
     >
       <input type="hidden" name="contractId" value={contractId} />
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="Nuovo stato">
-          <Select name="status" value={status} onChange={(e) => setStatus(e.target.value)}>
-            {MASTER_WORKFLOW_STATUSES.map((st) => (
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Esito lavorazione">
+          <Select
+            name="status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="IN_LAVORAZIONE">
+              {MASTER_STATUS_LABELS.IN_LAVORAZIONE}
+            </option>
+            {MASTER_OUTCOME_STATUSES.map((st) => (
               <option key={st} value={st}>
                 {MASTER_STATUS_LABELS[st]}
               </option>
@@ -50,7 +67,7 @@ export function MasterStatusForm({
           </Select>
         </Field>
         <Field label="Note di lavorazione">
-          <Textarea name="workNotes" rows={2} />
+          <Textarea name="workNotes" rows={2} placeholder="Annotazioni interne" />
         </Field>
         <Field label="Nota storico">
           <Input name="note" placeholder="Motivo del cambiamento" />
@@ -61,15 +78,32 @@ export function MasterStatusForm({
         </label>
       </div>
 
-      {status === "COMPLETATO" ? (
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 text-sm text-emerald-900">
-          Completato: il tracciamento economico (attivazione, pagamento, gettoni) si gestisce in{" "}
-          <strong>Provvigioni</strong>.
+      {status === "IN_ATTESA_PAGAMENTO" ? (
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-900">
+          <strong>In pagamento</strong>: la pratica è ok. Il gettone e i pagamenti
+          si gestiscono in Provvigioni.
+        </div>
+      ) : null}
+
+      {status === "DOCUMENTAZIONE_INCOMPLETA" ? (
+        <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+          <p className="text-sm text-amber-950">
+            <strong>Richiesta integrazione</strong>: indica cosa manca al
+            collaboratore.
+          </p>
+          <Field label="Dati / documenti mancanti *">
+            <Textarea
+              name="integrationNotes"
+              rows={3}
+              required
+              placeholder="Es. manca CI retro, POD illegibile, IBAN non valido…"
+            />
+          </Field>
         </div>
       ) : null}
 
       {status === "KO" ? (
-        <div className="grid gap-3 rounded-lg border border-red-100 bg-red-50/50 p-3 md:grid-cols-2">
+        <div className="grid gap-3 rounded-lg border border-red-100 bg-red-50/50 p-3 sm:grid-cols-2">
           <Field label="Motivo del KO *">
             <Select
               name="koReason"
@@ -88,7 +122,7 @@ export function MasterStatusForm({
           <Field label="Dettaglio Altro">
             <Input name="koOtherText" placeholder="Solo se motivo = Altro" />
           </Field>
-          <div className="md:col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Note KO *">
               <Textarea name="koNotes" rows={3} required />
             </Field>
@@ -96,7 +130,9 @@ export function MasterStatusForm({
         </div>
       ) : null}
 
-      <Button type="submit">Salva stato</Button>
+      <Button type="submit" className="w-full sm:w-auto">
+        Salva esito
+      </Button>
     </form>
   );
 }

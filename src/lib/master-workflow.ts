@@ -1,9 +1,13 @@
 import type { AppContractStatus } from "@/lib/constants";
 
-/** Stati operativi Master (flusso semplificato) */
+/**
+ * Stati operativi Master (dopo invio pratica).
+ * Flusso: In lavorazione → In pagamento | Richiesta integrazione | KO
+ */
 export const MASTER_WORKFLOW_STATUSES = [
   "IN_LAVORAZIONE",
-  "COMPLETATO",
+  "IN_ATTESA_PAGAMENTO",
+  "DOCUMENTAZIONE_INCOMPLETA",
   "KO",
 ] as const;
 
@@ -11,9 +15,17 @@ export type MasterWorkflowStatus = (typeof MASTER_WORKFLOW_STATUSES)[number];
 
 export const MASTER_STATUS_LABELS: Record<MasterWorkflowStatus, string> = {
   IN_LAVORAZIONE: "In lavorazione",
-  COMPLETATO: "Completato",
+  IN_ATTESA_PAGAMENTO: "In pagamento",
+  DOCUMENTAZIONE_INCOMPLETA: "Richiesta integrazione",
   KO: "KO",
 };
+
+/** Solo gli esiti finali della lavorazione (3 scelte utente). */
+export const MASTER_OUTCOME_STATUSES = [
+  "IN_ATTESA_PAGAMENTO",
+  "DOCUMENTAZIONE_INCOMPLETA",
+  "KO",
+] as const;
 
 export const KO_REASON_OPTIONS = [
   { value: "DOC_INCOMPLETA", label: "Documentazione incompleta" },
@@ -29,9 +41,18 @@ export const KO_REASON_OPTIONS = [
 ] as const;
 
 const TRANSITIONS: Record<MasterWorkflowStatus, MasterWorkflowStatus[]> = {
-  IN_LAVORAZIONE: ["COMPLETATO", "KO"],
-  COMPLETATO: [],
-  KO: [],
+  IN_LAVORAZIONE: [
+    "IN_ATTESA_PAGAMENTO",
+    "DOCUMENTAZIONE_INCOMPLETA",
+    "KO",
+  ],
+  DOCUMENTAZIONE_INCOMPLETA: [
+    "IN_LAVORAZIONE",
+    "IN_ATTESA_PAGAMENTO",
+    "KO",
+  ],
+  IN_ATTESA_PAGAMENTO: ["KO", "DOCUMENTAZIONE_INCOMPLETA"],
+  KO: ["IN_LAVORAZIONE", "DOCUMENTAZIONE_INCOMPLETA"],
 };
 
 export function isMasterWorkflowStatus(
@@ -47,17 +68,29 @@ export function canTransitionMasterStatus(
 ): boolean {
   if (!isMasterWorkflowStatus(to)) return false;
   if (allowAdminOverride) return true;
-  // Legacy: da attesa/attivato si può chiudere a COMPLETATO o KO
+  // Da stati legacy / attesa si può passare agli esiti Master
   if (
     from === "IN_ATTESA_PAGAMENTO" ||
     from === "ATTIVATO" ||
     from === "DA_LAVORARE" ||
-    from === "INVIATO_AL_MASTER"
+    from === "INVIATO_AL_MASTER" ||
+    from === "DOCUMENTAZIONE_COMPLETA" ||
+    from === "DOCUMENTAZIONE_INCOMPLETA"
   ) {
-    return to === "COMPLETATO" || to === "KO" || to === "IN_LAVORAZIONE";
+    return (
+      to === "IN_ATTESA_PAGAMENTO" ||
+      to === "DOCUMENTAZIONE_INCOMPLETA" ||
+      to === "KO" ||
+      to === "IN_LAVORAZIONE"
+    );
   }
   if (!isMasterWorkflowStatus(from)) {
-    return to === "IN_LAVORAZIONE" || to === "COMPLETATO" || to === "KO";
+    return (
+      to === "IN_LAVORAZIONE" ||
+      to === "IN_ATTESA_PAGAMENTO" ||
+      to === "DOCUMENTAZIONE_INCOMPLETA" ||
+      to === "KO"
+    );
   }
   if (from === to) return false;
   return TRANSITIONS[from].includes(to);
@@ -73,11 +106,13 @@ export function validateMasterTransition(opts: {
   activationDate?: string;
   paymentDate?: string;
   paymentConfirmed?: boolean;
+  integrationNotes?: string;
 }): string[] {
   const errors: string[] = [];
   if (!canTransitionMasterStatus(opts.from, opts.to, opts.allowAdminOverride)) {
     errors.push(
-      `Transizione non consentita: ${opts.from} → ${opts.to}. Flusso: In lavorazione → Completato oppure KO.`,
+      `Transizione non consentita: ${opts.from} → ${opts.to}. ` +
+        `Esiti: In pagamento · Richiesta integrazione · KO.`,
     );
   }
   if (opts.to === "KO") {
@@ -87,7 +122,9 @@ export function validateMasterTransition(opts: {
     }
     if (!opts.koNotes?.trim()) errors.push("Note sul KO obbligatorie");
   }
-  // COMPLETATO: dati economici in Provvigioni (non obbligatori qui)
+  if (opts.to === "DOCUMENTAZIONE_INCOMPLETA" && !opts.integrationNotes?.trim() && !opts.koNotes?.trim()) {
+    errors.push("Indica quali dati integrativi mancano");
+  }
   return errors;
 }
 
@@ -98,14 +135,11 @@ export function daysSince(date: Date | string | null | undefined): number | null
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
-export function masterAwareStatusLabel(
+export function isStaleMasterPractice(
+  sentAt: Date | string | null | undefined,
   status: AppContractStatus | string,
-  labels: Record<string, string>,
-): string {
-  if (status === "KO") return "KO";
-  if (status === "IN_LAVORAZIONE") return "In lavorazione";
-  if (status === "COMPLETATO") return "Completato";
-  if (status === "IN_ATTESA_PAGAMENTO") return "In attesa di pagamento (archiviato)";
-  if (status === "ATTIVATO") return "Attivato (archiviato)";
-  return labels[status] ?? status;
+): boolean {
+  if (status !== "IN_LAVORAZIONE") return false;
+  const d = daysSince(sentAt);
+  return d != null && d >= 3;
 }

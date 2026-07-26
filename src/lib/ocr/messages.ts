@@ -67,7 +67,7 @@ export function ocrFileKindHint(files: Array<{ name: string; type: string }>): {
     return {
       onlyPdf: true,
       hasImage: false,
-      tip: "Hai caricato solo PDF. Per il percorso gratis e più affidabile: scatta una foto JPG/PNG di ogni pagina. I PDF nudi spesso falliscono; Mistral OCR (solo Admin) è l’alternativa a pagamento.",
+      tip: "Hai caricato solo PDF. Per il percorso gratis e più affidabile: scatta una foto JPG/PNG di ogni pagina. I PDF nudi spesso falliscono; Mistral OCR è l’alternativa a pagamento.",
     };
   }
   if (hasPdf && hasImage) {

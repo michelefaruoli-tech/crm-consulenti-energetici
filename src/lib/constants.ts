@@ -29,7 +29,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
 export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   BOZZA: "Bozza",
   INSERITO: "Salvato",
-  DOCUMENTAZIONE_INCOMPLETA: "Documentazione incompleta",
+  DOCUMENTAZIONE_INCOMPLETA: "Richiesta integrazione",
   DOCUMENTAZIONE_COMPLETA: "Documentazione completa",
   INVIATO_AL_FORNITORE: "Inviato al fornitore",
   DA_LAVORARE: "Da lavorare",
@@ -37,7 +37,7 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   ERRORE_INVIO: "Errore invio",
   IN_LAVORAZIONE: "In lavorazione",
   ATTIVATO: "Attivato",
-  IN_ATTESA_PAGAMENTO: "In attesa di pagamento",
+  IN_ATTESA_PAGAMENTO: "In pagamento",
   PAGATO_DAL_FORNITORE: "Pagato dal fornitore",
   PROVVIGIONE_LIQUIDATA: "Provvigione liquidata",
   COMPLETATO: "Completato",
@@ -48,10 +48,14 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
 
 export const MASTER_EMAIL = "michele.faruoli@gmail.com";
 
-/** Tendina Servizio: solo Gas / Luce / Altro (POD e PDR sono campi tecnici). */
+/** Tendina Servizio / tipologia utenza. */
 export const SERVICE_OPTIONS = [
   { value: "LUCE", label: "Luce" },
   { value: "GAS", label: "Gas" },
+  { value: "TELEFONIA", label: "Telefonia" },
+  { value: "POS", label: "POS" },
+  { value: "FOTOVOLTAICO", label: "Fotovoltaico" },
+  { value: "DUAL", label: "Dual (luce+gas)" },
   { value: "ALTRO", label: "Altro" },
 ] as const;
 

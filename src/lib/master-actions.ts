@@ -38,6 +38,8 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
   const expectedPaymentDate = String(formData.get("expectedPaymentDate") ?? "") || undefined;
   const paymentAmount = num(formData.get("paymentAmount"));
   const workNotes = String(formData.get("workNotes") ?? "") || null;
+  const integrationNotes =
+    String(formData.get("integrationNotes") ?? "").trim() || undefined;
 
   const contract = await prisma.contract.findUnique({ where: { id: contractId } });
   if (!contract || contract.deletedAt) {
@@ -59,11 +61,12 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     to: toStatus,
     allowAdminOverride: isAdmin && formData.get("forceOverride") === "on",
     koReason,
-    koNotes,
+    koNotes: toStatus === "DOCUMENTAZIONE_INCOMPLETA" ? integrationNotes ?? koNotes : koNotes,
     koOtherText,
     activationDate,
     paymentDate,
     paymentConfirmed,
+    integrationNotes,
   });
   if (errors.length) {
     redirect(
@@ -82,6 +85,7 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     workNotes,
   };
 
+  // Legacy: Completato / Attivato (UI rimossa, resta compatibilità)
   if (toStatus === "COMPLETATO") {
     updateData.workCompletedAt = new Date();
     if (activationDate) updateData.activationDate = new Date(activationDate);
@@ -89,7 +93,6 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     else if (paymentConfirmed) updateData.paymentDate = new Date();
     if (paymentAmount != null) updateData.paymentAmount = paymentAmount;
   }
-  // Legacy (UI rimossa): mantieni compatibilità se arriva ancora dallo storico
   if (toStatus === "IN_ATTESA_PAGAMENTO") {
     updateData.workCompletedAt = new Date();
     if (expectedPaymentAmount != null) updateData.expectedPaymentAmount = expectedPaymentAmount;
@@ -100,6 +103,9 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     if (paymentDate) updateData.paymentDate = new Date(paymentDate);
     else if (paymentConfirmed) updateData.paymentDate = new Date();
     if (paymentAmount != null) updateData.paymentAmount = paymentAmount;
+  }
+  if (toStatus === "DOCUMENTAZIONE_INCOMPLETA") {
+    updateData.koNotes = integrationNotes ?? koNotes ?? workNotes;
   }
   if (toStatus === "KO") {
     updateData.koReason = resolvedKo;

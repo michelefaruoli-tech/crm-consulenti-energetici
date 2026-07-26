@@ -135,12 +135,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Nessun file valido" }, { status: 400 });
     }
 
-    // Mistral OCR (a pagamento): solo Admin e solo se spunta la casella
+    // Mistral OCR (a pagamento): disponibile per tutti gli utenti autenticati se spuntato
     const wantMistral =
       String(form.get("useMistralOcr") ?? "").toLowerCase() === "true" ||
       String(form.get("useMistralOcr") ?? "") === "1" ||
       String(form.get("useMistralOcr") ?? "") === "on";
-    const useMistralOcr = wantMistral && session.role === "ADMIN";
+    const useMistralOcr = wantMistral;
 
     const { extracted, provider } = await analyzeDocuments(inputs, { useMistralOcr });
 

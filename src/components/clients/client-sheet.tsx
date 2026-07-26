@@ -23,6 +23,13 @@ import {
 } from "@/lib/constants";
 import { resolveUtilityDisplay } from "@/lib/utility-display";
 
+const SERVICE_VALUE_SET = new Set<string>(SERVICE_OPTIONS.map((o) => o.value));
+
+function normalizeUtilityType(raw: string | null | undefined): string {
+  const u = (raw ?? "LUCE").toUpperCase();
+  return SERVICE_VALUE_SET.has(u) ? u : "ALTRO";
+}
+
 export type ClientSheetClient = {
   id: string;
   type: "PRIVATO" | "AZIENDA";
@@ -202,10 +209,9 @@ export function ClientSheet({
   const [clientType, setClientType] = useState(client.type);
 
   // Blocco 2 state
-  const [utilityType, setUtilityType] = useState(() => {
-    const u = (selected?.utilityType ?? "LUCE").toUpperCase();
-    return u === "LUCE" || u === "GAS" || u === "ALTRO" ? u : "ALTRO";
-  });
+  const [utilityType, setUtilityType] = useState(() =>
+    normalizeUtilityType(selected?.utilityType),
+  );
   const [operationType, setOperationType] = useState(
     selected?.operationType === "CAMBIO" ? "SWITCH" : selected?.operationType ?? "SWITCH",
   );
@@ -228,16 +234,20 @@ export function ClientSheet({
   const [productName, setProductName] = useState(selected?.productName ?? "");
   const [offerCode, setOfferCode] = useState(selected?.offerCode ?? "");
   const [gettoneValue, setGettoneValue] = useState(selected?.gettone ?? "");
+  const [priceType, setPriceType] = useState(selected?.priceType ?? "");
 
   const rulesForSupplier = useMemo(
     () => listinoRules.filter((r) => r.supplierId === offerSupplierId),
     [listinoRules, offerSupplierId],
   );
 
+  const needsIban = paymentMethod === "RID";
+  const isEnergy =
+    utilityType === "LUCE" || utilityType === "GAS" || utilityType === "DUAL";
+
   useEffect(() => {
     if (!selected) return;
-    const u = (selected.utilityType ?? "LUCE").toUpperCase();
-    setUtilityType(u === "LUCE" || u === "GAS" || u === "ALTRO" ? u : "ALTRO");
+    setUtilityType(normalizeUtilityType(selected.utilityType));
     setOperationType(
       selected.operationType === "CAMBIO" ? "SWITCH" : selected.operationType ?? "SWITCH",
     );
@@ -256,6 +266,7 @@ export function ClientSheet({
     setProductName(selected.productName ?? "");
     setOfferCode(selected.offerCode ?? "");
     setGettoneValue(selected.gettone ?? "");
+    setPriceType(selected.priceType ?? "");
     setBlock2Dirty(false);
     setBlock3Dirty(false);
   }, [selected, client.iban]);
@@ -472,105 +483,157 @@ export function ClientSheet({
       </section>
 
       {/* Elenco contratti */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 font-semibold text-slate-900">
-          Contratti del cliente ({contracts.length})
-        </h2>
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold text-slate-900">
+            Contratti stipulati ({contracts.length})
+          </h2>
+          <Link
+            href={`/contratti/nuovo?clientId=${client.id}`}
+            className="text-sm font-medium text-emerald-700 underline"
+          >
+            + Nuovo contratto
+          </Link>
+        </div>
         {contracts.length === 0 ? (
           <p className="text-sm text-slate-500">
-            Nessun contratto.{" "}
+            Nessun contratto ancora.{" "}
             <Link href={`/contratti/nuovo?clientId=${client.id}`} className="text-emerald-700 underline">
               Creane uno
             </Link>
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[40rem] text-left text-sm">
-              <thead className="bg-slate-50 text-xs text-slate-600">
-                <tr>
-                  <th className="px-2 py-2">N°</th>
-                  <th className="px-2 py-2">Data</th>
-                  <th className="px-2 py-2">Servizio / ID</th>
-                  <th className="px-2 py-2">Fornitore</th>
-                  <th className="px-2 py-2">Collaboratore</th>
-                  <th className="px-2 py-2">Stato</th>
-                  <th className="px-2 py-2">Gettone</th>
-                  <th className="px-2 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((c) => {
-                  const u = resolveUtilityDisplay(c);
-                  const active = c.id === selectedId;
-                  return (
-                    <tr
-                      key={c.id}
-                      className={
-                        active
-                          ? "border-t border-emerald-200 bg-emerald-50"
-                          : "border-t border-slate-100"
-                      }
-                    >
-                      <td className="px-2 py-2 font-medium">{c.contractNumber}</td>
-                      <td className="px-2 py-2">{c.insertionDate}</td>
-                      <td className="px-2 py-2">
-                        <div className="text-xs">{u.techLines.join(" · ") || "—"}</div>
-                        <div className="text-[10px] uppercase text-slate-500">{u.serviceLabel}</div>
-                      </td>
-                      <td className="px-2 py-2">{c.supplierName}</td>
-                      <td className="px-2 py-2">{c.collaboratorName}</td>
-                      <td className="px-2 py-2">
-                        <StatusBadge status={c.status} />
-                      </td>
-                      <td className="px-2 py-2">
-                        <div>€ {c.gettone}</div>
-                        <div
-                          className={
-                            c.commissionConfirmed
-                              ? "text-[10px] font-medium text-emerald-700"
-                              : "text-[10px] font-medium text-amber-800"
-                          }
-                        >
-                          {c.commissionConfirmed ? "Confermata" : "Da confermare"}
-                        </div>
-                        {c.stornoLabel ? (
-                          <div className="text-[10px] text-slate-600">{c.stornoLabel}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={active ? "primary" : "secondary"}
-                          onClick={() => selectContract(c.id)}
-                        >
-                          {active ? "Selezionato" : "Apri"}
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Mobile: card tocco-friendly */}
+            <div className="grid gap-2 sm:hidden">
+              {contracts.map((c) => {
+                const u = resolveUtilityDisplay(c);
+                const active = c.id === selectedId;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => selectContract(c.id)}
+                    className={
+                      active
+                        ? "rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 text-left"
+                        : "rounded-xl border border-slate-200 bg-white p-3 text-left active:bg-slate-50"
+                    }
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold text-slate-900">{c.contractNumber}</p>
+                        <p className="text-xs text-slate-500">{c.insertionDate}</p>
+                      </div>
+                      <StatusBadge status={c.status} />
+                    </div>
+                    <p className="mt-1 text-sm text-slate-800">
+                      {u.serviceLabel}
+                      {c.operationType ? ` · ${c.operationType}` : ""}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {c.supplierName} · {c.collaboratorName}
+                    </p>
+                    <p className="mt-1 text-xs font-medium text-slate-700">
+                      Gettone € {c.gettone}
+                      {c.commissionConfirmed ? " · confermato" : " · da confermare"}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Desktop: tabella */}
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="w-full min-w-[40rem] text-left text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-600">
+                  <tr>
+                    <th className="px-2 py-2">N°</th>
+                    <th className="px-2 py-2">Data</th>
+                    <th className="px-2 py-2">Servizio / ID</th>
+                    <th className="px-2 py-2">Fornitore</th>
+                    <th className="px-2 py-2">Collaboratore</th>
+                    <th className="px-2 py-2">Stato</th>
+                    <th className="px-2 py-2">Gettone</th>
+                    <th className="px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {contracts.map((c) => {
+                    const u = resolveUtilityDisplay(c);
+                    const active = c.id === selectedId;
+                    return (
+                      <tr
+                        key={c.id}
+                        className={
+                          active
+                            ? "border-t border-emerald-200 bg-emerald-50"
+                            : "border-t border-slate-100"
+                        }
+                      >
+                        <td className="px-2 py-2 font-medium">{c.contractNumber}</td>
+                        <td className="px-2 py-2">{c.insertionDate}</td>
+                        <td className="px-2 py-2">
+                          <div className="text-xs">{u.techLines.join(" · ") || "—"}</div>
+                          <div className="text-[10px] uppercase text-slate-500">{u.serviceLabel}</div>
+                        </td>
+                        <td className="px-2 py-2">{c.supplierName}</td>
+                        <td className="px-2 py-2">{c.collaboratorName}</td>
+                        <td className="px-2 py-2">
+                          <StatusBadge status={c.status} />
+                        </td>
+                        <td className="px-2 py-2">
+                          <div>€ {c.gettone}</div>
+                          <div
+                            className={
+                              c.commissionConfirmed
+                                ? "text-[10px] font-medium text-emerald-700"
+                                : "text-[10px] font-medium text-amber-800"
+                            }
+                          >
+                            {c.commissionConfirmed ? "Confermata" : "Da confermare"}
+                          </div>
+                          {c.stornoLabel ? (
+                            <div className="text-[10px] text-slate-600">{c.stornoLabel}</div>
+                          ) : null}
+                        </td>
+                        <td className="px-2 py-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={active ? "primary" : "secondary"}
+                            onClick={() => selectContract(c.id)}
+                          >
+                            {active ? "Selezionato" : "Apri"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
       {selected && canEditSelected ? (
         <>
-          {/* BLOCCA 2 */}
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          {/* BLOCCA 2: operazione + fornitura */}
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="mb-4 flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100 text-sm font-bold text-sky-800">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sm font-bold text-sky-800">
                 2
               </span>
               <div>
-                <h2 className="font-semibold text-slate-900">Contratto e dati della fornitura</h2>
-                <p className="text-xs text-slate-500">{selected.contractNumber}</p>
+                <h2 className="font-semibold text-slate-900">Scheda contratto</h2>
+                <p className="text-xs text-slate-500">
+                  {selected.contractNumber} · operazione, fornitura e pagamento
+                </p>
               </div>
             </div>
             <form
-              className="space-y-4"
+              className="space-y-5"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (selected.warnOnEdit) {
@@ -593,6 +656,7 @@ export function ClientSheet({
                 fd.set("supplyProvince", supplyProvince);
                 fd.set("supplyRegion", supplyRegion);
                 fd.set("contractIban", contractIban);
+                fd.set("supplierId", offerSupplierId);
                 start(async () => {
                   try {
                     await updateClientContractBlockAction(fd);
@@ -609,252 +673,339 @@ export function ClientSheet({
               <input type="hidden" name="contractId" value={selected.id} />
               <input type="hidden" name="clientId" value={client.id} />
 
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Numero contratto">
-                  <Input readOnly value={selected.contractNumber} />
-                </Field>
-                <Field label="Data creazione">
-                  <Input readOnly value={selected.insertionDate} />
-                </Field>
-                <Field label="Ultimo aggiornamento">
-                  <Input readOnly value={selected.updatedAt} />
-                </Field>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Servizio">
-                  <Select
-                    value={utilityType}
-                    onChange={(e) => {
-                      setUtilityType(e.target.value);
-                      mark2();
-                    }}
-                  >
-                    {SERVICE_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Tipo operazione">
-                  <Select
-                    value={operationType}
-                    onChange={(e) => {
-                      setOperationType(e.target.value);
-                      mark2();
-                    }}
-                  >
-                    {OPERATION_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-              {operationType === "ALTRO" ? (
-                <Field label="Specifica operazione *">
-                  <Input name="operationOther" defaultValue={selected.operationOther ?? ""} required />
-                </Field>
-              ) : null}
-
-              {utilityType === "LUCE" && (
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Field label="POD">
-                    <Input name="pod" defaultValue={selected.pod ?? selected.podPdr ?? ""} />
+              {/* Mini-blocco: Operazione */}
+              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
+                <h3 className="text-sm font-semibold text-slate-900">Operazione effettuata</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Tipo operazione">
+                    <Select
+                      value={operationType}
+                      onChange={(e) => {
+                        setOperationType(e.target.value);
+                        mark2();
+                      }}
+                    >
+                      {OPERATION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
-                  <Field label="Potenza impegnata (kW)">
-                    <Input name="powerKw" defaultValue={selected.powerKw ?? ""} />
-                  </Field>
-                  <Field label="Consumo annuo (kWh)">
-                    <Input name="annualKwh" defaultValue={selected.annualKwh ?? ""} />
+                  <Field label="Tipologia (Luce / Gas / …)">
+                    <Select
+                      value={utilityType}
+                      onChange={(e) => {
+                        setUtilityType(e.target.value);
+                        mark2();
+                      }}
+                    >
+                      {SERVICE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
                   </Field>
                 </div>
-              )}
-              {utilityType === "GAS" && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="PDR">
-                    <Input name="pdr" defaultValue={selected.pdr ?? ""} />
+                {operationType === "ALTRO" ? (
+                  <Field label="Specifica operazione *">
+                    <Input name="operationOther" defaultValue={selected.operationOther ?? ""} required />
                   </Field>
-                  <Field label="Consumo annuo (Smc)">
-                    <Input name="annualSmc" defaultValue={selected.annualSmc ?? ""} />
-                  </Field>
-                </div>
-              )}
-              {utilityType === "ALTRO" ? (
-                <div className="grid gap-3 md:grid-cols-2">
+                ) : null}
+                {utilityType === "ALTRO" ? (
                   <Field label="Specifica servizio *">
                     <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} required />
                   </Field>
-                </div>
-              ) : null}
+                ) : null}
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Classificazione fornitura">
+                <Field label="Fornitore">
                   <Select
-                    name="supplyClassification"
-                    defaultValue={
-                      selected.supplyClassification ??
-                      (clientType === "AZIENDA" && utilityType !== "GAS"
-                        ? "ALTRI_USI"
-                        : "")
-                    }
-                    onChange={mark2}
+                    name="supplierId"
+                    value={offerSupplierId}
+                    onChange={(e) => {
+                      setOfferSupplierId(e.target.value);
+                      setCommissionRuleId("");
+                      setProductName("");
+                      setOfferCode("");
+                      mark2();
+                      mark3();
+                    }}
                   >
-                    <option value="">—</option>
-                    {classificationOptions.map((o) => (
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code})
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+
+                <Field label="Metodo di pagamento">
+                  <Select
+                    value={paymentMethod}
+                    onChange={(e) => {
+                      setPaymentMethod(e.target.value);
+                      if (e.target.value === "RID" && !contractIban && client.iban) {
+                        setContractIban(client.iban);
+                      }
+                      mark2();
+                    }}
+                  >
+                    {PAYMENT_METHOD_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
                       </option>
                     ))}
                   </Select>
                 </Field>
-                {clientType === "AZIENDA" && utilityType === "LUCE" ? (
-                  <Field label="Livello di tensione">
-                    <Select name="voltageLevel" defaultValue={selected.voltageLevel ?? ""}>
-                      <option value="">—</option>
-                      <option value="BASSA">Bassa tensione</option>
-                      <option value="MEDIA">Media tensione</option>
-                    </Select>
+
+                {needsIban ? (
+                  <div className="space-y-3 rounded-lg border border-sky-100 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-800">IBAN per addebito</p>
+                      {client.iban ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-emerald-700 underline"
+                          onClick={() => {
+                            setContractIban(client.iban ?? "");
+                            mark2();
+                          }}
+                        >
+                          Copia da anagrafica
+                        </button>
+                      ) : (
+                        <span className="text-xs text-amber-700">Nessun IBAN in anagrafica</span>
+                      )}
+                    </div>
+                    <Field label="IBAN contratto *">
+                      <Input
+                        value={contractIban}
+                        onChange={(e) => {
+                          setContractIban(e.target.value);
+                          mark2();
+                        }}
+                        required
+                        autoComplete="off"
+                        className="font-mono text-base tracking-wide"
+                      />
+                    </Field>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Intestatario conto">
+                        <Input name="ibanHolder" defaultValue={selected.ibanHolder ?? ""} />
+                      </Field>
+                      <Field label="CF intestatario">
+                        <Input name="ibanHolderCf" defaultValue={selected.ibanHolderCf ?? ""} />
+                      </Field>
+                      <Field label="Mandato SEPA">
+                        <Input name="sepaMandate" defaultValue={selected.sepaMandate ?? ""} />
+                      </Field>
+                      <Field label="Note pagamento">
+                        <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
+                      </Field>
+                    </div>
+                  </div>
+                ) : (
+                  <Field label="Note pagamento">
+                    <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
                   </Field>
-                ) : null}
+                )}
               </div>
 
-              <Field label="Data ingresso in fornitura">
-                <Input
-                  type="date"
-                  name="supplyStartDate"
-                  defaultValue={selected.supplyStartDate ?? ""}
-                />
-              </Field>
-              <Field label="Note contratto">
-                <Textarea name="notes" rows={2} defaultValue={selected.notes ?? ""} />
-              </Field>
+              {/* Mini-blocco: Fornitura */}
+              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
+                <h3 className="text-sm font-semibold text-slate-900">Dati di fornitura</h3>
 
-              <h3 className="pt-2 text-sm font-semibold text-slate-800">Indirizzo di fornitura</h3>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={addressesMatch}
-                  onChange={(e) => {
-                    setAddressesMatch(e.target.checked);
-                    if (e.target.checked) {
-                      setSupplyStreet(street);
-                      setSupplyStreetNumber(streetNumber);
-                      setSupplyZip(zipCode);
-                      setSupplyCity(city);
-                      setSupplyProvince(province);
-                      setSupplyRegion(region);
-                    }
-                    mark2();
-                  }}
-                />
-                Coincide con la residenza o sede legale
-              </label>
-              {!addressesMatch ? (
-                <CapAddressFields
-                  zipCode={supplyZip}
-                  city={supplyCity}
-                  province={supplyProvince}
-                  region={supplyRegion}
-                  street={supplyStreet}
-                  streetNumber={supplyStreetNumber}
-                  onZipChange={(v) => {
-                    setSupplyZip(v);
-                    mark2();
-                  }}
-                  onCityChange={(v) => {
-                    setSupplyCity(v);
-                    mark2();
-                  }}
-                  onProvinceChange={(v) => {
-                    setSupplyProvince(v);
-                    mark2();
-                  }}
-                  onRegionChange={(v) => {
-                    setSupplyRegion(v);
-                    mark2();
-                  }}
-                  onStreetChange={(v) => {
-                    setSupplyStreet(v);
-                    mark2();
-                  }}
-                  onStreetNumberChange={(v) => {
-                    setSupplyStreetNumber(v);
-                    mark2();
-                  }}
-                />
-              ) : (
-                <p className="text-xs text-slate-500">
-                  Verrà salvata una copia dell&apos;indirizzo anagrafico sul contratto.
-                </p>
-              )}
-              <input type="hidden" name="supplyCountry" value="Italia" />
+                <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-5 w-5 shrink-0"
+                    checked={addressesMatch}
+                    onChange={(e) => {
+                      setAddressesMatch(e.target.checked);
+                      if (e.target.checked) {
+                        setSupplyStreet(street);
+                        setSupplyStreetNumber(streetNumber);
+                        setSupplyZip(zipCode);
+                        setSupplyCity(city);
+                        setSupplyProvince(province);
+                        setSupplyRegion(region);
+                      }
+                      mark2();
+                    }}
+                  />
+                  <span>
+                    <strong>Coincide con anagrafica</strong>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      Usa lo stesso indirizzo di residenza / sede legale
+                    </span>
+                  </span>
+                </label>
 
-              <h3 className="pt-2 text-sm font-semibold text-slate-800">Modalità di pagamento</h3>
-              <Field label="Pagamento">
-                <Select
-                  value={paymentMethod}
-                  onChange={(e) => {
-                    setPaymentMethod(e.target.value);
-                    if (e.target.value === "RID" && !contractIban && client.iban) {
-                      setContractIban(client.iban);
-                    }
-                    mark2();
-                  }}
-                >
-                  {PAYMENT_METHOD_OPTIONS.filter((o) =>
-                    ["BOLLETTINO", "RID"].includes(o.value),
-                  ).map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              {paymentMethod === "RID" ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="IBAN contratto *">
+                {!addressesMatch ? (
+                  <CapAddressFields
+                    zipCode={supplyZip}
+                    city={supplyCity}
+                    province={supplyProvince}
+                    region={supplyRegion}
+                    street={supplyStreet}
+                    streetNumber={supplyStreetNumber}
+                    onZipChange={(v) => {
+                      setSupplyZip(v);
+                      mark2();
+                    }}
+                    onCityChange={(v) => {
+                      setSupplyCity(v);
+                      mark2();
+                    }}
+                    onProvinceChange={(v) => {
+                      setSupplyProvince(v);
+                      mark2();
+                    }}
+                    onRegionChange={(v) => {
+                      setSupplyRegion(v);
+                      mark2();
+                    }}
+                    onStreetChange={(v) => {
+                      setSupplyStreet(v);
+                      mark2();
+                    }}
+                    onStreetNumberChange={(v) => {
+                      setSupplyStreetNumber(v);
+                      mark2();
+                    }}
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Indirizzo fornitura = anagrafica (viene copiato al salvataggio).
+                  </p>
+                )}
+                <input type="hidden" name="supplyCountry" value="Italia" />
+
+                {(utilityType === "LUCE" || utilityType === "DUAL") && (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Field label="POD">
+                      <Input
+                        name="pod"
+                        defaultValue={selected.pod ?? selected.podPdr ?? ""}
+                        className="font-mono uppercase"
+                      />
+                    </Field>
+                    <Field label="Potenza contatore (kW)">
+                      <Input
+                        name="powerKw"
+                        inputMode="decimal"
+                        defaultValue={selected.powerKw ?? ""}
+                      />
+                    </Field>
+                    <Field label="kWh annui consumati">
+                      <Input
+                        name="annualKwh"
+                        inputMode="decimal"
+                        defaultValue={selected.annualKwh ?? ""}
+                      />
+                    </Field>
+                  </div>
+                )}
+                {(utilityType === "GAS" || utilityType === "DUAL") && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="PDR">
+                      <Input
+                        name="pdr"
+                        defaultValue={selected.pdr ?? ""}
+                        className="font-mono uppercase"
+                      />
+                    </Field>
+                    <Field label="Smc / mc annui consumati">
+                      <Input
+                        name="annualSmc"
+                        inputMode="decimal"
+                        defaultValue={selected.annualSmc ?? ""}
+                      />
+                    </Field>
+                  </div>
+                )}
+                {!isEnergy ? (
+                  <Field label="POD / PDR / Codice migrazione">
                     <Input
-                      value={contractIban}
-                      onChange={(e) => {
-                        setContractIban(e.target.value);
-                        mark2();
-                      }}
-                      required
+                      name="podPdr"
+                      defaultValue={selected.podPdr ?? selected.pod ?? selected.pdr ?? ""}
+                      className="font-mono"
+                      placeholder="Codice tecnico o migrazione"
                     />
                   </Field>
-                  <Field label="Intestatario conto">
-                    <Input name="ibanHolder" defaultValue={selected.ibanHolder ?? ""} />
-                  </Field>
-                  <Field label="CF intestatario">
-                    <Input name="ibanHolderCf" defaultValue={selected.ibanHolderCf ?? ""} />
-                  </Field>
-                  <Field label="Mandato SEPA">
-                    <Input name="sepaMandate" defaultValue={selected.sepaMandate ?? ""} />
-                  </Field>
-                </div>
-              ) : null}
-              <Field label="Note pagamento">
-                <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
-              </Field>
+                ) : null}
 
-              <Button type="submit" disabled={!block2Dirty || pending}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Classificazione fornitura">
+                    <Select
+                      name="supplyClassification"
+                      defaultValue={
+                        selected.supplyClassification ??
+                        (clientType === "AZIENDA" && utilityType !== "GAS"
+                          ? "ALTRI_USI"
+                          : "")
+                      }
+                      onChange={mark2}
+                    >
+                      <option value="">—</option>
+                      {classificationOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {clientType === "AZIENDA" && utilityType === "LUCE" ? (
+                    <Field label="Livello di tensione">
+                      <Select name="voltageLevel" defaultValue={selected.voltageLevel ?? ""}>
+                        <option value="">—</option>
+                        <option value="BASSA">Bassa tensione</option>
+                        <option value="MEDIA">Media tensione</option>
+                      </Select>
+                    </Field>
+                  ) : (
+                    <Field label="Data ingresso in fornitura">
+                      <Input
+                        type="date"
+                        name="supplyStartDate"
+                        defaultValue={selected.supplyStartDate ?? ""}
+                      />
+                    </Field>
+                  )}
+                </div>
+                {clientType === "AZIENDA" && utilityType === "LUCE" ? (
+                  <Field label="Data ingresso in fornitura">
+                    <Input
+                      type="date"
+                      name="supplyStartDate"
+                      defaultValue={selected.supplyStartDate ?? ""}
+                    />
+                  </Field>
+                ) : null}
+
+                <Field label="Note contratto">
+                  <Textarea name="notes" rows={2} defaultValue={selected.notes ?? ""} />
+                </Field>
+              </div>
+
+              <Button type="submit" disabled={!block2Dirty || pending} className="w-full sm:w-auto">
                 {pending && block2Dirty ? "Salvataggio…" : "Salva contratto"}
               </Button>
             </form>
           </section>
 
-          {/* BLOCCA 3 */}
-          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          {/* BLOCCA 3: offerta */}
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="mb-4 flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-sm font-bold text-amber-900">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-sm font-bold text-amber-900">
                 3
               </span>
               <div>
-                <h2 className="font-semibold text-slate-900">Fornitore, offerta, stato e gettone</h2>
-                <p className="text-xs text-slate-500">Dati commerciali e operativi</p>
+                <h2 className="font-semibold text-slate-900">Offerta e gettone</h2>
+                <p className="text-xs text-slate-500">
+                  Listino se presente, altrimenti compilazione manuale
+                </p>
               </div>
             </div>
             <form
@@ -871,11 +1022,13 @@ export function ClientSheet({
                 }
                 const fd = new FormData(e.currentTarget);
                 fd.set("status", status);
+                fd.set("priceType", priceType);
+                fd.set("supplierId", offerSupplierId);
                 start(async () => {
                   try {
                     await updateClientOfferBlockAction(fd);
                     setBlock3Dirty(false);
-                    setMsg("Offerta e stato salvati");
+                    setMsg("Offerta salvata");
                     router.refresh();
                   } catch (error) {
                     setErr(error instanceof Error ? error.message : "Errore salvataggio");
@@ -886,69 +1039,55 @@ export function ClientSheet({
             >
               <input type="hidden" name="contractId" value={selected.id} />
               <input type="hidden" name="clientId" value={client.id} />
+              <input type="hidden" name="supplierId" value={offerSupplierId} />
 
-              <Field label="Fornitore">
-                <Select
-                  name="supplierId"
-                  value={offerSupplierId}
-                  onChange={(e) => {
-                    setOfferSupplierId(e.target.value);
-                    setCommissionRuleId("");
-                    setProductName("");
-                    setOfferCode("");
-                    mark3();
-                  }}
-                >
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.code})
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
+                <h3 className="text-sm font-semibold text-slate-900">Tipologia offerta</h3>
 
-              <Field label="Regola listino (offerta)">
-                <Select
-                  name="commissionRuleId"
-                  value={commissionRuleId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setCommissionRuleId(id);
-                    if (!id) {
-                      mark3();
-                      return;
-                    }
-                    const rule = listinoRules.find((r) => r.id === id);
-                    if (rule) {
-                      setProductName(rule.name);
-                      setOfferCode(rule.name);
-                      if (canEditSelectedGettone && rule.gettoneTotale) {
-                        setGettoneValue(rule.gettoneTotale);
-                      }
-                    }
-                    mark3();
-                  }}
-                >
-                  <option value="">— nessuna / manuale —</option>
-                  {rulesForSupplier.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                      {r.clientSegment && r.clientSegment !== "TUTTI"
-                        ? ` · ${r.clientSegment}`
-                        : ""}
-                      {r.gettoneTotale ? ` · ${r.gettoneTotale} €` : ""}
-                    </option>
-                  ))}
-                </Select>
-                {rulesForSupplier.length === 0 ? (
-                  <p className="mt-1 text-xs text-slate-500">
-                    Nessuna regola listino per questo fornitore. Compila nome/codice a mano oppure
-                    creale in Fornitori.
-                  </p>
-                ) : null}
-              </Field>
+                {rulesForSupplier.length > 0 ? (
+                  <Field label="Offerta da listino">
+                    <Select
+                      name="commissionRuleId"
+                      value={commissionRuleId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setCommissionRuleId(id);
+                        if (!id) {
+                          mark3();
+                          return;
+                        }
+                        const rule = listinoRules.find((r) => r.id === id);
+                        if (rule) {
+                          setProductName(rule.name);
+                          setOfferCode(rule.name);
+                          if (canEditSelectedGettone && rule.gettoneTotale) {
+                            setGettoneValue(rule.gettoneTotale);
+                          }
+                        }
+                        mark3();
+                      }}
+                    >
+                      <option value="">— scegli oppure compilazione manuale —</option>
+                      {rulesForSupplier.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                          {r.clientSegment && r.clientSegment !== "TUTTI"
+                            ? ` · ${r.clientSegment}`
+                            : ""}
+                          {r.gettoneTotale ? ` · ${r.gettoneTotale} €` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : (
+                  <>
+                    <input type="hidden" name="commissionRuleId" value="" />
+                    <p className="text-xs text-slate-500">
+                      Nessuna offerta in listino per questo fornitore: inserisci il nome a mano.
+                    </p>
+                  </>
+                )}
 
-              <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Nome offerta">
                   <Input
                     name="productName"
@@ -957,9 +1096,10 @@ export function ClientSheet({
                       setProductName(e.target.value);
                       mark3();
                     }}
+                    placeholder="Es. Casa Flex / Business Green"
                   />
                 </Field>
-                <Field label="Codice offerta">
+                <Field label="Codice offerta (facoltativo)">
                   <Input
                     name="offerCode"
                     value={offerCode}
@@ -969,126 +1109,171 @@ export function ClientSheet({
                     }}
                   />
                 </Field>
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Tipo prezzo">
-                  <Select name="priceType" defaultValue={selected.priceType ?? ""}>
-                    <option value="">—</option>
-                    <option value="FISSO">Fisso</option>
-                    <option value="INDICIZZATO">Indicizzato</option>
-                  </Select>
-                </Field>
-                <Field label="PCV">
-                  <Input name="pcv" defaultValue={selected.pcv ?? ""} />
-                </Field>
-                <Field label="Spread">
-                  <Input name="spread" defaultValue={selected.spread ?? ""} />
-                </Field>
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="Prezzo kWh">
-                  <Input name="pricePerKwh" defaultValue={selected.pricePerKwh ?? ""} />
-                </Field>
-                <Field label="Prezzo Smc">
-                  <Input name="pricePerSmc" defaultValue={selected.pricePerSmc ?? ""} />
-                </Field>
-                <Field label="Quota fissa">
-                  <Input name="monthlyFee" defaultValue={selected.monthlyFee ?? ""} />
-                </Field>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Sconto / Bonus">
-                  <Input name="discount" defaultValue={selected.discount ?? ""} />
-                </Field>
-                <Field label="Durata (mesi)">
-                  <Input name="durationMonths" defaultValue={String(selected.durationMonths)} />
-                </Field>
-              </div>
-              <Field label="Note economiche">
-                <Textarea name="economicNotes" rows={2} defaultValue={selected.economicNotes ?? ""} />
-              </Field>
 
-              <Field label="Stato contratto">
-                <Select
-                  value={status}
-                  onChange={(e) => {
-                    setStatus(e.target.value);
-                    mark3();
-                  }}
-                >
-                  {(Object.keys(CONTRACT_STATUS_LABELS) as AppContractStatus[]).map((k) => (
-                    <option key={k} value={k}>
-                      {CONTRACT_STATUS_LABELS[k]}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              {(status === "KO" || status === "ANNULLATO") && (
-                <>
-                  <Field label={status === "KO" ? "Motivo KO *" : "Motivo annullamento *"}>
-                    <Input name="koReason" defaultValue={selected.koReason ?? ""} required />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Prezzo fisso o variabile">
+                    <Select
+                      value={priceType}
+                      onChange={(e) => {
+                        setPriceType(e.target.value);
+                        mark3();
+                      }}
+                    >
+                      <option value="">—</option>
+                      <option value="FISSO">Fisso</option>
+                      <option value="VARIABILE">Variabile</option>
+                      <option value="INDICIZZATO">Indicizzato</option>
+                    </Select>
                   </Field>
-                  <Field label="Note">
-                    <Textarea name="koNotes" rows={2} defaultValue={selected.koNotes ?? ""} />
+                  <Field label="PCV mese (€)">
+                    <Input name="pcv" inputMode="decimal" defaultValue={selected.pcv ?? ""} />
                   </Field>
-                </>
-              )}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Prezzo al kWh (€)">
+                    <Input
+                      name="pricePerKwh"
+                      inputMode="decimal"
+                      defaultValue={selected.pricePerKwh ?? ""}
+                    />
+                  </Field>
+                  <Field label="Prezzo al mc / Smc (€)">
+                    <Input
+                      name="pricePerSmc"
+                      inputMode="decimal"
+                      defaultValue={selected.pricePerSmc ?? ""}
+                    />
+                  </Field>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Quota fissa mensile">
+                    <Input name="monthlyFee" inputMode="decimal" defaultValue={selected.monthlyFee ?? ""} />
+                  </Field>
+                  <Field label="Spread (se variabile)">
+                    <Input name="spread" inputMode="decimal" defaultValue={selected.spread ?? ""} />
+                  </Field>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Sconto / Bonus">
+                    <Input name="discount" defaultValue={selected.discount ?? ""} />
+                  </Field>
+                  <Field label="Durata (mesi)">
+                    <Input
+                      name="durationMonths"
+                      inputMode="numeric"
+                      defaultValue={String(selected.durationMonths)}
+                    />
+                  </Field>
+                </div>
+              </div>
 
-              <Field label="Valore gettone (€)">
-                <Input
-                  name="gettone"
-                  value={gettoneValue}
-                  onChange={(e) => {
-                    setGettoneValue(e.target.value);
-                    mark3();
-                  }}
-                  disabled={!canEditSelectedGettone}
-                  title={
-                    canEditSelectedGettone
-                      ? "Gettone previsto (Commission.expected)"
-                      : "Non autorizzato a modificare il gettone"
-                  }
-                />
-                <p
-                  className={
-                    selected.commissionConfirmed
-                      ? "mt-1 text-xs font-medium text-emerald-700"
-                      : "mt-1 text-xs font-medium text-amber-800"
-                  }
-                >
-                  {selected.commissionConfirmed
-                    ? "Gettone confermato (verde)"
-                    : "Gettone da confermare (giallo)"}
-                </p>
-                {canEditSelectedGettone && !canEditGettone ? (
-                  <p className="mt-1 text-xs text-slate-500">
-                    Dopo la modifica resta in attesa di conferma Admin.
+              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
+                <Field label="Note">
+                  <Textarea
+                    name="economicNotes"
+                    rows={3}
+                    defaultValue={selected.economicNotes ?? ""}
+                    placeholder="Note per Master / collaboratore"
+                  />
+                </Field>
+
+                <Field label="Valore gettone (€) — indicativo">
+                  <Input
+                    name="gettone"
+                    value={gettoneValue}
+                    onChange={(e) => {
+                      setGettoneValue(e.target.value);
+                      mark3();
+                    }}
+                    inputMode="decimal"
+                    disabled={!canEditSelectedGettone}
+                    className="text-lg font-semibold"
+                    title={
+                      canEditSelectedGettone
+                        ? "Il collaboratore indica un valore; il Master lo conferma"
+                        : "Non autorizzato a modificare il gettone"
+                    }
+                  />
+                  <p
+                    className={
+                      selected.commissionConfirmed
+                        ? "mt-1 text-xs font-medium text-emerald-700"
+                        : "mt-1 text-xs font-medium text-amber-800"
+                    }
+                  >
+                    {selected.commissionConfirmed
+                      ? "Gettone confermato dal Master / Admin"
+                      : "Da confermare dal Master (indicativo collaboratore)"}
                   </p>
-                ) : null}
-              </Field>
+                </Field>
+              </div>
 
-              <Field label="Collaboratore">
-                {canChangeCollaborator ? (
-                  <Select name="collaboratorId" defaultValue={selected.collaboratorId}>
-                    {collaborators.map((c) => (
-                      <option key={c.id} value={c.id} disabled={!c.active}>
-                        {c.name}
-                        {!c.active ? " (inattivo)" : ""}
-                        {" · "}
-                        {ROLE_LABELS[c.role as AppRole] ?? c.role}
+              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
+                <h3 className="text-sm font-semibold text-slate-900">Stato pratica</h3>
+                <p className="text-xs text-slate-500">
+                  Dopo la lavorazione Master: <strong>KO</strong>,{" "}
+                  <strong>In pagamento</strong> oppure{" "}
+                  <strong>Richiesta integrazione</strong>.
+                </p>
+                <Field label="Stato contratto">
+                  <Select
+                    value={status}
+                    onChange={(e) => {
+                      setStatus(e.target.value);
+                      mark3();
+                    }}
+                  >
+                    {(Object.keys(CONTRACT_STATUS_LABELS) as AppContractStatus[]).map((k) => (
+                      <option key={k} value={k}>
+                        {CONTRACT_STATUS_LABELS[k]}
                       </option>
                     ))}
                   </Select>
-                ) : (
+                </Field>
+                {(status === "KO" || status === "ANNULLATO") && (
                   <>
-                    <Input readOnly value={selected.collaboratorName} />
-                    <input type="hidden" name="collaboratorId" value={selected.collaboratorId} />
+                    <Field label={status === "KO" ? "Motivo KO *" : "Motivo annullamento *"}>
+                      <Input name="koReason" defaultValue={selected.koReason ?? ""} required />
+                    </Field>
+                    <Field label="Note">
+                      <Textarea name="koNotes" rows={2} defaultValue={selected.koNotes ?? ""} />
+                    </Field>
                   </>
                 )}
-              </Field>
+                {status === "DOCUMENTAZIONE_INCOMPLETA" ? (
+                  <Field label="Cosa manca (integrazione)">
+                    <Textarea
+                      name="koNotes"
+                      rows={2}
+                      defaultValue={selected.koNotes ?? ""}
+                      placeholder="Dati o documenti da integrare"
+                    />
+                  </Field>
+                ) : null}
 
-              <Button type="submit" disabled={!block3Dirty || pending}>
-                {pending && block3Dirty ? "Salvataggio…" : "Salva offerta e stato"}
+                <Field label="Collaboratore">
+                  {canChangeCollaborator ? (
+                    <Select name="collaboratorId" defaultValue={selected.collaboratorId}>
+                      {collaborators.map((c) => (
+                        <option key={c.id} value={c.id} disabled={!c.active}>
+                          {c.name}
+                          {!c.active ? " (inattivo)" : ""}
+                          {" · "}
+                          {ROLE_LABELS[c.role as AppRole] ?? c.role}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <>
+                      <Input readOnly value={selected.collaboratorName} />
+                      <input type="hidden" name="collaboratorId" value={selected.collaboratorId} />
+                    </>
+                  )}
+                </Field>
+              </div>
+
+              <Button type="submit" disabled={!block3Dirty || pending} className="w-full sm:w-auto">
+                {pending && block3Dirty ? "Salvataggio…" : "Salva offerta"}
               </Button>
             </form>
           </section>

@@ -403,7 +403,7 @@ async function analyzeWithOpenRouter(
 
   if (hasPdf && !hasImage && !opts?.useMistralOcr) {
     throw new ProviderError(
-      "PDF non letto in modalità gratis. Carica foto JPG/PNG delle pagine, oppure (Admin) attiva «Mistral OCR».",
+      "PDF non letto in modalità gratis. Carica foto JPG/PNG delle pagine, oppure attiva «Mistral OCR».",
       false,
       "openrouter",
     );
@@ -558,7 +558,7 @@ async function analyzeWithOpenRouterModel(
   if (hasPdf) {
     extracted.warnings.push(
       pdfEngine === "mistral-ocr"
-        ? "PDF analizzato con Mistral OCR (Admin, a pagamento): verifica i campi."
+        ? "PDF analizzato con Mistral OCR (a pagamento): verifica i campi."
         : pdfEngine === "native"
           ? "PDF analizzato in modalità native (gratis): verifica i campi."
           : "PDF analizzato via OpenRouter: verifica i campi.",
@@ -811,7 +811,7 @@ export async function analyzeDocuments(
     [
       "Non sono riuscito a leggere i documenti con i servizi automatici.",
       onlyPdf
-        ? "Hai caricato solo PDF: scatta foto JPG/PNG delle pagine e riprova (gratis e più affidabile). In alternativa Admin può attivare Mistral OCR."
+        ? "Hai caricato solo PDF: scatta foto JPG/PNG delle pagine e riprova (gratis e più affidabile). In alternativa puoi attivare Mistral OCR."
         : "Riprova tra qualche minuto, oppure usa foto più nitide/leggere. Se continua, compila a mano.",
       errors.length ? `Dettaglio tecnico: ${errors.slice(0, 2).join(" · ")}` : "",
     ]
