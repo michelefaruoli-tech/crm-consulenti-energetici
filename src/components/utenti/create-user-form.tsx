@@ -82,11 +82,16 @@ export function CreateUserForm({
 
     start(async () => {
       const res = await createUserAction(fd);
-      if (res.error) {
+      if (res.error && !res.ok) {
         setError(res.error);
         return;
       }
-      setMessage("Utente creato.");
+      if (res.error && res.ok) {
+        // Creato ma scope parziale
+        setMessage(res.error);
+      } else {
+        setMessage("Utente creato.");
+      }
       (e.target as HTMLFormElement).reset();
       setRole("COLLABORATORE");
       setSupplierSelected(new Set());

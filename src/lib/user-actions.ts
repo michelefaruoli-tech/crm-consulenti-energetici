@@ -15,15 +15,46 @@ const ROLES: Role[] = [
 ];
 
 function parseIds(formData: FormData, key: string): string[] {
-  return [...new Set(formData.getAll(key).map((v) => String(v).trim()).filter(Boolean))];
+  return [
+    ...new Set(
+      formData
+        .getAll(key)
+        .map((v) => String(v).trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function parseRole(raw: string): Role | null {
   return ROLES.includes(raw as Role) ? (raw as Role) : null;
 }
 
+/** Scrive scope senza $transaction / createMany (Neon HTTP non li supporta). */
+async function replaceBackofficeScopes(opts: {
+  userId: string;
+  supplierIds: string[];
+  collaboratorIds: string[];
+}): Promise<void> {
+  const { userId, supplierIds, collaboratorIds } = opts;
+
+  await prisma.userSupplierScope.deleteMany({ where: { userId } });
+  await prisma.userCollaboratorScope.deleteMany({ where: { userId } });
+
+  for (const supplierId of supplierIds) {
+    await prisma.userSupplierScope.create({
+      data: { userId, supplierId },
+    });
+  }
+  for (const collaboratorId of collaboratorIds) {
+    await prisma.userCollaboratorScope.create({
+      data: { userId, collaboratorId },
+    });
+  }
+}
+
 /**
  * Crea utente. Per Backoffice: fornitori obbligatori; collaboratori vuoti = TUTTI.
+ * Nessuna transazione Prisma (adapter Neon HTTP).
  */
 export async function createUserAction(
   formData: FormData,
@@ -71,7 +102,7 @@ export async function createUserAction(
       };
     }
 
-    // 1) utente  2) scope (separati = errori più chiari)
+    // Un solo create utente (niente nested create = niente transaction Neon)
     const user = await prisma.user.create({
       data: {
         email,
@@ -82,23 +113,27 @@ export async function createUserAction(
     });
 
     if (role === "BACKOFFICE") {
-      if (supplierIds.length) {
-        await prisma.userSupplierScope.createMany({
-          data: supplierIds.map((supplierId) => ({
-            userId: user.id,
-            supplierId,
-          })),
-          skipDuplicates: true,
-        });
-      }
-      if (collaboratorIds.length) {
-        await prisma.userCollaboratorScope.createMany({
-          data: collaboratorIds.map((collaboratorId) => ({
-            userId: user.id,
-            collaboratorId,
-          })),
-          skipDuplicates: true,
-        });
+      try {
+        for (const supplierId of supplierIds) {
+          await prisma.userSupplierScope.create({
+            data: { userId: user.id, supplierId },
+          });
+        }
+        for (const collaboratorId of collaboratorIds) {
+          await prisma.userCollaboratorScope.create({
+            data: { userId: user.id, collaboratorId },
+          });
+        }
+      } catch (scopeErr) {
+        console.error("[createUserAction scopes]", scopeErr);
+        // Utente già creato: non bloccare; admin può sistemare lo scope dopo
+        revalidatePath("/utenti");
+        return {
+          ok: true,
+          error: `Utente creato, ma scope fornitori non salvato: ${
+            scopeErr instanceof Error ? scopeErr.message.slice(0, 120) : "errore"
+          }. Apri «Scope fornitori» e salva di nuovo.`,
+        };
       }
     }
 
@@ -107,6 +142,12 @@ export async function createUserAction(
   } catch (e) {
     console.error("[createUserAction]", e);
     const msg = e instanceof Error ? e.message : "Errore creazione utente";
+    if (msg.includes("Transactions are not supported")) {
+      return {
+        error:
+          "Errore database (Neon HTTP). Riprova: se persiste, crea l’utente senza scope e assegna i fornitori dopo.",
+      };
+    }
     if (msg.includes("Unique constraint") || msg.includes("User_email")) {
       return { error: "Email già registrata" };
     }
@@ -157,32 +198,23 @@ export async function updateUserScopesAction(
       return { error: "Seleziona almeno un fornitore" };
     }
 
-    await prisma.$transaction([
-      prisma.userSupplierScope.deleteMany({ where: { userId } }),
-      prisma.userCollaboratorScope.deleteMany({ where: { userId } }),
-      prisma.userSupplierScope.createMany({
-        data: supplierIds.map((supplierId) => ({ userId, supplierId })),
-        skipDuplicates: true,
-      }),
-      ...(collaboratorIds.length
-        ? [
-            prisma.userCollaboratorScope.createMany({
-              data: collaboratorIds.map((collaboratorId) => ({
-                userId,
-                collaboratorId,
-              })),
-              skipDuplicates: true,
-            }),
-          ]
-        : []),
-    ]);
+    await replaceBackofficeScopes({
+      userId,
+      supplierIds,
+      collaboratorIds,
+    });
 
     revalidatePath("/utenti");
     return { ok: true };
   } catch (e) {
     console.error("[updateUserScopesAction]", e);
-    return {
-      error: e instanceof Error ? e.message.slice(0, 200) : "Errore salvataggio scope",
-    };
+    const msg = e instanceof Error ? e.message : "Errore salvataggio scope";
+    if (msg.includes("Transactions are not supported")) {
+      return {
+        error:
+          "Errore database Neon (transazioni). Riprova tra qualche secondo.",
+      };
+    }
+    return { error: msg.slice(0, 200) };
   }
 }
