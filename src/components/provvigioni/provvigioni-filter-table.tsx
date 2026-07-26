@@ -65,8 +65,15 @@ function settledOptions(): string[] {
   return out;
 }
 
+/** Chiave bozza = contratto (sempre unico). Il salvataggio usa commissionId. */
 function rowId(row: { commissionId?: string; id?: string } | Record<string, unknown>) {
-  return String(row.commissionId || row.id || "");
+  return String((row as { id?: string }).id || (row as { commissionId?: string }).commissionId || "");
+}
+
+function commissionIdOf(row: { commissionId?: string; id?: string } | Record<string, unknown>) {
+  const c = String((row as { commissionId?: string }).commissionId || "");
+  if (c) return c;
+  return String((row as { id?: string }).id || "");
 }
 
 function originalCellValue(row: ProvvigioneRow, key: string): string {
@@ -331,10 +338,13 @@ export function ProvvigioniFilterTable({
 
     const changes: Array<{ commissionId: string; field: string; value: string }> = [];
     for (const [id, cells] of Object.entries(drafts)) {
+      const base = rows.find((r) => rowId(r) === id);
+      const commissionId = base ? commissionIdOf(base) : id;
+      if (!commissionId) continue;
       for (const [colKey, value] of Object.entries(cells)) {
         const field = FIELD_MAP[colKey];
         if (!field) continue;
-        changes.push({ commissionId: id, field, value });
+        changes.push({ commissionId, field, value });
       }
     }
 
@@ -876,7 +886,7 @@ export function ProvvigioniFilterTable({
         dense
         rows={displayRows as unknown as Record<string, unknown>[]}
         columns={columns}
-        rowKey={(r) => String(r.commissionId || r.id)}
+        rowKey={(r) => String(r.id || r.commissionId)}
         draftMode
         getDraftValue={getDraftValue}
         isDraftDirty={isDraftDirty}

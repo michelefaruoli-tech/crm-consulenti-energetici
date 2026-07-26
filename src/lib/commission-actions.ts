@@ -20,6 +20,7 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import type { Role } from "@/generated/prisma/client";
+import { parsePrivatoDisplayName } from "@/lib/utils";
 
 type SessionLike = { id: string; role: Role };
 
@@ -365,23 +366,78 @@ async function applyCommissionField(
   } else if (field === "clientName") {
     const raw = value.trim();
     if (!raw) throw new Error("Nome cliente vuoto");
-    const client = await prisma.client.findUnique({
+    const existing = await prisma.client.findUnique({
       where: { id: commission.contract.clientId },
-      select: { type: true },
     });
-    if (!client) throw new Error("Cliente non trovato");
-    if (client.type === "AZIENDA") {
+    if (!existing) throw new Error("Cliente non trovato");
+
+    const isAzienda = existing.type === "AZIENDA";
+    const parsed = isAzienda ? null : parsePrivatoDisplayName(raw);
+
+    // Se lo stesso Client è su più contratti, rinominarlo cambierebbe TUTTE le righe.
+    // In Provvigioni ogni riga = un contratto: creiamo un’anagrafica solo per questo.
+    const otherCount = await prisma.contract.count({
+      where: {
+        clientId: existing.id,
+        id: { not: commission.contractId },
+        deletedAt: null,
+      },
+    });
+
+    if (otherCount > 0) {
+      const created = await prisma.client.create({
+        data: {
+          type: existing.type,
+          companyName: isAzienda ? raw : existing.companyName,
+          firstName: isAzienda ? existing.firstName : parsed!.firstName,
+          lastName: isAzienda ? existing.lastName : parsed!.lastName,
+          fiscalCode: existing.fiscalCode,
+          vatNumber: existing.vatNumber,
+          email: existing.email,
+          pec: existing.pec,
+          phone: existing.phone,
+          iban: existing.iban,
+          address: existing.address,
+          street: existing.street,
+          streetNumber: existing.streetNumber,
+          city: existing.city,
+          province: existing.province,
+          region: existing.region,
+          zipCode: existing.zipCode,
+          country: existing.country,
+          classification: existing.classification,
+          legalFirstName: existing.legalFirstName,
+          legalLastName: existing.legalLastName,
+          legalFiscalCode: existing.legalFiscalCode,
+          sdiCode: existing.sdiCode,
+          supplyAddress: existing.supplyAddress,
+          supplyStreet: existing.supplyStreet,
+          supplyStreetNumber: existing.supplyStreetNumber,
+          supplyCity: existing.supplyCity,
+          supplyProvince: existing.supplyProvince,
+          supplyRegion: existing.supplyRegion,
+          supplyZipCode: existing.supplyZipCode,
+          addressesMatch: existing.addressesMatch,
+          notes: existing.notes,
+          createdById: session.id,
+        },
+      });
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: { clientId: created.id },
+      });
+    } else if (isAzienda) {
       await prisma.client.update({
-        where: { id: commission.contract.clientId },
+        where: { id: existing.id },
         data: { companyName: raw },
       });
     } else {
-      const parts = raw.split(/\s+/).filter(Boolean);
-      const lastName = parts[0] ?? raw;
-      const firstName = parts.slice(1).join(" ") || null;
       await prisma.client.update({
-        where: { id: commission.contract.clientId },
-        data: { lastName, firstName },
+        where: { id: existing.id },
+        data: {
+          lastName: parsed!.lastName,
+          firstName: parsed!.firstName,
+        },
       });
     }
   } else if (field === "confirmed") {
