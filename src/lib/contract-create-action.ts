@@ -47,11 +47,16 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     if (!c.companyName?.trim()) errors.push("Ragione sociale obbligatoria");
   }
   if (!c.type) errors.push("Tipologia cliente (Privato / Business) obbligatoria");
-  if (!payload.supplierId && !payload.supplierName?.trim()) {
-    errors.push("Fornitore obbligatorio");
-  }
   if (!payload.services.length) {
     errors.push("Aggiungi almeno un servizio");
+  }
+
+  // Fornitore: top-level oppure su ogni riga
+  const anySupplier =
+    Boolean(payload.supplierId || payload.supplierName?.trim()) ||
+    payload.services.some((s) => s.supplierId || s.supplierName?.trim());
+  if (!anySupplier) {
+    errors.push("Fornitore obbligatorio");
   }
 
   if (!sendToMaster) {
@@ -62,27 +67,37 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   if (c.type === "AZIENDA" && !c.vatNumber?.trim()) {
     errors.push("Partita IVA obbligatoria per invio al Master");
   }
-  if (!payload.operationType) errors.push("Tipo operazione obbligatorio");
-  if (payload.operationType === "ALTRO" && !payload.operationOther?.trim()) {
-    errors.push("Specifica operazione obbligatoria");
-  }
-  for (const s of payload.services) {
-    if (!s.service) errors.push("Servizio obbligatorio su ogni riga");
+  for (const [i, s] of payload.services.entries()) {
+    const n = i + 1;
+    const op = s.operationType || payload.operationType;
+    if (!op) errors.push(`Servizio #${n}: tipo operazione obbligatorio`);
+    if (op === "ALTRO" && !(s.operationOther || payload.operationOther)?.trim()) {
+      errors.push(`Servizio #${n}: specifica operazione obbligatoria`);
+    }
+    if (!s.service) errors.push(`Servizio #${n}: tipologia obbligatoria`);
     if (s.service === "ALTRO" && !s.serviceOther?.trim()) {
-      errors.push("Specifica servizio obbligatoria");
+      errors.push(`Servizio #${n}: specifica servizio obbligatoria`);
     }
     if (s.service === "LUCE" && !s.pod?.trim()) {
-      errors.push("POD obbligatorio per Luce");
+      errors.push(`Servizio #${n}: POD obbligatorio per Luce`);
     }
     if (s.service === "GAS" && !s.pdr?.trim()) {
-      errors.push("PDR obbligatorio per Gas");
+      errors.push(`Servizio #${n}: PDR obbligatorio per Gas`);
     }
     if (
-      !["LUCE", "GAS"].includes(s.service) &&
+      !["LUCE", "GAS", "DUAL"].includes(s.service) &&
       !s.techNotes?.trim() &&
-      !s.phoneNumber?.trim()
+      !s.migrationCode?.trim() &&
+      !s.phoneNumber?.trim() &&
+      !s.pod?.trim() &&
+      !s.pdr?.trim()
     ) {
-      errors.push(`Identificativo/descrizione tecnica obbligatoria per ${s.service}`);
+      errors.push(`Servizio #${n}: codice / identificativo tecnico obbligatorio`);
+    }
+    const pay = s.paymentMethod || payload.paymentMethod;
+    if (!pay) errors.push(`Servizio #${n}: metodo di pagamento obbligatorio`);
+    if (!(s.supplierId || s.supplierName || payload.supplierId || payload.supplierName)) {
+      errors.push(`Servizio #${n}: fornitore obbligatorio`);
     }
   }
   if (!c.fiscalCode?.trim()) errors.push("Codice fiscale obbligatorio per invio al Master");
@@ -91,8 +106,9 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   if (!c.zipCode?.trim() || !c.city?.trim()) {
     errors.push("Indirizzo residenza/sede completo obbligatorio");
   }
-  if (!payload.contractKind) errors.push("Tipo contratto obbligatorio");
-  if (!payload.paymentMethod) errors.push("Metodo di pagamento obbligatorio");
+  if (!payload.contractKind && !payload.services.some((s) => s.contractKind)) {
+    errors.push("Tipo contratto obbligatorio");
+  }
   if (c.type === "AZIENDA") {
     if (!c.legalFirstName?.trim() || !c.legalLastName?.trim()) {
       errors.push("Nome e cognome rappresentante legale obbligatori");
@@ -114,8 +130,11 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     if (!hasBill) errors.push("Allegato bolletta/fattura obbligatorio");
   }
 
-  // IBAN obbligatorio solo con Master + RID
-  if (payload.paymentMethod === "RID") {
+  // IBAN obbligatorio solo con Master + RID (su almeno una riga)
+  const usesRid =
+    payload.paymentMethod === "RID" ||
+    payload.services.some((s) => s.paymentMethod === "RID");
+  if (usesRid) {
     if (!c.iban?.trim()) errors.push("IBAN obbligatorio per RID");
     else if (!isValidIban(c.iban)) errors.push("IBAN non valido");
   }
@@ -312,10 +331,13 @@ async function createFullContractActionInner(
     clientId = created.id;
   }
 
-  // Fornitore
-  let supplierId = payload.supplierId;
-  if (!supplierId && payload.supplierName?.trim()) {
-    const name = payload.supplierName.trim();
+  async function resolveSupplierId(opts: {
+    supplierId?: string;
+    supplierName?: string;
+  }): Promise<string | null> {
+    if (opts.supplierId) return opts.supplierId;
+    if (!opts.supplierName?.trim()) return null;
+    const name = opts.supplierName.trim();
     const code =
       name
         .toUpperCase()
@@ -324,24 +346,34 @@ async function createFullContractActionInner(
     const existing = await prisma.supplier.findFirst({
       where: { name: { equals: name, mode: "insensitive" } },
     });
-    if (existing) supplierId = existing.id;
-    else {
-      const created = await prisma.supplier.create({
-        data: { name, code: `${code}_${Date.now().toString(36)}` },
-      });
-      supplierId = created.id;
-    }
+    if (existing) return existing.id;
+    const created = await prisma.supplier.create({
+      data: { name, code: `${code}_${Date.now().toString(36)}` },
+    });
+    return created.id;
   }
-  if (!supplierId || !clientId) {
-    return { ok: false, errors: ["Cliente o fornitore mancante"] };
+
+  // Fornitore di fallback (prima riga / payload)
+  let defaultSupplierId = await resolveSupplierId({
+    supplierId: payload.supplierId,
+    supplierName: payload.supplierName,
+  });
+  if (!defaultSupplierId && payload.services[0]) {
+    defaultSupplierId = await resolveSupplierId({
+      supplierId: payload.services[0].supplierId,
+      supplierName: payload.services[0].supplierName,
+    });
+  }
+  if (!clientId) {
+    return { ok: false, errors: ["Cliente mancante"] };
+  }
+  if (!defaultSupplierId) {
+    return { ok: false, errors: ["Fornitore mancante"] };
   }
 
   const insertionDate =
     parseFlexibleDate(payload.insertionDate ?? "") ?? new Date();
-  // Data ingresso calcolata dalla data registrazione + tipo operazione (mai inserita a mano)
-  const supplyStart = computeSupplyStartDate(insertionDate, payload.operationType);
   const duration = payload.durationMonths || 12;
-  const expiryDate = calcExpiryDate(supplyStart, duration);
 
   const status = payload.draft
     ? "BOZZA"
@@ -374,6 +406,39 @@ async function createFullContractActionInner(
   let firstId = "";
 
   for (const line of services) {
+    const lineSupplierId =
+      (await resolveSupplierId({
+        supplierId: line.supplierId,
+        supplierName: line.supplierName,
+      })) || defaultSupplierId;
+
+    const operationType = line.operationType || payload.operationType || "SWITCH";
+    const supplyStart = computeSupplyStartDate(insertionDate, operationType);
+    const expiryDate = calcExpiryDate(supplyStart, duration);
+    const supplySame =
+      line.supplySameAsResidence ?? payload.supplySameAsResidence;
+    const supplyStreet = supplySame
+      ? payload.client.street || null
+      : line.supplyStreet || payload.supplyStreet || null;
+    const supplyStreetNumber = supplySame
+      ? payload.client.streetNumber || null
+      : line.supplyStreetNumber || payload.supplyStreetNumber || null;
+    const supplyZipCode = supplySame
+      ? payload.client.zipCode || null
+      : line.supplyZipCode || payload.supplyZipCode || null;
+    const supplyCity = supplySame
+      ? payload.client.city || null
+      : line.supplyCity || payload.supplyCity || null;
+    const supplyProvince = supplySame
+      ? payload.client.province || null
+      : line.supplyProvince || payload.supplyProvince || null;
+    const supplyRegion = supplySame
+      ? payload.client.region || null
+      : line.supplyRegion || payload.supplyRegion || null;
+    const supplyAddress = supplySame
+      ? addressLine || null
+      : [supplyStreet, supplyStreetNumber].filter(Boolean).join(" ") || null;
+
     let created: { id: string } | null = null;
     let attempts = 0;
     while (!created && attempts < 5) {
@@ -382,45 +447,51 @@ async function createFullContractActionInner(
         const contractNumber = await nextContractNumber();
         const podPdr =
           line.service === "LUCE"
-            ? line.pod?.trim() || null
+            ? line.pod?.trim() || line.migrationCode?.trim() || null
             : line.service === "GAS"
-              ? line.pdr?.trim() || null
-              : line.pod?.trim() || line.pdr?.trim() || null;
+              ? line.pdr?.trim() || line.migrationCode?.trim() || null
+              : line.migrationCode?.trim() ||
+                line.pod?.trim() ||
+                line.pdr?.trim() ||
+                null;
 
         created = await prisma.contract.create({
           data: {
             contractNumber,
             clientId,
-            supplierId,
+            supplierId: lineSupplierId,
             collaboratorId,
             createdById: session.id,
             status,
             utilityType: line.service,
             serviceOther: line.serviceOther || null,
-            operationType: payload.operationType || "SWITCH",
-            operationOther: payload.operationOther || null,
-            productName: payload.productName || null,
-            offerCode: payload.offerCode || null,
-            commissionRuleId: payload.commissionRuleId || null,
-            contractKind: payload.contractKind || null,
-            priceType: payload.priceType || null,
+            operationType,
+            operationOther:
+              line.operationOther || payload.operationOther || null,
+            productName: line.productName || payload.productName || null,
+            offerCode: line.offerCode || payload.offerCode || null,
+            commissionRuleId:
+              line.commissionRuleId || payload.commissionRuleId || null,
+            contractKind: line.contractKind || payload.contractKind || null,
+            priceType: line.priceType || payload.priceType || null,
             pod: line.pod?.trim() || null,
             pdr: line.pdr?.trim() || null,
             podPdr,
             powerKw: num(line.powerKw),
             annualKwh: num(line.annualKwh),
             annualSmc: num(line.annualSmc),
-            pricePerKwh: num(payload.pricePerKwh),
-            pricePerSmc: num(payload.pricePerSmc),
-            pcv: num(payload.pcv),
-            spread: num(payload.spread),
-            monthlyFee: num(payload.monthlyFee),
+            pricePerKwh: num(line.pricePerKwh || payload.pricePerKwh),
+            pricePerSmc: num(line.pricePerSmc || payload.pricePerSmc),
+            pcv: num(line.pcv || payload.pcv),
+            spread: num(line.spread || payload.spread),
+            monthlyFee: num(line.monthlyFee || payload.monthlyFee),
             oneOffFee: num(payload.oneOffFee),
             discount: num(payload.discount),
             economicNotes: payload.economicNotes || null,
-            paymentMethod: payload.paymentMethod || null,
+            paymentMethod:
+              line.paymentMethod || payload.paymentMethod || null,
             contractIban: payload.client.iban || null,
-            ibanHolder: payload.ibanHolder || null,
+            ibanHolder: line.ibanHolder || payload.ibanHolder || null,
             ibanHolderCf: payload.ibanHolderCf || null,
             invoiceEmail: payload.invoiceEmail || null,
             supplyClassification: classification,
@@ -428,29 +499,14 @@ async function createFullContractActionInner(
             supplyStartDate: supplyStart,
             expiryDate,
             insertionDate,
-            addressesMatch: payload.supplySameAsResidence,
-            supplyStreet: payload.supplySameAsResidence
-              ? payload.client.street || null
-              : payload.supplyStreet || null,
-            supplyStreetNumber: payload.supplySameAsResidence
-              ? payload.client.streetNumber || null
-              : payload.supplyStreetNumber || null,
-            supplyZipCode: payload.supplySameAsResidence
-              ? payload.client.zipCode || null
-              : payload.supplyZipCode || null,
-            supplyCity: payload.supplySameAsResidence
-              ? payload.client.city || null
-              : payload.supplyCity || null,
-            supplyProvince: payload.supplySameAsResidence
-              ? payload.client.province || null
-              : payload.supplyProvince || null,
-            supplyRegion: payload.supplySameAsResidence
-              ? payload.client.region || null
-              : payload.supplyRegion || null,
-            supplyAddress: payload.supplySameAsResidence
-              ? addressLine || null
-              : [payload.supplyStreet, payload.supplyStreetNumber].filter(Boolean).join(" ") ||
-                null,
+            addressesMatch: supplySame,
+            supplyStreet,
+            supplyStreetNumber,
+            supplyZipCode,
+            supplyCity,
+            supplyProvince,
+            supplyRegion,
+            supplyAddress,
             supplyCountry: "Italia",
             sendToMaster,
             assignedToMaster: sendToMaster,
@@ -465,6 +521,7 @@ async function createFullContractActionInner(
               phoneNumber: line.phoneNumber,
               migrationCode: line.migrationCode,
               techNotes: line.techNotes,
+              priceIndex: line.priceIndex,
             }),
             parentContractId: firstId || null,
           },
@@ -508,9 +565,10 @@ async function createFullContractActionInner(
       },
     });
 
-    const expectedFromRule = payload.commissionRuleId
+    const ruleId = line.commissionRuleId || payload.commissionRuleId;
+    const expectedFromRule = ruleId
       ? await prisma.commissionRule.findUnique({
-          where: { id: payload.commissionRuleId },
+          where: { id: ruleId },
           select: { fixedAmount: true },
         })
       : null;

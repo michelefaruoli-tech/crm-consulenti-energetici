@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AutocompleteSearch } from "@/components/contracts/autocomplete-search";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,10 @@ import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { createFullContractAction } from "@/lib/contract-create-action";
 import {
   DOC_TYPE_OPTIONS,
-  OPERATION_OPTIONS,
-  PAYMENT_METHOD_OPTIONS,
-  SERVICE_OPTIONS,
 } from "@/lib/constants";
 import {
   calcExpiryDate,
+  createEmptyServiceLine,
   type ContractServiceLine,
   type NewContractPayload,
 } from "@/lib/contract-form-types";
@@ -21,6 +19,10 @@ import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
 import { PersistentAlert } from "@/components/ui/persistent-alert";
 import { DocumentAutoFillPanel } from "@/components/contracts/ocr/document-auto-fill-panel";
+import {
+  AddServiceButton,
+  ServiceContractBlocks,
+} from "@/components/contracts/service-contract-blocks";
 import type { OcrApplyPayload } from "@/lib/ocr/schema";
 import { format } from "date-fns";
 import { Paperclip, X } from "lucide-react";
@@ -40,6 +42,7 @@ type Props = {
     name: string;
     clientSegment: string;
     gettoneTotale: string;
+    hasRid?: boolean;
   }[];
   initialClientId?: string;
 };
@@ -63,11 +66,6 @@ export function NuovoContrattoForm({
   const [clientLabel, setClientLabel] = useState<string | undefined>();
   const [creatingClient, setCreatingClient] = useState(!initialClientId);
 
-  const [supplierChoice, setSupplierChoice] = useState("");
-  const [supplierId, setSupplierId] = useState<string | undefined>();
-  const [supplierName, setSupplierName] = useState("");
-  const creatingSupplier = supplierChoice === "__NEW__";
-
   const [clientType, setClientType] = useState<"PRIVATO" | "AZIENDA">("PRIVATO");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -90,35 +88,12 @@ export function NuovoContrattoForm({
   const [sdiCode, setSdiCode] = useState("");
   const [classification, setClassification] = useState("");
 
-  const [operationType, setOperationType] = useState("SWITCH");
-  const [operationOther, setOperationOther] = useState("");
-  const [supplySame, setSupplySame] = useState(true);
-  const [supplyStreet, setSupplyStreet] = useState("");
-  const [supplyStreetNumber, setSupplyStreetNumber] = useState("");
-  const [supplyZip, setSupplyZip] = useState("");
-  const [supplyCity, setSupplyCity] = useState("");
-  const [supplyProvince, setSupplyProvince] = useState("");
-  const [supplyRegion, setSupplyRegion] = useState("");
   const [durationMonths, setDurationMonths] = useState(12);
-
-  const [productName, setProductName] = useState("");
-  const [offerCode, setOfferCode] = useState("");
-  const [commissionRuleId, setCommissionRuleId] = useState("");
-  const [contractKind, setContractKind] = useState("Domestico");
-  const [priceType, setPriceType] = useState("Fisso");
-  const [priceIndex, setPriceIndex] = useState("PUN");
-  const [paymentMethod, setPaymentMethod] = useState("");
-  const [ibanHolder, setIbanHolder] = useState("");
-  const [pricePerKwh, setPricePerKwh] = useState("");
-  const [pricePerSmc, setPricePerSmc] = useState("");
-  const [pcv, setPcv] = useState("");
-  const [spread, setSpread] = useState("");
-  const [monthlyFee, setMonthlyFee] = useState("");
   const [notes, setNotes] = useState("");
   const [masterNotes, setMasterNotes] = useState("");
 
   const [services, setServices] = useState<ContractServiceLine[]>([
-    { id: uid(), service: "LUCE", pod: "" },
+    createEmptyServiceLine({ service: "LUCE" }),
   ]);
   const [attachments, setAttachments] = useState<
     {
@@ -134,51 +109,41 @@ export function NuovoContrattoForm({
   >([]);
 
   const [registrationDate, setRegistrationDate] = useState(() => new Date());
+  const primary = services[0];
+  const primaryOp = primary?.operationType ?? "SWITCH";
   const computedSupplyStart = useMemo(
-    () => computeSupplyStartDate(registrationDate, operationType),
-    [registrationDate, operationType],
+    () => computeSupplyStartDate(registrationDate, primaryOp),
+    [registrationDate, primaryOp],
   );
   const expiryPreview = useMemo(
     () => format(calcExpiryDate(computedSupplyStart, durationMonths), "dd/MM/yyyy"),
     [computedSupplyStart, durationMonths],
   );
 
-  useEffect(() => {
-    // Indice di riferimento in base al servizio
-    if (priceType !== "Indicizzato") return;
-    if (services.some((s) => s.service === "GAS") && !services.some((s) => s.service === "LUCE")) {
-      setPriceIndex("PSV");
-    } else {
-      setPriceIndex("PUN");
-    }
-  }, [priceType, services]);
-
-  // CAP gestito da CapAddressFields
-
-  function onSupplierChange(value: string) {
-    setSupplierChoice(value);
-    setCommissionRuleId("");
-    if (value === "__NEW__") {
-      setSupplierId(undefined);
-      setSupplierName("");
-      return;
-    }
-    if (!value) {
-      setSupplierId(undefined);
-      setSupplierName("");
-      return;
-    }
-    const found = suppliers.find((s) => s.id === value);
-    setSupplierId(value);
-    setSupplierName(found?.name ?? "");
+  function patchService(id: string, patch: Partial<ContractServiceLine>) {
+    setServices((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   }
 
-  const rulesForSupplier = useMemo(
-    () => listinoRules.filter((r) => r.supplierId === supplierId),
-    [listinoRules, supplierId],
-  );
+  function addService() {
+    const prev = services[services.length - 1];
+    setServices((s) => [
+      ...s,
+      createEmptyServiceLine({
+        service: prev?.service === "LUCE" ? "GAS" : "LUCE",
+        supplySameAsResidence: prev?.supplySameAsResidence ?? true,
+        operationType: prev?.operationType ?? "SWITCH",
+        paymentMethod: prev?.paymentMethod ?? "",
+        supplierId: prev?.supplierId,
+        contractKind:
+          prev?.contractKind ??
+          (clientType === "PRIVATO" ? "Domestico" : "Non domestico"),
+        priceType: prev?.priceType ?? "FISSO",
+      }),
+    ]);
+  }
 
   function buildPayload(draft: boolean): NewContractPayload {
+    const first = services[0];
     return {
       draft,
       sendToMaster,
@@ -211,38 +176,37 @@ export function NuovoContrattoForm({
         sdiCode,
         classification,
       },
-      supplierId: creatingSupplier ? undefined : supplierId,
-      supplierName: creatingSupplier
-        ? supplierName
-        : suppliers.find((s) => s.id === supplierId)?.name,
-      operationType,
-      operationOther,
+      supplierId: first?.supplierId,
+      supplierName: first?.supplierName,
+      operationType: first?.operationType || "SWITCH",
+      operationOther: first?.operationOther,
       insertionDate: formatItDate(registrationDate),
-      supplySameAsResidence: supplySame,
-      supplyStreet,
-      supplyStreetNumber,
-      supplyZipCode: supplyZip,
-      supplyCity,
-      supplyProvince,
-      supplyRegion,
+      supplySameAsResidence: first?.supplySameAsResidence !== false,
+      supplyStreet: first?.supplyStreet,
+      supplyStreetNumber: first?.supplyStreetNumber,
+      supplyZipCode: first?.supplyZipCode,
+      supplyCity: first?.supplyCity,
+      supplyProvince: first?.supplyProvince,
+      supplyRegion: first?.supplyRegion,
       supplyClassification: classification,
       durationMonths,
-      productName,
-      offerCode,
-      commissionRuleId: commissionRuleId || undefined,
-      contractKind,
-      priceType,
-      paymentMethod,
-      ibanHolder,
-      pricePerKwh,
-      pricePerSmc,
-      pcv,
-      spread,
-      monthlyFee,
+      productName: first?.productName,
+      offerCode: first?.offerCode,
+      commissionRuleId: first?.commissionRuleId || undefined,
+      contractKind:
+        first?.contractKind ||
+        (clientType === "PRIVATO" ? "Domestico" : "Non domestico"),
+      priceType: first?.priceType,
+      paymentMethod: first?.paymentMethod,
+      ibanHolder: first?.ibanHolder,
+      pricePerKwh: first?.pricePerKwh,
+      pricePerSmc: first?.pricePerSmc,
+      pcv: first?.pcv,
+      spread: first?.spread,
+      monthlyFee: first?.monthlyFee,
       notes,
       masterNotes,
       services,
-      // Allegati via API separata (evita "unexpected response" per body troppo grande)
       attachments: [],
     };
   }
@@ -453,208 +417,51 @@ export function NuovoContrattoForm({
     if (payload.legalFirstName != null) setLegalFirstName(payload.legalFirstName);
     if (payload.legalLastName != null) setLegalLastName(payload.legalLastName);
     if (payload.classification != null) setClassification(payload.classification);
-    if (payload.productName != null) setProductName(payload.productName);
-    if (payload.paymentMethod != null) setPaymentMethod(payload.paymentMethod);
-    if (payload.supplierName) {
-      const found = suppliers.find(
-        (s) => s.name.toLowerCase() === payload.supplierName!.toLowerCase(),
-      );
-      if (found) {
-        setSupplierChoice(found.id);
-        setSupplierId(found.id);
-        setSupplierName(found.name);
-      } else {
-        setSupplierChoice("__NEW__");
-        setSupplierId(undefined);
-        setSupplierName(payload.supplierName);
-      }
-    }
-    if (payload.supplySame != null) setSupplySame(payload.supplySame);
-    if (payload.supplyStreet != null) setSupplyStreet(payload.supplyStreet);
-    if (payload.supplyStreetNumber != null) {
-      setSupplyStreetNumber(payload.supplyStreetNumber);
-    }
-    if (payload.supplyZip != null) setSupplyZip(payload.supplyZip);
-    if (payload.supplyCity != null) setSupplyCity(payload.supplyCity);
-    if (payload.supplyProvince != null) setSupplyProvince(payload.supplyProvince);
-    if (payload.supplyRegion != null) setSupplyRegion(payload.supplyRegion);
+
+    const foundSupplier = payload.supplierName
+      ? suppliers.find(
+          (s) => s.name.toLowerCase() === payload.supplierName!.toLowerCase(),
+        )
+      : undefined;
+
+    const basePatch: Partial<ContractServiceLine> = {
+      productName: payload.productName ?? undefined,
+      paymentMethod: payload.paymentMethod ?? undefined,
+      supplySameAsResidence: payload.supplySame ?? true,
+      supplyStreet: payload.supplyStreet ?? undefined,
+      supplyStreetNumber: payload.supplyStreetNumber ?? undefined,
+      supplyZipCode: payload.supplyZip ?? undefined,
+      supplyCity: payload.supplyCity ?? undefined,
+      supplyProvince: payload.supplyProvince ?? undefined,
+      supplyRegion: payload.supplyRegion ?? undefined,
+      supplierId: foundSupplier?.id,
+      supplierName: foundSupplier ? undefined : payload.supplierName ?? undefined,
+    };
+
     if (payload.services?.length) {
       setServices(
-        payload.services.map((s) => ({
-          id: uid(),
-          service: s.service,
-          pod: s.pod ?? "",
-          pdr: s.pdr ?? "",
-          annualKwh: s.annualKwh ?? "",
-          annualSmc: s.annualSmc ?? "",
-          powerKw: s.powerKw ?? "",
-        })),
+        payload.services.map((s) =>
+          createEmptyServiceLine({
+            ...basePatch,
+            service: s.service,
+            pod: s.pod ?? "",
+            pdr: s.pdr ?? "",
+            annualKwh: s.annualKwh ?? "",
+            annualSmc: s.annualSmc ?? "",
+            powerKw: s.powerKw ?? "",
+          }),
+        ),
       );
+    } else {
+      setServices((all) => {
+        const first = all[0] ?? createEmptyServiceLine();
+        return [{ ...first, ...basePatch }];
+      });
     }
     setMessage(
       "Dati dai documenti applicati al modulo. Controlla tutto prima di creare il contratto.",
     );
     setErrors([]);
-  }
-
-  const hasLuce = services.some((s) => s.service === "LUCE");
-  const hasGas = services.some((s) => s.service === "GAS");
-
-  function renderServiceLines() {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-medium text-slate-800">Servizi / punti fornitura</h3>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              setServices((s) => [...s, { id: uid(), service: "GAS", pdr: "" }])
-            }
-          >
-            + Aggiungi servizio (nuovo contratto)
-          </Button>
-        </div>
-        <p className="text-xs text-slate-500">
-          Multi POD/PDR: ogni riga crea un contratto collegato, senza ripetere i dati cliente.
-        </p>
-        {services.map((line, idx) => (
-          <div key={line.id} className="space-y-2 rounded-lg border border-slate-200 p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Servizio #{idx + 1}</span>
-              {services.length > 1 ? (
-                <button
-                  type="button"
-                  className="text-xs text-red-600"
-                  onClick={() => setServices((s) => s.filter((x) => x.id !== line.id))}
-                >
-                  Rimuovi
-                </button>
-              ) : null}
-            </div>
-            <div className="grid gap-2 md:grid-cols-3">
-              <Field label="Servizio">
-                <Select
-                  value={line.service}
-                  onChange={(e) =>
-                    setServices((all) =>
-                      all.map((x) =>
-                        x.id === line.id ? { ...x, service: e.target.value } : x,
-                      ),
-                    )
-                  }
-                >
-                  {SERVICE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              {line.service === "LUCE" ? (
-                <Field label={sendToMaster ? "POD *" : "POD"}>
-                  <Input
-                    value={line.pod ?? ""}
-                    onChange={(e) =>
-                      setServices((all) =>
-                        all.map((x) =>
-                          x.id === line.id ? { ...x, pod: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                </Field>
-              ) : null}
-              {line.service === "GAS" ? (
-                <Field label={sendToMaster ? "PDR *" : "PDR"}>
-                  <Input
-                    value={line.pdr ?? ""}
-                    onChange={(e) =>
-                      setServices((all) =>
-                        all.map((x) =>
-                          x.id === line.id ? { ...x, pdr: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                </Field>
-              ) : null}
-              {line.service === "ALTRO" ? (
-                <Field label="Specifica servizio">
-                  <Input
-                    value={line.serviceOther ?? ""}
-                    onChange={(e) =>
-                      setServices((all) =>
-                        all.map((x) =>
-                          x.id === line.id ? { ...x, serviceOther: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                </Field>
-              ) : null}
-              {line.service === "LUCE" ? (
-                <>
-                  <Field label="Consumo annuo kWh">
-                    <Input
-                      value={line.annualKwh ?? ""}
-                      onChange={(e) =>
-                        setServices((all) =>
-                          all.map((x) =>
-                            x.id === line.id ? { ...x, annualKwh: e.target.value } : x,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field label="Potenza kW">
-                    <Input
-                      value={line.powerKw ?? ""}
-                      onChange={(e) =>
-                        setServices((all) =>
-                          all.map((x) =>
-                            x.id === line.id ? { ...x, powerKw: e.target.value } : x,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                </>
-              ) : null}
-              {line.service === "GAS" ? (
-                <Field label="Consumo annuo Smc">
-                  <Input
-                    value={line.annualSmc ?? ""}
-                    onChange={(e) =>
-                      setServices((all) =>
-                        all.map((x) =>
-                          x.id === line.id ? { ...x, annualSmc: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                </Field>
-              ) : null}
-              {!["LUCE", "GAS"].includes(line.service) ? (
-                <Field label="Identificativo / note tecniche">
-                  <Input
-                    value={line.techNotes ?? ""}
-                    onChange={(e) =>
-                      setServices((all) =>
-                        all.map((x) =>
-                          x.id === line.id ? { ...x, techNotes: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                </Field>
-              ) : null}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
   }
 
   return (
@@ -769,7 +576,12 @@ export function NuovoContrattoForm({
                 const t = e.target.value as "PRIVATO" | "AZIENDA";
                 setClientType(t);
                 setClassification("");
-                setContractKind(t === "PRIVATO" ? "Domestico" : "Non domestico");
+                setServices((all) =>
+                  all.map((s) => ({
+                    ...s,
+                    contractKind: t === "PRIVATO" ? "Domestico" : "Non domestico",
+                  })),
+                );
               }}
             >
               <option value="PRIVATO">Privato (domestico)</option>
@@ -897,127 +709,17 @@ export function NuovoContrattoForm({
         ) : null}
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Dati dell&apos;operazione</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Tipo operazione">
-            <Select value={operationType} onChange={(e) => setOperationType(e.target.value)}>
-              {OPERATION_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {operationType === "ALTRO" ? (
-            <Field label="Specifica operazione *">
-              <Input
-                value={operationOther}
-                onChange={(e) => setOperationOther(e.target.value)}
-              />
-            </Field>
-          ) : null}
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm sm:p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Servizi del contratto</h2>
+            <p className="text-sm text-slate-500">
+              Ogni servizio ha 3 blocchi: Fornitura · Operazione · Fornitore. «Aggiungi servizio» ripete tutto.
+            </p>
+          </div>
+          <AddServiceButton onClick={addService} />
         </div>
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Fornitore e contratto</h2>
-        <Field label="Fornitore *">
-          <Select value={supplierChoice} onChange={(e) => onSupplierChange(e.target.value)}>
-            <option value="">Seleziona fornitore</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-            <option value="__NEW__">Altro… (registra nuovo)</option>
-          </Select>
-        </Field>
-        {creatingSupplier ? (
-          <Field label="Nome nuovo fornitore *">
-            <Input
-              value={supplierName}
-              onChange={(e) => setSupplierName(e.target.value)}
-              placeholder="Scrivi il nome del fornitore"
-            />
-          </Field>
-        ) : null}
-        <Field label="Regola listino (offerta)">
-          <Select
-            value={commissionRuleId}
-            onChange={(e) => {
-              const id = e.target.value;
-              setCommissionRuleId(id);
-              if (!id) return;
-              const rule = listinoRules.find((r) => r.id === id);
-              if (rule) {
-                setProductName(rule.name);
-                setOfferCode(rule.name);
-              }
-            }}
-            disabled={!supplierId || creatingSupplier}
-          >
-            <option value="">
-              {!supplierId || creatingSupplier
-                ? "— (scegli prima il fornitore) —"
-                : rulesForSupplier.length === 0
-                  ? "— nessuna regola (lascia bianco / manuale) —"
-                  : "— nessuna / manuale —"}
-            </option>
-            {rulesForSupplier.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-                {r.clientSegment && r.clientSegment !== "TUTTI" ? ` · ${r.clientSegment}` : ""}
-                {r.gettoneTotale ? ` · ${r.gettoneTotale} €` : ""}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <div className="grid gap-3 md:grid-cols-3">
-          <Field label="Nome offerta">
-            <Input value={productName} onChange={(e) => setProductName(e.target.value)} />
-          </Field>
-          <Field label="Codice offerta">
-            <Input value={offerCode} onChange={(e) => setOfferCode(e.target.value)} />
-          </Field>
-          <Field label="Tipo contratto">
-            <Select
-              value={contractKind}
-              onChange={(e) => setContractKind(e.target.value)}
-            >
-              {clientType === "PRIVATO" ? (
-                <>
-                  <option value="Domestico">Domestico</option>
-                  <option value="Altri usi">Altri usi</option>
-                </>
-              ) : (
-                <>
-                  <option value="Non domestico">Non domestico</option>
-                  <option value="Altri usi">Altri usi</option>
-                </>
-              )}
-            </Select>
-          </Field>
-          <Field label="Tipo prezzo">
-            <Select value={priceType} onChange={(e) => setPriceType(e.target.value)}>
-              <option value="Fisso">Fisso</option>
-              <option value="Indicizzato">Indicizzato</option>
-            </Select>
-          </Field>
-          {priceType === "Indicizzato" ? (
-            <>
-              <Field label="Indice di riferimento">
-                <Select value={priceIndex} onChange={(e) => setPriceIndex(e.target.value)}>
-                  <option value="PUN">PUN (luce)</option>
-                  <option value="PSV">PSV (gas)</option>
-                  <option value="Altro">Altro</option>
-                </Select>
-              </Field>
-              <Field label="Spread">
-                <Input value={spread} onChange={(e) => setSpread(e.target.value)} />
-              </Field>
-            </>
-          ) : null}
+        <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Data registrazione">
             <Input
               type="date"
@@ -1029,15 +731,10 @@ export function NuovoContrattoForm({
                 if (!y || !m || !d) return;
                 setRegistrationDate(new Date(y, m - 1, d));
               }}
-              title="Puoi modificare la data di registrazione della pratica"
             />
           </Field>
           <Field label="Ingresso fornitura (calcolato)">
-            <Input
-              value={formatItDate(computedSupplyStart)}
-              readOnly
-              className="bg-slate-50"
-            />
+            <Input value={formatItDate(computedSupplyStart)} readOnly className="bg-white" />
           </Field>
           <Field label="Durata (mesi)">
             <Input
@@ -1047,102 +744,35 @@ export function NuovoContrattoForm({
               onChange={(e) => setDurationMonths(Number(e.target.value) || 12)}
             />
           </Field>
-          <Field label="Data scadenza (auto)">
-            <Input value={expiryPreview} readOnly className="bg-slate-50" />
+          <Field label="Scadenza (auto)">
+            <Input value={expiryPreview} readOnly className="bg-white" />
           </Field>
         </div>
-        <p className="text-xs text-slate-500">
-          L&apos;ingresso in fornitura si calcola dalla data di registrazione (cambio: 1° mese
-          successivo se prima del giorno 8, altrimenti +2 mesi; voltura/attivazione ≈ +7 giorni).
-        </p>
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Indirizzo di fornitura</h2>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={supplySame}
-            onChange={(e) => setSupplySame(e.target.checked)}
+        {services.map((line, idx) => (
+          <ServiceContractBlocks
+            key={line.id}
+            line={line}
+            index={idx}
+            canRemove={services.length > 1}
+            onChange={(patch) => patchService(line.id, patch)}
+            onRemove={() => setServices((s) => s.filter((x) => x.id !== line.id))}
+            suppliers={suppliers}
+            listinoRules={listinoRules}
+            clientType={clientType}
+            clientIban={iban}
+            residence={{
+              street,
+              streetNumber,
+              zipCode,
+              city,
+              province,
+              region,
+            }}
           />
-          L&apos;indirizzo di fornitura coincide con residenza / sede legale
-        </label>
-        {!supplySame ? (
-          <CapAddressFields
-            zipCode={supplyZip}
-            city={supplyCity}
-            province={supplyProvince}
-            region={supplyRegion}
-            street={supplyStreet}
-            streetNumber={supplyStreetNumber}
-            onZipChange={setSupplyZip}
-            onCityChange={setSupplyCity}
-            onProvinceChange={setSupplyProvince}
-            onRegionChange={setSupplyRegion}
-            onStreetChange={setSupplyStreet}
-            onStreetNumberChange={setSupplyStreetNumber}
-            zipLabel="CAP fornitura"
-          />
-        ) : null}
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">
-          Condizioni economiche e pagamento
-        </h2>
-        <div className="grid gap-3 md:grid-cols-3">
-          {hasLuce ? (
-            <Field label="Prezzo energia €/kWh">
-              <Input value={pricePerKwh} onChange={(e) => setPricePerKwh(e.target.value)} />
-            </Field>
-          ) : null}
-          {hasGas ? (
-            <Field label="Prezzo gas €/Smc">
-              <Input value={pricePerSmc} onChange={(e) => setPricePerSmc(e.target.value)} />
-            </Field>
-          ) : null}
-          <Field label="PCV €/mese">
-            <Input value={pcv} onChange={(e) => setPcv(e.target.value)} />
-          </Field>
-          <Field label="Canone mensile €">
-            <Input value={monthlyFee} onChange={(e) => setMonthlyFee(e.target.value)} />
-          </Field>
-          <Field label="Metodo di pagamento">
-            <Select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-            >
-              <option value="">Seleziona</option>
-              {PAYMENT_METHOD_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {paymentMethod === "RID" ? (
-            <>
-              <Field label="IBAN (da scheda cliente)">
-                <Input value={iban} readOnly className="bg-slate-50" />
-              </Field>
-              <Field label="Intestatario IBAN (se diverso)">
-                <Input value={ibanHolder} onChange={(e) => setIbanHolder(e.target.value)} />
-              </Field>
-            </>
-          ) : null}
+        ))}
+        <div className="pt-1">
+          <AddServiceButton onClick={addService} />
         </div>
-        {paymentMethod === "RID" && !iban.trim() ? (
-          <p className="text-xs text-amber-700">
-            Inserisci l&apos;IBAN nella scheda cliente sopra: verrà usato per il RID.
-            {sendToMaster ? " Con invio al Master è obbligatorio." : " Senza invio al Master non è obbligatorio."}
-          </p>
-        ) : null}
-      </section>
-
-      {/* Servizi subito prima degli allegati */}
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Servizi del contratto</h2>
-        {renderServiceLines()}
       </section>
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1245,9 +875,14 @@ export function NuovoContrattoForm({
           </p>
           <p>
             <strong>Fornitore:</strong>{" "}
-            {creatingSupplier
-              ? supplierName || "—"
-              : suppliers.find((s) => s.id === supplierId)?.name || "—"}
+            {services
+              .map((s) => {
+                if (s.supplierId) {
+                  return suppliers.find((x) => x.id === s.supplierId)?.name ?? s.supplierId;
+                }
+                return s.supplierName || "—";
+              })
+              .join(" · ")}
           </p>
           <p>
             <strong>Ingresso / scadenza:</strong> {formatItDate(computedSupplyStart)} →{" "}

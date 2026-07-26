@@ -119,6 +119,7 @@ export default async function ClienteDetailPage({
       clientSegment: r.clientSegment || "TUTTI",
       gettoneBase: base > 0 ? base.toFixed(2) : "",
       gettoneTotale: totale > 0 ? totale.toFixed(2) : "",
+      hasRid: n(r.gettoneRid) > 0,
     };
   });
 

@@ -22,19 +22,69 @@ export type ContractFormAttachment = {
   contentBase64: string;
 };
 
+/**
+ * Un «servizio» = 3 blocchi ripetibili:
+ * 1 Fornitura · 2 Operazione (+ servizio + pagamento) · 3 Fornitore (+ condizioni)
+ */
 export type ContractServiceLine = {
   id: string;
-  service: string;
-  serviceOther?: string;
+  // --- 1 Fornitura ---
+  supplySameAsResidence?: boolean;
+  supplyStreet?: string;
+  supplyStreetNumber?: string;
+  supplyZipCode?: string;
+  supplyCity?: string;
+  supplyProvince?: string;
+  supplyRegion?: string;
   pod?: string;
   pdr?: string;
   powerKw?: string;
   annualKwh?: string;
   annualSmc?: string;
-  phoneNumber?: string;
   migrationCode?: string;
   techNotes?: string;
+  phoneNumber?: string;
+  // --- 2 Operazione ---
+  service: string;
+  serviceOther?: string;
+  operationType?: string;
+  operationOther?: string;
+  paymentMethod?: string;
+  ibanHolder?: string;
+  // --- 3 Fornitore + condizioni ---
+  supplierId?: string;
+  /** Nome se si registra un fornitore nuovo su questa riga */
+  supplierName?: string;
+  commissionRuleId?: string;
+  productName?: string;
+  offerCode?: string;
+  contractKind?: string;
+  priceType?: string;
+  priceIndex?: string;
+  pricePerKwh?: string;
+  pricePerSmc?: string;
+  pcv?: string;
+  spread?: string;
+  monthlyFee?: string;
 };
+
+export function createEmptyServiceLine(
+  partial?: Partial<ContractServiceLine>,
+): ContractServiceLine {
+  return {
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID().slice(0, 8)
+        : Math.random().toString(36).slice(2, 10),
+    service: "LUCE",
+    supplySameAsResidence: true,
+    operationType: "SWITCH",
+    paymentMethod: "",
+    priceType: "FISSO",
+    contractKind: "Domestico",
+    ...partial,
+  };
+}
 
 export type NewContractPayload = {
   draft: boolean;
@@ -64,8 +114,10 @@ export type NewContractPayload = {
     sdiCode?: string;
     classification?: string;
   };
+  /** Fallback se la riga servizio non ha fornitore proprio */
   supplierId?: string;
   supplierName?: string;
+  /** Fallback operazione / pagamento / offerta (prima riga) */
   operationType: string;
   operationOther?: string;
   supplySameAsResidence: boolean;

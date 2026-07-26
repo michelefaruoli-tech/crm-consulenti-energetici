@@ -127,6 +127,7 @@ export type ClientSheetListinoRule = {
   clientSegment: string;
   gettoneBase: string;
   gettoneTotale: string;
+  hasRid?: boolean;
 };
 export type ClientSheetCollaborator = {
   id: string;
@@ -619,21 +620,18 @@ export function ClientSheet({
 
       {selected && canEditSelected ? (
         <>
-          {/* BLOCCA 2: operazione + fornitura */}
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sm font-bold text-sky-800">
-                2
-              </span>
-              <div>
-                <h2 className="font-semibold text-slate-900">Scheda contratto</h2>
-                <p className="text-xs text-slate-500">
-                  {selected.contractNumber} · operazione, fornitura e pagamento
-                </p>
-              </div>
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm sm:p-5">
+            <div className="mb-1">
+              <h2 className="font-semibold text-slate-900">
+                Scheda contratto · {selected.contractNumber}
+              </h2>
+              <p className="text-xs text-slate-500">
+                Tre blocchi: Fornitura · Operazione · Fornitore (come in Nuovo contratto)
+              </p>
             </div>
+
             <form
-              className="space-y-5"
+              className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (selected.warnOnEdit) {
@@ -661,7 +659,7 @@ export function ClientSheet({
                   try {
                     await updateClientContractBlockAction(fd);
                     setBlock2Dirty(false);
-                    setMsg("Contratto salvato");
+                    setMsg("Fornitura e operazione salvate");
                     router.refresh();
                   } catch (error) {
                     setErr(error instanceof Error ? error.message : "Errore salvataggio");
@@ -672,151 +670,18 @@ export function ClientSheet({
             >
               <input type="hidden" name="contractId" value={selected.id} />
               <input type="hidden" name="clientId" value={client.id} />
+              <input type="hidden" name="supplierId" value={offerSupplierId} />
 
-              {/* Mini-blocco: Operazione */}
-              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Operazione effettuata</h3>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Tipo operazione">
-                    <Select
-                      value={operationType}
-                      onChange={(e) => {
-                        setOperationType(e.target.value);
-                        mark2();
-                      }}
-                    >
-                      {OPERATION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Tipologia (Luce / Gas / …)">
-                    <Select
-                      value={utilityType}
-                      onChange={(e) => {
-                        setUtilityType(e.target.value);
-                        mark2();
-                      }}
-                    >
-                      {SERVICE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
+              {/* 1 Fornitura */}
+              <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 sm:p-4">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-xs font-bold text-white">
+                    1
+                  </span>
+                  <h3 className="font-semibold text-slate-900">Fornitura</h3>
                 </div>
-                {operationType === "ALTRO" ? (
-                  <Field label="Specifica operazione *">
-                    <Input name="operationOther" defaultValue={selected.operationOther ?? ""} required />
-                  </Field>
-                ) : null}
-                {utilityType === "ALTRO" ? (
-                  <Field label="Specifica servizio *">
-                    <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} required />
-                  </Field>
-                ) : null}
-
-                <Field label="Fornitore">
-                  <Select
-                    name="supplierId"
-                    value={offerSupplierId}
-                    onChange={(e) => {
-                      setOfferSupplierId(e.target.value);
-                      setCommissionRuleId("");
-                      setProductName("");
-                      setOfferCode("");
-                      mark2();
-                      mark3();
-                    }}
-                  >
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.code})
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-
-                <Field label="Metodo di pagamento">
-                  <Select
-                    value={paymentMethod}
-                    onChange={(e) => {
-                      setPaymentMethod(e.target.value);
-                      if (e.target.value === "RID" && !contractIban && client.iban) {
-                        setContractIban(client.iban);
-                      }
-                      mark2();
-                    }}
-                  >
-                    {PAYMENT_METHOD_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-
-                {needsIban ? (
-                  <div className="space-y-3 rounded-lg border border-sky-100 bg-white p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-800">IBAN per addebito</p>
-                      {client.iban ? (
-                        <button
-                          type="button"
-                          className="text-xs font-medium text-emerald-700 underline"
-                          onClick={() => {
-                            setContractIban(client.iban ?? "");
-                            mark2();
-                          }}
-                        >
-                          Copia da anagrafica
-                        </button>
-                      ) : (
-                        <span className="text-xs text-amber-700">Nessun IBAN in anagrafica</span>
-                      )}
-                    </div>
-                    <Field label="IBAN contratto *">
-                      <Input
-                        value={contractIban}
-                        onChange={(e) => {
-                          setContractIban(e.target.value);
-                          mark2();
-                        }}
-                        required
-                        autoComplete="off"
-                        className="font-mono text-base tracking-wide"
-                      />
-                    </Field>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Intestatario conto">
-                        <Input name="ibanHolder" defaultValue={selected.ibanHolder ?? ""} />
-                      </Field>
-                      <Field label="CF intestatario">
-                        <Input name="ibanHolderCf" defaultValue={selected.ibanHolderCf ?? ""} />
-                      </Field>
-                      <Field label="Mandato SEPA">
-                        <Input name="sepaMandate" defaultValue={selected.sepaMandate ?? ""} />
-                      </Field>
-                      <Field label="Note pagamento">
-                        <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
-                      </Field>
-                    </div>
-                  </div>
-                ) : (
-                  <Field label="Note pagamento">
-                    <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
-                  </Field>
-                )}
-              </div>
-
-              {/* Mini-blocco: Fornitura */}
-              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Dati di fornitura</h3>
-
-                <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800">
+                <p className="text-sm font-medium text-slate-800">Indirizzo di fornitura</p>
+                <label className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-white p-3 text-sm text-slate-800">
                   <input
                     type="checkbox"
                     className="mt-1 h-5 w-5 shrink-0"
@@ -841,7 +706,6 @@ export function ClientSheet({
                     </span>
                   </span>
                 </label>
-
                 {!addressesMatch ? (
                   <CapAddressFields
                     zipCode={supplyZip}
@@ -877,7 +741,7 @@ export function ClientSheet({
                   />
                 ) : (
                   <p className="text-xs text-slate-500">
-                    Indirizzo fornitura = anagrafica (viene copiato al salvataggio).
+                    Indirizzo fornitura = anagrafica (copiato al salvataggio).
                   </p>
                 )}
                 <input type="hidden" name="supplyCountry" value="Italia" />
@@ -892,36 +756,20 @@ export function ClientSheet({
                       />
                     </Field>
                     <Field label="Potenza contatore (kW)">
-                      <Input
-                        name="powerKw"
-                        inputMode="decimal"
-                        defaultValue={selected.powerKw ?? ""}
-                      />
+                      <Input name="powerKw" inputMode="decimal" defaultValue={selected.powerKw ?? ""} />
                     </Field>
                     <Field label="kWh annui consumati">
-                      <Input
-                        name="annualKwh"
-                        inputMode="decimal"
-                        defaultValue={selected.annualKwh ?? ""}
-                      />
+                      <Input name="annualKwh" inputMode="decimal" defaultValue={selected.annualKwh ?? ""} />
                     </Field>
                   </div>
                 )}
                 {(utilityType === "GAS" || utilityType === "DUAL") && (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="PDR">
-                      <Input
-                        name="pdr"
-                        defaultValue={selected.pdr ?? ""}
-                        className="font-mono uppercase"
-                      />
+                      <Input name="pdr" defaultValue={selected.pdr ?? ""} className="font-mono uppercase" />
                     </Field>
                     <Field label="Smc / mc annui consumati">
-                      <Input
-                        name="annualSmc"
-                        inputMode="decimal"
-                        defaultValue={selected.annualSmc ?? ""}
-                      />
+                      <Input name="annualSmc" inputMode="decimal" defaultValue={selected.annualSmc ?? ""} />
                     </Field>
                   </div>
                 )}
@@ -931,20 +779,16 @@ export function ClientSheet({
                       name="podPdr"
                       defaultValue={selected.podPdr ?? selected.pod ?? selected.pdr ?? ""}
                       className="font-mono"
-                      placeholder="Codice tecnico o migrazione"
                     />
                   </Field>
                 ) : null}
-
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Classificazione fornitura">
                     <Select
                       name="supplyClassification"
                       defaultValue={
                         selected.supplyClassification ??
-                        (clientType === "AZIENDA" && utilityType !== "GAS"
-                          ? "ALTRI_USI"
-                          : "")
+                        (clientType === "AZIENDA" && utilityType !== "GAS" ? "ALTRI_USI" : "")
                       }
                       onChange={mark2}
                     >
@@ -956,25 +800,6 @@ export function ClientSheet({
                       ))}
                     </Select>
                   </Field>
-                  {clientType === "AZIENDA" && utilityType === "LUCE" ? (
-                    <Field label="Livello di tensione">
-                      <Select name="voltageLevel" defaultValue={selected.voltageLevel ?? ""}>
-                        <option value="">—</option>
-                        <option value="BASSA">Bassa tensione</option>
-                        <option value="MEDIA">Media tensione</option>
-                      </Select>
-                    </Field>
-                  ) : (
-                    <Field label="Data ingresso in fornitura">
-                      <Input
-                        type="date"
-                        name="supplyStartDate"
-                        defaultValue={selected.supplyStartDate ?? ""}
-                      />
-                    </Field>
-                  )}
-                </div>
-                {clientType === "AZIENDA" && utilityType === "LUCE" ? (
                   <Field label="Data ingresso in fornitura">
                     <Input
                       type="date"
@@ -982,32 +807,132 @@ export function ClientSheet({
                       defaultValue={selected.supplyStartDate ?? ""}
                     />
                   </Field>
-                ) : null}
-
+                </div>
                 <Field label="Note contratto">
                   <Textarea name="notes" rows={2} defaultValue={selected.notes ?? ""} />
                 </Field>
               </div>
 
+              {/* 2 Operazione */}
+              <div className="space-y-3 rounded-xl border border-sky-100 bg-sky-50/50 p-3 sm:p-4">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600 text-xs font-bold text-white">
+                    2
+                  </span>
+                  <h3 className="font-semibold text-slate-900">Operazione</h3>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Tipo operazione">
+                    <Select
+                      value={operationType}
+                      onChange={(e) => {
+                        setOperationType(e.target.value);
+                        mark2();
+                      }}
+                    >
+                      {OPERATION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Servizio contratto">
+                    <Select
+                      value={utilityType}
+                      onChange={(e) => {
+                        setUtilityType(e.target.value);
+                        mark2();
+                      }}
+                    >
+                      {SERVICE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                {operationType === "ALTRO" ? (
+                  <Field label="Specifica operazione *">
+                    <Input name="operationOther" defaultValue={selected.operationOther ?? ""} required />
+                  </Field>
+                ) : null}
+                {utilityType === "ALTRO" ? (
+                  <Field label="Specifica servizio *">
+                    <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} required />
+                  </Field>
+                ) : null}
+                <Field label="Metodo di pagamento">
+                  <Select
+                    value={paymentMethod}
+                    onChange={(e) => {
+                      setPaymentMethod(e.target.value);
+                      if (e.target.value === "RID" && !contractIban && client.iban) {
+                        setContractIban(client.iban);
+                      }
+                      mark2();
+                    }}
+                  >
+                    {PAYMENT_METHOD_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {needsIban ? (
+                  <div className="space-y-3 rounded-lg border border-sky-100 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-800">IBAN per addebito</p>
+                      {client.iban ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-emerald-700 underline"
+                          onClick={() => {
+                            setContractIban(client.iban ?? "");
+                            mark2();
+                          }}
+                        >
+                          Copia da anagrafica
+                        </button>
+                      ) : (
+                        <span className="text-xs text-amber-700">Nessun IBAN in anagrafica</span>
+                      )}
+                    </div>
+                    <Field label="IBAN contratto *">
+                      <Input
+                        value={contractIban}
+                        onChange={(e) => {
+                          setContractIban(e.target.value);
+                          mark2();
+                        }}
+                        required
+                        className="font-mono text-base tracking-wide"
+                      />
+                    </Field>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Intestatario conto">
+                        <Input name="ibanHolder" defaultValue={selected.ibanHolder ?? ""} />
+                      </Field>
+                      <Field label="CF intestatario">
+                        <Input name="ibanHolderCf" defaultValue={selected.ibanHolderCf ?? ""} />
+                      </Field>
+                    </div>
+                  </div>
+                ) : (
+                  <Field label="Note pagamento">
+                    <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
+                  </Field>
+                )}
+              </div>
+
               <Button type="submit" disabled={!block2Dirty || pending} className="w-full sm:w-auto">
-                {pending && block2Dirty ? "Salvataggio…" : "Salva contratto"}
+                {pending && block2Dirty ? "Salvataggio…" : "Salva fornitura e operazione"}
               </Button>
             </form>
-          </section>
 
-          {/* BLOCCA 3: offerta */}
-          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-sm font-bold text-amber-900">
-                3
-              </span>
-              <div>
-                <h2 className="font-semibold text-slate-900">Offerta e gettone</h2>
-                <p className="text-xs text-slate-500">
-                  Listino se presente, altrimenti compilazione manuale
-                </p>
-              </div>
-            </div>
+            {/* 3 Fornitore + condizioni */}
             <form
               className="space-y-4"
               onSubmit={(e) => {
@@ -1028,7 +953,7 @@ export function ClientSheet({
                   try {
                     await updateClientOfferBlockAction(fd);
                     setBlock3Dirty(false);
-                    setMsg("Offerta salvata");
+                    setMsg("Fornitore e condizioni salvati");
                     router.refresh();
                   } catch (error) {
                     setErr(error instanceof Error ? error.message : "Errore salvataggio");
@@ -1041,8 +966,33 @@ export function ClientSheet({
               <input type="hidden" name="clientId" value={client.id} />
               <input type="hidden" name="supplierId" value={offerSupplierId} />
 
-              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Tipologia offerta</h3>
+              <div className="space-y-3 rounded-xl border border-amber-100 bg-amber-50/40 p-3 sm:p-4">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-600 text-xs font-bold text-white">
+                    3
+                  </span>
+                  <h3 className="font-semibold text-slate-900">Fornitore e condizioni</h3>
+                </div>
+
+                <Field label="Fornitore">
+                  <Select
+                    name="supplierIdSelect"
+                    value={offerSupplierId}
+                    onChange={(e) => {
+                      setOfferSupplierId(e.target.value);
+                      setCommissionRuleId("");
+                      setProductName("");
+                      setOfferCode("");
+                      mark3();
+                    }}
+                  >
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code})
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
 
                 {rulesForSupplier.length > 0 ? (
                   <Field label="Offerta da listino">
@@ -1063,6 +1013,15 @@ export function ClientSheet({
                           if (canEditSelectedGettone && rule.gettoneTotale) {
                             setGettoneValue(rule.gettoneTotale);
                           }
+                          if (rule.hasRid) {
+                            setPaymentMethod("RID");
+                            if (!contractIban && client.iban) setContractIban(client.iban);
+                            mark2();
+                          } else if (!paymentMethod) {
+                            setPaymentMethod("BOLLETTINO");
+                            mark2();
+                          }
+                          setPriceType((prev) => prev || "FISSO");
                         }
                         mark3();
                       }}
@@ -1083,7 +1042,7 @@ export function ClientSheet({
                   <>
                     <input type="hidden" name="commissionRuleId" value="" />
                     <p className="text-xs text-slate-500">
-                      Nessuna offerta in listino per questo fornitore: inserisci il nome a mano.
+                      Nessuna offerta in listino: inserisci il nome a mano.
                     </p>
                   </>
                 )}
@@ -1093,10 +1052,25 @@ export function ClientSheet({
                     name="productName"
                     value={productName}
                     onChange={(e) => {
-                      setProductName(e.target.value);
+                      const name = e.target.value;
+                      setProductName(name);
+                      const match = rulesForSupplier.find(
+                        (r) => r.name.toLowerCase() === name.trim().toLowerCase(),
+                      );
+                      if (match) {
+                        setCommissionRuleId(match.id);
+                        setOfferCode(match.name);
+                        if (canEditSelectedGettone && match.gettoneTotale) {
+                          setGettoneValue(match.gettoneTotale);
+                        }
+                        if (match.hasRid) {
+                          setPaymentMethod("RID");
+                          if (!contractIban && client.iban) setContractIban(client.iban);
+                          mark2();
+                        }
+                      }
                       mark3();
                     }}
-                    placeholder="Es. Casa Flex / Business Green"
                   />
                 </Field>
                 <Field label="Codice offerta (facoltativo)">
@@ -1131,21 +1105,11 @@ export function ClientSheet({
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Prezzo al kWh (€)">
-                    <Input
-                      name="pricePerKwh"
-                      inputMode="decimal"
-                      defaultValue={selected.pricePerKwh ?? ""}
-                    />
+                    <Input name="pricePerKwh" inputMode="decimal" defaultValue={selected.pricePerKwh ?? ""} />
                   </Field>
                   <Field label="Prezzo al mc / Smc (€)">
-                    <Input
-                      name="pricePerSmc"
-                      inputMode="decimal"
-                      defaultValue={selected.pricePerSmc ?? ""}
-                    />
+                    <Input name="pricePerSmc" inputMode="decimal" defaultValue={selected.pricePerSmc ?? ""} />
                   </Field>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Quota fissa mensile">
                     <Input name="monthlyFee" inputMode="decimal" defaultValue={selected.monthlyFee ?? ""} />
                   </Field>
@@ -1153,21 +1117,7 @@ export function ClientSheet({
                     <Input name="spread" inputMode="decimal" defaultValue={selected.spread ?? ""} />
                   </Field>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Sconto / Bonus">
-                    <Input name="discount" defaultValue={selected.discount ?? ""} />
-                  </Field>
-                  <Field label="Durata (mesi)">
-                    <Input
-                      name="durationMonths"
-                      inputMode="numeric"
-                      defaultValue={String(selected.durationMonths)}
-                    />
-                  </Field>
-                </div>
-              </div>
 
-              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
                 <Field label="Note">
                   <Textarea
                     name="economicNotes"
@@ -1176,7 +1126,6 @@ export function ClientSheet({
                     placeholder="Note per Master / collaboratore"
                   />
                 </Field>
-
                 <Field label="Valore gettone (€) — indicativo">
                   <Input
                     name="gettone"
@@ -1188,11 +1137,6 @@ export function ClientSheet({
                     inputMode="decimal"
                     disabled={!canEditSelectedGettone}
                     className="text-lg font-semibold"
-                    title={
-                      canEditSelectedGettone
-                        ? "Il collaboratore indica un valore; il Master lo conferma"
-                        : "Non autorizzato a modificare il gettone"
-                    }
                   />
                   <p
                     className={
@@ -1206,16 +1150,8 @@ export function ClientSheet({
                       : "Da confermare dal Master (indicativo collaboratore)"}
                   </p>
                 </Field>
-              </div>
 
-              <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 sm:p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Stato pratica</h3>
-                <p className="text-xs text-slate-500">
-                  Dopo la lavorazione Master: <strong>KO</strong>,{" "}
-                  <strong>In pagamento</strong> oppure{" "}
-                  <strong>Richiesta integrazione</strong>.
-                </p>
-                <Field label="Stato contratto">
+                <Field label="Stato pratica">
                   <Select
                     value={status}
                     onChange={(e) => {
@@ -1273,7 +1209,7 @@ export function ClientSheet({
               </div>
 
               <Button type="submit" disabled={!block3Dirty || pending} className="w-full sm:w-auto">
-                {pending && block3Dirty ? "Salvataggio…" : "Salva offerta"}
+                {pending && block3Dirty ? "Salvataggio…" : "Salva fornitore e condizioni"}
               </Button>
             </form>
           </section>

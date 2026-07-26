@@ -72,6 +72,7 @@ export default async function NuovoContrattoPage({
       name: r.name,
       clientSegment: r.clientSegment || "TUTTI",
       gettoneTotale: totale > 0 ? totale.toFixed(2) : "",
+      hasRid: n(r.gettoneRid) > 0,
     };
   });
 
