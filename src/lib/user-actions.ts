@@ -75,8 +75,11 @@ export async function createUserAction(
 
     if (!name) return { error: "Nome obbligatorio" };
     if (!email || !email.includes("@")) return { error: "Email non valida" };
-    if (password.length < 6) return { error: "Password: minimo 6 caratteri" };
     if (!role) return { error: "Ruolo non valido" };
+
+    const { validatePassword } = await import("@/lib/password-policy");
+    const pwCheck = validatePassword(password, { email });
+    if (!pwCheck.ok) return { error: pwCheck.error };
 
     const supplierIds = parseIds(formData, "supplierIds");
     const collaboratorIds = allCollaborators

@@ -113,8 +113,12 @@ export function CreateUserForm({
         <Input name="email" type="email" required />
       </Field>
       <Field label="Password">
-        <Input name="password" type="password" required minLength={6} />
+        <Input name="password" type="password" required minLength={8} />
       </Field>
+      <p className="md:col-span-2 -mt-2 text-xs text-slate-500">
+        Minimo 8 caratteri, almeno una lettera e un numero (es.{" "}
+        <code className="rounded bg-slate-100 px-1">Casa2026</code>).
+      </p>
       <Field label="Ruolo">
         <Select
           name="role"

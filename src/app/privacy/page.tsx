@@ -1,9 +1,18 @@
 import Link from "next/link";
+import { MASTER_EMAIL } from "@/lib/constants";
 
 export const metadata = {
   title: "Privacy | CRM Energia",
   description: "Informativa privacy del gestionale CRM Consulenti Energetici",
 };
+
+const CONTACT_EMAIL =
+  process.env.MASTER_EMAIL?.trim() ||
+  process.env.BACKUP_EMAIL?.trim() ||
+  MASTER_EMAIL;
+
+const COMPANY_NAME =
+  process.env.PRIVACY_COMPANY_NAME?.trim() || "FM Consulenza";
 
 export default function PrivacyPage() {
   return (
@@ -19,8 +28,8 @@ export default function PrivacyPage() {
             Informativa privacy
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Ultimo aggiornamento: luglio 2026 · Testo semplificato per utenti del
-            CRM
+            Ultimo aggiornamento: luglio 2026 · CRM Energia / Consulenti
+            energetici
           </p>
         </div>
 
@@ -29,10 +38,21 @@ export default function PrivacyPage() {
             1. Chi gestisce i dati
           </h2>
           <p>
-            Il gestionale CRM Energia è utilizzato da FM Consulenza (o dalla
-            società titolare del dominio) per gestire clienti, contratti e
-            provvigioni energetiche. Per richieste privacy: usa l’email del
-            titolare / Master del CRM.
+            Titolare del trattamento: <strong>{COMPANY_NAME}</strong>.
+          </p>
+          <p>
+            Contatto privacy / amministratore CRM:{" "}
+            <a
+              className="font-medium text-emerald-700 underline"
+              href={`mailto:${CONTACT_EMAIL}`}
+            >
+              {CONTACT_EMAIL}
+            </a>
+            .
+          </p>
+          <p>
+            Il gestionale CRM Energia serve a gestire clienti, contratti luce/gas
+            e provvigioni dei consulenti energetici.
           </p>
         </section>
 
@@ -68,12 +88,11 @@ export default function PrivacyPage() {
             4. Dove stanno i dati
           </h2>
           <p>
-            I dati sono salvati su database cloud (Neon/PostgreSQL, regione UE
+            I dati sono salvati su database cloud PostgreSQL (Neon, regione UE
             quando configurata) e l’applicazione è ospitata su Vercel. Le email
-            di backup/notifica possono transitare tramite il provider SMTP
-            configurato. L’accesso è riservato agli utenti autenticati con
-            password, secondo i ruoli assegnati (Admin, Backoffice,
-            Collaboratore, ecc.).
+            di backup/notifica transitano tramite il provider SMTP configurato.
+            L’accesso è riservato agli utenti autenticati, secondo i ruoli
+            (Admin, Backoffice, Collaboratore, ecc.).
           </p>
         </section>
 
@@ -92,14 +111,17 @@ export default function PrivacyPage() {
 
         <section className="space-y-2 text-sm leading-relaxed text-slate-700">
           <h2 className="text-base font-semibold text-slate-900">
-            6. Sicurezza
+            6. Sicurezza e password
           </h2>
           <ul className="list-inside list-disc space-y-1">
-            <li>Password degli utenti salvate in forma non reversibile (hash)</li>
+            <li>
+              Password salvate in forma non reversibile (hash); regole minime: 8
+              caratteri, lettera + numero
+            </li>
             <li>Connessione HTTPS</li>
             <li>Ruoli e scope (es. Backoffice vede solo certi fornitori)</li>
             <li>Log di accessi e tentativi sospetti per l’Admin</li>
-            <li>Protezione anti-abuso sul login (limite tentativi)</li>
+            <li>Limite tentativi sul login (anti-abuso)</li>
           </ul>
         </section>
 
@@ -109,10 +131,15 @@ export default function PrivacyPage() {
           </h2>
           <p>
             Gli interessati possono chiedere accesso, rettifica o cancellazione
-            dei propri dati contattando il titolare del trattamento. Le
-            richieste che riguardano i dati nel CRM saranno gestite
-            dall’amministratore (esportazione/aggiornamento/eliminazione
-            secondo necessità e obblighi di legge).
+            dei propri dati scrivendo a{" "}
+            <a
+              className="text-emerald-700 underline"
+              href={`mailto:${CONTACT_EMAIL}`}
+            >
+              {CONTACT_EMAIL}
+            </a>
+            . Le richieste relative ai dati nel CRM saranno gestite
+            dall’amministratore secondo necessità e obblighi di legge.
           </p>
         </section>
 

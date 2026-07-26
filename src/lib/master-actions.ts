@@ -294,11 +294,11 @@ export async function changeOwnPasswordAction(
   const current = String(formData.get("currentPassword") ?? "");
   const next = String(formData.get("newPassword") ?? "");
   const confirm = String(formData.get("confirmPassword") ?? "");
-  const minLen = Number(process.env.PASSWORD_MIN_LENGTH ?? 8);
 
-  if (next.length < minLen) {
-    return { ok: false, error: `La nuova password deve avere almeno ${minLen} caratteri` };
-  }
+  const { validatePassword } = await import("@/lib/password-policy");
+  const check = validatePassword(next, { email: session.email });
+  if (!check.ok) return { ok: false, error: check.error };
+
   if (next !== confirm) {
     return { ok: false, error: "Nuova password e conferma non coincidono" };
   }
@@ -440,19 +440,23 @@ export async function resetPasswordWithTokenAction(
   const token = String(formData.get("token") ?? "");
   const next = String(formData.get("newPassword") ?? "");
   const confirm = String(formData.get("confirmPassword") ?? "");
-  const minLen = Number(process.env.PASSWORD_MIN_LENGTH ?? 8);
 
   if (!token) return { ok: false, error: "Token mancante" };
-  if (next.length < minLen) {
-    return { ok: false, error: `Password minima ${minLen} caratteri` };
-  }
-  if (next !== confirm) return { ok: false, error: "Le password non coincidono" };
 
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash } });
+  const row = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    include: { user: { select: { email: true } } },
+  });
   if (!row || row.usedAt || row.expiresAt < new Date()) {
     return { ok: false, error: "Link non valido o scaduto" };
   }
+
+  const { validatePassword } = await import("@/lib/password-policy");
+  const check = validatePassword(next, { email: row.user.email });
+  if (!check.ok) return { ok: false, error: check.error };
+
+  if (next !== confirm) return { ok: false, error: "Le password non coincidono" };
 
   const hashed = await hashPassword(next);
   await prisma.user.update({
@@ -471,6 +475,7 @@ export async function resetPasswordWithTokenAction(
   await logSecurityEvent({
     eventType: "PASSWORD_RESET_COMPLETED",
     userId: row.userId,
+    email: row.user.email,
     meta: await getRequestMeta(),
   });
 
@@ -507,15 +512,8 @@ export async function adminSetUserPasswordAction(
   const userId = String(formData.get("userId") ?? "").trim();
   const next = String(formData.get("newPassword") ?? "");
   const confirm = String(formData.get("confirmPassword") ?? "");
-  const minLen = Number(process.env.PASSWORD_MIN_LENGTH ?? 8);
 
   if (!userId) return { ok: false, error: "Utente non specificato" };
-  if (next.length < minLen) {
-    return {
-      ok: false,
-      error: `La password deve avere almeno ${minLen} caratteri`,
-    };
-  }
   if (next !== confirm) {
     return { ok: false, error: "Password e conferma non coincidono" };
   }
@@ -528,6 +526,10 @@ export async function adminSetUserPasswordAction(
   if (!user.active) {
     return { ok: false, error: "Utente disattivato: ripristinalo prima" };
   }
+
+  const { validatePassword } = await import("@/lib/password-policy");
+  const check = validatePassword(next, { email: user.email });
+  if (!check.ok) return { ok: false, error: check.error };
 
   await prisma.user.update({
     where: { id: user.id },

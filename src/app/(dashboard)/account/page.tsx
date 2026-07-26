@@ -29,8 +29,8 @@ export default async function AccountPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-semibold text-slate-900">Cambia password</h2>
         <p className="mb-4 text-sm text-slate-500">
-          La password non viene mai mostrata. Usa almeno 8 caratteri (consigliati
-          maiuscole, numeri e simboli).
+          La password non viene mai mostrata. Obbligo: almeno 8 caratteri, una
+          lettera e un numero. Meglio se aggiungi anche maiuscole o simboli.
         </p>
         <ChangePasswordForm />
       </section>

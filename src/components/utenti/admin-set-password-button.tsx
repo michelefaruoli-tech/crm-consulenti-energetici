@@ -69,12 +69,15 @@ export function AdminSetPasswordButton({
       <p className="text-[11px] font-medium text-slate-700">
         Nuova password per {userName}
       </p>
+      <p className="text-[10px] text-slate-500">
+        Min. 8 caratteri, 1 lettera + 1 numero
+      </p>
       <input
         name="newPassword"
         type="password"
         required
         minLength={8}
-        placeholder="Min. 8 caratteri"
+        placeholder="Es. Casa2026"
         autoComplete="new-password"
         className="rounded border border-slate-300 px-2 py-1 text-xs"
       />
