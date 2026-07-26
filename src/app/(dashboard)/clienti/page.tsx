@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { hasPermission } from "@/lib/permissions";
 import { ClientsFilterTable } from "@/components/clients/clients-filter-table";
 import { StornoLegend } from "@/components/ui/storno-legend";
+import { CleanupDuplicatesButton } from "@/components/clients/cleanup-duplicates-button";
+import { mergeDuplicateClientsOnce } from "@/lib/client-dedupe";
+import { archiveSupersededPodContracts } from "@/lib/contract-pod-archive";
 import {
   isRecurring,
   markEarlyReswitchContracts,
@@ -16,14 +19,21 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** Contratti con R/G = R (ricorrente mensile). */
+/** Contratti attivi con R/G = R (ricorrente mensile). */
 const recurringContractFilter = {
   deletedAt: null as null,
+  isHistorical: false as const,
   OR: [
     { recurrence: { equals: "R", mode: "insensitive" as const } },
     { recurrence: { contains: "Ricor", mode: "insensitive" as const } },
     { recurrence: { contains: "mensil", mode: "insensitive" as const } },
   ],
+};
+
+/** Solo contratti attivi (non storici, non eliminati). */
+const activeContractWhere = {
+  deletedAt: null as null,
+  isHistorical: false as const,
 };
 
 export default async function ClientiPage({
@@ -40,11 +50,36 @@ export default async function ClientiPage({
     ricorrenza === "yes";
   const canViewAll = hasPermission(session.role, "clients.edit_all");
 
+  // Allinea anagrafiche e archivia POD ricontrattualizzati (best-effort)
+  if (canViewAll) {
+    try {
+      await mergeDuplicateClientsOnce();
+      await archiveSupersededPodContracts();
+    } catch (e) {
+      console.error("[clienti cleanup]", e);
+    }
+  }
+
   try {
     const clients = await prisma.client.findMany({
       where: {
         deletedAt: null,
-        ...(canViewAll ? {} : { createdById: session.id }),
+        ...(canViewAll
+          ? {}
+          : {
+              // Come Contratti: creati da te OPPURE con almeno un contratto tuo
+              OR: [
+                { createdById: session.id },
+                {
+                  contracts: {
+                    some: {
+                      deletedAt: null,
+                      collaboratorId: session.id,
+                    },
+                  },
+                },
+              ],
+            }),
         ...(onlyRecurring
           ? {
               contracts: {
@@ -80,18 +115,20 @@ export default async function ClientiPage({
         _count: {
           select: {
             contracts: {
-              where: { deletedAt: null },
+              where: activeContractWhere,
             },
           },
         },
         contracts: {
-          where: { deletedAt: null },
+          where: activeContractWhere,
           select: {
             id: true,
             clientId: true,
             status: true,
             recurrence: true,
             podPdr: true,
+            pod: true,
+            pdr: true,
             supplyStartDate: true,
             insertionDate: true,
             createdAt: true,
@@ -108,13 +145,12 @@ export default async function ClientiPage({
       orderBy: { updatedAt: "desc" },
     });
 
-    // Tutti i contratti della pagina (serve per ricambio / POD più recente)
     const allContracts = clients.flatMap((c) =>
       c.contracts.map((ct) => ({
         id: ct.id,
         clientId: ct.clientId,
         supplierId: ct.supplierId,
-        podPdr: ct.podPdr,
+        podPdr: ct.podPdr || ct.pod || ct.pdr,
         supplyStartDate: ct.supplyStartDate,
         insertionDate: ct.insertionDate,
         createdAt: ct.createdAt,
@@ -173,15 +209,18 @@ export default async function ClientiPage({
             </h1>
             <p className="text-slate-500">
               {onlyRecurring
-                ? "Clienti con almeno un contratto R (ricorrente) in Provvigioni"
-                : "Clicca sul nome (verde) o sulla riga per aprire anagrafica e contratti"}
+                ? "Clienti con almeno un contratto R (ricorrente) attivo"
+                : "Clicca sul nome (verde) o sulla riga per aprire anagrafica e contratti attivi"}
             </p>
           </div>
-          {hasPermission(session.role, "clients.create") ? (
-            <Link href="/clienti/nuovo">
-              <Button>Nuovo cliente</Button>
-            </Link>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {canViewAll ? <CleanupDuplicatesButton /> : null}
+            {hasPermission(session.role, "clients.create") ? (
+              <Link href="/clienti/nuovo">
+                <Button>Nuovo cliente</Button>
+              </Link>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">

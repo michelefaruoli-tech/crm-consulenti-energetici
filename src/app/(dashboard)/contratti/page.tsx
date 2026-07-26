@@ -27,13 +27,9 @@ export default async function ContrattiPage({
   const mode =
     vista === "storico"
       ? "storico"
-      : vista === "attivi"
-        ? "attivi"
-        : vista === "tutti"
-          ? "tutti"
-          : canViewAll
-            ? "tutti"
-            : "attivi";
+      : vista === "tutti"
+        ? "tutti"
+        : "attivi";
 
   const collabFilter =
     canViewAll && collab && collab !== "tutti" ? collab : undefined;

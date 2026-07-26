@@ -37,7 +37,7 @@ export default async function ClienteDetailPage({
     include: {
       createdBy: { select: { name: true } },
       contracts: {
-        where: { deletedAt: null },
+        where: { deletedAt: null, isHistorical: false },
         include: {
           supplier: true,
           collaborator: { select: { id: true, name: true } },

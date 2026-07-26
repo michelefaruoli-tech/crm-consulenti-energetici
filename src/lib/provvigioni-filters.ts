@@ -1,7 +1,6 @@
 /**
  * Filtri condivisi Provvigioni (pagina + export Excel).
- * Include anche i contratti da archivio storico (isHistorical),
- * così i database importati compaiono filtrando per collaboratore.
+ * Solo contratti attivi (non storici, non eliminati).
  *
  * I filtri colonna (fornitore, stato, tipologia) sono server-side:
  * applicano a tutto il database, non solo alla pagina da 100 righe.
@@ -55,7 +54,10 @@ export function buildProvvigioniContractWhere(
   const q = f.q?.trim() || undefined;
   const recurrenceMode = f.recurrenceMode ?? "all";
 
-  const and: Prisma.ContractWhereInput[] = [];
+  const and: Prisma.ContractWhereInput[] = [
+    { deletedAt: null },
+    { isHistorical: false },
+  ];
 
   if (supplierName) {
     and.push({
