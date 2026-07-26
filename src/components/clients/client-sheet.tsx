@@ -672,11 +672,125 @@ export function ClientSheet({
               <input type="hidden" name="clientId" value={client.id} />
               <input type="hidden" name="supplierId" value={offerSupplierId} />
 
-              {/* 1 Fornitura */}
+              {/* 1 Operazione */}
+              <div className="space-y-3 rounded-xl border border-sky-100 bg-sky-50/50 p-3 sm:p-4">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600 text-xs font-bold text-white">
+                    1
+                  </span>
+                  <h3 className="font-semibold text-slate-900">Operazione</h3>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Tipo operazione">
+                    <Select
+                      value={operationType}
+                      onChange={(e) => {
+                        setOperationType(e.target.value);
+                        mark2();
+                      }}
+                    >
+                      {OPERATION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Servizio contratto">
+                    <Select
+                      value={utilityType}
+                      onChange={(e) => {
+                        setUtilityType(e.target.value);
+                        mark2();
+                      }}
+                    >
+                      {SERVICE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                {operationType === "ALTRO" ? (
+                  <Field label="Specifica operazione *">
+                    <Input name="operationOther" defaultValue={selected.operationOther ?? ""} required />
+                  </Field>
+                ) : null}
+                {utilityType === "ALTRO" ? (
+                  <Field label="Specifica servizio *">
+                    <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} required />
+                  </Field>
+                ) : null}
+                <Field label="Metodo di pagamento">
+                  <Select
+                    value={paymentMethod}
+                    onChange={(e) => {
+                      setPaymentMethod(e.target.value);
+                      if (e.target.value === "RID" && !contractIban && client.iban) {
+                        setContractIban(client.iban);
+                      }
+                      mark2();
+                    }}
+                  >
+                    {PAYMENT_METHOD_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {needsIban ? (
+                  <div className="space-y-3 rounded-lg border border-sky-100 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-800">IBAN per addebito</p>
+                      {client.iban ? (
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-emerald-700 underline"
+                          onClick={() => {
+                            setContractIban(client.iban ?? "");
+                            mark2();
+                          }}
+                        >
+                          Copia da anagrafica
+                        </button>
+                      ) : (
+                        <span className="text-xs text-amber-700">Nessun IBAN in anagrafica</span>
+                      )}
+                    </div>
+                    <Field label="IBAN contratto *">
+                      <Input
+                        value={contractIban}
+                        onChange={(e) => {
+                          setContractIban(e.target.value);
+                          mark2();
+                        }}
+                        required
+                        className="font-mono text-base tracking-wide"
+                      />
+                    </Field>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Intestatario conto">
+                        <Input name="ibanHolder" defaultValue={selected.ibanHolder ?? ""} />
+                      </Field>
+                      <Field label="CF intestatario">
+                        <Input name="ibanHolderCf" defaultValue={selected.ibanHolderCf ?? ""} />
+                      </Field>
+                    </div>
+                  </div>
+                ) : (
+                  <Field label="Note pagamento">
+                    <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
+                  </Field>
+                )}
+              </div>
+
+              {/* 2 Fornitura */}
               <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 sm:p-4">
                 <div className="flex items-center gap-2">
                   <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-xs font-bold text-white">
-                    1
+                    2
                   </span>
                   <h3 className="font-semibold text-slate-900">Fornitura</h3>
                 </div>
@@ -811,120 +925,6 @@ export function ClientSheet({
                 <Field label="Note contratto">
                   <Textarea name="notes" rows={2} defaultValue={selected.notes ?? ""} />
                 </Field>
-              </div>
-
-              {/* 2 Operazione */}
-              <div className="space-y-3 rounded-xl border border-sky-100 bg-sky-50/50 p-3 sm:p-4">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600 text-xs font-bold text-white">
-                    2
-                  </span>
-                  <h3 className="font-semibold text-slate-900">Operazione</h3>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Tipo operazione">
-                    <Select
-                      value={operationType}
-                      onChange={(e) => {
-                        setOperationType(e.target.value);
-                        mark2();
-                      }}
-                    >
-                      {OPERATION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Servizio contratto">
-                    <Select
-                      value={utilityType}
-                      onChange={(e) => {
-                        setUtilityType(e.target.value);
-                        mark2();
-                      }}
-                    >
-                      {SERVICE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                </div>
-                {operationType === "ALTRO" ? (
-                  <Field label="Specifica operazione *">
-                    <Input name="operationOther" defaultValue={selected.operationOther ?? ""} required />
-                  </Field>
-                ) : null}
-                {utilityType === "ALTRO" ? (
-                  <Field label="Specifica servizio *">
-                    <Input name="serviceOther" defaultValue={selected.serviceOther ?? ""} required />
-                  </Field>
-                ) : null}
-                <Field label="Metodo di pagamento">
-                  <Select
-                    value={paymentMethod}
-                    onChange={(e) => {
-                      setPaymentMethod(e.target.value);
-                      if (e.target.value === "RID" && !contractIban && client.iban) {
-                        setContractIban(client.iban);
-                      }
-                      mark2();
-                    }}
-                  >
-                    {PAYMENT_METHOD_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                {needsIban ? (
-                  <div className="space-y-3 rounded-lg border border-sky-100 bg-white p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-slate-800">IBAN per addebito</p>
-                      {client.iban ? (
-                        <button
-                          type="button"
-                          className="text-xs font-medium text-emerald-700 underline"
-                          onClick={() => {
-                            setContractIban(client.iban ?? "");
-                            mark2();
-                          }}
-                        >
-                          Copia da anagrafica
-                        </button>
-                      ) : (
-                        <span className="text-xs text-amber-700">Nessun IBAN in anagrafica</span>
-                      )}
-                    </div>
-                    <Field label="IBAN contratto *">
-                      <Input
-                        value={contractIban}
-                        onChange={(e) => {
-                          setContractIban(e.target.value);
-                          mark2();
-                        }}
-                        required
-                        className="font-mono text-base tracking-wide"
-                      />
-                    </Field>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Intestatario conto">
-                        <Input name="ibanHolder" defaultValue={selected.ibanHolder ?? ""} />
-                      </Field>
-                      <Field label="CF intestatario">
-                        <Input name="ibanHolderCf" defaultValue={selected.ibanHolderCf ?? ""} />
-                      </Field>
-                    </div>
-                  </div>
-                ) : (
-                  <Field label="Note pagamento">
-                    <Input name="paymentNotes" defaultValue={selected.paymentNotes ?? ""} />
-                  </Field>
-                )}
               </div>
 
               <Button type="submit" disabled={!block2Dirty || pending} className="w-full sm:w-auto">
