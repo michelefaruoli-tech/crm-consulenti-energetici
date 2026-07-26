@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
 import { toContractRows } from "@/lib/contract-row";
 import { ArchiveImportForm } from "@/components/archive/archive-import-form";
+import { HeliosImportPanel } from "@/components/provvigioni/helios-import-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +130,21 @@ export default async function ArchivioPage() {
           collaborators={collaborators}
           defaultCollaboratorId={session.id}
         />
+      </section>
+
+      <section
+        id="helios-import"
+        className="rounded-xl border-2 border-sky-400 bg-sky-50 p-5 shadow-sm"
+      >
+        <h2 className="mb-1 font-semibold text-sky-950">
+          Importa rendiconto Helios (mensile)
+        </h2>
+        <p className="mb-4 text-sm text-sky-900/80">
+          Qui carichi i file che ti manda Helios (es. Provvigioni_Aprile_2026_…). Segna in
+          automatico i mesi ricorrenti come <strong>pagati</strong> in Provvigioni, per POD.
+          Puoi ripetere l’operazione ogni mese senza intasare la scheda Provvigioni.
+        </p>
+        <HeliosImportPanel embedded />
       </section>
 
       <div className="flex items-center justify-between">
