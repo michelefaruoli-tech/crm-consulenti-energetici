@@ -15,6 +15,7 @@ import {
   RecurringRendicontoPanel,
   toSettledRow,
 } from "@/components/provvigioni/recurring-rendiconto-panel";
+import { HeliosImportPanel } from "@/components/provvigioni/helios-import-panel";
 import { PaginationNav } from "@/components/ui/pagination-nav";
 import { Button } from "@/components/ui/button";
 import {
@@ -692,6 +693,8 @@ export default async function ProvvigioniPage({
         alerts={alertRows}
         otherRecurringCount={otherRecurringCount}
       />
+
+      {canViewAll ? <HeliosImportPanel /> : null}
 
       <ProvvigioniTrashPanel
         rows={deletedRecent.map((c) => ({
