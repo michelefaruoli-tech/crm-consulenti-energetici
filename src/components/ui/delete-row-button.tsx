@@ -27,8 +27,8 @@ export function DeleteRowButton({
         disabled={pending}
         className={
           compact
-            ? "rounded px-1 py-0 text-base font-bold leading-none text-red-600 hover:bg-red-50 disabled:opacity-50"
-            : "rounded px-1.5 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            ? "rounded px-1 py-0 text-base font-bold leading-none text-red-800 hover:bg-white/70 disabled:opacity-50"
+            : "rounded bg-white/80 px-1.5 py-0.5 text-[11px] font-semibold text-red-800 ring-1 ring-red-200 hover:bg-white disabled:opacity-50"
         }
         title="Archivia / elimina"
         aria-label="Elimina"

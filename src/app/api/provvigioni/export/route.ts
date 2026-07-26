@@ -21,6 +21,12 @@ export async function GET(request: Request) {
   const supplier = url.searchParams.get("supplier");
   const stato = url.searchParams.get("stato");
   const tipologia = url.searchParams.get("tipologia");
+  const q = url.searchParams.get("q");
+  const vistaRaw = url.searchParams.get("vista");
+  const vista =
+    vistaRaw === "ricorrente" || vistaRaw === "tutti" ? vistaRaw : "gettoni";
+  const recurrenceMode =
+    vista === "ricorrente" ? "only" : vista === "tutti" ? "all" : "exclude";
   const canViewAll = hasPermission(session.role, "commissions.view_all");
 
   const contractWhere = buildProvvigioniContractWhere({
@@ -30,6 +36,8 @@ export async function GET(request: Request) {
     supplier,
     stato,
     tipologia,
+    q,
+    recurrenceMode,
   });
 
   const contracts = await prisma.contract.findMany({

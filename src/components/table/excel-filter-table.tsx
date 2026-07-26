@@ -327,7 +327,7 @@ export function ExcelFilterTable({
           dense ? "min-w-[1200px] text-xs" : "min-w-[1200px] text-sm",
         )}
       >
-        <thead className="bg-slate-50 text-slate-600">
+        <thead className="bg-slate-100 text-slate-800">
           <tr>
             {selection ? (
               <th className={cn("align-middle", dense ? "px-1.5 py-1.5" : "px-3 py-2")}>
@@ -362,7 +362,7 @@ export function ExcelFilterTable({
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="font-medium hover:text-slate-900"
+                      className="font-semibold text-slate-800 hover:text-slate-950"
                       onClick={() => toggleSort(col.key)}
                       title={
                         isServerCol

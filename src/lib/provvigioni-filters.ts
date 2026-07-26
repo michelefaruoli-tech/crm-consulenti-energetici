@@ -21,7 +21,23 @@ export type ProvvigioniFilters = {
   stato?: string | null;
   /** Tipologia: Business | Domestico */
   tipologia?: string | null;
+  /** Cerca cliente (nome, cognome, ragione sociale, CF, POD) */
+  q?: string | null;
+  /**
+   * Scheda:
+   * - exclude = gettoni/una tantum (nasconde R) — default per snellire
+   * - only = solo ricorrenti
+   * - all = tutti
+   */
+  recurrenceMode?: "exclude" | "only" | "all" | null;
 };
+
+/** Filtro Prisma: contratti ricorrenti (R in Provvigioni). */
+export const recurringWhereOr: Prisma.ContractWhereInput[] = [
+  { recurrence: { equals: "R", mode: "insensitive" } },
+  { recurrence: { contains: "Ricor", mode: "insensitive" } },
+  { recurrence: { contains: "mensil", mode: "insensitive" } },
+];
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
@@ -35,6 +51,8 @@ export function buildProvvigioniContractWhere(
   const supplierName = f.supplier?.trim() || undefined;
   const stato = f.stato?.trim() || undefined;
   const tipologia = f.tipologia?.trim() || undefined;
+  const q = f.q?.trim() || undefined;
+  const recurrenceMode = f.recurrenceMode ?? "exclude";
 
   const and: Prisma.ContractWhereInput[] = [];
 
@@ -62,6 +80,27 @@ export function buildProvvigioniContractWhere(
     and.push({ client: { type: "AZIENDA" } });
   } else if (tipologia === "Domestico") {
     and.push({ client: { type: "PRIVATO" } });
+  }
+
+  if (q) {
+    and.push({
+      OR: [
+        { client: { firstName: { contains: q, mode: "insensitive" } } },
+        { client: { lastName: { contains: q, mode: "insensitive" } } },
+        { client: { companyName: { contains: q, mode: "insensitive" } } },
+        { client: { fiscalCode: { contains: q, mode: "insensitive" } } },
+        { client: { vatNumber: { contains: q, mode: "insensitive" } } },
+        { podPdr: { contains: q, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  if (recurrenceMode === "only") {
+    and.push({ OR: recurringWhereOr });
+  } else if (recurrenceMode === "exclude") {
+    and.push({
+      NOT: { OR: recurringWhereOr },
+    });
   }
 
   return {

@@ -109,7 +109,7 @@ export function ContractsFilterTable({
       render: (r) => (
         <Link
           href={`/contratti/${String(r.id)}`}
-          className="font-medium text-emerald-700 hover:underline"
+          className="font-semibold text-slate-900 underline-offset-2 hover:underline"
           onClick={(e) => {
             if (dirty && !confirm("Hai modifiche non salvate. Vuoi uscire senza salvarle?")) {
               e.preventDefault();

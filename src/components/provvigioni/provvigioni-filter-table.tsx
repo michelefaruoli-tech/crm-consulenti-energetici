@@ -123,6 +123,8 @@ export function ProvvigioniFilterTable({
     supplier?: string | null;
     stato?: string | null;
     tipologia?: string | null;
+    q?: string | null;
+    vista?: string | null;
   };
   serverSortKey?: string | null;
   serverSortDir?: "asc" | "desc";
@@ -151,6 +153,8 @@ export function ProvvigioniFilterTable({
     listQuery?.supplier ?? "",
     listQuery?.stato ?? "",
     listQuery?.tipologia ?? "",
+    listQuery?.q ?? "",
+    listQuery?.vista ?? "gettoni",
     String(page),
     serverSortKey ?? "",
     serverSortDir,
@@ -176,6 +180,8 @@ export function ProvvigioniFilterTable({
       supplier: listQuery?.supplier,
       stato: listQuery?.stato,
       tipologia: listQuery?.tipologia,
+      q: listQuery?.q,
+      vista: listQuery?.vista,
       sort: serverSortKey === "client" ? "client" : undefined,
       dir: serverSortKey === "client" ? serverSortDir : undefined,
       ...extra,

@@ -42,19 +42,14 @@ export function ClientsFilterTable({
       getValue: (r) => String(r.name ?? ""),
       render: (r) => {
         const alert = Boolean(r.nameAlert);
-        const dark =
-          String(r.stornoKind ?? "") === "ricorrente" ||
-          String(r.rowClassName ?? "").includes("emerald-800");
         return (
           <Link
             href={`/clienti/${String(r.id)}`}
             title={String(r.stornoLabel ?? "") || undefined}
             className={
               alert
-                ? "font-bold text-red-700 underline-offset-2 hover:underline"
-                : dark
-                  ? "font-medium text-emerald-50 underline-offset-2 hover:underline"
-                  : "font-medium text-emerald-800 underline-offset-2 hover:underline"
+                ? "font-bold text-red-800 underline-offset-2 hover:underline"
+                : "font-semibold text-slate-900 underline-offset-2 hover:underline"
             }
             onClick={(e) => e.stopPropagation()}
           >

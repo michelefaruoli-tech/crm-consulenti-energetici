@@ -2,12 +2,13 @@
  * Stato storno / colori riga contratto (e lista clienti).
  *
  * Colori (richiesta UI):
- * - giallo       — Da incassare (non ancora pagato)
- * - verde scuro  — Ricorrente
- * - rosso chiaro — In periodo storno (non ricambiare) — colore attuale
+ * - giallo       — Da incassare
+ * - teal chiaro  — Ricorrente (distinto dal lime fuori storno)
+ * - arancio      — A ~1 mese dai 2 mesi di contratto (inizio fornitura + 2 mesi)
+ * - rosso chiaro — In periodo storno
  * - grigio       — KO / Cessato
- * - verdino      — Fuori storno (si può cambiare)
- * - scritta rossa — A ~1 mese dalla fine storno
+ * - lime         — Fuori storno
+ * - testo rosso  — A ~1 mese dalla fine storno
  */
 
 export type StornoKind =
@@ -15,6 +16,7 @@ export type StornoKind =
   | "scaduto"
   | "in_storno"
   | "in_scadenza"
+  | "verso_due_mesi"
   | "ricorrente"
   | "fuori_storno"
   | "sconosciuto"
@@ -33,8 +35,23 @@ export type StornoInfo = {
 };
 
 const CESSATI = new Set(["KO", "ANNULLATO", "CHIUSO"]);
-/** Giorni prima della fine storno = “in scadenza” */
+/** Giorni prima della fine storno = “in scadenza” (~1 mese) */
 export const STORNO_WARNING_DAYS = 30;
+/** Giorni prima del traguardo «2 mesi di contratto» */
+export const TWO_MONTH_WARNING_DAYS = 30;
+
+/**
+ * Testo sempre scuro + link/select/input leggibili su sfondi colorati.
+ * (Evita verde-su-verde / bianco-su-chiaro illeggibili)
+ */
+const ROW_TEXT =
+  "text-slate-900 [&_a]:text-slate-900 [&_a]:font-semibold [&_a]:underline-offset-2 hover:[&_a]:underline [&_select]:bg-white [&_select]:text-slate-900 [&_input]:text-slate-900 [&_button]:opacity-100";
+
+const ROW_TEXT_MUTED =
+  "text-slate-700 [&_a]:text-slate-800 [&_a]:font-semibold [&_select]:bg-white [&_select]:text-slate-900 [&_input]:text-slate-800";
+
+const ROW_TEXT_ALERT =
+  "font-semibold text-red-800 [&_a]:font-bold [&_a]:text-red-800 [&_select]:bg-white [&_select]:text-slate-900 [&_input]:text-red-800";
 
 export function normalizePodKey(podPdr: string | null | undefined): string {
   return String(podPdr ?? "")
@@ -78,6 +95,20 @@ function daysBetween(from: Date, to: Date): number {
   return Math.round(ms / (24 * 60 * 60 * 1000));
 }
 
+/**
+ * Manca ~1 mese al compimento di 2 mesi dall’inizio fornitura
+ * (finestra: 0–30 giorni prima di inizio+2 mesi).
+ */
+export function isApproachingTwoMonthsContract(
+  supplyStart: Date | null | undefined,
+  now = new Date(),
+): boolean {
+  if (!supplyStart) return false;
+  const mark = addMonths(supplyStart, 2);
+  const remaining = daysBetween(now, mark);
+  return remaining >= 0 && remaining <= TWO_MONTH_WARNING_DAYS;
+}
+
 function isPaid(collectionDate: Date | null | undefined): boolean {
   return Boolean(collectionDate);
 }
@@ -107,7 +138,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "cessato",
       label: "KO / Cessato",
-      rowClassName: "bg-slate-200/80 text-slate-700",
+      rowClassName: `bg-slate-200 ${ROW_TEXT_MUTED}`,
       stornoEndDate: null,
       isFuoriStorno: false,
       warnOnEdit: false,
@@ -118,7 +149,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "precedente",
       label: "Precedente (stesso POD)",
-      rowClassName: "bg-slate-100/90 text-slate-500",
+      rowClassName: `bg-slate-100 ${ROW_TEXT_MUTED}`,
       stornoEndDate: null,
       isFuoriStorno: false,
       warnOnEdit: true,
@@ -136,31 +167,43 @@ export function resolveStornoInfo(input: {
     return {
       kind: "in_storno",
       label: "Ricambio in periodo storno",
-      rowClassName: "bg-red-50/90",
+      rowClassName: `bg-red-100 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
       warnOnEdit: true,
     };
   }
 
-  // Ricorrente: verde scuro (priorità su «da incassare»)
+  // ~1 mese prima dei 2 mesi di contratto (inizio fornitura + 2 mesi)
+  if (isApproachingTwoMonthsContract(input.supplyStartDate, now)) {
+    return {
+      kind: "verso_due_mesi",
+      label: "Verso 2 mesi (-1 mese)",
+      rowClassName: `border-l-4 border-orange-500 bg-orange-100 ${ROW_TEXT}`,
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: false,
+      warnOnEdit: true,
+    };
+  }
+
+  // Ricorrente: teal chiaro (non scuro), ben distinto dal lime «fuori storno»
   if (isRecurring(input.recurrence)) {
     return {
       kind: "ricorrente",
       label: "Ricorrente",
-      rowClassName: "bg-emerald-800 text-emerald-50",
+      rowClassName: `border-l-4 border-teal-500 bg-teal-50 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
     };
   }
 
-  // Non ancora pagato → da incassare (giallo)
+  // Non ancora pagato → da incassare (giallo + testo scuro)
   if (!isPaid(input.collectionDate)) {
     return {
       kind: "da_pagare",
       label: "Da incassare",
-      rowClassName: "bg-yellow-100/90 text-yellow-950",
+      rowClassName: `bg-yellow-100 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -172,7 +215,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "fuori_storno",
       label: "Fuori storno (0 mesi)",
-      rowClassName: "bg-emerald-50/90 text-emerald-950",
+      rowClassName: `bg-lime-100 ${ROW_TEXT}`,
       stornoEndDate: input.supplyStartDate ?? null,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -191,7 +234,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "scaduto",
       label: "Scaduto",
-      rowClassName: "bg-red-100/90",
+      rowClassName: `bg-red-100 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
       warnOnEdit: true,
@@ -202,7 +245,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "fuori_storno",
       label: "Fuori storno",
-      rowClassName: "bg-emerald-50/90 text-emerald-950",
+      rowClassName: `bg-lime-100 ${ROW_TEXT}`,
       stornoEndDate: null,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -215,7 +258,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "fuori_storno",
       label: "Fuori storno",
-      rowClassName: "bg-emerald-50/90 text-emerald-950",
+      rowClassName: `bg-lime-100 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -227,18 +270,18 @@ export function resolveStornoInfo(input: {
     return {
       kind: "in_scadenza",
       label: "Fine periodo storno (~1 mese)",
-      rowClassName: "bg-rose-50/90 font-semibold text-red-700",
+      rowClassName: `bg-rose-50 ${ROW_TEXT_ALERT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
       warnOnEdit: true,
     };
   }
 
-  // Pagato e ancora dentro i mesi di storno: non ricambiare (colore attuale)
+  // Pagato e ancora dentro i mesi di storno: non ricambiare
   return {
     kind: "in_storno",
     label: "In periodo storno (pagato)",
-    rowClassName: "bg-red-50/90",
+    rowClassName: `bg-red-100 ${ROW_TEXT}`,
     stornoEndDate: stornoEnd,
     isFuoriStorno: false,
     warnOnEdit: true,
@@ -347,12 +390,13 @@ export function markEarlyReswitchContracts<
 }
 
 export const STORNO_LEGEND = [
-  { label: "Da incassare", className: "bg-yellow-200 ring-yellow-400" },
-  { label: "Ricorrente", className: "bg-emerald-800 ring-emerald-900" },
-  { label: "Fuori storno (si può cambiare)", className: "bg-emerald-100 ring-emerald-300" },
-  { label: "Fine storno (~1 mese) — testo rosso", className: "bg-rose-100 ring-red-400" },
-  { label: "In periodo storno (non cambiare)", className: "bg-red-200 ring-red-300" },
-  { label: "KO / Cessato", className: "bg-slate-300 ring-slate-400" },
+  { label: "Da incassare", className: "bg-yellow-200 ring-yellow-500" },
+  { label: "Ricorrente", className: "bg-teal-50 ring-teal-500" },
+  { label: "Fuori storno (si può cambiare)", className: "bg-lime-200 ring-lime-500" },
+  { label: "Verso 2 mesi (-1)", className: "bg-orange-200 ring-orange-500" },
+  { label: "Fine storno (~1 mese) — testo rosso", className: "bg-rose-100 ring-red-500" },
+  { label: "In periodo storno (non cambiare)", className: "bg-red-200 ring-red-400" },
+  { label: "KO / Cessato", className: "bg-slate-300 ring-slate-500" },
 ] as const;
 
 /**
@@ -363,12 +407,13 @@ const CLIENT_KIND_PRIORITY: Record<StornoKind, number> = {
   in_storno: 1,
   scaduto: 2,
   in_scadenza: 3,
-  da_pagare: 4,
-  ricorrente: 5,
-  fuori_storno: 6,
-  precedente: 7,
-  cessato: 8,
-  sconosciuto: 9,
+  verso_due_mesi: 4,
+  da_pagare: 5,
+  ricorrente: 6,
+  fuori_storno: 7,
+  precedente: 8,
+  cessato: 9,
+  sconosciuto: 10,
 };
 
 /** Aggrega lo stato storno dei contratti di un cliente in un solo stile riga. */

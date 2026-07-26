@@ -58,6 +58,10 @@ type SearchParams = {
   /** client = cognome+nome su tutto il filtro */
   sort?: string;
   dir?: string;
+  /** Cerca cliente / POD */
+  q?: string;
+  /** gettoni (default) | ricorrente | tutti */
+  vista?: string;
 };
 
 export default async function ProvvigioniPage({
@@ -75,6 +79,8 @@ export default async function ProvvigioniPage({
     tipologia: tipologiaRaw,
     sort: sortRaw,
     dir: dirRaw,
+    q: qRaw,
+    vista: vistaRaw,
   } = await searchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
@@ -83,6 +89,11 @@ export default async function ProvvigioniPage({
   const supplier = supplierRaw?.trim() || undefined;
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
+  const q = qRaw?.trim() || undefined;
+  const vista =
+    vistaRaw === "ricorrente" || vistaRaw === "tutti" ? vistaRaw : "gettoni";
+  const recurrenceMode =
+    vista === "ricorrente" ? "only" : vista === "tutti" ? "all" : "exclude";
 
   const contractWhere = buildProvvigioniContractWhere({
     canViewAll,
@@ -91,6 +102,8 @@ export default async function ProvvigioniPage({
     supplier,
     stato,
     tipologia,
+    q,
+    recurrenceMode,
   });
   const collabFilter =
     canViewAll && collab && collab !== "tutti" ? collab : undefined;
@@ -223,6 +236,8 @@ export default async function ProvvigioniPage({
     collabGroups,
     settledRowsRaw,
     deletedRecent,
+    countGettoni,
+    countRicorrenti,
   ] = await Promise.all([
     pageContractIds
       ? pageContractIds.length === 0
@@ -286,6 +301,30 @@ export default async function ProvvigioniPage({
       },
       orderBy: { deletedAt: "desc" },
       take: 30,
+    }),
+    prisma.contract.count({
+      where: buildProvvigioniContractWhere({
+        canViewAll,
+        sessionUserId: session.id,
+        collab,
+        supplier,
+        stato,
+        tipologia,
+        q,
+        recurrenceMode: "exclude",
+      }),
+    }),
+    prisma.contract.count({
+      where: buildProvvigioniContractWhere({
+        canViewAll,
+        sessionUserId: session.id,
+        collab,
+        supplier,
+        stato,
+        tipologia,
+        q,
+        recurrenceMode: "only",
+      }),
     }),
   ]);
 
@@ -460,6 +499,8 @@ export default async function ProvvigioniPage({
     supplier,
     stato,
     tipologia,
+    q,
+    vista: vista === "gettoni" ? undefined : vista,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
@@ -468,12 +509,20 @@ export default async function ProvvigioniPage({
     supplier ? `fornitore ${supplier}` : null,
     stato ? `stato ${stato}` : null,
     tipologia ? `tipologia ${tipologia}` : null,
+    q ? `cerca «${q}»` : null,
+    vista === "ricorrente"
+      ? "scheda Ricorrente"
+      : vista === "tutti"
+        ? "tutti (gettoni+R)"
+        : "scheda Gettoni",
   ].filter(Boolean);
   const collabQs = [
     collabFilter ? `collab=${encodeURIComponent(collabFilter)}` : null,
     supplier ? `supplier=${encodeURIComponent(supplier)}` : null,
     stato ? `stato=${encodeURIComponent(stato)}` : null,
     tipologia ? `tipologia=${encodeURIComponent(tipologia)}` : null,
+    q ? `q=${encodeURIComponent(q)}` : null,
+    vista !== "gettoni" ? `vista=${vista}` : null,
   ]
     .filter(Boolean)
     .map((p) => `&${p}`)
@@ -484,7 +533,21 @@ export default async function ProvvigioniPage({
   if (supplier) exportParams.set("supplier", supplier);
   if (stato) exportParams.set("stato", stato);
   if (tipologia) exportParams.set("tipologia", tipologia);
+  if (q) exportParams.set("q", q);
+  if (vista !== "gettoni") exportParams.set("vista", vista);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
+
+  function vistaHref(nextVista: "gettoni" | "ricorrente" | "tutti") {
+    return `/provvigioni?${new URLSearchParams({
+      settled: settledPeriod,
+      ...(collabFilter ? { collab: collabFilter } : {}),
+      ...(supplier ? { supplier } : {}),
+      ...(stato ? { stato } : {}),
+      ...(tipologia ? { tipologia } : {}),
+      ...(q ? { q } : {}),
+      ...(nextVista !== "gettoni" ? { vista: nextVista } : {}),
+    }).toString()}`;
+  }
 
   const sortHint = sortByClient
     ? ` Ordinati per cliente A→Z unico (${sortDir === "asc" ? "A→Z" : "Z→A"}), Domestico e Business insieme.`
@@ -494,7 +557,9 @@ export default async function ProvvigioniPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Provvigioni</h1>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {vista === "ricorrente" ? "Provvigioni · Ricorrente" : "Provvigioni"}
+          </h1>
           <p className="text-slate-500">
             {total} contratti
             {filterHints.length
@@ -517,6 +582,71 @@ export default async function ProvvigioniPage({
         ) : null}
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href={vistaHref("gettoni")}
+          className={
+            vista === "gettoni"
+              ? "rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+              : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          }
+        >
+          Gettoni ({countGettoni})
+        </Link>
+        <Link
+          href={vistaHref("ricorrente")}
+          className={
+            vista === "ricorrente"
+              ? "rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white"
+              : "rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-950 hover:bg-teal-100"
+          }
+        >
+          Ricorrente ({countRicorrenti})
+        </Link>
+        <Link
+          href={vistaHref("tutti")}
+          className={
+            vista === "tutti"
+              ? "rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white"
+              : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          }
+        >
+          Tutti ({countGettoni + countRicorrenti})
+        </Link>
+      </div>
+
+      <form className="flex flex-wrap gap-2" action="/provvigioni" method="get">
+        {collabFilter ? (
+          <input type="hidden" name="collab" value={collabFilter} />
+        ) : null}
+        <input type="hidden" name="settled" value={settledPeriod} />
+        {supplier ? <input type="hidden" name="supplier" value={supplier} /> : null}
+        {stato ? <input type="hidden" name="stato" value={stato} /> : null}
+        {tipologia ? (
+          <input type="hidden" name="tipologia" value={tipologia} />
+        ) : null}
+        {vista !== "gettoni" ? (
+          <input type="hidden" name="vista" value={vista} />
+        ) : null}
+        <input
+          name="q"
+          defaultValue={q ?? ""}
+          placeholder="Cerca cliente, CF, P.IVA o POD…"
+          className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+        />
+        <Button type="submit" variant="secondary">
+          Cerca
+        </Button>
+        {q ? (
+          <Link
+            href={vistaHref(vista)}
+            className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            Pulisci
+          </Link>
+        ) : null}
+      </form>
+
       {canViewAll ? (
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
@@ -525,11 +655,13 @@ export default async function ProvvigioniPage({
               ...(supplier ? { supplier } : {}),
               ...(stato ? { stato } : {}),
               ...(tipologia ? { tipologia } : {}),
+              ...(q ? { q } : {}),
+              ...(vista !== "gettoni" ? { vista } : {}),
             }).toString()}`}
             className={
               !collabFilter
                 ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
-                : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-700"
+                : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-800"
             }
           >
             Tutti i collaboratori ({collabCounts.reduce((s, c) => s + c.n, 0)})
@@ -543,11 +675,13 @@ export default async function ProvvigioniPage({
                 ...(supplier ? { supplier } : {}),
                 ...(stato ? { stato } : {}),
                 ...(tipologia ? { tipologia } : {}),
+                ...(q ? { q } : {}),
+                ...(vista !== "gettoni" ? { vista } : {}),
               }).toString()}`}
               className={
                 collabFilter === c.id
                   ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
-                  : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-700"
+                  : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-800"
               }
             >
               {c.name} ({c.n})
@@ -621,6 +755,8 @@ export default async function ProvvigioniPage({
           supplier,
           stato,
           tipologia,
+          q,
+          vista: vista === "gettoni" ? undefined : vista,
         }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}
