@@ -122,7 +122,7 @@ export type ProvvigioniTotals = {
 /**
  * Somma gettoni su TUTTO il filtro (non solo la pagina).
  * Usa aggregati SQL (veloce) invece di caricare tutte le righe in memoria.
- * I gettoni a 0 sui privati vengono allineati in background sulla pagina.
+ * «Da incassare» = senza data incasso E non KO/cessato (come il filtro Stato).
  */
 export async function sumProvvigioniTotals(
   contractWhere: Prisma.ContractWhereInput,
@@ -130,8 +130,13 @@ export async function sumProvvigioniTotals(
   const withCollection: Prisma.ContractWhereInput = {
     AND: [contractWhere, { collectionDate: { not: null } }],
   };
+  // Allineato al filtro «Da incassare»: esclude KO / Annullato / Chiuso
   const withoutCollection: Prisma.ContractWhereInput = {
-    AND: [contractWhere, { collectionDate: null }],
+    AND: [
+      contractWhere,
+      { collectionDate: null },
+      { status: { notIn: [...KO_STATUSES] } },
+    ],
   };
   const recurringOnly: Prisma.ContractWhereInput = {
     AND: [contractWhere, { OR: recurringWhereOr }],
