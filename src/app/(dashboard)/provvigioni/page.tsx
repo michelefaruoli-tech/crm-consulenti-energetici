@@ -713,7 +713,7 @@ export default async function ProvvigioniPage({
             {formatCurrency(totals.daIncassare)}
           </p>
           <p className="mt-1 text-xs text-amber-800/70">
-            Solo senza data di incasso · somma gettoni
+            Senza data incasso e non KO/cessato · somma gettoni
           </p>
         </div>
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
