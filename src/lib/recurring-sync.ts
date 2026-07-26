@@ -95,6 +95,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       deletedAt: null,
       ...(collaboratorId ? { collaboratorId } : {}),
       OR: [
+        { recurrence: { equals: "R", mode: "insensitive" } },
         { recurrence: { contains: "Ricor", mode: "insensitive" } },
         { recurrence: { contains: "mensil", mode: "insensitive" } },
       ],

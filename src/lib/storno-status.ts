@@ -1,20 +1,13 @@
 /**
- * Stato storno / colori riga contratto.
+ * Stato storno / colori riga contratto (e lista clienti).
  *
- * Regola di business (provvigioni energia):
- * - Contratto NON ancora pagato → FUORI STORNO («Da pagare»).
- * - Dopo il pagamento parte il periodo di storno del fornitore
- *   (data ingresso fornitura + mesi storno).
- * - «In storno» critico = RICAMBIO: nuovo contratto sullo stesso POD
- *   mentre un contratto precedente già pagato è ancora nel periodo storno.
- *
- * Priorità colori:
- * 1. grigio  — KO / Annullato / Chiuso
- * 2. rosso   — Ricambio in periodo storno / Scaduto
- * 3. ambra   — Periodo storno in scadenza (pagato, ultimi 30 gg)
- * 4. rosso chiaro — Pagato e ancora nel periodo storno (non ricambiare)
- * 5. salvia  — Ricorrente
- * 6. verde   — Da pagare / Fuori storno
+ * Colori (richiesta UI):
+ * - giallo       — Da incassare (non ancora pagato)
+ * - verde scuro  — Ricorrente
+ * - rosso chiaro — In periodo storno (non ricambiare) — colore attuale
+ * - grigio       — KO / Cessato
+ * - verdino      — Fuori storno (si può cambiare)
+ * - scritta rossa — A ~1 mese dalla fine storno
  */
 
 export type StornoKind =
@@ -50,7 +43,10 @@ export function normalizePodKey(podPdr: string | null | undefined): string {
 }
 
 export function isRecurring(recurrence: string | null | undefined): boolean {
-  return /ricor/i.test(String(recurrence ?? ""));
+  const r = String(recurrence ?? "").trim();
+  if (!r) return false;
+  if (/^r$/i.test(r)) return true;
+  return /ricor|mensil/i.test(r);
 }
 
 export function addMonths(date: Date, months: number): Date {
@@ -147,12 +143,24 @@ export function resolveStornoInfo(input: {
     };
   }
 
-  // Non ancora pagato → fuori storno (nuovo da liquidare)
+  // Ricorrente: verde scuro (priorità su «da incassare»)
+  if (isRecurring(input.recurrence)) {
+    return {
+      kind: "ricorrente",
+      label: "Ricorrente",
+      rowClassName: "bg-emerald-800 text-emerald-50",
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: true,
+      warnOnEdit: false,
+    };
+  }
+
+  // Non ancora pagato → da incassare (giallo)
   if (!isPaid(input.collectionDate)) {
     return {
       kind: "da_pagare",
-      label: "Da pagare",
-      rowClassName: "bg-emerald-50/90",
+      label: "Da incassare",
+      rowClassName: "bg-yellow-100/90 text-yellow-950",
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -164,20 +172,8 @@ export function resolveStornoInfo(input: {
     return {
       kind: "fuori_storno",
       label: "Fuori storno (0 mesi)",
-      rowClassName: "bg-emerald-50/90",
+      rowClassName: "bg-emerald-50/90 text-emerald-950",
       stornoEndDate: input.supplyStartDate ?? null,
-      isFuoriStorno: true,
-      warnOnEdit: false,
-    };
-  }
-
-  // Ricorrente: resta sempre verde salvia
-  if (isRecurring(input.recurrence)) {
-    return {
-      kind: "ricorrente",
-      label: "Ricorrente",
-      rowClassName: "bg-teal-50/90",
-      stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
     };
@@ -206,7 +202,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "fuori_storno",
       label: "Fuori storno",
-      rowClassName: "bg-emerald-50/90",
+      rowClassName: "bg-emerald-50/90 text-emerald-950",
       stornoEndDate: null,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -219,25 +215,26 @@ export function resolveStornoInfo(input: {
     return {
       kind: "fuori_storno",
       label: "Fuori storno",
-      rowClassName: "bg-emerald-50/90",
+      rowClassName: "bg-emerald-50/90 text-emerald-950",
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
     };
   }
 
+  // ~1 mese dalla fine storno: evidenzia la scritta in rosso
   if (remaining <= STORNO_WARNING_DAYS) {
     return {
       kind: "in_scadenza",
-      label: "Fine periodo storno",
-      rowClassName: "bg-amber-100/90",
+      label: "Fine periodo storno (~1 mese)",
+      rowClassName: "bg-rose-50/90 font-semibold text-red-700",
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
       warnOnEdit: true,
     };
   }
 
-  // Pagato e ancora dentro i mesi di storno: non ricambiare
+  // Pagato e ancora dentro i mesi di storno: non ricambiare (colore attuale)
   return {
     kind: "in_storno",
     label: "In periodo storno (pagato)",
@@ -350,9 +347,49 @@ export function markEarlyReswitchContracts<
 }
 
 export const STORNO_LEGEND = [
-  { label: "Da pagare / Fuori storno", className: "bg-emerald-200 ring-emerald-300" },
-  { label: "Ricorrente", className: "bg-teal-200 ring-teal-300" },
-  { label: "Fine periodo storno", className: "bg-amber-200 ring-amber-300" },
-  { label: "Periodo storno / Ricambio", className: "bg-red-200 ring-red-300" },
+  { label: "Da incassare", className: "bg-yellow-200 ring-yellow-400" },
+  { label: "Ricorrente", className: "bg-emerald-800 ring-emerald-900" },
+  { label: "Fuori storno (si può cambiare)", className: "bg-emerald-100 ring-emerald-300" },
+  { label: "Fine storno (~1 mese) — testo rosso", className: "bg-rose-100 ring-red-400" },
+  { label: "In periodo storno (non cambiare)", className: "bg-red-200 ring-red-300" },
   { label: "KO / Cessato", className: "bg-slate-300 ring-slate-400" },
 ] as const;
+
+/**
+ * Priorità per scegliere il colore riga quando un cliente ha più contratti.
+ * Numero più basso = più importante (vince).
+ */
+const CLIENT_KIND_PRIORITY: Record<StornoKind, number> = {
+  in_storno: 1,
+  scaduto: 2,
+  in_scadenza: 3,
+  da_pagare: 4,
+  ricorrente: 5,
+  fuori_storno: 6,
+  precedente: 7,
+  cessato: 8,
+  sconosciuto: 9,
+};
+
+/** Aggrega lo stato storno dei contratti di un cliente in un solo stile riga. */
+export function resolveClientRowStyle(
+  infos: Array<Pick<StornoInfo, "kind" | "rowClassName" | "label">>,
+): { kind: StornoKind; rowClassName: string; label: string } {
+  if (infos.length === 0) {
+    return { kind: "sconosciuto", rowClassName: "", label: "" };
+  }
+  let best = infos[0];
+  let bestP = CLIENT_KIND_PRIORITY[best.kind] ?? 99;
+  for (let i = 1; i < infos.length; i++) {
+    const p = CLIENT_KIND_PRIORITY[infos[i].kind] ?? 99;
+    if (p < bestP) {
+      best = infos[i];
+      bestP = p;
+    }
+  }
+  return {
+    kind: best.kind,
+    rowClassName: best.rowClassName,
+    label: best.label,
+  };
+}

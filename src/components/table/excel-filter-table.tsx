@@ -505,7 +505,10 @@ export function ExcelFilterTable({
                 key={key}
                 className={cn(
                   "border-t border-slate-100",
-                  onRowClick && "cursor-pointer hover:bg-slate-50",
+                  onRowClick &&
+                    (getRowClassName
+                      ? "cursor-pointer hover:brightness-[0.97]"
+                      : "cursor-pointer hover:bg-slate-50"),
                   selection?.selectedKeys.has(key) && "bg-emerald-50/60",
                   getRowClassName?.(row),
                 )}

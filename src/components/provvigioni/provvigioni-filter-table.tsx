@@ -30,6 +30,7 @@ const FIELD_MAP: Record<string, string> = {
   collaboratorName: "collaboratorName",
   supplierName: "supplierName",
   clientType: "clientType",
+  amount: "expected",
   operationType: "operationType",
   stato: "stato",
   recurrence: "recurrence",
@@ -79,6 +80,8 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return row.supplierName ?? "";
     case "clientType":
       return shortClientType(row.clientType ?? "");
+    case "amount":
+      return row.amount ?? "";
     case "operationType":
       return row.operationType ?? "";
     case "stato":
@@ -459,6 +462,14 @@ export function ProvvigioniFilterTable({
       inputClassName: "max-w-[3rem] text-center",
     },
     {
+      key: "amount",
+      label: "Gettone",
+      getValue: (r) => String(r.amount ?? ""),
+      editable: true,
+      sortKind: "number",
+      inputClassName: "max-w-[4.5rem] text-right tabular-nums",
+    },
+    {
       key: "operationType",
       label: "Tipo op.",
       getValue: (r) => getDraftValue(r, "operationType"),
@@ -799,8 +810,9 @@ export function ProvvigioniFilterTable({
       <p className="text-xs text-slate-500">
         Celle modificabili = bozza (giallo) finché non salvi. Usa le frecce{" "}
         <strong>← →</strong> sotto la tabella per scorrere.{" "}
-        <strong>R/G</strong>: R = ricorrente · G = gettone (una tantum).{" "}
-        <strong>Tip.</strong>: Dom / Bus.{" "}
+        <strong>Gettone</strong>: valore in € (modificabile in bozza).{" "}
+        <strong>R/G</strong>: R = ricorrente (entra in Clienti → A ricorrenza) · G =
+        gettone una tantum. <strong>Tip.</strong>: Dom / Bus.{" "}
         <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato.{" "}
         <strong>Storno</strong> + data + importo. Fornitore / Stato / Tip. filtrano
         su tutto il database. Privati: Dolomiti 45 · Plenitude 60 · Enel 65.

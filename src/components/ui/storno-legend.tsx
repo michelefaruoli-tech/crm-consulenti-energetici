@@ -1,9 +1,10 @@
 export function StornoLegend({ className = "" }: { className?: string }) {
   const items = [
-    { label: "Da pagare / Fuori storno", swatch: "bg-emerald-200 ring-emerald-300" },
-    { label: "Ricorrente", swatch: "bg-teal-200 ring-teal-300" },
-    { label: "Fine periodo storno", swatch: "bg-amber-200 ring-amber-300" },
-    { label: "Periodo storno / Ricambio", swatch: "bg-red-200 ring-red-300" },
+    { label: "Da incassare", swatch: "bg-yellow-200 ring-yellow-400" },
+    { label: "Ricorrente", swatch: "bg-emerald-800 ring-emerald-900" },
+    { label: "Fuori storno", swatch: "bg-emerald-100 ring-emerald-300" },
+    { label: "~1 mese fine storno (testo rosso)", swatch: "bg-rose-100 ring-red-400" },
+    { label: "In periodo storno", swatch: "bg-red-200 ring-red-300" },
     { label: "KO / Cessato", swatch: "bg-slate-300 ring-slate-400" },
   ];
   return (

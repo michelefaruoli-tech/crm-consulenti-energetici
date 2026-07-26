@@ -12,7 +12,7 @@ export type ProvvigioneRow = {
   collaboratorName: string;
   supplierName: string;
   clientType: string;
-  /** Gettone effettivo (anche se non mostrato in colonna) */
+  /** Gettone effettivo mostrato in colonna Gettone */
   amount: string;
   /** Etichetta tipo operazione (Switch, Voltura, …) */
   operationType: string;
@@ -124,7 +124,9 @@ export function effectiveGettone(opts: {
 }
 
 export function isRecurringMonthly(recurrence: string | null | undefined): boolean {
-  const r = (recurrence ?? "").toLowerCase();
+  const r = (recurrence ?? "").trim().toLowerCase();
+  if (!r) return false;
+  if (r === "r") return true;
   return r.includes("ricorr") || r.includes("mensil");
 }
 

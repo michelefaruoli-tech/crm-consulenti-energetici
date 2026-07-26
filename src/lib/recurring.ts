@@ -57,5 +57,9 @@ export const RECURRING_STATUS_LABELS: Record<string, string> = {
 };
 
 export function isRecurring(recurrence: string | null | undefined): boolean {
-  return /ricor|mensil/i.test(recurrence ?? "");
+  const r = (recurrence ?? "").trim();
+  if (!r) return false;
+  // In Provvigioni la colonna R/G usa «R» come abbreviazione di ricorrente
+  if (/^r$/i.test(r)) return true;
+  return /ricor|mensil/i.test(r);
 }
