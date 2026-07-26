@@ -283,8 +283,10 @@ export async function previewHeliosProvvigioniAction(
   formData: FormData,
 ): Promise<HeliosImportPreviewResult | { ok: false; error: string }> {
   const session = await requireSession();
-  if (!hasPermission(session.role, "commissions.view_all")) {
-    return { ok: false, error: "Solo Admin / Segreteria possono importare Helios" };
+  if (!hasPermission(session.role, "commissions.view_all") &&
+      !hasPermission(session.role, "commissions.edit_gettone") &&
+      !hasPermission(session.role, "commissions.edit_own_gettone")) {
+    return { ok: false, error: "Non hai permesso di importare i rendiconti Helios" };
   }
 
   const loaded = await bufferFromForm(formData);
@@ -331,8 +333,10 @@ export async function applyHeliosProvvigioniAction(
   | { ok: false; error: string }
 > {
   const session = await requireSession();
-  if (!hasPermission(session.role, "commissions.view_all")) {
-    return { ok: false, error: "Solo Admin / Segreteria possono importare Helios" };
+  if (!hasPermission(session.role, "commissions.view_all") &&
+      !hasPermission(session.role, "commissions.edit_gettone") &&
+      !hasPermission(session.role, "commissions.edit_own_gettone")) {
+    return { ok: false, error: "Non hai permesso di importare i rendiconti Helios" };
   }
 
   const loaded = await bufferFromForm(formData);

@@ -584,25 +584,21 @@ export default async function ProvvigioniPage({
             </span>
           </p>
         </div>
-        {canExport || canViewAll ? (
-          <div className="flex flex-wrap gap-2">
-            {canViewAll ? (
-              <a href="#helios-import">
-                <Button type="button" variant="secondary">
-                  Importa Helios
-                </Button>
-              </a>
-            ) : null}
-            {canExport ? (
-              <a href={exportHref}>
-                <Button variant="secondary">Scarica Excel</Button>
-              </a>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <a href="#helios-import">
+            <Button type="button" variant="secondary">
+              Importa Helios
+            </Button>
+          </a>
+          {canExport ? (
+            <a href={exportHref}>
+              <Button variant="secondary">Scarica Excel</Button>
+            </a>
+          ) : null}
+        </div>
       </div>
 
-      {canViewAll ? <HeliosImportPanel /> : null}
+      <HeliosImportPanel />
 
       <div className="flex flex-wrap gap-2">
         <Link
