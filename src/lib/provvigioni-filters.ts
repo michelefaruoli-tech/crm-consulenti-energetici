@@ -6,7 +6,6 @@
  * applicano a tutto il database, non solo alla pagina da 100 righe.
  */
 import type { Prisma } from "@/generated/prisma/client";
-import { effectiveGettone, isRecurringMonthly } from "@/lib/provvigioni-stato";
 import { prisma } from "@/lib/prisma";
 
 export type ProvvigioniFilters = {
@@ -121,40 +120,47 @@ export type ProvvigioniTotals = {
 };
 
 /**
- * Somma gettoni su TUTTO il filtro (non solo la pagina),
- * usando gli stessi default privati della tabella (Enel 65, …).
- * Così i totali coincidono con la somma dei gettoni che vedi nelle righe.
+ * Somma gettoni su TUTTO il filtro (non solo la pagina).
+ * Usa aggregati SQL (veloce) invece di caricare tutte le righe in memoria.
+ * I gettoni a 0 sui privati vengono allineati in background sulla pagina.
  */
 export async function sumProvvigioniTotals(
   contractWhere: Prisma.ContractWhereInput,
 ): Promise<ProvvigioniTotals> {
-  const rows = await prisma.contract.findMany({
-    where: contractWhere,
-    select: {
-      collectionDate: true,
-      recurrence: true,
-      client: { select: { type: true } },
-      supplier: { select: { name: true } },
-      commission: { select: { expected: true } },
-    },
-  });
+  const withCollection: Prisma.ContractWhereInput = {
+    AND: [contractWhere, { collectionDate: { not: null } }],
+  };
+  const withoutCollection: Prisma.ContractWhereInput = {
+    AND: [contractWhere, { collectionDate: null }],
+  };
+  const recurringOnly: Prisma.ContractWhereInput = {
+    AND: [contractWhere, { OR: recurringWhereOr }],
+  };
 
-  let complessivo = 0;
-  let incassato = 0;
-  let daIncassare = 0;
-  let ricorrenti = 0;
+  const [complessivoAgg, incassatoAgg, daIncassareAgg, ricorrentiAgg] =
+    await Promise.all([
+      prisma.commission.aggregate({
+        where: { contract: contractWhere },
+        _sum: { expected: true },
+      }),
+      prisma.commission.aggregate({
+        where: { contract: withCollection },
+        _sum: { expected: true },
+      }),
+      prisma.commission.aggregate({
+        where: { contract: withoutCollection },
+        _sum: { expected: true },
+      }),
+      prisma.commission.aggregate({
+        where: { contract: recurringOnly },
+        _sum: { expected: true },
+      }),
+    ]);
 
-  for (const row of rows) {
-    const amount = effectiveGettone({
-      expected: Number(row.commission?.expected ?? 0),
-      clientType: row.client.type,
-      supplierName: row.supplier.name,
-    });
-    complessivo += amount;
-    if (row.collectionDate) incassato += amount;
-    else daIncassare += amount;
-    if (isRecurringMonthly(row.recurrence)) ricorrenti += amount;
-  }
-
-  return { complessivo, daIncassare, ricorrenti, incassato };
+  return {
+    complessivo: Number(complessivoAgg._sum.expected ?? 0),
+    incassato: Number(incassatoAgg._sum.expected ?? 0),
+    daIncassare: Number(daIncassareAgg._sum.expected ?? 0),
+    ricorrenti: Number(ricorrentiAgg._sum.expected ?? 0),
+  };
 }

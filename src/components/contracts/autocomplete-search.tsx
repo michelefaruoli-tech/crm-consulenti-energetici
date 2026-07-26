@@ -67,7 +67,7 @@ export function AutocompleteSearch({
       ) : (
         <>
           <input
-            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            className="w-full min-h-11 rounded-lg border border-slate-200 px-3 py-2.5 text-base sm:min-h-0 sm:py-2 sm:text-sm"
             placeholder={placeholder}
             value={query}
             onChange={(e) => {
@@ -82,7 +82,7 @@ export function AutocompleteSearch({
                 <button
                   key={item.id}
                   type="button"
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  className="block w-full px-3 py-3 text-left text-base hover:bg-slate-50 sm:py-2 sm:text-sm"
                   onClick={() => {
                     onSelect(item);
                     setOpen(false);

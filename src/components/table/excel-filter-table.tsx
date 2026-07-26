@@ -274,9 +274,9 @@ export function ExcelFilterTable({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="-mx-3 rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:rounded-xl sm:border">
       {hasAnyFilter ? (
-        <div className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+        <div className="flex flex-col gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 sm:flex-row sm:items-center sm:justify-between">
           <span>
             Filtri locali attivi: vedi {filtered.length} di {rows.length} righe di
             questa pagina. Fornitore, Stato e Tipologia ricaricano invece
@@ -284,7 +284,7 @@ export function ExcelFilterTable({
           </span>
           <button
             type="button"
-            className="rounded bg-amber-800 px-2 py-1 font-medium text-white hover:bg-amber-900"
+            className="rounded bg-amber-800 px-2 py-1.5 font-medium text-white hover:bg-amber-900"
             onClick={clearAllFilters}
           >
             Azzera filtri
@@ -292,9 +292,9 @@ export function ExcelFilterTable({
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-1.5">
-        <p className="text-[11px] text-slate-500">
-          Scorri la tabella a sinistra / destra se non vedi tutte le colonne
+      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+        <p className="text-[11px] leading-snug text-slate-600 sm:text-xs">
+          Su telefono: scorri la tabella in orizzontale per vedere tutte le colonne
         </p>
         <div className="flex gap-1">
           <button
@@ -318,7 +318,7 @@ export function ExcelFilterTable({
 
       <div
         ref={scrollRef}
-        className="overflow-x-scroll overscroll-x-contain"
+        className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
         style={{ scrollbarGutter: "stable" }}
       >
       <table

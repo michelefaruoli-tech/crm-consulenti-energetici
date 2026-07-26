@@ -465,7 +465,7 @@ export function NuovoContrattoForm({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 pb-24 sm:space-y-6 sm:pb-0">
       <DocumentAutoFillPanel
         canUseMistralOcr
         onApply={applyOcrPayload}
@@ -474,16 +474,16 @@ export function NuovoContrattoForm({
         }}
       />
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Opzioni e stato</h2>
+            <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Opzioni e stato</h2>
             <p className="text-sm text-slate-500">Salva in gestionale oppure invia al Master</p>
           </div>
-          <label className="flex cursor-pointer items-center gap-3 rounded-xl border-2 border-emerald-500 bg-emerald-50 px-4 py-3">
+          <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border-2 border-emerald-500 bg-emerald-50 px-4 py-3">
             <input
               type="checkbox"
-              className="h-5 w-5"
+              className="h-5 w-5 shrink-0"
               checked={sendToMaster}
               onChange={(e) => setSendToMaster(e.target.checked)}
             />
@@ -514,8 +514,8 @@ export function NuovoContrattoForm({
         )}
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Dati cliente</h2>
+      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Dati cliente</h2>
         <AutocompleteSearch
           label="Cliente"
           required
@@ -775,8 +775,8 @@ export function NuovoContrattoForm({
         </div>
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Allegati</h2>
+      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Allegati</h2>
         {sendToMaster ? (
           <p className="text-xs text-amber-800">
             Con invio al Master sono obbligatori: documento di identità e bolletta/fattura (max
@@ -845,8 +845,8 @@ export function NuovoContrattoForm({
         ) : null}
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Note e conferma</h2>
+      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Note e conferma</h2>
         <Field label="Note interne">
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
@@ -913,16 +913,22 @@ export function NuovoContrattoForm({
           />
         ) : null}
 
-        <div className="flex flex-wrap gap-3">
+        <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-slate-200 bg-white/95 p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur sm:static sm:z-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
           <Button
             type="button"
             variant="secondary"
+            className="min-h-12 flex-1 sm:flex-none"
             disabled={pending}
             onClick={() => submit(true)}
           >
-            Salva come bozza
+            Bozza
           </Button>
-          <Button type="button" disabled={pending} onClick={() => submit(false)}>
+          <Button
+            type="button"
+            className="min-h-12 flex-[1.4] sm:flex-none"
+            disabled={pending}
+            onClick={() => submit(false)}
+          >
             {sendToMaster ? "Crea e invia al Master" : "Crea contratto"}
           </Button>
         </div>

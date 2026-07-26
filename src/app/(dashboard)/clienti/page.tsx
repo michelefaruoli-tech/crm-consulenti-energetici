@@ -7,8 +7,6 @@ import { hasPermission } from "@/lib/permissions";
 import { ClientsFilterTable } from "@/components/clients/clients-filter-table";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { CleanupDuplicatesButton } from "@/components/clients/cleanup-duplicates-button";
-import { mergeDuplicateClientsOnce } from "@/lib/client-dedupe";
-import { archiveSupersededPodContracts } from "@/lib/contract-pod-archive";
 import {
   isRecurring,
   markEarlyReswitchContracts,
@@ -49,16 +47,6 @@ export default async function ClientiPage({
     ricorrenza === "sì" ||
     ricorrenza === "yes";
   const canViewAll = hasPermission(session.role, "clients.edit_all");
-
-  // Allinea anagrafiche e archivia POD ricontrattualizzati (best-effort)
-  if (canViewAll) {
-    try {
-      await mergeDuplicateClientsOnce();
-      await archiveSupersededPodContracts();
-    } catch (e) {
-      console.error("[clienti cleanup]", e);
-    }
-  }
 
   try {
     const clients = await prisma.client.findMany({

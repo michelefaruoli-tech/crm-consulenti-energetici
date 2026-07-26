@@ -119,41 +119,41 @@ export default async function ProvvigioniPage({
     { id: "desc" },
   ];
 
-  // Sync mesi ricorrenti PRIMA di leggere gli alert (altrimenti il riquadro sopra resta vuoto/incompleto)
-  try {
-    await syncAllRecurringMonths(sessionCollabFilter);
-  } catch (e) {
-    console.error("sync recurring", e);
-  }
+  // Sync ricorrenze in background: non bloccare il caricamento della pagina
+  void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
+    console.error("sync recurring", e),
+  );
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
   const total = await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
 
-  // Crea commissioni mancanti (senza di esse la tabella le nascondeva → “righe vuote”)
-  const missingCommission = await prisma.contract.findMany({
-    where: { ...contractWhere, commission: { is: null } },
-    select: { id: true },
-    take: 500,
-  });
-  if (missingCommission.length > 0) {
-    await Promise.all(
-      missingCommission.map((c) =>
-        prisma.commission
-          .create({
-            data: {
-              contractId: c.id,
-              expected: 0,
-              accrued: 0,
-              received: 0,
-              paid: 0,
-            },
-          })
-          .catch(() => null),
+  // Commissoni mancanti: in background (non blocca il caricamento)
+  void prisma.contract
+    .findMany({
+      where: { ...contractWhere, commission: { is: null } },
+      select: { id: true },
+      take: 20,
+    })
+    .then((missingCommission) =>
+      Promise.all(
+        missingCommission.map((c) =>
+          prisma.commission
+            .create({
+              data: {
+                contractId: c.id,
+                expected: 0,
+                accrued: 0,
+                received: 0,
+                paid: 0,
+              },
+            })
+            .catch(() => null),
+        ),
       ),
-    );
-  }
+    )
+    .catch(() => null);
 
   const contractSelect = {
     id: true,
@@ -198,9 +198,9 @@ export default async function ProvvigioniPage({
     },
   } as const;
 
-  // Ordinamento cliente: A→Z unico (Domestico e Business mescolati per nome)
+  // Ordinamento cliente: solo se il filtro non è enorme (altrimenti troppo lento)
   let pageContractIds: string[] | null = null;
-  if (sortByClient) {
+  if (sortByClient && total <= 800) {
     const light = await prisma.contract.findMany({
       where: contractWhere,
       select: {
@@ -302,7 +302,7 @@ export default async function ProvvigioniPage({
         collaborator: { select: { name: true } },
       },
       orderBy: { deletedAt: "desc" },
-      take: 30,
+      take: 12,
     }),
     prisma.contract.count({
       where: buildProvvigioniContractWhere({
@@ -337,13 +337,13 @@ export default async function ProvvigioniPage({
           .map((id) => contractsRaw.find((c) => c.id === id))
           .filter((c): c is (typeof contractsRaw)[number] => Boolean(c));
 
-  // Allinea stato/gettone sulle righe della pagina corrente:
-  // - con data incasso → Incassato (non più KO/Chiuso)
-  // - privati Dolomiti/Plenitude/Enel → gettone 45/60/65 se ancora a 0
+  // Allinea in memoria subito; scrittura DB in background (pagina più veloce)
   const alignJobs: Promise<unknown>[] = [];
   for (const c of contracts) {
     const hasDate = Boolean(c.collectionDate);
     if (hasDate && ["KO", "ANNULLATO", "CHIUSO", "IN_ATTESA_PAGAMENTO"].includes(c.status)) {
+      (c as { status: string }).status = "PAGATO_DAL_FORNITORE";
+      (c as { paymentStatus: string | null }).paymentStatus = "Incassato";
       alignJobs.push(
         prisma.contract
           .update({
@@ -353,10 +353,6 @@ export default async function ProvvigioniPage({
               paymentStatus: "Incassato",
             },
           })
-          .then(() => {
-            (c as { status: string }).status = "PAGATO_DAL_FORNITORE";
-            (c as { paymentStatus: string | null }).paymentStatus = "Incassato";
-          })
           .catch(() => null),
       );
     }
@@ -364,14 +360,12 @@ export default async function ProvvigioniPage({
       const target = defaultGettonePrivato(c.supplier.name);
       const current = Number(c.commission.expected ?? 0);
       if (target != null && current === 0) {
+        (c.commission as { expected: unknown }).expected = target;
         alignJobs.push(
           prisma.commission
             .update({
               where: { id: c.commission.id },
               data: { expected: target },
-            })
-            .then(() => {
-              (c.commission as { expected: unknown }).expected = target;
             })
             .catch(() => null),
         );
@@ -379,7 +373,7 @@ export default async function ProvvigioniPage({
     }
   }
   if (alignJobs.length > 0) {
-    await Promise.all(alignJobs);
+    void Promise.all(alignJobs);
   }
 
   const latestMap = markLatestContractsByPod(
@@ -557,22 +551,23 @@ export default async function ProvvigioniPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
             {vista === "ricorrente" ? "Provvigioni · Ricorrente" : "Provvigioni"}
           </h1>
-          <p className="text-slate-500">
+          <p className="text-sm text-slate-500 sm:text-base">
             {total} contratti
             {filterHints.length
-              ? ` · filtro: ${filterHints.join(" · ")}`
+              ? ` · ${filterHints.join(" · ")}`
               : canViewAll
-                ? ` · accesso ${roleLabel} — tutti i collaboratori`
+                ? ` · ${roleLabel}`
                 : " · solo i tuoi"}
-            .{sortHint} Max {PAGE_SIZE} righe per pagina. I filtri Fornitore /
-            Stato / Tipologia cercano in tutto il database. Colori = storno; bordo =
-            gettone.
-            {totals.daConfermare > 0
-              ? ` · ${totals.daConfermare} gettoni da confermare.`
-              : ""}
+            .
+            <span className="hidden sm:inline">
+              {sortHint} Max {PAGE_SIZE} per pagina.
+              {totals.daConfermare > 0
+                ? ` · ${totals.daConfermare} da confermare.`
+                : ""}
+            </span>
           </p>
         </div>
         {canExport ? (
@@ -622,7 +617,7 @@ export default async function ProvvigioniPage({
           name="q"
           defaultValue={q ?? ""}
           placeholder="Cerca cliente, CF, P.IVA o POD… (es. Mecca, Moschetta)"
-          className="min-w-[16rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+          className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 placeholder:text-slate-400 sm:min-w-[16rem] sm:py-2 sm:text-sm"
         />
         <Button type="submit" variant="secondary">
           Cerca

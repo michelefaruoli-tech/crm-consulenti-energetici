@@ -141,8 +141,11 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   const extra = maybeR.filter((c) => isRecurring(c.recurrence));
   const all = [...contracts, ...extra];
   const seen = new Set<string>();
+  // Cap: poche sync per richiesta → non martella il DB ad ogni apertura Provvigioni
+  const MAX_PER_RUN = 12;
 
   for (const c of all) {
+    if (seen.size >= MAX_PER_RUN) break;
     if (seen.has(c.id)) continue;
     seen.add(c.id);
     await syncRecurringMonthsForContract(c.id);
@@ -179,7 +182,7 @@ export async function getMissingRecurringAlerts(collaboratorId?: string) {
       },
     },
     orderBy: [{ period: "asc" }],
-    take: 300,
+    take: 40,
   });
 }
 
@@ -217,5 +220,6 @@ export async function getSettledRecurringForPeriod(
       },
     },
     orderBy: [{ period: "asc" }],
+    take: 200,
   });
 }
