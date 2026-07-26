@@ -36,6 +36,8 @@ export type ProvvigioneRow = {
   stornoRowClass?: string;
   warnOnEdit?: boolean;
   gettoneBorderClass?: string;
+  /** Manca data ingresso fornitura → POD/link in rosso */
+  missingSupplyStart?: boolean;
 };
 
 /**

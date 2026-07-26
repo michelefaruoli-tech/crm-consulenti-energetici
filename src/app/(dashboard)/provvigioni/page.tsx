@@ -460,6 +460,7 @@ export default async function ProvvigioniPage({
       stornoLabel: storno.label,
       stornoRowClass: storno.rowClassName,
       warnOnEdit: storno.warnOnEdit,
+      missingSupplyStart: storno.missingSupplyStart === true,
       gettoneBorderClass: contract.commissionConfirmed
         ? "border-l-4 border-l-emerald-600"
         : "border-l-4 border-l-amber-500",

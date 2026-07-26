@@ -421,26 +421,43 @@ export function ProvvigioniFilterTable({
       render: (r) => {
         const row = r as unknown as ProvvigioneRow;
         const pod = String(row.podPdr ?? "").trim();
+        const missing = Boolean(row.missingSupplyStart);
+        const alertClass = missing
+          ? "font-bold text-red-700 underline decoration-red-500"
+          : "font-medium text-emerald-700 underline decoration-emerald-300";
         if (!pod) {
           return (
             <Link
               href={`/clienti/${row.clientId}?contratto=${row.id}`}
-              className="text-[11px] font-medium text-emerald-700 underline"
-              title="Apri contratto (POD assente)"
+              className={`text-[11px] ${missing ? "font-bold text-red-700 underline" : "font-medium text-emerald-700 underline"}`}
+              title={
+                missing
+                  ? "Manca data ingresso fornitura — apri e sistema"
+                  : "Apri contratto (POD assente)"
+              }
               onClick={(e) => e.stopPropagation()}
             >
-              Apri contratto
+              {missing ? "Sistema ingresso →" : "Apri contratto"}
             </Link>
           );
         }
         return (
           <Link
             href={`/clienti/${row.clientId}?contratto=${row.id}`}
-            className="font-mono text-[11px] font-medium text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900"
-            title="Apri scheda contratto"
+            className={`font-mono text-[11px] underline-offset-2 hover:opacity-90 ${alertClass}`}
+            title={
+              missing
+                ? "Manca data ingresso fornitura — apri e sistema"
+                : "Apri scheda contratto"
+            }
             onClick={(e) => e.stopPropagation()}
           >
             {pod}
+            {missing ? (
+              <span className="ml-1 font-sans text-[10px] font-bold uppercase">
+                ingresso?
+              </span>
+            ) : null}
           </Link>
         );
       },
@@ -848,14 +865,11 @@ export function ProvvigioniFilterTable({
       </div>
 
       <p className="text-xs text-slate-500">
-        Celle modificabili = bozza (giallo) finché non salvi. Usa le frecce{" "}
-        <strong>← →</strong> sotto la tabella per scorrere.{" "}
-        <strong>Gettone</strong>: valore in € (modificabile in bozza).{" "}
-        <strong>R/G</strong>: R = ricorrente (entra in Clienti → A ricorrenza) · G =
-        gettone una tantum. <strong>Tip.</strong>: Dom / Bus.{" "}
-        <strong>Stato</strong>: KO/Cessato · Da incassare · Incassato.{" "}
-        <strong>Storno</strong> + data + importo. Fornitore / Stato / Tip. filtrano
-        su tutto il database. Privati: Dolomiti 45 · Plenitude 60 · Enel 65.
+        Celle modificabili = bozza (giallo) finché non salvi. Colori riga (legenda sotto):
+        1 da incassare · 2 rosso BLOCCA storno · 3 verde fuori storno · 4 ciano ricorrente ·
+        5 viola fine storno · 6 arancio scadenza 12 mesi · POD rosso = manca ingresso
+        fornitura. <strong>R/G</strong>: R ricorrente · G gettone. Privati: Dolomiti 45 ·
+        Plenitude 60 · Enel 65.
         {canDelete ? " × rossa = elimina." : ""}
       </p>
       <ExcelFilterTable
