@@ -276,7 +276,8 @@ export default async function ProvvigioniPage({
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
-          where: { deletedAt: null },
+          // Stesso filtro di Provvigioni: solo attivi (non storici / eliminati)
+          where: { deletedAt: null, isHistorical: false },
           _count: { id: true },
         })
       : Promise.resolve([]),

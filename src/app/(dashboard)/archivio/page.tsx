@@ -120,9 +120,10 @@ export default async function ArchivioPage() {
           Carica un Excel (.xlsx). Colonne riconosciute: Nome, Cognome, Ragione sociale,
           Telefono, Tipo, Fornitore, POD/PDR, Utility, Consumi, Data inserimento, Data
           ingresso fornitura, Mesi storno, Pagamento, Data pagamento, Agenzia, Gettone,
-          Collaboratore, Nome offerta, Operazione, Durata mesi, Scadenza, Note. Le altre
-          colonne vengono ignorate. Collaboratore di default: scegli la persona giusta (o
-          Vizzino / email nel file).
+          Collaboratore, Nome offerta, Operazione, Durata mesi, Scadenza, Note. Di default i
+          contratti finiscono in <strong>Provvigioni</strong> (attivi). Spunta «Nascondi da
+          Provvigioni» solo per lotti già chiusi che vuoi solo in Archivio. Se rifai lo stesso
+          POD, il contratto precedente viene archiviato in automatico.
         </p>
         <ArchiveImportForm
           collaborators={collaborators}

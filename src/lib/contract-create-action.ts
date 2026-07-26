@@ -612,6 +612,16 @@ async function createFullContractActionInner(
 
   // Email Master inviata dal client via API dopo upload allegati (evita body/timeout Server Action)
 
+  // POD ricontrattualizzato → archivia i precedenti (CRM snello)
+  try {
+    const { archiveOlderForContractPods } = await import(
+      "@/lib/contract-pod-archive"
+    );
+    await archiveOlderForContractPods(createdIds);
+  } catch (e) {
+    console.error("[archiveOlderForContractPods]", e);
+  }
+
   await prisma.auditLog.create({
     data: {
       userId: session.id,

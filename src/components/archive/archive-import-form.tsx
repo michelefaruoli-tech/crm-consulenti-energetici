@@ -324,6 +324,19 @@ export function ArchiveImportForm({
           />
           Salta righe con POD/PDR già presente (o doppio nel file)
         </label>
+        <label className="flex items-start gap-2 text-sm text-slate-700 md:pb-2">
+          <input
+            type="checkbox"
+            name="hideFromProvvigioni"
+            value="1"
+            disabled={busy}
+            className="mt-0.5"
+          />
+          <span>
+            Nascondi da Provvigioni (solo Archivio storico). Lascia <strong>spento</strong> se
+            i collaboratori devono vedere i contratti in Provvigioni.
+          </span>
+        </label>
 
         <div className="flex flex-wrap gap-2 md:col-span-2">
           <Button

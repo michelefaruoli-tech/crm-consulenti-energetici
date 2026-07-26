@@ -16,9 +16,9 @@ export function CleanupDuplicatesButton() {
         variant="secondary"
         disabled={pending}
         onClick={() => {
-          if (
+            if (
             !confirm(
-              "Unisco anagrafiche duplicate (stesso nome+P.IVA/CF) e archivio i contratti POD precedenti fuori storno. Continuo?",
+              "1) Riattivo i contratti importati nascosti (così Lobefaro & co. li vedono in Provvigioni).\n2) Unisco anagrafiche duplicate.\n3) Archivo i POD ricontrattualizzati (precedenti).\n\nContinuo?",
             )
           ) {
             return;
@@ -30,7 +30,7 @@ export function CleanupDuplicatesButton() {
           });
         }}
       >
-        {pending ? "Pulizia…" : "Pulisci duplicati"}
+        {pending ? "Pulizia…" : "Ripristina elenchi + pulisci"}
       </Button>
       {msg ? <p className="max-w-xs text-right text-xs text-slate-600">{msg}</p> : null}
     </div>

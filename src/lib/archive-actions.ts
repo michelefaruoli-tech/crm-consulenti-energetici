@@ -124,6 +124,8 @@ type ParsedSheet = {
   label: string;
   defaultCollabId: string;
   skipPodDuplicates: boolean;
+  /** true = solo in Archivio, nascosto da Provvigioni/Contratti attivi */
+  hideFromProvvigioni: boolean;
   sheet: ExcelJS.Worksheet;
   headers: string[];
   cols: {
@@ -164,6 +166,8 @@ async function loadSheetFromForm(formData: FormData): Promise<
   }
 
   const skipPodDuplicates = String(formData.get("skipPodDuplicates") ?? "") === "1";
+  const hideFromProvvigioni =
+    String(formData.get("hideFromProvvigioni") ?? "") === "1";
 
   // Preferisci base64 (stabile tra i lotti); fallback File/Blob dal form
   let buffer: Buffer | null = null;
@@ -254,7 +258,15 @@ async function loadSheetFromForm(formData: FormData): Promise<
 
   return {
     ok: true,
-    data: { label, defaultCollabId, skipPodDuplicates, sheet, headers, cols },
+    data: {
+      label,
+      defaultCollabId,
+      skipPodDuplicates,
+      hideFromProvvigioni,
+      sheet,
+      headers,
+      cols,
+    },
   };
 }
 
@@ -717,7 +729,8 @@ async function importOneHistoricalRow(opts: {
       paymentStatus: paid ? "Incassato" : "Da incassare",
       paymentDate: paid ? paymentDate ?? null : null,
       collectionDate,
-      isHistorical: true,
+      // Visibili in Provvigioni/Contratti. Solo se richiesto vanno in solo-Archivio.
+      isHistorical: data.hideFromProvvigioni === true,
       archiveLabel: data.label,
       commissionConfirmed: paid,
       commissionConfirmedAt: paid ? new Date() : null,
