@@ -626,7 +626,7 @@ export function ClientSheet({
                 Scheda contratto · {selected.contractNumber}
               </h2>
               <p className="text-xs text-slate-500">
-                Tre blocchi: Fornitura · Operazione · Fornitore (come in Nuovo contratto)
+                Tre blocchi: Operazione · Fornitura · Fornitore (come in Nuovo contratto)
               </p>
             </div>
 

@@ -23,7 +23,7 @@ export type ListinoRuleOption = {
 type SupplierOption = { id: string; name: string };
 
 /**
- * Tre quadrati: Fornitura → Operazione (+ servizio + pagamento) → Fornitore (+ condizioni).
+ * Tre quadrati: Operazione (+ servizio + pagamento) → Fornitura → Fornitore (+ condizioni).
  * Usato in Nuovo contratto (ripetibile) e allineato alla scheda cliente.
  */
 export function ServiceContractBlocks({
@@ -102,11 +102,95 @@ export function ServiceContractBlocks({
         ) : null}
       </div>
 
-      {/* 1 — Fornitura */}
+      {/* 1 — Operazione */}
+      <div className="space-y-3 rounded-xl border border-sky-100 bg-sky-50/50 p-3 sm:p-4">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600 text-xs font-bold text-white">
+            1
+          </span>
+          <h3 className="font-semibold text-slate-900">Operazione</h3>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Tipo operazione">
+            <Select
+              value={line.operationType ?? "SWITCH"}
+              onChange={(e) => onChange({ operationType: e.target.value })}
+            >
+              {OPERATION_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Servizio contratto">
+            <Select
+              value={line.service}
+              onChange={(e) => onChange({ service: e.target.value })}
+            >
+              {SERVICE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        {line.operationType === "ALTRO" ? (
+          <Field label="Specifica operazione *">
+            <Input
+              value={line.operationOther ?? ""}
+              onChange={(e) => onChange({ operationOther: e.target.value })}
+            />
+          </Field>
+        ) : null}
+        {line.service === "ALTRO" ? (
+          <Field label="Specifica servizio *">
+            <Input
+              value={line.serviceOther ?? ""}
+              onChange={(e) => onChange({ serviceOther: e.target.value })}
+            />
+          </Field>
+        ) : null}
+
+        <Field label="Metodo di pagamento">
+          <Select
+            value={line.paymentMethod ?? ""}
+            onChange={(e) => onChange({ paymentMethod: e.target.value })}
+          >
+            <option value="">Seleziona</option>
+            {PAYMENT_METHOD_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {needsIban ? (
+          <div className="space-y-2 rounded-lg border border-sky-100 bg-white p-3">
+            <Field label="IBAN (da anagrafica)">
+              <Input
+                value={clientIban}
+                readOnly
+                className="bg-slate-50 font-mono"
+                placeholder="Inserisci IBAN nell’anagrafica cliente sopra"
+              />
+            </Field>
+            <Field label="Intestatario IBAN (se diverso)">
+              <Input
+                value={line.ibanHolder ?? ""}
+                onChange={(e) => onChange({ ibanHolder: e.target.value })}
+              />
+            </Field>
+          </div>
+        ) : null}
+      </div>
+
+      {/* 2 — Fornitura */}
       <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3 sm:p-4">
         <div className="flex items-center gap-2">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-xs font-bold text-white">
-            1
+            2
           </span>
           <h3 className="font-semibold text-slate-900">Fornitura</h3>
         </div>
@@ -213,90 +297,6 @@ export function ServiceContractBlocks({
               className="font-mono"
             />
           </Field>
-        ) : null}
-      </div>
-
-      {/* 2 — Operazione */}
-      <div className="space-y-3 rounded-xl border border-sky-100 bg-sky-50/50 p-3 sm:p-4">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600 text-xs font-bold text-white">
-            2
-          </span>
-          <h3 className="font-semibold text-slate-900">Operazione</h3>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Tipo operazione">
-            <Select
-              value={line.operationType ?? "SWITCH"}
-              onChange={(e) => onChange({ operationType: e.target.value })}
-            >
-              {OPERATION_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Servizio contratto">
-            <Select
-              value={line.service}
-              onChange={(e) => onChange({ service: e.target.value })}
-            >
-              {SERVICE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-        {line.operationType === "ALTRO" ? (
-          <Field label="Specifica operazione *">
-            <Input
-              value={line.operationOther ?? ""}
-              onChange={(e) => onChange({ operationOther: e.target.value })}
-            />
-          </Field>
-        ) : null}
-        {line.service === "ALTRO" ? (
-          <Field label="Specifica servizio *">
-            <Input
-              value={line.serviceOther ?? ""}
-              onChange={(e) => onChange({ serviceOther: e.target.value })}
-            />
-          </Field>
-        ) : null}
-
-        <Field label="Metodo di pagamento">
-          <Select
-            value={line.paymentMethod ?? ""}
-            onChange={(e) => onChange({ paymentMethod: e.target.value })}
-          >
-            <option value="">Seleziona</option>
-            {PAYMENT_METHOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {needsIban ? (
-          <div className="space-y-2 rounded-lg border border-sky-100 bg-white p-3">
-            <Field label="IBAN (da anagrafica)">
-              <Input
-                value={clientIban}
-                readOnly
-                className="bg-slate-50 font-mono"
-                placeholder="Inserisci IBAN nell’anagrafica cliente sopra"
-              />
-            </Field>
-            <Field label="Intestatario IBAN (se diverso)">
-              <Input
-                value={line.ibanHolder ?? ""}
-                onChange={(e) => onChange({ ibanHolder: e.target.value })}
-              />
-            </Field>
-          </div>
         ) : null}
       </div>
 

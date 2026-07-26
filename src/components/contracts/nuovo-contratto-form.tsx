@@ -715,7 +715,7 @@ export function NuovoContrattoForm({
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Servizi del contratto</h2>
             <p className="text-sm text-slate-500">
-              Ogni servizio ha 3 blocchi: Fornitura · Operazione · Fornitore. «Aggiungi servizio» ripete tutto.
+              Ogni servizio ha 3 blocchi: Operazione · Fornitura · Fornitore. «Aggiungi servizio» ripete tutto.
             </p>
           </div>
           <AddServiceButton onClick={addService} />
