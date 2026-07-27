@@ -217,13 +217,13 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           {multiMonth ? (
             <p className="mt-1 text-[11px] text-sky-800">
               File multi-mese rilevato:{" "}
-              {competencePeriods.map(periodLabel).join(" · ")}. Competenza presa
-              dalla colonna <strong>Inizio</strong> di ogni riga.
+              {competencePeriods.map(periodLabel).join(" · ")}. Competenza dal{" "}
+              <strong>nome di ogni foglio</strong> (es. Gennaio 2026).
             </p>
           ) : (
             <p className="mt-1 text-[11px] text-slate-500">
-              Fallback se nel file non c’è la colonna Inizio. Per file tipo
-              dic–gen–feb la competenza viene letta da ogni riga.
+              Nei file mensili la competenza è il mese del rendiconto (dal nome file o
+              dalla selezione sopra), non la colonna Inizio fornitura.
             </p>
           )}
         </Field>

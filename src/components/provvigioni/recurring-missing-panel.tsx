@@ -133,7 +133,7 @@ export function RecurringMissingPanel({
                           className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] text-white"
                           title={`Competenza ${periodLabel(m.period)} → rendiconto ${periodLabel(settledPeriod)}`}
                         >
-                          Pagato
+                          Incassato
                         </button>
                       </form>
                       <form action={updateRecurringMonthStatusAction}>
