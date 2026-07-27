@@ -8,6 +8,7 @@ import {
 } from "@/lib/helios-provvigioni-import";
 import {
   guessCompetenceFromFilename,
+  HELIOS_IMPORT_STATUS_LABEL,
   type HeliosImportPreviewRow,
 } from "@/lib/helios-provvigioni-shared";
 import { periodLabel, toPeriod } from "@/lib/recurring";
@@ -37,12 +38,7 @@ function monthOptions(): string[] {
   return out;
 }
 
-const STATUS_LABEL: Record<HeliosImportPreviewRow["status"], string> = {
-  will_pay: "Da segnare pagato",
-  already_paid: "Già pagato",
-  not_found: "POD non in CRM",
-  ambiguous: "Più contratti",
-};
+const STATUS_LABEL = HELIOS_IMPORT_STATUS_LABEL;
 
 export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
@@ -124,7 +120,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
         ? `mesi ${res.competencePeriods.map(periodLabel).join(", ")}`
         : `competenza ${periodLabel(res.competencePeriod)}`;
       setMessage(
-        `Anteprima (${mesiLabel}): ${res.summary.willPay} da pagare · ${res.summary.alreadyPaid} già ok · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
+        `Anteprima (${mesiLabel}): ${res.summary.willPay} da incassare · ${res.summary.alreadyPaid} già incassati · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
           (res.summary.podsToUpdate > 0
             ? ` · ${res.summary.podsToUpdate} POD da aggiornare`
             : ""),
@@ -139,11 +135,12 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     }
     if (
       !window.confirm(
-        `Segnare come pagati ${summary?.willPay ?? 0} mesi Helios?\n` +
+        `Segnare come INCASSATI ${summary?.willPay ?? 0} mesi (pagamento dal fornitore)?\n` +
+          `Lo stato «Pagato» al collaboratore lo imposti tu dopo in Provvigioni.\n` +
           (multiMonth
             ? `Competenze: ${competencePeriods.map(periodLabel).join(", ")}\n`
             : `Competenza ${periodLabel(competencePeriod)}\n`) +
-          `Rendiconto / bonifico: ${periodLabel(settledPeriod)}`,
+          `Rendiconto / bonifico fornitore: ${periodLabel(settledPeriod)}`,
       )
     ) {
       return;
@@ -157,7 +154,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
         return;
       }
       setMessage(
-        `Import ok: ${res.paid} mesi segnati pagati · ${res.skippedPaid} già pagati · ${res.notFound} non trovati · ${res.ambiguous} ambigui` +
+        `Import ok: ${res.collected} mesi segnati incassati · ${res.skippedCollected} già incassati · ${res.notFound} non trovati · ${res.ambiguous} ambigui` +
           (res.podsUpdated > 0 ? ` · ${res.podsUpdated} POD aggiornati` : ""),
       );
       setPreview(null);
@@ -174,6 +171,11 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
 
   const form = (
     <div className="space-y-3">
+      <p className="rounded-lg border border-sky-200 bg-white/80 px-3 py-2 text-xs text-sky-950">
+        <strong>Flusso:</strong> il rendiconto del fornitore porta le provvigioni da{" "}
+        <em>Da incassare</em> a <em>Incassato</em> (tu hai ricevuto da Helios). Lo stato{" "}
+        <em>Pagato</em> lo usi solo quando liquidi il collaboratore, in Provvigioni.
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="File Excel Helios (.xlsx)">
           <Input
@@ -225,7 +227,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             </p>
           )}
         </Field>
-        <Field label="Mese rendiconto / bonifico">
+        <Field label="Mese rendiconto fornitore">
           <Select
             value={settledPeriod}
             onChange={(e) => {
@@ -261,7 +263,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           disabled={pending || !preview || (summary?.willPay ?? 0) === 0}
           onClick={runApply}
         >
-          Conferma e segna pagati
+          Conferma e segna incassati
         </Button>
       </div>
 
@@ -282,10 +284,10 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             Totale file: {summary.total}
           </span>
           <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-900">
-            Da pagare: {summary.willPay}
+            Da incassare: {summary.willPay}
           </span>
           <span className="rounded-full bg-emerald-100 px-2 py-1 text-emerald-900">
-            Già pagati: {summary.alreadyPaid}
+            Già incassati: {summary.alreadyPaid}
           </span>
           <span className="rounded-full bg-red-100 px-2 py-1 text-red-900">
             Non trovati: {summary.notFound}
@@ -372,8 +374,8 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             Importa rendiconto Helios
           </p>
           <p className="text-xs text-sky-900/80">
-            Carica il file Excel (es. Provvigioni_Aprile_2026_…) per segnare i mesi
-            pagati per POD.
+            Carica il file Excel del fornitore (es. Provvigioni_Aprile_2026_…) per segnare i
+            mesi <strong>incassati</strong> per POD. Non liquida i collaboratori.
           </p>
         </div>
         <Button

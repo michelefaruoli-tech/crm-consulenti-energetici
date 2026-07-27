@@ -141,8 +141,8 @@ export default async function ArchivioPage() {
         </h2>
         <p className="mb-4 text-sm text-sky-900/80">
           Qui carichi i file che ti manda Helios (es. Provvigioni_Aprile_2026_…). Segna in
-          automatico i mesi ricorrenti come <strong>pagati</strong> in Provvigioni, per POD.
-          Puoi ripetere l’operazione ogni mese senza intasare la scheda Provvigioni.
+          automatico i mesi ricorrenti come <strong>Incassato</strong> in Provvigioni (pagamento
+          dal fornitore). Per pagare i collaboratori usa poi «Segna pagato» in Provvigioni.
         </p>
         <HeliosImportPanel embedded />
       </section>

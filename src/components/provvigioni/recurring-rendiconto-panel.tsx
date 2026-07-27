@@ -46,7 +46,7 @@ export function RecurringRendicontoPanel({
             Rendiconto ricorrenze — {periodLabel(settledPeriod)}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            Mesi di <strong>competenza</strong> segnati come pagati nel bonifico/rendiconto di{" "}
+            Mesi di <strong>competenza</strong> segnati come incassati nel rendiconto del fornitore di{" "}
             {periodLabel(settledPeriod)}. Es. a luglio puoi avere competenze di aprile–maggio.
           </p>
         </div>
@@ -75,7 +75,7 @@ export function RecurringRendicontoPanel({
       {rows.length === 0 ? (
         <p className="mt-2 text-sm text-slate-500">
           Nessuna rata ricorrente associata a questo mese di rendiconto. Segna i mesi mancanti
-          come «Pagato» scegliendo questo mese come bonifico.
+          come <strong>Incassato</strong> scegliendo questo mese come rendiconto fornitore.
         </p>
       ) : (
         <div className="mt-3 max-h-64 overflow-auto">

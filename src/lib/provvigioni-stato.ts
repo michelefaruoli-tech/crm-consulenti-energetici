@@ -41,8 +41,11 @@ export type ProvvigioneRow = {
 };
 
 /**
- * Stato in Provvigioni.
- * Priorità: se la provvigione è stata liquidata al collaboratore → «Pagato».
+ * Stato in Provvigioni (UI semplificata).
+ *
+ * Flusso atteso:
+ * 1. Rendiconto fornitore (import Helios, ecc.) → Incassato (collectionDate)
+ * 2. Liquidazione collaboratore (Segna pagato) → Pagato (PROVVIGIONE_LIQUIDATA)
  */
 export function simplifiedProvvigioneStato(
   status: string,

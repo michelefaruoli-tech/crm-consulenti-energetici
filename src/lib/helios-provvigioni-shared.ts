@@ -1,10 +1,18 @@
 /** Utility condivise (client + server) per import Excel Helios. */
 
 export type HeliosImportRowStatus =
-  | "will_pay"
-  | "already_paid"
+  | "will_pay" /** da segnare incassato (fornitore) */
+  | "already_paid" /** già incassato */
   | "not_found"
   | "ambiguous";
+
+/** Etichette UI: import rendiconto = Incassato, non Pagato collaboratore. */
+export const HELIOS_IMPORT_STATUS_LABEL: Record<HeliosImportRowStatus, string> = {
+  will_pay: "Da segnare incassato",
+  already_paid: "Già incassato",
+  not_found: "POD non in CRM",
+  ambiguous: "Più contratti",
+};
 
 export type HeliosImportPreviewRow = {
   excelRow: number;

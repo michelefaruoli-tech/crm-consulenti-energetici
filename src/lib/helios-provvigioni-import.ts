@@ -494,8 +494,9 @@ export async function applyHeliosProvvigioniAction(
 ): Promise<
   | {
       ok: true;
-      paid: number;
-      skippedPaid: number;
+      /** Mesi segnati incassati (fornitore), non liquidati al collaboratore */
+      collected: number;
+      skippedCollected: number;
       notFound: number;
       ambiguous: number;
       podsUpdated: number;
@@ -538,8 +539,8 @@ export async function applyHeliosProvvigioniAction(
       parsed.lines.map((l) => [`${l.pod}|${l.competencePeriod}`, l.baseAmount]),
     );
 
-    let paid = 0;
-    let skippedPaid = 0;
+    let collected = 0;
+    let skippedCollected = 0;
     let podsUpdated = 0;
     const podUpdatedIds = new Set<string>();
     const notFound = preview.filter((r) => r.status === "not_found").length;
@@ -562,7 +563,7 @@ export async function applyHeliosProvvigioniAction(
       }
 
       if (row.status === "already_paid") {
-        skippedPaid++;
+        skippedCollected++;
         continue;
       }
       if (row.status !== "will_pay" || !row.contractId) continue;
@@ -580,7 +581,7 @@ export async function applyHeliosProvvigioniAction(
       });
 
       if (existing?.status === "PAID") {
-        skippedPaid++;
+        skippedCollected++;
         continue;
       }
 
@@ -592,7 +593,7 @@ export async function applyHeliosProvvigioniAction(
             paidAt: new Date(),
             settledPeriod,
             amount: amount ?? existing.amount,
-            note: existing.note ?? "Import file Helios",
+            note: existing.note ?? "Import rendiconto fornitore (Helios)",
           },
         });
       } else {
@@ -604,15 +605,23 @@ export async function applyHeliosProvvigioniAction(
             paidAt: new Date(),
             settledPeriod,
             amount,
-            note: "Import file Helios",
+            note: "Import rendiconto fornitore (Helios)",
           },
         });
       }
 
+      const contract = await prisma.contract.findUnique({
+        where: { id: row.contractId },
+        select: { status: true },
+      });
       const [y, mo] = rowPeriod.split("-").map(Number);
       await prisma.contract.update({
         where: { id: row.contractId },
         data: {
+          // Incassato dal fornitore — NON liquidare il collaboratore (Pagato)
+          ...(contract?.status === "PROVVIGIONE_LIQUIDATA"
+            ? {}
+            : { status: "PAGATO_DAL_FORNITORE" }),
           paymentStatus: "Incassato",
           collectionDate: new Date(y, mo - 1, 1),
           recurrence: "Ricorrente",
@@ -620,7 +629,7 @@ export async function applyHeliosProvvigioniAction(
       });
 
       await syncRecurringMonthsForContract(row.contractId).catch(() => undefined);
-      paid++;
+      collected++;
     }
 
     await writeAuditLog({
@@ -633,8 +642,8 @@ export async function applyHeliosProvvigioniAction(
         competencePeriod,
         competencePeriods,
         settledPeriod,
-        paid,
-        skippedPaid,
+        collected,
+        skippedCollected,
         notFound,
         ambiguous,
         podsUpdated,
@@ -648,8 +657,8 @@ export async function applyHeliosProvvigioniAction(
 
     return {
       ok: true,
-      paid,
-      skippedPaid,
+      collected,
+      skippedCollected,
       notFound,
       ambiguous,
       podsUpdated,

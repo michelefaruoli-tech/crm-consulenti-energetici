@@ -44,8 +44,8 @@ export function RecurringMissingPanel({
         {otherRecurringCount > 0 ? (
           <p className="text-xs text-slate-600">
             Hai comunque <strong>{otherRecurringCount}</strong> contratti ricorrenti (R) in elenco:
-            non compaiono qui perché non hanno mesi passati ancora da pagare (inizio fornitura
-            recente, oppure mesi già segnati Pagato/Chiuso).
+            non compaiono qui perché non hanno mesi passati ancora da incassare (inizio fornitura
+            recente, oppure mesi già segnati Incassato/Chiuso).
           </p>
         ) : null}
       </div>
@@ -62,12 +62,12 @@ export function RecurringMissingPanel({
   return (
     <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
       <h2 className="text-base font-semibold text-amber-950">
-        Ricorrenze: mesi di competenza non pagati ({alerts.length})
+        Ricorrenze: mesi di competenza non incassati ({alerts.length})
       </h2>
       <p className="mt-1 text-xs text-amber-900/80">
-        Qui vedi solo i contratti R con <strong>mesi già scaduti e non pagati</strong> (es. mag/giu),
+        Qui vedi solo i contratti R con <strong>mesi già scaduti e non incassati</strong> (es. mag/giu),
         non tutti i ricorrenti della tabella sotto. La competenza non è il mese del bonifico: quando
-        segni «Pagato», scegli sotto il <strong>mese del rendiconto</strong>.
+        segni <strong>Incassato</strong>, scegli sotto il <strong>mese del rendiconto fornitore</strong>.
       </p>
       {otherRecurringCount > 0 ? (
         <p className="mt-1 text-xs text-amber-900/70">
@@ -79,7 +79,7 @@ export function RecurringMissingPanel({
       ) : null}
 
       <label className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-950">
-        <span className="font-medium">Mese rendiconto / bonifico:</span>
+        <span className="font-medium">Mese rendiconto fornitore:</span>
         <select
           className="rounded border border-amber-300 bg-white px-2 py-1"
           value={settledPeriod}
