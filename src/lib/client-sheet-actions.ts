@@ -45,7 +45,21 @@ function normalizeIban(raw: string | null): string | null {
 }
 
 /** Blocco 2: contratto, fornitura, pagamento */
-export async function updateClientContractBlockAction(formData: FormData): Promise<void> {
+export async function updateClientContractBlockAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await updateClientContractBlockActionInner(formData);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Salvataggio non riuscito",
+    };
+  }
+}
+
+async function updateClientContractBlockActionInner(formData: FormData): Promise<void> {
   const session = await requireSession();
   const contractId = clean(formData.get("contractId"));
   const clientId = clean(formData.get("clientId"));
@@ -168,7 +182,21 @@ export async function updateClientContractBlockAction(formData: FormData): Promi
 }
 
 /** Blocco 3: fornitore, offerta, stato, gettone */
-export async function updateClientOfferBlockAction(formData: FormData): Promise<void> {
+export async function updateClientOfferBlockAction(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await updateClientOfferBlockActionInner(formData);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Salvataggio non riuscito",
+    };
+  }
+}
+
+async function updateClientOfferBlockActionInner(formData: FormData): Promise<void> {
   const session = await requireSession();
   const contractId = clean(formData.get("contractId"));
   const clientId = clean(formData.get("clientId"));
@@ -267,24 +295,26 @@ export async function updateClientOfferBlockAction(formData: FormData): Promise<
 
   const gettoneRaw = clean(formData.get("gettone"));
   if (gettoneRaw != null) {
-    if (
-      !canEditGettoneAmount(session.role, session.id, contract.collaboratorId)
-    ) {
-      throw new Error("Non puoi modificare il valore gettone");
-    }
     const amount = Number(gettoneRaw.replace(",", ".")) || 0;
     const prev = Number(contract.commission?.expected ?? 0);
-    if (contract.commission) {
-      await prisma.commission.update({
-        where: { id: contract.commission.id },
-        data: { expected: amount },
-      });
-    } else {
-      await prisma.commission.create({
-        data: { contractId, expected: amount },
-      });
-    }
-    if (prev !== amount) {
+    const changed = Math.abs(amount - prev) > 0.009;
+    // Se il gettone non è cambiato, non bloccare il resto del salvataggio
+    if (changed) {
+      if (
+        !canEditGettoneAmount(session.role, session.id, contract.collaboratorId)
+      ) {
+        throw new Error("Non puoi modificare il valore gettone");
+      }
+      if (contract.commission) {
+        await prisma.commission.update({
+          where: { id: contract.commission.id },
+          data: { expected: amount },
+        });
+      } else {
+        await prisma.commission.create({
+          data: { contractId, expected: amount },
+        });
+      }
       const isAdminGettone = hasPermission(session.role, "commissions.edit_gettone");
       await prisma.contract.update({
         where: { id: contractId },

@@ -552,7 +552,7 @@ export function ClientSheet({
               <Textarea name="notes" rows={2} defaultValue={client.notes ?? ""} />
             </Field>
 
-            <Button type="submit" disabled={!clientDirty || pending}>
+            <Button type="submit" disabled={pending}>
               {pending && clientDirty ? "Salvataggio…" : "Salva anagrafica"}
             </Button>
           </form>
@@ -806,9 +806,15 @@ export function ClientSheet({
                 fd.set("supplyRegion", supplyRegion);
                 fd.set("contractIban", contractIban);
                 fd.set("supplierId", offerSupplierId);
+                setErr(null);
+                setMsg(null);
                 start(async () => {
                   try {
-                    await updateClientContractBlockAction(fd);
+                    const res = await updateClientContractBlockAction(fd);
+                    if (!res.ok) {
+                      setErr(res.error);
+                      return;
+                    }
                     setBlock2Dirty(false);
                     setMsg("Fornitura e operazione salvate");
                     router.refresh();
@@ -817,6 +823,7 @@ export function ClientSheet({
                   }
                 });
               }}
+              onInput={mark2}
               onChange={mark2}
             >
               <input type="hidden" name="contractId" value={selected.id} />
@@ -1078,7 +1085,7 @@ export function ClientSheet({
                 </Field>
               </div>
 
-              <Button type="submit" disabled={!block2Dirty || pending} className="w-full sm:w-auto">
+              <Button type="submit" disabled={pending} className="w-full sm:w-auto">
                 {pending && block2Dirty ? "Salvataggio…" : "Salva fornitura e operazione"}
               </Button>
             </form>
@@ -1100,9 +1107,15 @@ export function ClientSheet({
                 fd.set("status", status);
                 fd.set("priceType", priceType);
                 fd.set("supplierId", offerSupplierId);
+                setErr(null);
+                setMsg(null);
                 start(async () => {
                   try {
-                    await updateClientOfferBlockAction(fd);
+                    const res = await updateClientOfferBlockAction(fd);
+                    if (!res.ok) {
+                      setErr(res.error);
+                      return;
+                    }
                     setBlock3Dirty(false);
                     setMsg("Fornitore e condizioni salvati");
                     router.refresh();
@@ -1111,6 +1124,7 @@ export function ClientSheet({
                   }
                 });
               }}
+              onInput={mark3}
               onChange={mark3}
             >
               <input type="hidden" name="contractId" value={selected.id} />
@@ -1359,10 +1373,44 @@ export function ClientSheet({
                 </Field>
               </div>
 
-              <Button type="submit" disabled={!block3Dirty || pending} className="w-full sm:w-auto">
+              <Button type="submit" disabled={pending} className="w-full sm:w-auto">
                 {pending && block3Dirty ? "Salvataggio…" : "Salva fornitore e condizioni"}
               </Button>
             </form>
+
+            {/* Barra azioni in fondo: reinvio email Master + back office fornitore */}
+            <div className="mt-6 space-y-3 rounded-2xl border-4 border-emerald-600 bg-emerald-50 p-4 shadow-md sm:p-5">
+              <h3 className="text-lg font-black uppercase tracking-wide text-emerald-950">
+                Reinvia email al BACK OFFICE
+              </h3>
+              <p className="text-sm text-emerald-900">
+                Invia di nuovo l&apos;email completa (anagrafica + blocchi servizio + allegati) a{" "}
+                <strong>Master</strong> e ai <strong>back office</strong> del fornitore (stesse
+                regole di sempre: Enel → Giuseppe + Stefania, Edison → Mada, ecc.).
+                {siblingContractIds(selected.id).length > 1
+                  ? ` Verranno inclusi anche i ${siblingContractIds(selected.id).length} contratti collegati (es. Luce + Gas).`
+                  : ""}
+              </p>
+              {msg ? (
+                <p className="rounded-lg bg-white px-3 py-2 text-sm text-emerald-800">{msg}</p>
+              ) : null}
+              {err ? (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{err}</p>
+              ) : null}
+              <Button
+                type="button"
+                size="lg"
+                className="min-h-14 w-full bg-emerald-700 text-base font-bold uppercase tracking-wide text-white hover:bg-emerald-800 sm:w-auto sm:min-w-[16rem]"
+                disabled={pending}
+                onClick={() => sendBackofficeEmail(selected.id)}
+              >
+                {pending && sendingEmailId === selected.id
+                  ? "Invio in corso…"
+                  : siblingContractIds(selected.id).length > 1
+                    ? `Reinvia email (${siblingContractIds(selected.id).length} contratti)`
+                    : "Reinvia email al BACK OFFICE"}
+              </Button>
+            </div>
           </section>
         </>
       ) : selected ? (
