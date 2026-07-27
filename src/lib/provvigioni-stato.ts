@@ -3,7 +3,7 @@
  * sia dal Client Component (tabella). Non mettere "use client" qui.
  */
 
-import { isRecurring } from "@/lib/recurring";
+import { isRecurring, periodLabel, toPeriod } from "@/lib/recurring";
 
 export type ProvvigioneRow = {
   id: string;
@@ -38,6 +38,8 @@ export type ProvvigioneRow = {
   gettoneBorderClass?: string;
   /** Manca data ingresso fornitura → POD/link in rosso */
   missingSupplyStart?: boolean;
+  /** Solo ricorrenti: ultima competenza mensile (sotto colonna Incasso) */
+  recurringIncassoNote?: string;
 };
 
 /**
@@ -135,6 +137,42 @@ export function effectiveGettone(opts: {
 
 export function isRecurringMonthly(recurrence: string | null | undefined): boolean {
   return isRecurring(recurrence);
+}
+
+/** Ultima competenza mensile da mostrare sotto «Incasso» (solo ricorrenti). */
+export function lastRecurringIncassoNote(
+  months: Array<{ period: string; status: string }>,
+  statoSemplificato: string,
+): string {
+  if (months.length === 0) return "";
+
+  const now = toPeriod(new Date());
+  const sorted = [...months].sort((a, b) => a.period.localeCompare(b.period));
+
+  const pastMissing = sorted.filter(
+    (m) => m.status === "MISSING" && m.period < now,
+  );
+  if (pastMissing.length > 0) {
+    const last = pastMissing[pastMissing.length - 1]!;
+    return `${periodLabel(last.period)} · da incassare`;
+  }
+
+  const paid = sorted.filter((m) => m.status === "PAID");
+  if (paid.length > 0) {
+    const last = paid[paid.length - 1]!;
+    if (statoSemplificato === "Pagato") {
+      return `${periodLabel(last.period)} · pagato`;
+    }
+    return `${periodLabel(last.period)} · incassato`;
+  }
+
+  const pending = sorted.filter((m) => m.status === "PENDING");
+  if (pending.length > 0) {
+    const last = pending[pending.length - 1]!;
+    return `${periodLabel(last.period)} · in attesa`;
+  }
+
+  return "";
 }
 
 /**

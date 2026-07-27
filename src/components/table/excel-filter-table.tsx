@@ -16,6 +16,8 @@ export type FilterColumn = {
   sortKind?: "text" | "date" | "number";
   /** Classi extra sull’input editabile (es. nome cliente in evidenza) */
   inputClassName?: string;
+  /** Testo secondario sotto la cella editabile (es. competenza mensile) */
+  cellExtra?: (row: Record<string, unknown>) => React.ReactNode;
 };
 
 type Props = {
@@ -548,43 +550,46 @@ export function ExcelFilterTable({
                     }}
                   >
                     {col.editable && (draftMode ? onCellDraft : onCellEdit) ? (
-                      <input
-                        className={cn(
-                          "w-full rounded border bg-transparent focus:border-emerald-500 focus:outline-none",
-                          dirty
-                            ? "border-amber-400"
-                            : "border-transparent hover:border-slate-200",
-                          dense ? "min-w-0 px-0.5 py-0.5 text-xs" : "min-w-[10rem] px-1 py-0.5",
-                          col.inputClassName,
-                        )}
-                        value={draftMode ? displayVal : undefined}
-                        defaultValue={draftMode ? undefined : displayVal}
-                        title={
-                          draftMode
-                            ? "Modifica in bozza — poi premi «Salva tutte le modifiche»"
-                            : "Modifica e premi Invio oppure clicca fuori per salvare"
-                        }
-                        onChange={
-                          draftMode && onCellDraft
-                            ? (e) => onCellDraft(row, col.key, e.target.value)
-                            : undefined
-                        }
-                        onKeyDown={(e) => {
-                          if (!draftMode && e.key === "Enter") {
-                            (e.target as HTMLInputElement).blur();
+                      <div>
+                        <input
+                          className={cn(
+                            "w-full rounded border bg-transparent focus:border-emerald-500 focus:outline-none",
+                            dirty
+                              ? "border-amber-400"
+                              : "border-transparent hover:border-slate-200",
+                            dense ? "min-w-0 px-0.5 py-0.5 text-xs" : "min-w-[10rem] px-1 py-0.5",
+                            col.inputClassName,
+                          )}
+                          value={draftMode ? displayVal : undefined}
+                          defaultValue={draftMode ? undefined : displayVal}
+                          title={
+                            draftMode
+                              ? "Modifica in bozza — poi premi «Salva tutte le modifiche»"
+                              : "Modifica e premi Invio oppure clicca fuori per salvare"
                           }
-                        }}
-                        onBlur={
-                          draftMode || !onCellEdit
-                            ? undefined
-                            : (e) => {
-                                const next = e.target.value;
-                                if (next !== baseVal) {
-                                  void onCellEdit(row, col.key, next);
+                          onChange={
+                            draftMode && onCellDraft
+                              ? (e) => onCellDraft(row, col.key, e.target.value)
+                              : undefined
+                          }
+                          onKeyDown={(e) => {
+                            if (!draftMode && e.key === "Enter") {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                          onBlur={
+                            draftMode || !onCellEdit
+                              ? undefined
+                              : (e) => {
+                                  const next = e.target.value;
+                                  if (next !== baseVal) {
+                                    void onCellEdit(row, col.key, next);
+                                  }
                                 }
-                              }
-                        }
-                      />
+                          }
+                        />
+                        {col.cellExtra ? col.cellExtra(row) : null}
+                      </div>
                     ) : col.render ? (
                       col.render(row)
                     ) : (

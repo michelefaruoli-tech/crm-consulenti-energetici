@@ -614,7 +614,18 @@ export function ProvvigioniFilterTable({
       getValue: (r) => String(r.collectionMonth ?? ""),
       editable: true,
       sortKind: "date",
-      // Data incasso gettone (non inizio fornitura)
+      cellExtra: (r) => {
+        const note = (r as ProvvigioneRow).recurringIncassoNote;
+        if (!note) return null;
+        return (
+          <p
+            className="mt-0.5 text-[10px] leading-tight text-slate-500"
+            title="Ultima competenza mensile (ricorrente)"
+          >
+            {note}
+          </p>
+        );
+      },
     },
     {
       key: "stornoFlag",

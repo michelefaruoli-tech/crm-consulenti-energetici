@@ -38,10 +38,12 @@ import type { Prisma } from "@/generated/prisma/client";
 import {
   defaultGettonePrivato,
   effectiveGettone,
+  lastRecurringIncassoNote,
   operationTypeLabel,
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
+import { isRecurring } from "@/lib/recurring";
 
 export const dynamic = "force-dynamic";
 
@@ -205,6 +207,10 @@ export default async function ProvvigioniPage({
         stornoDate: true,
         stornoAmount: true,
       },
+    },
+    recurringMonths: {
+      select: { period: true, status: true },
+      orderBy: { period: "asc" as const },
     },
   } as const;
 
@@ -452,6 +458,8 @@ export default async function ProvvigioniPage({
       isEarlyReswitch: earlyMap.get(contract.id) ?? false,
     });
 
+    const stato = simplifiedProvvigioneStato(contract.status, hasDate);
+
     return {
       id: contract.id,
       clientId: contract.clientId,
@@ -470,10 +478,13 @@ export default async function ProvvigioniPage({
       ),
       operationType: operationTypeLabel(contract.operationType),
       recurrence: contract.recurrence || "Una tantum",
-      stato: simplifiedProvvigioneStato(contract.status, hasDate),
+      stato,
       paymentStatus: paidLabel,
       confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,
+      recurringIncassoNote: isRecurring(contract.recurrence)
+        ? lastRecurringIncassoNote(contract.recurringMonths, stato)
+        : undefined,
       stornoFlag: item?.stornoDate ? "Sì" : "No",
       stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
       stornoAmount: item?.stornoAmount != null ? String(Number(item.stornoAmount)) : "",
