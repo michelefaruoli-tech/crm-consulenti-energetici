@@ -207,19 +207,17 @@ export function CapAddressFields({
             />
           </Field>
         </div>
-        <div className="md:col-span-4">
-          <Field label="Via/Piazza">
+        <div className="md:col-span-6">
+          <Field label="Indirizzo">
             <Input
-              value={street}
-              onChange={(e) => onStreetChange(e.target.value)}
-            />
-          </Field>
-        </div>
-        <div className="md:col-span-2">
-          <Field label="Civico">
-            <Input
-              value={streetNumber}
-              onChange={(e) => onStreetNumberChange(e.target.value)}
+              value={[street, streetNumber].filter(Boolean).join(" ").trim()}
+              onChange={(e) => {
+                // Un solo campo: via + civico insieme (es. "Via Roma 12")
+                onStreetChange(e.target.value);
+                onStreetNumberChange("");
+              }}
+              placeholder="Es. Via Roma 12"
+              autoComplete="street-address"
             />
           </Field>
         </div>

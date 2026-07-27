@@ -220,11 +220,11 @@ export function NuovoContrattoForm({
       const hasBill = attachments.some((a) => a.docType === "BOLLETTA");
       if (!hasId || !hasBill) {
         setErrors([
-          "Con invio al Master allega almeno documento di identità e bolletta/fattura.",
+          "Con invio al back office allega almeno documento di identità e bolletta/fattura.",
         ]);
         return;
       }
-      if (!confirm("Confermi creazione e invio al Master (michele.faruoli@gmail.com)?")) {
+      if (!confirm("Confermi creazione e invio al BACKOFFICE per la lavorazione?")) {
         return;
       }
     }
@@ -326,7 +326,7 @@ export function NuovoContrattoForm({
 
           setMessage(
             mailJson.message ||
-              "Contratto creato e inviato al Master.",
+              "Contratto creato e inviato al back office.",
           );
           router.push(`/lavorazione/${contractId}?ok=email`);
           router.refresh();
@@ -476,43 +476,65 @@ export function NuovoContrattoForm({
       />
 
       <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Opzioni e stato</h2>
-            <p className="text-sm text-slate-500">Salva in gestionale oppure invia al Master</p>
+        <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+          <div className="flex flex-col justify-center gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 sm:text-lg">
+                Opzioni e stato
+              </h2>
+              <p className="text-sm text-slate-500">
+                Salva in gestionale oppure invia al back office per la lavorazione
+              </p>
+            </div>
+            {canPickCollaborator ? (
+              <Field label="Collaboratore">
+                <Select
+                  value={collaboratorId}
+                  onChange={(e) => setCollaboratorId(e.target.value)}
+                >
+                  {collaborators.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            ) : (
+              <p className="text-sm text-slate-600">
+                Collaboratore: <strong>{session.name}</strong> (assegnato automaticamente)
+              </p>
+            )}
           </div>
-          <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border-2 border-emerald-500 bg-emerald-50 px-4 py-3">
-            <input
-              type="checkbox"
-              className="h-5 w-5 shrink-0"
-              checked={sendToMaster}
-              onChange={(e) => setSendToMaster(e.target.checked)}
-            />
-            <span className="text-sm font-semibold text-emerald-900">
-              Invia al Master per la lavorazione
+
+          <button
+            type="button"
+            onClick={() => setSendToMaster((v) => !v)}
+            aria-pressed={sendToMaster}
+            className={[
+              "flex min-h-[7.5rem] w-full flex-col items-start justify-center rounded-2xl border-4 px-5 py-5 text-left shadow-md transition sm:min-h-[9rem] sm:px-6",
+              sendToMaster
+                ? "border-emerald-700 bg-emerald-600 text-white ring-4 ring-emerald-300"
+                : "border-emerald-500 bg-emerald-50 text-emerald-950 hover:bg-emerald-100",
+            ].join(" ")}
+          >
+            <span className="text-xl font-black uppercase leading-tight tracking-wide sm:text-2xl md:text-3xl">
+              Invia al BACKOFFICE
             </span>
-          </label>
+            <span className="mt-2 text-base font-semibold sm:text-lg">
+              per essere lavorato
+            </span>
+            <span
+              className={[
+                "mt-3 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider",
+                sendToMaster
+                  ? "bg-white/20 text-white"
+                  : "bg-emerald-200 text-emerald-900",
+              ].join(" ")}
+            >
+              {sendToMaster ? "Attivo — verrà inviato" : "Clicca per attivare"}
+            </span>
+          </button>
         </div>
-        {canPickCollaborator ? (
-          <div className="mt-4 max-w-md">
-            <Field label="Collaboratore">
-              <Select
-                value={collaboratorId}
-                onChange={(e) => setCollaboratorId(e.target.value)}
-              >
-                {collaborators.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-slate-600">
-            Collaboratore: <strong>{session.name}</strong> (assegnato automaticamente)
-          </p>
-        )}
       </section>
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
@@ -777,11 +799,25 @@ export function NuovoContrattoForm({
       </section>
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Allegati</h2>
+        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Note</h2>
+        <Field label="Note interne">
+          <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+        <Field label="Note da inviare al back office">
+          <Textarea
+            rows={3}
+            value={masterNotes}
+            onChange={(e) => setMasterNotes(e.target.value)}
+          />
+        </Field>
+      </section>
+
+      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Documenti / Allegati</h2>
         {sendToMaster ? (
           <p className="text-xs text-amber-800">
-            Con invio al Master sono obbligatori: documento di identità e bolletta/fattura (max
-            15MB ciascuno; totale consigliato 25MB). File grandi: email con link protetti.
+            Con invio al back office sono obbligatori: documento di identità e bolletta/fattura
+            (max 15MB ciascuno; totale consigliato 25MB). File grandi: email con link protetti.
           </p>
         ) : null}
         <div className="grid gap-3 md:grid-cols-2">
@@ -826,17 +862,7 @@ export function NuovoContrattoForm({
       </section>
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Note e conferma</h2>
-        <Field label="Note interne">
-          <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-        <Field label="Note da inviare al Master">
-          <Textarea
-            rows={3}
-            value={masterNotes}
-            onChange={(e) => setMasterNotes(e.target.value)}
-          />
-        </Field>
+        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Conferma</h2>
         <div className="space-y-1 rounded-lg bg-slate-50 p-4 text-sm">
           <p>
             <strong>Cliente:</strong>{" "}
@@ -869,7 +895,7 @@ export function NuovoContrattoForm({
             {expiryPreview}
           </p>
           <p>
-            <strong>Invia al Master:</strong> {sendToMaster ? "Sì" : "No"}
+            <strong>Invia al BACKOFFICE:</strong> {sendToMaster ? "Sì" : "No"}
           </p>
           <p>
             <strong>Allegati:</strong> {attachments.length}
@@ -905,11 +931,11 @@ export function NuovoContrattoForm({
           </Button>
           <Button
             type="button"
-            className="min-h-12 flex-[1.4] sm:flex-none"
+            className="min-h-12 flex-[1.4] sm:min-h-14 sm:flex-none sm:px-8 sm:text-base sm:font-bold"
             disabled={pending}
             onClick={() => submit(false)}
           >
-            {sendToMaster ? "Crea e invia al Master" : "Crea contratto"}
+            {sendToMaster ? "Crea e invia al BACKOFFICE" : "Crea contratto"}
           </Button>
         </div>
       </section>
