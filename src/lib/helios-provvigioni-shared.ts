@@ -16,6 +16,8 @@ export type HeliosImportPreviewRow = {
   status: HeliosImportRowStatus;
   contractId?: string;
   clientName?: string;
+  /** true se il POD verrà scritto sul contratto CRM (mancava) */
+  willUpdatePod?: boolean;
 };
 
 export type HeliosImportPreviewResult = {
@@ -35,8 +37,31 @@ export type HeliosImportPreviewResult = {
     alreadyPaid: number;
     notFound: number;
     ambiguous: number;
+    podsToUpdate: number;
   };
 };
+
+/** Chiave confronto nomi (Excel ↔ CRM) senza accenti/maiuscole. */
+export function normalizePersonKey(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Da nome foglio tipo «Gennaio 2026» → 2026-01. */
+export function periodFromSheetName(sheetName: string): string | null {
+  const lower = sheetName.toLowerCase().trim();
+  for (const [name, mm] of Object.entries(IT_MONTHS)) {
+    const re = new RegExp(`${name}\\s*(\\d{4})`, "i");
+    const m = lower.match(re);
+    if (m) return `${m[1]}-${mm}`;
+  }
+  return null;
+}
 
 const IT_MONTHS: Record<string, string> = {
   gennaio: "01",

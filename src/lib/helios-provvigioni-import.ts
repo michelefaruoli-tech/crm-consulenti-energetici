@@ -12,7 +12,9 @@ import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 import {
   guessCompetenceFromFilename,
   isYearMonthPeriod,
+  normalizePersonKey,
   periodFromHeliosDate,
+  periodFromSheetName,
   type HeliosImportPreviewRow,
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
@@ -59,12 +61,56 @@ function cellNum(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function findHeliosSheet(workbook: ExcelJS.Workbook): ExcelJS.Worksheet | null {
-  const byName = workbook.worksheets.find((s) =>
+function findHeliosDataSheets(
+  workbook: ExcelJS.Workbook,
+): Array<{ sheet: ExcelJS.Worksheet; sheetPeriod: string | null }> {
+  const out: Array<{ sheet: ExcelJS.Worksheet; sheetPeriod: string | null }> =
+    [];
+
+  for (const sheet of workbook.worksheets) {
+    if (/riepilogo/i.test(sheet.name)) continue;
+
+    const headerRow = sheet.getRow(1);
+    const headers: Array<string | undefined> = [];
+    headerRow.eachCell((c, col) => {
+      headers[col] = cellStr(c.value).toLowerCase();
+    });
+
+    const colPod = headerIndex(
+      headers,
+      "cod.ute.",
+      "cod.ute",
+      "cod ute",
+      "pod",
+      "pdr",
+    );
+    if (colPod >= 0) {
+      out.push({
+        sheet,
+        sheetPeriod: periodFromSheetName(sheet.name),
+      });
+    }
+  }
+
+  if (out.length > 0) return out;
+
+  const legacy = workbook.worksheets.find((s) =>
     /dettaglio|vendite/i.test(s.name),
   );
-  if (byName) return byName;
-  return workbook.worksheets[0] ?? null;
+  if (legacy) {
+    return [{ sheet: legacy, sheetPeriod: null }];
+  }
+  const first = workbook.worksheets[0];
+  return first ? [{ sheet: first, sheetPeriod: null }] : [];
+}
+
+function readSheetHeaders(sheet: ExcelJS.Worksheet): Array<string | undefined> {
+  const headerRow = sheet.getRow(1);
+  const headers: Array<string | undefined> = [];
+  headerRow.eachCell((c, col) => {
+    headers[col] = cellStr(c.value).toLowerCase();
+  });
+  return headers;
 }
 
 function headerIndex(headers: Array<string | undefined>, ...names: string[]): number {
@@ -115,85 +161,89 @@ export async function parseHeliosProvvigioniBuffer(
     return { ok: false, error: "Impossibile leggere il file Excel" };
   }
 
-  const sheet = findHeliosSheet(workbook);
-  if (!sheet) return { ok: false, error: "Foglio Excel vuoto" };
-
-  const headerRow = sheet.getRow(1);
-  const headers: Array<string | undefined> = [];
-  headerRow.eachCell((c, col) => {
-    headers[col] = cellStr(c.value).toLowerCase();
-  });
-
-  const colPod = headerIndex(
-    headers,
-    "cod.ute.",
-    "cod.ute",
-    "cod ute",
-    "pod",
-    "pdr",
-  );
-  const colName = headerIndex(
-    headers,
-    "intestatario contratto",
-    "intestatario",
-    "cliente",
-  );
-  const colBase = headerIndex(
-    headers,
-    "provvigione base (regola 1)",
-    "provvigione base",
-    "provvigione",
-  );
-  // Competenza riga (file multi-mese dic/gen/feb): colonna Inizio / competenza / periodo
-  const colInizio = headerIndex(
-    headers,
-    "inizio",
-    "data inizio",
-    "competenza",
-    "periodo",
-    "mese competenza",
-    "mese",
-  );
-
-  if (colPod < 0) {
-    return {
-      ok: false,
-      error:
-        "Colonna Cod.Ute. (POD) non trovata. Serve il foglio «Dettaglio Vendite Dirette».",
-    };
+  const dataSheets = findHeliosDataSheets(workbook);
+  if (dataSheets.length === 0) {
+    return { ok: false, error: "Foglio Excel vuoto" };
   }
 
   const lines: ParsedHeliosLine[] = [];
-  // Dedup per POD + mese competenza (stesso POD può comparire in dic, gen, feb)
   const seenKeys = new Set<string>();
+  let foundPodColumn = false;
 
-  for (let r = 2; r <= sheet.rowCount; r++) {
-    const row = sheet.getRow(r);
-    const podRaw = cellStr(row.getCell(colPod).value);
-    const pod = normalizePodKey(podRaw);
-    if (!pod) continue;
+  for (const { sheet, sheetPeriod } of dataSheets) {
+    const headers = readSheetHeaders(sheet);
 
-    let competencePeriod = fallbackCompetence;
-    if (colInizio >= 0) {
-      const fromCell = periodFromHeliosDate(row.getCell(colInizio).value);
-      if (fromCell) competencePeriod = fromCell;
+    const colPod = headerIndex(
+      headers,
+      "cod.ute.",
+      "cod.ute",
+      "cod ute",
+      "pod",
+      "pdr",
+    );
+    if (colPod < 0) continue;
+    foundPodColumn = true;
+
+    const colName = headerIndex(
+      headers,
+      "intestatario contratto",
+      "intestatario",
+      "cliente",
+    );
+    const colBase = headerIndex(
+      headers,
+      "provvigione base (regola 1)",
+      "provvigione base",
+      "provvigione",
+    );
+    const colInizio = headerIndex(
+      headers,
+      "inizio",
+      "data inizio",
+      "competenza",
+      "periodo",
+      "mese competenza",
+      "mese",
+    );
+
+    const sheetFallback = sheetPeriod ?? fallbackCompetence;
+
+    for (let r = 2; r <= sheet.rowCount; r++) {
+      const row = sheet.getRow(r);
+      const podRaw = cellStr(row.getCell(colPod).value);
+      const pod = normalizePodKey(podRaw);
+      if (!pod) continue;
+
+      let competencePeriod = sheetFallback;
+      if (colInizio >= 0) {
+        const fromCell = periodFromHeliosDate(row.getCell(colInizio).value);
+        if (fromCell) competencePeriod = fromCell;
+      }
+
+      const dedupKey = `${pod}|${competencePeriod}`;
+      if (seenKeys.has(dedupKey)) continue;
+      seenKeys.add(dedupKey);
+
+      const intestatario =
+        colName >= 0 ? cellStr(row.getCell(colName).value) : "";
+      const baseAmount = colBase >= 0 ? cellNum(row.getCell(colBase).value) : 0;
+
+      lines.push({
+        excelRow: r,
+        pod,
+        intestatario,
+        baseAmount,
+        competencePeriod,
+      });
     }
+  }
 
-    const dedupKey = `${pod}|${competencePeriod}`;
-    if (seenKeys.has(dedupKey)) continue;
-    seenKeys.add(dedupKey);
-
-    const intestatario =
-      colName >= 0 ? cellStr(row.getCell(colName).value) : "";
-    const baseAmount = colBase >= 0 ? cellNum(row.getCell(colBase).value) : 0;
-
-    lines.push({
-      excelRow: r,
-      pod,
-      intestatario,
-      baseAmount,
-      competencePeriod,
-    });
+  if (!foundPodColumn) {
+    return {
+      ok: false,
+      error:
+        "Colonna Cod.Ute. (POD) non trovata. Attesi fogli mensili (es. Gennaio 2026) o «Dettaglio Vendite Dirette».",
+    };
   }
 
   if (lines.length === 0) {
@@ -232,7 +282,11 @@ async function loadHeliosContractList(supplierId: string) {
 type HeliosContractRow = Awaited<ReturnType<typeof loadHeliosContractList>>[number];
 
 async function loadHeliosContractsByPod(): Promise<
-  | { ok: true; byPod: Map<string, HeliosContractRow[]> }
+  | {
+      ok: true;
+      byPod: Map<string, HeliosContractRow[]>;
+      byName: Map<string, HeliosContractRow[]>;
+    }
   | { ok: false; error: string }
 > {
   const helios = await prisma.supplier.findFirst({
@@ -245,14 +299,43 @@ async function loadHeliosContractsByPod(): Promise<
 
   const contracts = await loadHeliosContractList(helios.id);
   const byPod = new Map<string, HeliosContractRow[]>();
+  const byName = new Map<string, HeliosContractRow[]>();
+
   for (const c of contracts) {
     const key = normalizePodKey(c.podPdr || c.pod || c.pdr);
-    if (!key) continue;
-    const list = byPod.get(key) ?? [];
-    list.push(c);
-    byPod.set(key, list);
+    if (key) {
+      const list = byPod.get(key) ?? [];
+      list.push(c);
+      byPod.set(key, list);
+    } else {
+      const nameKey = normalizePersonKey(clientDisplayName(c.client));
+      if (!nameKey) continue;
+      const list = byName.get(nameKey) ?? [];
+      list.push(c);
+      byName.set(nameKey, list);
+    }
   }
-  return { ok: true, byPod };
+  return { ok: true, byPod, byName };
+}
+
+function resolveHeliosMatch(
+  line: ParsedHeliosLine,
+  byPod: Map<string, HeliosContractRow[]>,
+  byName: Map<string, HeliosContractRow[]>,
+): {
+  matches: HeliosContractRow[];
+  matchedByName: boolean;
+} {
+  const podMatches = byPod.get(line.pod) ?? [];
+  if (podMatches.length > 0) {
+    return { matches: podMatches, matchedByName: false };
+  }
+
+  const nameKey = normalizePersonKey(line.intestatario);
+  if (!nameKey) return { matches: [], matchedByName: false };
+
+  const nameMatches = byName.get(nameKey) ?? [];
+  return { matches: nameMatches, matchedByName: true };
 }
 
 function buildPreviewRows(
@@ -270,9 +353,27 @@ function buildPreviewRows(
       recurringMonths: Array<{ period: string; status: string }>;
     }>
   >,
+  byName: Map<
+    string,
+    Array<{
+      id: string;
+      client: {
+        type: string;
+        firstName: string | null;
+        lastName: string | null;
+        companyName: string | null;
+      };
+      recurringMonths: Array<{ period: string; status: string }>;
+    }>
+  >,
 ): HeliosImportPreviewRow[] {
   return lines.map((line) => {
-    const matches = byPod.get(line.pod) ?? [];
+    const { matches, matchedByName } = resolveHeliosMatch(
+      line,
+      byPod as Map<string, HeliosContractRow[]>,
+      byName as Map<string, HeliosContractRow[]>,
+    );
+
     if (matches.length === 0) {
       return {
         excelRow: line.excelRow,
@@ -310,6 +411,7 @@ function buildPreviewRows(
       status: already ? ("already_paid" as const) : ("will_pay" as const),
       contractId: c.id,
       clientName: clientDisplayName(c.client),
+      willUpdatePod: matchedByName,
     };
   });
 }
@@ -321,6 +423,7 @@ function summarize(rows: HeliosImportPreviewRow[]) {
     alreadyPaid: rows.filter((r) => r.status === "already_paid").length,
     notFound: rows.filter((r) => r.status === "not_found").length,
     ambiguous: rows.filter((r) => r.status === "ambiguous").length,
+    podsToUpdate: rows.filter((r) => r.willUpdatePod).length,
   };
 }
 
@@ -358,7 +461,7 @@ export async function previewHeliosProvvigioniAction(
       return { ok: false, error: map.error };
     }
 
-    const rows = buildPreviewRows(parsed.lines, map.byPod);
+    const rows = buildPreviewRows(parsed.lines, map.byPod, map.byName);
     const competencePeriods = [
       ...new Set(rows.map((r) => r.competencePeriod)),
     ].sort();
@@ -395,6 +498,7 @@ export async function applyHeliosProvvigioniAction(
       skippedPaid: number;
       notFound: number;
       ambiguous: number;
+      podsUpdated: number;
       competencePeriod: string;
       settledPeriod: string;
     }
@@ -429,13 +533,15 @@ export async function applyHeliosProvvigioniAction(
     const map = await loadHeliosContractsByPod();
     if (!map.ok) return { ok: false, error: map.error };
 
-    const preview = buildPreviewRows(parsed.lines, map.byPod);
+    const preview = buildPreviewRows(parsed.lines, map.byPod, map.byName);
     const amountByKey = new Map(
       parsed.lines.map((l) => [`${l.pod}|${l.competencePeriod}`, l.baseAmount]),
     );
 
     let paid = 0;
     let skippedPaid = 0;
+    let podsUpdated = 0;
+    const podUpdatedIds = new Set<string>();
     const notFound = preview.filter((r) => r.status === "not_found").length;
     const ambiguous = preview.filter((r) => r.status === "ambiguous").length;
     const competencePeriods = [
@@ -443,6 +549,18 @@ export async function applyHeliosProvvigioniAction(
     ].sort();
 
     for (const row of preview) {
+      if (row.willUpdatePod && row.contractId && !podUpdatedIds.has(row.contractId)) {
+        await prisma.contract.update({
+          where: { id: row.contractId },
+          data: {
+            podPdr: row.pod,
+            pod: row.pod,
+          },
+        });
+        podUpdatedIds.add(row.contractId);
+        podsUpdated++;
+      }
+
       if (row.status === "already_paid") {
         skippedPaid++;
         continue;
@@ -519,6 +637,7 @@ export async function applyHeliosProvvigioniAction(
         skippedPaid,
         notFound,
         ambiguous,
+        podsUpdated,
       },
     });
 
@@ -533,6 +652,7 @@ export async function applyHeliosProvvigioniAction(
       skippedPaid,
       notFound,
       ambiguous,
+      podsUpdated,
       competencePeriod: competencePeriods[0] ?? competencePeriod,
       settledPeriod,
     };

@@ -67,6 +67,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     alreadyPaid: number;
     notFound: number;
     ambiguous: number;
+    podsToUpdate: number;
   } | null>(null);
 
   async function onFileChange(file: File | null) {
@@ -123,7 +124,10 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
         ? `mesi ${res.competencePeriods.map(periodLabel).join(", ")}`
         : `competenza ${periodLabel(res.competencePeriod)}`;
       setMessage(
-        `Anteprima (${mesiLabel}): ${res.summary.willPay} da pagare · ${res.summary.alreadyPaid} già ok · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui`,
+        `Anteprima (${mesiLabel}): ${res.summary.willPay} da pagare · ${res.summary.alreadyPaid} già ok · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
+          (res.summary.podsToUpdate > 0
+            ? ` · ${res.summary.podsToUpdate} POD da aggiornare`
+            : ""),
       );
     });
   }
@@ -153,7 +157,8 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
         return;
       }
       setMessage(
-        `Import ok: ${res.paid} mesi segnati pagati · ${res.skippedPaid} già pagati · ${res.notFound} non trovati · ${res.ambiguous} ambigui`,
+        `Import ok: ${res.paid} mesi segnati pagati · ${res.skippedPaid} già pagati · ${res.notFound} non trovati · ${res.ambiguous} ambigui` +
+          (res.podsUpdated > 0 ? ` · ${res.podsUpdated} POD aggiornati` : ""),
       );
       setPreview(null);
       setSummary(null);
@@ -165,7 +170,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
   }
 
   const notFoundRows = preview?.filter((r) => r.status === "not_found") ?? [];
-  const willPayRows = preview?.filter((r) => r.status === "will_pay") ?? [];
+  const displayRows = preview ?? [];
 
   const form = (
     <div className="space-y-3">
@@ -288,41 +293,53 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           <span className="rounded-full bg-violet-100 px-2 py-1 text-violet-900">
             Ambigui: {summary.ambiguous}
           </span>
+          {summary.podsToUpdate > 0 ? (
+            <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-900">
+              POD da aggiornare: {summary.podsToUpdate}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
-      {preview && willPayRows.length > 0 ? (
-        <div className="max-h-40 overflow-auto rounded-lg border border-slate-200 bg-white text-xs">
+      {preview && displayRows.length > 0 ? (
+        <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white text-xs">
           <table className="min-w-full">
             <thead className="sticky top-0 bg-slate-50 text-left">
               <tr>
                 <th className="px-2 py-1">POD</th>
                 <th className="px-2 py-1">Competenza</th>
-                <th className="px-2 py-1">File</th>
-                <th className="px-2 py-1">CRM</th>
+                <th className="px-2 py-1">Nome (file)</th>
+                <th className="px-2 py-1">Nome (CRM)</th>
                 <th className="px-2 py-1">€</th>
                 <th className="px-2 py-1">Esito</th>
               </tr>
             </thead>
             <tbody>
-              {willPayRows.slice(0, 40).map((r) => (
+              {displayRows.slice(0, 80).map((r) => (
                 <tr
                   key={`${r.excelRow}-${r.pod}-${r.competencePeriod}`}
                   className="border-t border-slate-100"
                 >
                   <td className="px-2 py-1 font-mono">{r.pod}</td>
                   <td className="px-2 py-1">{periodLabel(r.competencePeriod)}</td>
-                  <td className="px-2 py-1">{r.intestatario}</td>
-                  <td className="px-2 py-1">{r.clientName ?? "—"}</td>
+                  <td className="px-2 py-1">{r.intestatario || "—"}</td>
+                  <td className="px-2 py-1">
+                    {r.clientName ?? "—"}
+                    {r.willUpdatePod ? (
+                      <span className="ml-1 text-[10px] text-blue-700">
+                        +POD
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-2 py-1">{r.baseAmount || "—"}</td>
                   <td className="px-2 py-1">{STATUS_LABEL[r.status]}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {willPayRows.length > 40 ? (
+          {displayRows.length > 80 ? (
             <p className="border-t border-slate-100 px-2 py-1 text-slate-500">
-              … e altri {willPayRows.length - 40}
+              … e altri {displayRows.length - 80}
             </p>
           ) : null}
         </div>
