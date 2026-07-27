@@ -71,7 +71,11 @@ export function buildProvvigioniContractWhere(
   }
 
   if (stato === "Incassato") {
-    and.push({ collectionDate: { not: null } });
+    // Incassato dal fornitore ma non ancora liquidato al collaboratore
+    and.push({
+      collectionDate: { not: null },
+      status: { not: "PROVVIGIONE_LIQUIDATA" },
+    });
   } else if (stato === "Da incassare") {
     and.push({
       collectionDate: null,
