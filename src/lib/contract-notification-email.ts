@@ -190,7 +190,14 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
     line("Servizio / utility", contract.utilityType),
     line("Prodotto / offerta", contract.productName),
     line("Codice offerta", contract.offerCode),
-    line("Operazione", contract.operationType),
+    line(
+      "Operazione",
+      contract.operationType?.toUpperCase() === "ALTRO" && contract.operationOther
+        ? contract.operationOther
+        : contract.operationType
+          ? operationTypeLabel(contract.operationType)
+          : null,
+    ),
     line("Altro operazione", contract.operationOther),
     line("Altro servizio", contract.serviceOther),
     line("POD", contract.pod || (contract.utilityType === "LUCE" ? contract.podPdr : null)),
@@ -252,6 +259,22 @@ function priceTypeLabel(raw: string | null | undefined): string {
   return raw!.trim();
 }
 
+/**
+ * Etichetta operazione per oggetto email.
+ * Usa SOLO il valore indicato sul contratto (Voltura, Switch, …).
+ * Non inventa "Switch" se il campo è vuoto.
+ */
+function operationForSubject(contract: ContractLike): string {
+  const raw = (contract.operationType ?? "").trim();
+  if (!raw) return "";
+  const upper = raw.toUpperCase();
+  if (upper === "ALTRO") {
+    return (contract.operationOther ?? "").trim() || "Altro";
+  }
+  // operationTypeLabel senza default forzato: qui raw è già valorizzato
+  return operationTypeLabel(raw);
+}
+
 /** Oggetto email lavorazione: Cliente – Servizio – Operazione – Fisso/Variabile (senza n. pratica). */
 function buildLavorazioneSubject(
   contract: ContractLike,
@@ -259,10 +282,7 @@ function buildLavorazioneSubject(
 ): string {
   const clientName = clientDisplayName(contract.client);
   const utility = (contract.utilityType || "").trim().toUpperCase();
-  const operation =
-    contract.operationType?.toUpperCase() === "ALTRO" && contract.operationOther
-      ? contract.operationOther.trim()
-      : operationTypeLabel(contract.operationType);
+  const operation = operationForSubject(contract);
   const price = priceTypeLabel(contract.priceType);
 
   const parts = [
@@ -366,13 +386,7 @@ export function buildBatchContractNotificationBody(
     .map((c) => (c.utilityType || "").trim().toUpperCase() || "?")
     .join("+");
   const operations = [
-    ...new Set(
-      contracts.map((c) =>
-        c.operationType?.toUpperCase() === "ALTRO" && c.operationOther
-          ? c.operationOther.trim()
-          : operationTypeLabel(c.operationType),
-      ),
-    ),
+    ...new Set(contracts.map((c) => operationForSubject(c)).filter(Boolean)),
   ].join("/");
   const prices = [
     ...new Set(
