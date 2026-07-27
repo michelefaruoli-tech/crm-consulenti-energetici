@@ -15,6 +15,8 @@ type Props = {
   className?: string;
   /** Contenuto sotto i pulsanti (lista file già caricati) */
   children?: React.ReactNode;
+  /** Evidenza obbligatorietà giallo → verde */
+  fillStatus?: "off" | "empty" | "filled";
 };
 
 /**
@@ -32,6 +34,7 @@ export function AttachmentDropZone({
   onAdd,
   className,
   children,
+  fillStatus = "off",
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -40,10 +43,14 @@ export function AttachmentDropZone({
   return (
     <div
       className={cn(
-        "rounded-xl border-2 border-dashed bg-slate-50/60 p-3 transition-colors sm:p-4",
+        "rounded-xl border-2 border-dashed p-3 transition-colors sm:p-4",
         dragOver
           ? "border-emerald-500 bg-emerald-50"
-          : "border-slate-300 hover:border-emerald-400 hover:bg-emerald-50/40",
+          : fillStatus === "filled"
+            ? "border-emerald-500 bg-emerald-50/80"
+            : fillStatus === "empty"
+              ? "border-amber-400 bg-amber-50/80"
+              : "border-slate-300 bg-slate-50/60 hover:border-emerald-400 hover:bg-emerald-50/40",
         className,
       )}
       onDragOver={(e) => {
@@ -58,9 +65,22 @@ export function AttachmentDropZone({
       }}
     >
       <div className="mb-2 flex items-start gap-2">
-        <Paperclip className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+        <Paperclip
+          className={cn(
+            "mt-0.5 h-4 w-4 shrink-0",
+            fillStatus === "filled"
+              ? "text-emerald-700"
+              : fillStatus === "empty"
+                ? "text-amber-700"
+                : "text-emerald-700",
+          )}
+        />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          <p className="text-sm font-semibold text-slate-900">
+            {title}
+            {fillStatus === "empty" ? " *" : null}
+            {fillStatus === "filled" ? " ✓" : null}
+          </p>
           <p className="text-xs text-slate-500">{hint}</p>
         </div>
       </div>

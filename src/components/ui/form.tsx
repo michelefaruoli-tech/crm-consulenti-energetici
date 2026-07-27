@@ -46,10 +46,36 @@ export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLab
   );
 }
 
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({
+  label,
+  children,
+  fillStatus = "off",
+}: {
+  label: string;
+  children: React.ReactNode;
+  /** Evidenza obbligatorietà: giallo vuoto → verde compilato (solo se attivo). */
+  fillStatus?: "off" | "empty" | "filled";
+}) {
+  const active = fillStatus === "empty" || fillStatus === "filled";
   return (
-    <div className="min-w-0">
-      <Label>{label}</Label>
+    <div
+      className={cn(
+        "min-w-0 rounded-lg transition-colors",
+        active && "p-2 ring-2",
+        fillStatus === "empty" && "bg-amber-50 ring-amber-400",
+        fillStatus === "filled" && "bg-emerald-50 ring-emerald-400",
+      )}
+    >
+      <Label
+        className={cn(
+          fillStatus === "empty" && "text-amber-900",
+          fillStatus === "filled" && "text-emerald-800",
+        )}
+      >
+        {label}
+        {fillStatus === "empty" ? " *" : null}
+        {fillStatus === "filled" ? " ✓" : null}
+      </Label>
       {children}
     </div>
   );

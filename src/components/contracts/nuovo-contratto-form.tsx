@@ -32,6 +32,24 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function fillStatus(active: boolean, filled: boolean): "off" | "empty" | "filled" {
+  if (!active) return "off";
+  return filled ? "filled" : "empty";
+}
+
+function hasIdentityDoc(
+  attachments: { docType: string }[],
+): boolean {
+  const unico = attachments.some((a) => a.docType === "CI_UNICO");
+  const fronte = attachments.some((a) => a.docType === "CI_FRONTE");
+  const retro = attachments.some((a) => a.docType === "CI_RETRO");
+  return unico || (fronte && retro);
+}
+
+function hasBillDoc(attachments: { docType: string }[]): boolean {
+  return attachments.some((a) => a.docType === "BOLLETTA");
+}
+
 type Props = {
   session: { id: string; name: string; role: string };
   collaborators: { id: string; name: string }[];
@@ -120,6 +138,21 @@ export function NuovoContrattoForm({
     () => format(calcExpiryDate(computedSupplyStart, durationMonths), "dd/MM/yyyy"),
     [computedSupplyStart, durationMonths],
   );
+
+  const req = sendToMaster;
+  const identityOk = useMemo(() => hasIdentityDoc(attachments), [attachments]);
+  const billOk = useMemo(() => hasBillDoc(attachments), [attachments]);
+  const addressOk = Boolean(
+    (street || streetNumber).trim() &&
+      zipCode.replace(/\D/g, "").length === 5 &&
+      city.trim() &&
+      province.trim(),
+  );
+  const clientNameOk =
+    clientType === "PRIVATO"
+      ? Boolean(firstName.trim() && lastName.trim())
+      : Boolean(companyName.trim());
+  const clientOk = Boolean(clientId) || (creatingClient && clientNameOk);
 
   function patchService(id: string, patch: Partial<ContractServiceLine>) {
     setServices((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
@@ -216,17 +249,52 @@ export function NuovoContrattoForm({
     setErrors([]);
     setMessage(null);
     if (sendToMaster && !draft) {
-      const hasId = attachments.some((a) => ["CI_FRONTE", "CI_RETRO"].includes(a.docType));
-      const hasBill = attachments.some((a) => a.docType === "BOLLETTA");
-      if (!hasId || !hasBill) {
+      const missing: string[] = [];
+      if (!clientOk) missing.push("Cliente (nome/cognome o ragione sociale)");
+      if (!classification.trim()) missing.push("Classificazione");
+      if (clientType === "PRIVATO" && !fiscalCode.trim()) missing.push("Codice fiscale");
+      if (clientType === "AZIENDA" && !vatNumber.trim() && !fiscalCode.trim()) {
+        missing.push("Partita IVA o CF aziendale");
+      }
+      if (!phone.trim()) missing.push("Telefono");
+      if (!addressOk) missing.push("Indirizzo completo (CAP, comune, provincia, via)");
+      for (const [i, s] of services.entries()) {
+        const n = i + 1;
+        if (!s.supplierId && !s.supplierName?.trim()) missing.push(`Servizio ${n}: fornitore`);
+        if (!s.paymentMethod) missing.push(`Servizio ${n}: metodo pagamento`);
+        if ((s.service === "LUCE" || s.service === "DUAL") && !s.pod?.trim()) {
+          missing.push(`Servizio ${n}: POD`);
+        }
+        if ((s.service === "GAS" || s.service === "DUAL") && !s.pdr?.trim()) {
+          missing.push(`Servizio ${n}: PDR`);
+        }
+      }
+      if (!identityOk) {
+        missing.push(
+          "Documento identità: carica documento unico OPPURE fronte + retro",
+        );
+      }
+      if (!billOk) {
+        missing.push("Almeno una fattura / bolletta");
+      }
+      if (missing.length) {
         setErrors([
-          "Con invio al back office allega almeno documento di identità e bolletta/fattura.",
+          "Per inviare al BACK OFFICE completa i campi evidenziati in giallo:",
+          ...missing,
         ]);
         return;
       }
-      if (!confirm("Confermi creazione e invio al BACKOFFICE per la lavorazione?")) {
-        return;
-      }
+      const ok = window.confirm(
+        "CONFERMA CREAZIONE E INVIO AL BACK OFFICE\n\n" +
+          "Il contratto verrà creato e inviato al back office per essere lavorato.\n\n" +
+          "Confermi?",
+      );
+      if (!ok) return;
+    } else if (!draft) {
+      const ok = window.confirm(
+        "Confermi la creazione del contratto?\n\n(Non verrà inviato al back office)",
+      );
+      if (!ok) return;
     }
     startTransition(async () => {
       try {
@@ -592,7 +660,7 @@ export function NuovoContrattoForm({
         />
 
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Tipologia cliente *">
+          <Field label="Tipologia cliente" fillStatus={fillStatus(req, true)}>
             <Select
               value={clientType}
               onChange={(e) => {
@@ -611,7 +679,10 @@ export function NuovoContrattoForm({
               <option value="AZIENDA">Business</option>
             </Select>
           </Field>
-          <Field label={clientType === "PRIVATO" ? "Classificazione *" : "Classificazione *"}>
+          <Field
+            label="Classificazione"
+            fillStatus={fillStatus(req, Boolean(classification.trim()))}
+          >
             <Select
               value={classification}
               onChange={(e) => setClassification(e.target.value)}
@@ -638,16 +709,19 @@ export function NuovoContrattoForm({
 
         {clientType === "PRIVATO" ? (
           <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Nome *">
+            <Field label="Nome" fillStatus={fillStatus(req, Boolean(firstName.trim()))}>
               <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
             </Field>
-            <Field label="Cognome *">
+            <Field label="Cognome" fillStatus={fillStatus(req, Boolean(lastName.trim()))}>
               <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
             </Field>
-            <Field label="Codice fiscale">
+            <Field
+              label="Codice fiscale"
+              fillStatus={fillStatus(req, Boolean(fiscalCode.trim()))}
+            >
               <Input value={fiscalCode} onChange={(e) => setFiscalCode(e.target.value)} />
             </Field>
-            <Field label="Telefono">
+            <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
             <Field label="Email">
@@ -659,16 +733,25 @@ export function NuovoContrattoForm({
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Ragione sociale *">
+            <Field
+              label="Ragione sociale"
+              fillStatus={fillStatus(req, Boolean(companyName.trim()))}
+            >
               <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
             </Field>
-            <Field label="Partita IVA">
+            <Field
+              label="Partita IVA"
+              fillStatus={fillStatus(req, Boolean(vatNumber.trim() || fiscalCode.trim()))}
+            >
               <Input value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} />
             </Field>
-            <Field label="CF aziendale">
+            <Field
+              label="CF aziendale"
+              fillStatus={fillStatus(req, Boolean(vatNumber.trim() || fiscalCode.trim()))}
+            >
               <Input value={fiscalCode} onChange={(e) => setFiscalCode(e.target.value)} />
             </Field>
-            <Field label="Telefono">
+            <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
             <Field label="Email">
@@ -717,8 +800,9 @@ export function NuovoContrattoForm({
           onRegionChange={setRegion}
           onStreetChange={setStreet}
           onStreetNumberChange={setStreetNumber}
+          highlightRequired={req}
         />
-        <Field label="IBAN">
+        <Field label="IBAN" fillStatus={fillStatus(req && services.some((s) => s.paymentMethod === "RID"), Boolean(iban.trim()))}>
           <Input
             value={iban}
             onChange={(e) => setIban(e.target.value)}
@@ -791,6 +875,7 @@ export function NuovoContrattoForm({
               province,
               region,
             }}
+            highlightRequired={req}
           />
         ))}
         <div className="pt-1">
@@ -814,22 +899,107 @@ export function NuovoContrattoForm({
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
         <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Documenti / Allegati</h2>
-        {sendToMaster ? (
-          <p className="text-xs text-amber-800">
-            Con invio al back office sono obbligatori: documento di identità e bolletta/fattura
-            (max 15MB ciascuno; totale consigliato 25MB). File grandi: email con link protetti.
+        {req ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+            Obbligatori per il back office:{" "}
+            <strong>documento identità</strong> (unico <em>oppure</em> fronte + retro) e{" "}
+            <strong>almeno una fattura/bolletta</strong> (anche più di una). Giallo = manca ·
+            Verde = ok.
           </p>
         ) : null}
-        <div className="grid gap-3 md:grid-cols-2">
-          {DOC_TYPE_OPTIONS.map((doc) => (
+
+        <div
+          className={[
+            "space-y-3 rounded-xl p-3 ring-2 transition-colors",
+            req
+              ? identityOk
+                ? "bg-emerald-50 ring-emerald-400"
+                : "bg-amber-50 ring-amber-400"
+              : "bg-slate-50 ring-slate-200",
+          ].join(" ")}
+        >
+          <div>
+            <p className="text-sm font-bold text-slate-900">
+              Documento identità {req ? (identityOk ? "✓" : "*") : ""}
+            </p>
+            <p className="text-xs text-slate-600">
+              Carica un <strong>documento unico</strong>, oppure <strong>fronte + retro</strong>.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
             <AttachmentDropZone
-              key={doc.value}
-              title={doc.label}
-              hint="1) Trascina · 2) Scegli file · 3) Foto (telefono)"
-              onAdd={(files) => void onFilesSelected(files, doc.value)}
+              title="Documento unico"
+              hint="CI / passaporto in un solo file"
+              fillStatus={fillStatus(
+                req,
+                attachments.some((a) => a.docType === "CI_UNICO"),
+              )}
+              onAdd={(files) => void onFilesSelected(files, "CI_UNICO")}
             />
-          ))}
+            <AttachmentDropZone
+              title="Fronte"
+              hint="Solo se non usi documento unico"
+              fillStatus={fillStatus(
+                req && !attachments.some((a) => a.docType === "CI_UNICO"),
+                attachments.some((a) => a.docType === "CI_FRONTE"),
+              )}
+              onAdd={(files) => void onFilesSelected(files, "CI_FRONTE")}
+            />
+            <AttachmentDropZone
+              title="Retro"
+              hint="Solo se non usi documento unico"
+              fillStatus={fillStatus(
+                req && !attachments.some((a) => a.docType === "CI_UNICO"),
+                attachments.some((a) => a.docType === "CI_RETRO"),
+              )}
+              onAdd={(files) => void onFilesSelected(files, "CI_RETRO")}
+            />
+          </div>
         </div>
+
+        <div
+          className={[
+            "space-y-3 rounded-xl p-3 ring-2 transition-colors",
+            req
+              ? billOk
+                ? "bg-emerald-50 ring-emerald-400"
+                : "bg-amber-50 ring-amber-400"
+              : "bg-slate-50 ring-slate-200",
+          ].join(" ")}
+        >
+          <div>
+            <p className="text-sm font-bold text-slate-900">
+              Fattura / bolletta {req ? (billOk ? "✓" : "*") : ""}
+            </p>
+            <p className="text-xs text-slate-600">
+              Obbligatoria almeno una. Puoi caricare anche più fatture.
+            </p>
+          </div>
+          <AttachmentDropZone
+            title="Fattura / bolletta"
+            hint="Trascina una o più fatture"
+            fillStatus={fillStatus(req, billOk)}
+            onAdd={(files) => void onFilesSelected(files, "BOLLETTA")}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-slate-700">Altri allegati (facoltativi)</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {DOC_TYPE_OPTIONS.filter(
+              (d) =>
+                !["CI_UNICO", "CI_FRONTE", "CI_RETRO", "BOLLETTA"].includes(d.value),
+            ).map((doc) => (
+              <AttachmentDropZone
+                key={doc.value}
+                title={doc.label}
+                hint="1) Trascina · 2) Scegli file · 3) Foto (telefono)"
+                onAdd={(files) => void onFilesSelected(files, doc.value)}
+              />
+            ))}
+          </div>
+        </div>
+
         {attachments.length > 0 ? (
           <ul className="space-y-2 text-sm">
             {attachments.map((a) => (
@@ -840,7 +1010,7 @@ export function NuovoContrattoForm({
                 <div className="min-w-0">
                   <p className="truncate font-medium text-slate-900">{a.filename}</p>
                   <p className="text-xs text-slate-500">
-                    {DOC_TYPE_OPTIONS.find((d) => d.value === a.docType)?.label}
+                    {DOC_TYPE_OPTIONS.find((d) => d.value === a.docType)?.label ?? a.docType}
                     {a.mimeType ? ` · ${a.mimeType}` : ""}
                     {a.size
                       ? ` · ${Math.max(1, Math.round(a.size / 1024))} KB`

@@ -97,10 +97,11 @@ export const PAYMENT_METHOD_OPTIONS = [
 ] as const;
 
 export const DOC_TYPE_OPTIONS = [
+  { value: "CI_UNICO", label: "Documento identità (unico)" },
   { value: "CI_FRONTE", label: "Documento identità fronte" },
   { value: "CI_RETRO", label: "Documento identità retro" },
   { value: "CF_TS", label: "Codice fiscale / tessera sanitaria" },
-  { value: "BOLLETTA", label: "Ultima fattura / bolletta" },
+  { value: "BOLLETTA", label: "Fattura / bolletta" },
   { value: "VISURA", label: "Visura camerale" },
   { value: "DOC_AMM", label: "Documento amministratore" },
   { value: "MODULO", label: "Modulo firmato" },

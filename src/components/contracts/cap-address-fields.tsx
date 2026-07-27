@@ -35,6 +35,7 @@ export function CapAddressFields({
   onStreetNumberChange,
   zipLabel = "CAP",
   provinceReadOnly = true,
+  highlightRequired = false,
 }: {
   zipCode: string;
   city: string;
@@ -51,6 +52,8 @@ export function CapAddressFields({
   zipLabel?: string;
   /** Provincia compilata dal CAP: sola lettura solo se già valorizzata. */
   provinceReadOnly?: boolean;
+  /** Evidenza giallo/verde campi obbligatori (invio back office). */
+  highlightRequired?: boolean;
 }) {
   const [places, setPlaces] = useState<Place[]>([]);
   const [multi, setMulti] = useState(false);
@@ -134,6 +137,9 @@ export function CapAddressFields({
       : "";
 
   const provinceLocked = provinceReadOnly && Boolean(province);
+  const fs = (filled: boolean): "off" | "empty" | "filled" =>
+    highlightRequired ? (filled ? "filled" : "empty") : "off";
+  const addressLine = [street, streetNumber].filter(Boolean).join(" ").trim();
 
   return (
     <div className="space-y-3">
@@ -143,7 +149,7 @@ export function CapAddressFields({
       <input type="hidden" name="zipCode" value={zipCode} readOnly />
 
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">
-        <Field label={`${zipLabel}`}>
+        <Field label={`${zipLabel}`} fillStatus={fs(zipCode.replace(/\D/g, "").length === 5)}>
           <Input
             value={zipCode}
             onChange={(e) => onZipChange(e.target.value)}
@@ -155,7 +161,7 @@ export function CapAddressFields({
         </Field>
         {multi ? (
           <div className="md:col-span-3">
-            <Field label="Comune (scegli dalla lista) *">
+            <Field label="Comune (scegli dalla lista)" fillStatus={fs(Boolean(city))}>
               <Select
                 value={selectedLabel}
                 onChange={(e) => pickPlace(e.target.value)}
@@ -171,7 +177,7 @@ export function CapAddressFields({
           </div>
         ) : (
           <div className="md:col-span-2">
-            <Field label="Comune">
+            <Field label="Comune" fillStatus={fs(Boolean(city.trim()))}>
               <Input
                 value={city}
                 onChange={(e) => onCityChange(e.target.value)}
@@ -180,7 +186,7 @@ export function CapAddressFields({
             </Field>
           </div>
         )}
-        <Field label="Provincia (sigla)">
+        <Field label="Provincia (sigla)" fillStatus={fs(Boolean(province.trim()))}>
           <Input
             value={province}
             onChange={(e) =>
@@ -196,7 +202,7 @@ export function CapAddressFields({
           />
         </Field>
         <div className="md:col-span-2">
-          <Field label="Regione">
+          <Field label="Regione" fillStatus={fs(Boolean(region.trim()))}>
             <Input
               value={region}
               onChange={(e) => onRegionChange(e.target.value)}
@@ -208,9 +214,9 @@ export function CapAddressFields({
           </Field>
         </div>
         <div className="md:col-span-6">
-          <Field label="Indirizzo">
+          <Field label="Indirizzo" fillStatus={fs(Boolean(addressLine))}>
             <Input
-              value={[street, streetNumber].filter(Boolean).join(" ").trim()}
+              value={addressLine}
               onChange={(e) => {
                 // Un solo campo: via + civico insieme (es. "Via Roma 12")
                 onStreetChange(e.target.value);
