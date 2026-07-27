@@ -234,7 +234,13 @@ async function loadSheetFromForm(formData: FormData): Promise<
       "inizio fornitura",
     ),
     pagamento: colPrefer("pagamento", "pagato"),
-    dataPagamento: colPrefer("data pagamento", "data incasso"),
+    dataPagamento: colPrefer(
+      "data pagamento",
+      "data incasso",
+      "commissioni",
+      "prov",
+      "provvigioni",
+    ),
     telefono: colPrefer("telefono", "cellulare", "phone"),
     gettone: colPrefer("gettone", "provvigione", "expected"),
     collab: colPrefer("collaboratore", "agente"),
@@ -739,9 +745,12 @@ async function importOneHistoricalRow(opts: {
   const contractNumber = await generateContractNumber();
   const op = normalizeOperationType(operazioneRaw || "CAMBIO");
   const supplyFromFile = parseDate(supplyRaw);
+  // Se manca ingresso fornitura, spesso la colonna COMMISSIONI/PROV/incasso corrisponde all'inizio
   const supplyStartDate =
-    supplyFromFile ?? computeSupplyStartDate(insertionDate, op);
-  const collectionDate = paid ? paymentDate ?? insertionDate : null;
+    supplyFromFile ??
+    paymentDate ??
+    computeSupplyStartDate(insertionDate, op);
+  const collectionDate = paid ? paymentDate ?? supplyStartDate ?? insertionDate : null;
   const durationMonths =
     Number(String(durataRaw).replace(",", ".").replace(/[^\d.-]/g, "")) || 12;
   const expiryDate = parseDate(scadenzaRaw);
