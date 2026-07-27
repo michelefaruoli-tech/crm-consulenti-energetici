@@ -92,6 +92,7 @@ export type ContractLike = {
   documents: Array<{
     id: string;
     filename: string;
+    mimeType?: string | null;
     docType?: string | null;
     size: number;
     contentBase64?: string | null;
