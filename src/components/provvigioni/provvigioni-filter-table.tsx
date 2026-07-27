@@ -267,12 +267,22 @@ export function ProvvigioniFilterTable({
   }
 
   const selectedCount = selectedKeys.size;
-  const selectedIds = useMemo(() => [...selectedKeys], [selectedKeys]);
+  /** ID contratto delle righe spuntate (chiave tabella = rowId = contratto). */
   const selectedContractIds = useMemo(
     () =>
       rows
-        .filter((r) => selectedKeys.has(String(r.commissionId || r.id)))
-        .map((r) => r.id),
+        .filter((r) => selectedKeys.has(rowId(r)))
+        .map((r) => String(r.id))
+        .filter(Boolean),
+    [rows, selectedKeys],
+  );
+  /** ID commissione delle stesse righe (azioni gettone / incasso). */
+  const selectedCommissionIds = useMemo(
+    () =>
+      rows
+        .filter((r) => selectedKeys.has(rowId(r)))
+        .map((r) => commissionIdOf(r))
+        .filter(Boolean),
     [rows, selectedKeys],
   );
 
@@ -767,7 +777,7 @@ export function ProvvigioniFilterTable({
             onClick={() =>
               runBulk("Segna incassato", async () => {
                 const fd = new FormData();
-                fd.set("commissionIds", selectedIds.join(","));
+                fd.set("commissionIds", selectedCommissionIds.join(","));
                 fd.set("collectionMonth", paidMonth);
                 return bulkMarkPaidAction(fd);
               })
@@ -802,7 +812,7 @@ export function ProvvigioniFilterTable({
               onClick={() =>
                 runBulk("Conferma gettone", async () => {
                   const fd = new FormData();
-                  fd.set("commissionIds", selectedIds.join(","));
+                  fd.set("commissionIds", selectedCommissionIds.join(","));
                   return bulkConfirmCommissionsAction(fd);
                 })
               }
@@ -835,7 +845,7 @@ export function ProvvigioniFilterTable({
                 `Incassa 1 mese ric. → rendiconto ${periodLabel(settledPeriod)}`,
                 async () => {
                   const fd = new FormData();
-                  fd.set("commissionIds", selectedIds.join(","));
+                  fd.set("commissionIds", selectedCommissionIds.join(","));
                   fd.set("settledPeriod", settledPeriod);
                   fd.set("mode", "oldest");
                   return bulkPayRecurringAction(fd);
@@ -855,7 +865,7 @@ export function ProvvigioniFilterTable({
                 `Incassa mesi ric. mancanti → rendiconto ${periodLabel(settledPeriod)}`,
                 async () => {
                   const fd = new FormData();
-                  fd.set("commissionIds", selectedIds.join(","));
+                  fd.set("commissionIds", selectedCommissionIds.join(","));
                   fd.set("settledPeriod", settledPeriod);
                   fd.set("mode", "all");
                   return bulkPayRecurringAction(fd);
@@ -954,7 +964,7 @@ export function ProvvigioniFilterTable({
         dense
         rows={displayRows as unknown as Record<string, unknown>[]}
         columns={columns}
-        rowKey={(r) => String(r.id || r.commissionId)}
+        rowKey={(r) => rowId(r)}
         draftMode
         getDraftValue={getDraftValue}
         isDraftDirty={isDraftDirty}
