@@ -11,6 +11,7 @@ import {
 } from "@/components/provvigioni/provvigioni-filter-table";
 import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
+import { HeliosAbsentPanel } from "@/components/provvigioni/helios-absent-panel";
 import {
   RecurringRendicontoPanel,
   toSettledRow,
@@ -19,6 +20,7 @@ import { PaginationNav } from "@/components/ui/pagination-nav";
 import { Button } from "@/components/ui/button";
 import {
   getMissingRecurringAlerts,
+  getHeliosAbsentAlerts,
   getSettledRecurringForPeriod,
   syncAllRecurringMonths,
 } from "@/lib/recurring-sync";
@@ -251,6 +253,7 @@ export default async function ProvvigioniPage({
     collaboratorOptions,
     supplierOptions,
     missing,
+    heliosAbsent,
     collabGroups,
     settledRowsRaw,
     deletedRecent,
@@ -290,6 +293,7 @@ export default async function ProvvigioniPage({
       orderBy: { name: "asc" },
     }),
     getMissingRecurringAlerts(sessionCollabFilter),
+    getHeliosAbsentAlerts(sessionCollabFilter),
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
@@ -523,6 +527,16 @@ export default async function ProvvigioniPage({
   const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
   const otherRecurringCount = Math.max(0, countRicorrenti - missingContractCount);
 
+  const heliosAbsentRows = heliosAbsent.map((m) => ({
+    id: m.id,
+    period: m.period,
+    contractId: m.contractId,
+    podPdr: m.contract.podPdr || "",
+    clientName: clientDisplayName(m.contract.client),
+    collaboratorName: m.contract.collaborator.name,
+    note: m.note,
+  }));
+
   const settledRows = settledRowsRaw.map(toSettledRow);
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
   const queryBase = {
@@ -720,6 +734,8 @@ export default async function ProvvigioniPage({
         alerts={alertRows}
         otherRecurringCount={otherRecurringCount}
       />
+
+      <HeliosAbsentPanel alerts={heliosAbsentRows} />
 
       <ProvvigioniTrashPanel
         rows={deletedRecent.map((c) => ({

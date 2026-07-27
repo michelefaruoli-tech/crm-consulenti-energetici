@@ -193,6 +193,44 @@ export async function getMissingRecurringAlerts(collaboratorId?: string) {
   });
 }
 
+/** Helios: mesi in cui il POD non compare più nei rendiconti successivi. */
+export async function getHeliosAbsentAlerts(collaboratorId?: string) {
+  return prisma.recurringMonth.findMany({
+    where: {
+      status: "ERROR_UNPAID",
+      note: { contains: "ASSENTE_RENDICONTO" },
+      contract: {
+        isHistorical: false,
+        deletedAt: null,
+        supplier: { name: { equals: "Helios", mode: "insensitive" } },
+        ...(collaboratorId ? { collaboratorId } : {}),
+      },
+    },
+    select: {
+      id: true,
+      period: true,
+      note: true,
+      contractId: true,
+      contract: {
+        select: {
+          podPdr: true,
+          collaborator: { select: { name: true } },
+          client: {
+            select: {
+              type: true,
+              firstName: true,
+              lastName: true,
+              companyName: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ period: "asc" }],
+    take: 80,
+  });
+}
+
 /** Mesi pagati in un certo rendiconto (es. bonifico di luglio). */
 export async function getSettledRecurringForPeriod(
   settledPeriod: string,
