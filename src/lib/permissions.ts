@@ -2,6 +2,8 @@ import { Role } from "@/generated/prisma/client";
 
 export type Permission =
   | "users.manage"
+  /** Area Manager: crea/gestisce solo collaboratori del proprio team */
+  | "users.manage_team"
   | "suppliers.manage"
   | "commission_rules.manage"
   | "backup.manage"
@@ -12,7 +14,7 @@ export type Permission =
   | "contracts.change_status"
   | "contracts.change_collaborator_dashboard"
   | "contracts.change_collaborator"
-  /** Backoffice: vede/lavora solo fornitori (e collab) assegnati */
+  /** Backoffice / Area Manager: scope fornitori (+ collab) */
   | "contracts.work_scoped"
   | "clients.edit_all"
   | "clients.create"
@@ -65,6 +67,19 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "clients.create",
     "documents.manage",
     "commissions.view_all",
+    "reports.export",
+  ],
+  AREA_MANAGER: [
+    "users.manage_team",
+    "contracts.work_scoped",
+    "contracts.edit_own",
+    "contracts.create",
+    "contracts.change_status",
+    "contracts.change_collaborator",
+    "clients.create",
+    "documents.manage",
+    "commissions.view_all",
+    "commissions.edit_own_gettone",
     "reports.export",
   ],
   COLLABORATORE: [

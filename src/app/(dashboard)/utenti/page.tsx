@@ -15,14 +15,44 @@ import {
   restoreUserAction,
   restoreAllDeletedUsersAction,
 } from "@/lib/actions";
+import { roleSupportsSupplierScope } from "@/lib/user-scope";
+
+function supplierLabel(
+  scopes: { supplier?: { name: string } | null }[] | undefined,
+  role: string,
+): string {
+  if (!scopes?.length) {
+    if (role === "BACKOFFICE") return "nessuno (non vede contratti)";
+    return "tutti";
+  }
+  return scopes.map((s) => s.supplier?.name ?? "?").join(", ");
+}
 
 export default async function UtentiPage() {
   const session = await requireSession();
-  if (!hasPermission(session.role, "users.manage")) redirect("/");
+  const isAdmin = hasPermission(session.role, "users.manage");
+  const isAreaManager =
+    session.role === "AREA_MANAGER" &&
+    hasPermission(session.role, "users.manage_team");
+  if (!isAdmin && !isAreaManager) redirect("/");
+
+  const teamIds = isAreaManager
+    ? (
+        await prisma.userCollaboratorScope.findMany({
+          where: { userId: session.id },
+          select: { collaboratorId: true },
+        })
+      ).map((c) => c.collaboratorId)
+    : [];
 
   const [users, deletedUsers, suppliers, collaborators] = await Promise.all([
     prisma.user.findMany({
-      where: { active: true },
+      where: isAdmin
+        ? { active: true }
+        : {
+            active: true,
+            OR: [{ id: session.id }, { id: { in: teamIds } }],
+          },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -31,7 +61,9 @@ export default async function UtentiPage() {
         role: true,
         active: true,
         createdAt: true,
-        supplierScopes: { select: { supplierId: true, supplier: { select: { name: true } } } },
+        supplierScopes: {
+          select: { supplierId: true, supplier: { select: { name: true } } },
+        },
         collaboratorScopes: {
           select: {
             collaboratorId: true,
@@ -40,17 +72,19 @@ export default async function UtentiPage() {
         },
       },
     }),
-    prisma.user.findMany({
-      where: { active: false },
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        updatedAt: true,
-      },
-    }),
+    isAdmin
+      ? prisma.user.findMany({
+          where: { active: false },
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            updatedAt: true,
+          },
+        })
+      : Promise.resolve([]),
     prisma.supplier.findMany({
       where: { active: true },
       orderBy: { name: "asc" },
@@ -59,35 +93,69 @@ export default async function UtentiPage() {
     prisma.user.findMany({
       where: {
         active: true,
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        role: {
+          in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA", "AREA_MANAGER"],
+        },
       },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
   ]);
 
+  // Area Manager: fornitori limitati al proprio scope (se impostato)
+  let supplierOptions = suppliers;
+  if (isAreaManager && !isAdmin) {
+    const myScope = await prisma.userSupplierScope.findMany({
+      where: { userId: session.id },
+      select: { supplierId: true },
+    });
+    if (myScope.length > 0) {
+      const allowed = new Set(myScope.map((s) => s.supplierId));
+      supplierOptions = suppliers.filter((s) => allowed.has(s.id));
+    }
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Utenti</h1>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {isAreaManager && !isAdmin ? "Il mio team" : "Utenti"}
+          </h1>
           <p className="text-slate-500">
-            Gestione accessi, ruoli e scope Backoffice (fornitori / collaboratori)
+            {isAreaManager && !isAdmin
+              ? "Crea e gestisci i collaboratori che inseriscono contratti per te"
+              : "Gestione accessi, ruoli, fornitori e Area Manager"}
           </p>
         </div>
-        <DeleteAllUsersButton />
+        {isAdmin ? <DeleteAllUsersButton /> : null}
       </div>
 
-      <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Non puoi eliminare l&apos;account con cui sei collegato. Gli utenti
-        eliminati non spariscono dal database: restano disattivati e li puoi
-        ripristinare qui sotto. Per i <strong>Backoffice</strong>: assegna i
-        fornitori (es. Enel, oppure Dolomiti + Edison). Quando arriva un
-        contratto «da lavorare» di quel fornitore, l&apos;email parte a te
-        (Admin) <strong>e</strong> ai backoffice di quel fornitore.
-      </p>
+      {isAdmin ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Per ogni ruolo (Backoffice, Area Manager, Collaboratore, Commerciale)
+          puoi assegnare <strong>tutti</strong> o <strong>parte dei fornitori</strong>.
+          L&apos;<strong>Area Manager</strong> può creare collaboratori e vedere i
+          loro contratti. I Backoffice ricevono le email «da lavorare» sui
+          fornitori assegnati.
+        </p>
+      ) : (
+        <p className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          Come Area Manager puoi creare Collaboratori o Commerciali: entrano nel
+          tuo team e tu vedi i loro contratti in Provvigioni / Contratti.
+        </p>
+      )}
 
-      <CreateUserForm suppliers={suppliers} collaborators={collaborators} />
+      <CreateUserForm
+        suppliers={supplierOptions}
+        collaborators={collaborators}
+        allowedRoles={
+          isAreaManager && !isAdmin
+            ? ["COLLABORATORE", "COMMERCIALE"]
+            : undefined
+        }
+        isAreaManager={isAreaManager && !isAdmin}
+      />
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
@@ -112,40 +180,45 @@ export default async function UtentiPage() {
                 <td className="px-4 py-3">{user.email}</td>
                 <td className="px-4 py-3">
                   <div className="space-y-1">
-                    <p>{ROLE_LABELS[user.role as AppRole] ?? String(user.role)}</p>
-                    {user.role === "BACKOFFICE" ? (
+                    <p>
+                      {ROLE_LABELS[user.role as AppRole] ?? String(user.role)}
+                    </p>
+                    {roleSupportsSupplierScope(user.role) ? (
                       <>
                         <p className="text-xs text-slate-500">
                           Fornitori:{" "}
-                          {user.supplierScopes?.length
-                            ? user.supplierScopes
-                                .map((s) => s.supplier?.name ?? "?")
-                                .join(", ")
-                            : "nessuno (non vede contratti)"}
+                          {supplierLabel(user.supplierScopes, user.role)}
                         </p>
-                        <p className="text-xs text-slate-500">
-                          Collab:{" "}
-                          {user.collaboratorScopes?.length
-                            ? user.collaboratorScopes
-                                .map((c) => c.collaborator?.name ?? "?")
-                                .join(", ")
-                            : "tutti"}
-                        </p>
-                        <EditUserScopesForm
-                          user={{
-                            id: user.id,
-                            name: user.name,
-                            role: user.role as AppRole,
-                          }}
-                          suppliers={suppliers}
-                          collaborators={collaborators}
-                          selectedSupplierIds={(user.supplierScopes ?? []).map(
-                            (s) => s.supplierId,
-                          )}
-                          selectedCollaboratorIds={(
-                            user.collaboratorScopes ?? []
-                          ).map((c) => c.collaboratorId)}
-                        />
+                        {user.role === "BACKOFFICE" ||
+                        user.role === "AREA_MANAGER" ? (
+                          <p className="text-xs text-slate-500">
+                            {user.role === "AREA_MANAGER" ? "Team" : "Collab"}:{" "}
+                            {user.collaboratorScopes?.length
+                              ? user.collaboratorScopes
+                                  .map((c) => c.collaborator?.name ?? "?")
+                                  .join(", ")
+                              : user.role === "AREA_MANAGER"
+                                ? "vuoto (crea collaboratori)"
+                                : "tutti"}
+                          </p>
+                        ) : null}
+                        {isAdmin || user.id === session.id || teamIds.includes(user.id) ? (
+                          <EditUserScopesForm
+                            user={{
+                              id: user.id,
+                              name: user.name,
+                              role: user.role as AppRole,
+                            }}
+                            suppliers={supplierOptions}
+                            collaborators={collaborators}
+                            selectedSupplierIds={(user.supplierScopes ?? []).map(
+                              (s) => s.supplierId,
+                            )}
+                            selectedCollaboratorIds={(
+                              user.collaboratorScopes ?? []
+                            ).map((c) => c.collaboratorId)}
+                          />
+                        ) : null}
                       </>
                     ) : null}
                   </div>
@@ -161,7 +234,7 @@ export default async function UtentiPage() {
                           Sicurezza
                         </Button>
                       </Link>
-                    ) : (
+                    ) : isAdmin ? (
                       <>
                         <AdminSetPasswordButton
                           userId={user.id}
@@ -180,6 +253,8 @@ export default async function UtentiPage() {
                           </Button>
                         </form>
                       </>
+                    ) : (
+                      <span className="text-xs text-slate-500">Nel tuo team</span>
                     )}
                   </div>
                 </td>
@@ -189,7 +264,7 @@ export default async function UtentiPage() {
         </table>
       </div>
 
-      {deletedUsers.length > 0 ? (
+      {isAdmin && deletedUsers.length > 0 ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>

@@ -281,7 +281,7 @@ export default async function ProvvigioniPage({
     canViewAll
       ? prisma.user.findMany({
           where: {
-            role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+            role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
           },
           select: { id: true, name: true, active: true },
           orderBy: [{ active: "desc" }, { name: "asc" }],

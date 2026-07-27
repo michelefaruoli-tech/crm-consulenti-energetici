@@ -348,7 +348,7 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
       where: {
         id: newCollaboratorId,
         active: true,
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
       },
     });
     if (!collab) throw new Error("Collaboratore non valido");

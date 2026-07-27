@@ -283,7 +283,7 @@ async function buildPreviewRows(
   const users = await prisma.user.findMany({
     where: {
       active: true,
-      role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
     },
     select: { id: true, name: true, email: true },
   });
@@ -515,7 +515,7 @@ export async function importHistoricalExcelBatchAction(
   const users = await prisma.user.findMany({
     where: {
       active: true,
-      role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
     },
     select: { id: true, name: true, email: true },
   });

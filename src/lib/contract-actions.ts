@@ -100,7 +100,7 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     const collaborator = await prisma.user.findFirst({
       where: {
         id: collaboratorId,
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
       },
       select: { id: true, name: true, active: true },
     });

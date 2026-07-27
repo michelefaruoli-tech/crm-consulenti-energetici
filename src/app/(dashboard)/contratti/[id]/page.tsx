@@ -84,7 +84,7 @@ export default async function ContrattoDetailPage({
     ? await prisma.user.findMany({
         where: {
           active: true,
-          role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+          role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
         },
         select: { id: true, name: true, role: true },
         orderBy: { name: "asc" },

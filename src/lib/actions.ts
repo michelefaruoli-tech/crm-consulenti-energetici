@@ -431,7 +431,7 @@ export async function updateContractCollaboratorAction(formData: FormData): Prom
     where: {
       id: collaboratorId,
       active: true,
-      role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+      role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
     },
   });
   if (!collaborator) {

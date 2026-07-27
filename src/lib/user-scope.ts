@@ -5,12 +5,32 @@ import { getMasterEmail } from "@/lib/mail";
 import { hasPermission } from "@/lib/permissions";
 
 export type UserVisibilityScope = {
-  /** all = admin/segreteria; own = collaboratore; scoped = backoffice */
-  kind: "all" | "own" | "scoped";
+  /**
+   * all = admin/segreteria
+   * own = collaboratore (solo sé; se ha supplierScopes li filtra)
+   * scoped = backoffice (fornitori + collab opzionali)
+   * team = area manager (sé + team in collaboratorScopes; fornitori opzionali)
+   */
+  kind: "all" | "own" | "scoped" | "team";
   supplierIds: string[];
-  /** Vuoto = tutti i collaboratori (entro i fornitori assegnati) */
+  /** Vuoto = tutti i collaboratori (entro i fornitori), tranne in team dove vuoto = solo sé */
   collaboratorIds: string[];
 };
+
+/** Ruoli che possono avere scope fornitori assegnato. */
+export function roleSupportsSupplierScope(role: Role): boolean {
+  return (
+    role === "BACKOFFICE" ||
+    role === "AREA_MANAGER" ||
+    role === "COLLABORATORE" ||
+    role === "COMMERCIALE"
+  );
+}
+
+/** Ruoli che gestiscono anche la lista collaboratori nello scope. */
+export function roleSupportsCollaboratorScope(role: Role): boolean {
+  return role === "BACKOFFICE" || role === "AREA_MANAGER";
+}
 
 export async function loadUserVisibilityScope(session: {
   id: string;
@@ -18,6 +38,28 @@ export async function loadUserVisibilityScope(session: {
 }): Promise<UserVisibilityScope> {
   if (hasPermission(session.role, "contracts.edit_all")) {
     return { kind: "all", supplierIds: [], collaboratorIds: [] };
+  }
+
+  if (session.role === "AREA_MANAGER") {
+    const [suppliers, collaborators] = await Promise.all([
+      prisma.userSupplierScope.findMany({
+        where: { userId: session.id },
+        select: { supplierId: true },
+      }),
+      prisma.userCollaboratorScope.findMany({
+        where: { userId: session.id },
+        select: { collaboratorId: true },
+      }),
+    ]);
+    const teamIds = [
+      session.id,
+      ...collaborators.map((c) => c.collaboratorId),
+    ];
+    return {
+      kind: "team",
+      supplierIds: suppliers.map((s) => s.supplierId),
+      collaboratorIds: [...new Set(teamIds)],
+    };
   }
 
   if (
@@ -41,7 +83,16 @@ export async function loadUserVisibilityScope(session: {
     };
   }
 
-  return { kind: "own", supplierIds: [], collaboratorIds: [session.id] };
+  // Collaboratore / Commerciale: own, con eventuale filtro fornitori
+  const suppliers = await prisma.userSupplierScope.findMany({
+    where: { userId: session.id },
+    select: { supplierId: true },
+  });
+  return {
+    kind: "own",
+    supplierIds: suppliers.map((s) => s.supplierId),
+    collaboratorIds: [session.id],
+  };
 }
 
 /** Filtro Prisma contratti in base al ruolo / scope. */
@@ -49,8 +100,25 @@ export function contractWhereFromScope(
   scope: UserVisibilityScope,
 ): Prisma.ContractWhereInput {
   if (scope.kind === "all") return {};
+
   if (scope.kind === "own") {
-    return { collaboratorId: sessionOwnId(scope) };
+    const where: Prisma.ContractWhereInput = {
+      collaboratorId: sessionOwnId(scope),
+    };
+    if (scope.supplierIds.length > 0) {
+      where.supplierId = { in: scope.supplierIds };
+    }
+    return where;
+  }
+
+  if (scope.kind === "team") {
+    const where: Prisma.ContractWhereInput = {
+      collaboratorId: { in: scope.collaboratorIds },
+    };
+    if (scope.supplierIds.length > 0) {
+      where.supplierId = { in: scope.supplierIds };
+    }
+    return where;
   }
 
   // Backoffice senza fornitori assegnati → non vede nulla
@@ -84,7 +152,29 @@ export async function userCanAccessContract(
 ): Promise<boolean> {
   const scope = await loadUserVisibilityScope(session);
   if (scope.kind === "all") return true;
-  if (scope.kind === "own") return contract.collaboratorId === session.id;
+
+  if (scope.kind === "own") {
+    if (contract.collaboratorId !== session.id) return false;
+    if (
+      scope.supplierIds.length > 0 &&
+      !scope.supplierIds.includes(contract.supplierId)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  if (scope.kind === "team") {
+    if (!scope.collaboratorIds.includes(contract.collaboratorId)) return false;
+    if (
+      scope.supplierIds.length > 0 &&
+      !scope.supplierIds.includes(contract.supplierId)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   if (!scope.supplierIds.includes(contract.supplierId)) return false;
   if (
     scope.collaboratorIds.length > 0 &&

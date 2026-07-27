@@ -359,7 +359,7 @@ async function applyCommissionField(
     const user = await prisma.user.findFirst({
       where: {
         name: { equals: raw, mode: "insensitive" },
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
       },
       select: { id: true },
     });

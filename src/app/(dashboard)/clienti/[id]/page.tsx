@@ -88,7 +88,7 @@ export default async function ClienteDetailPage({
     canChangeCollaborator || hasPermission(session.role, "contracts.change_collaborator_dashboard")
       ? prisma.user.findMany({
           where: {
-            role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+            role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
           },
           select: { id: true, name: true, active: true, role: true },
           orderBy: [{ active: "desc" }, { name: "asc" }],

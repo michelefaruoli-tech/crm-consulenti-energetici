@@ -5,14 +5,22 @@ import { requireSession, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import type { Role } from "@/generated/prisma/client";
+import {
+  roleSupportsCollaboratorScope,
+  roleSupportsSupplierScope,
+} from "@/lib/user-scope";
 
 const ROLES: Role[] = [
   "ADMIN",
   "SEGRETERIA",
   "BACKOFFICE",
+  "AREA_MANAGER",
   "COLLABORATORE",
   "COMMERCIALE",
 ];
+
+/** Ruoli che un Area Manager può creare. */
+const TEAM_CREATABLE: Role[] = ["COLLABORATORE", "COMMERCIALE"];
 
 function parseIds(formData: FormData, key: string): string[] {
   return [
@@ -29,8 +37,7 @@ function parseRole(raw: string): Role | null {
   return ROLES.includes(raw as Role) ? (raw as Role) : null;
 }
 
-/** Scrive scope senza $transaction / createMany (Neon HTTP non li supporta). */
-async function replaceBackofficeScopes(opts: {
+async function replaceUserScopes(opts: {
   userId: string;
   supplierIds: string[];
   collaboratorIds: string[];
@@ -52,18 +59,29 @@ async function replaceBackofficeScopes(opts: {
   }
 }
 
+function canManageUsers(role: Role): boolean {
+  return (
+    hasPermission(role, "users.manage") ||
+    hasPermission(role, "users.manage_team")
+  );
+}
+
 /**
- * Crea utente. Per Backoffice: fornitori obbligatori; collaboratori vuoti = TUTTI.
- * Nessuna transazione Prisma (adapter Neon HTTP).
+ * Crea utente.
+ * - Admin: qualsiasi ruolo + scope
+ * - Area Manager: solo Collaboratore/Commerciale, aggiunti al proprio team
  */
 export async function createUserAction(
   formData: FormData,
 ): Promise<{ ok?: boolean; error?: string }> {
   try {
     const session = await requireSession();
-    if (!hasPermission(session.role, "users.manage")) {
+    if (!canManageUsers(session.role)) {
       return { error: "Permesso negato" };
     }
+
+    const isAdmin = hasPermission(session.role, "users.manage");
+    const isAreaManager = session.role === "AREA_MANAGER";
 
     const name = String(formData.get("name") ?? "").trim();
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
@@ -72,25 +90,57 @@ export async function createUserAction(
     const allCollaborators =
       String(formData.get("allCollaborators") ?? "") === "1" ||
       String(formData.get("allCollaborators") ?? "") === "on";
+    const allSuppliers =
+      String(formData.get("allSuppliers") ?? "") === "1" ||
+      String(formData.get("allSuppliers") ?? "") === "on";
 
     if (!name) return { error: "Nome obbligatorio" };
     if (!email || !email.includes("@")) return { error: "Email non valida" };
     if (!role) return { error: "Ruolo non valido" };
 
+    if (isAreaManager && !isAdmin) {
+      if (!TEAM_CREATABLE.includes(role)) {
+        return {
+          error:
+            "Come Area Manager puoi creare solo Collaboratori o Commerciali",
+        };
+      }
+    }
+
     const { validatePassword } = await import("@/lib/password-policy");
     const pwCheck = validatePassword(password, { email });
     if (!pwCheck.ok) return { error: pwCheck.error };
 
-    const supplierIds = parseIds(formData, "supplierIds");
+    let supplierIds = allSuppliers ? [] : parseIds(formData, "supplierIds");
     const collaboratorIds = allCollaborators
       ? []
       : parseIds(formData, "collaboratorIds");
 
-    if (role === "BACKOFFICE" && supplierIds.length === 0) {
+    // Area Manager: i fornitori del nuovo collab = intersezione col proprio scope (se ha scope)
+    if (isAreaManager && !isAdmin) {
+      const mySuppliers = await prisma.userSupplierScope.findMany({
+        where: { userId: session.id },
+        select: { supplierId: true },
+      });
+      if (mySuppliers.length > 0) {
+        const allowed = new Set(mySuppliers.map((s) => s.supplierId));
+        if (supplierIds.length === 0) {
+          supplierIds = [...allowed];
+        } else {
+          supplierIds = supplierIds.filter((id) => allowed.has(id));
+        }
+      }
+    }
+
+    if (role === "BACKOFFICE" && supplierIds.length === 0 && !allSuppliers) {
       return {
         error:
           "Per un Backoffice seleziona almeno un fornitore (es. Enel). I collaboratori puoi lasciare «Tutti».",
       };
+    }
+
+    if (role === "AREA_MANAGER" && supplierIds.length === 0 && !allSuppliers) {
+      // Area Manager può partire senza fornitori = tutti; ok
     }
 
     const existing = await prisma.user.findFirst({
@@ -105,7 +155,6 @@ export async function createUserAction(
       };
     }
 
-    // Un solo create utente (niente nested create = niente transaction Neon)
     const user = await prisma.user.create({
       data: {
         email,
@@ -115,21 +164,20 @@ export async function createUserAction(
       },
     });
 
-    if (role === "BACKOFFICE") {
+    if (roleSupportsSupplierScope(role)) {
       try {
-        for (const supplierId of supplierIds) {
-          await prisma.userSupplierScope.create({
-            data: { userId: user.id, supplierId },
-          });
-        }
-        for (const collaboratorId of collaboratorIds) {
-          await prisma.userCollaboratorScope.create({
-            data: { userId: user.id, collaboratorId },
-          });
-        }
+        // allSuppliers = nessuna riga → nessun filtro (vedono tutti i fornitori)
+        const saveSuppliers = allSuppliers ? [] : supplierIds;
+        const saveCollabs = roleSupportsCollaboratorScope(role)
+          ? collaboratorIds
+          : [];
+        await replaceUserScopes({
+          userId: user.id,
+          supplierIds: saveSuppliers,
+          collaboratorIds: saveCollabs,
+        });
       } catch (scopeErr) {
         console.error("[createUserAction scopes]", scopeErr);
-        // Utente già creato: non bloccare; admin può sistemare lo scope dopo
         revalidatePath("/utenti");
         return {
           ok: true,
@@ -138,6 +186,13 @@ export async function createUserAction(
           }. Apri «Scope fornitori» e salva di nuovo.`,
         };
       }
+    }
+
+    // Area Manager: il nuovo collaboratore entra nel suo team
+    if (isAreaManager && !isAdmin && TEAM_CREATABLE.includes(role)) {
+      await prisma.userCollaboratorScope.create({
+        data: { userId: session.id, collaboratorId: user.id },
+      }).catch(() => undefined);
     }
 
     revalidatePath("/utenti");
@@ -154,54 +209,83 @@ export async function createUserAction(
     if (msg.includes("Unique constraint") || msg.includes("User_email")) {
       return { error: "Email già registrata" };
     }
-    if (msg.includes("BACKOFFICE") || msg.includes("invalid input value for enum")) {
+    if (msg.includes("invalid input value for enum")) {
       return {
         error:
-          "Il database non ha ancora il ruolo Backoffice. Contatta il supporto o esegui le migrazioni.",
-      };
-    }
-    if (msg.includes("UserSupplierScope") || msg.includes("does not exist")) {
-      return {
-        error:
-          "Tabelle scope Backoffice mancanti sul database. Esegui le migrazioni Prisma.",
+          "Il database non ha ancora il ruolo richiesto. Esegui le migrazioni Prisma.",
       };
     }
     return { error: msg.slice(0, 200) };
   }
 }
 
-/** Aggiorna fornitori/collaboratori visibili per un Backoffice. */
+/** Aggiorna fornitori / collaboratori nello scope di un utente. */
 export async function updateUserScopesAction(
   formData: FormData,
 ): Promise<{ error?: string; ok?: boolean }> {
   try {
     const session = await requireSession();
-    if (!hasPermission(session.role, "users.manage")) {
+    if (!canManageUsers(session.role)) {
       return { error: "Permesso negato" };
     }
 
+    const isAdmin = hasPermission(session.role, "users.manage");
     const userId = String(formData.get("userId") ?? "");
     if (!userId) return { error: "Utente mancante" };
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.active) return { error: "Utente non trovato" };
-    if (user.role !== "BACKOFFICE") {
-      return { error: "Lo scope si applica solo al ruolo Backoffice" };
+
+    if (!roleSupportsSupplierScope(user.role)) {
+      return {
+        error:
+          "Questo ruolo non usa lo scope fornitori (Admin/Segreteria vedono tutto)",
+      };
+    }
+
+    // Area Manager può modificare solo membri del proprio team (o sé stesso)
+    if (!isAdmin && session.role === "AREA_MANAGER") {
+      if (userId === session.id) {
+        // ok: può aggiornare i propri fornitori
+      } else {
+        const inTeam = await prisma.userCollaboratorScope.findFirst({
+          where: { userId: session.id, collaboratorId: userId },
+        });
+        if (!inTeam) {
+          return { error: "Puoi gestire solo i collaboratori del tuo team" };
+        }
+      }
     }
 
     const allCollaborators =
       String(formData.get("allCollaborators") ?? "") === "1" ||
       String(formData.get("allCollaborators") ?? "") === "on";
-    const supplierIds = parseIds(formData, "supplierIds");
-    const collaboratorIds = allCollaborators
-      ? []
-      : parseIds(formData, "collaboratorIds");
+    const allSuppliers =
+      String(formData.get("allSuppliers") ?? "") === "1" ||
+      String(formData.get("allSuppliers") ?? "") === "on";
 
-    if (supplierIds.length === 0) {
+    let supplierIds = allSuppliers ? [] : parseIds(formData, "supplierIds");
+    const collaboratorIds =
+      roleSupportsCollaboratorScope(user.role) && !allCollaborators
+        ? parseIds(formData, "collaboratorIds")
+        : [];
+
+    if (user.role === "BACKOFFICE" && supplierIds.length === 0 && !allSuppliers) {
       return { error: "Seleziona almeno un fornitore" };
     }
 
-    await replaceBackofficeScopes({
+    if (!isAdmin && session.role === "AREA_MANAGER" && userId !== session.id) {
+      const mySuppliers = await prisma.userSupplierScope.findMany({
+        where: { userId: session.id },
+        select: { supplierId: true },
+      });
+      if (mySuppliers.length > 0) {
+        const allowed = new Set(mySuppliers.map((s) => s.supplierId));
+        supplierIds = supplierIds.filter((id) => allowed.has(id));
+      }
+    }
+
+    await replaceUserScopes({
       userId,
       supplierIds,
       collaboratorIds,

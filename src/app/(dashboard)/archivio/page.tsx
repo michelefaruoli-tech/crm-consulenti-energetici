@@ -64,7 +64,7 @@ export default async function ArchivioPage() {
     prisma.user.findMany({
       where: {
         active: true,
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
       },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },

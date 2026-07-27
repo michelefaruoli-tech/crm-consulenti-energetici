@@ -2,6 +2,7 @@ export type AppRole =
   | "ADMIN"
   | "SEGRETERIA"
   | "BACKOFFICE"
+  | "AREA_MANAGER"
   | "COLLABORATORE"
   | "COMMERCIALE";
 
@@ -28,9 +29,19 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   ADMIN: "Amministratore",
   SEGRETERIA: "Segreteria",
   BACKOFFICE: "Backoffice",
+  AREA_MANAGER: "Area Manager",
   COLLABORATORE: "Collaboratore",
   COMMERCIALE: "Commerciale",
 };
+
+/** Ruoli selezionabili come collaboratore su un contratto. */
+export const ASSIGNABLE_COLLABORATOR_ROLES = [
+  "COLLABORATORE",
+  "COMMERCIALE",
+  "AREA_MANAGER",
+  "ADMIN",
+  "SEGRETERIA",
+] as const;
 
 export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   BOZZA: "Bozza",

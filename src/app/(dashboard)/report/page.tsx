@@ -56,7 +56,7 @@ export default async function ReportPage({
         ? prisma.user.findMany({
             where: {
               active: true,
-              role: { in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA"] },
+              role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
             },
             orderBy: { name: "asc" },
             select: { id: true, name: true },

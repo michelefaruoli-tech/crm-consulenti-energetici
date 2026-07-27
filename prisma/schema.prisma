@@ -11,6 +11,7 @@ enum Role {
   ADMIN
   SEGRETERIA
   BACKOFFICE
+  AREA_MANAGER
   COLLABORATORE
   COMMERCIALE
 }
@@ -69,11 +70,11 @@ model User {
   emailLogsSent    ContractEmailLog[]      @relation("EmailSentBy")
   passwordResetTokens PasswordResetToken[]
   securityEvents   UserSecurityEvent[]
-  /// Fornitori che questo utente (es. Backoffice) può vedere/lavorare
+  /// Fornitori che questo utente può vedere/lavorare (Backoffice / Area Manager / collab limitati)
   supplierScopes   UserSupplierScope[]
-  /// Collaboratori “coperti” da questo backoffice (vuoto = tutti i collab di quei fornitori)
+  /// Collaboratori “coperti” (Backoffice) o team gestito (Area Manager)
   collaboratorScopes UserCollaboratorScope[] @relation("BackofficeUser")
-  /// Dove questo utente compare come collaboratore nello scope di un backoffice
+  /// Dove questo utente compare nello scope di un backoffice / area manager
   scopedByBackoffices UserCollaboratorScope[] @relation("ScopedCollaborator")
 }
 

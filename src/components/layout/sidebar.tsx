@@ -60,7 +60,7 @@ const NAV_ITEMS: Array<{
     href: "/report",
     label: "Report",
     icon: BarChart3,
-    roles: ["ADMIN", "SEGRETERIA", "BACKOFFICE", "COLLABORATORE", "COMMERCIALE"],
+    roles: ["ADMIN", "SEGRETERIA", "BACKOFFICE", "AREA_MANAGER", "COLLABORATORE", "COMMERCIALE"],
   },
   {
     href: "/backup",
@@ -75,7 +75,7 @@ const NAV_ITEMS: Array<{
     roles: ["ADMIN"],
   },
   { href: "/account", label: "Account", icon: Shield, roles: "all" },
-  { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN"] },
+  { href: "/utenti", label: "Utenti", icon: Settings, roles: ["ADMIN", "AREA_MANAGER"] },
 ];
 
 function canSee(roles: NavRoles, role: AppRole): boolean {
@@ -94,6 +94,7 @@ export function Sidebar({
   const canCreateContract =
     user.role === "ADMIN" ||
     user.role === "SEGRETERIA" ||
+    user.role === "AREA_MANAGER" ||
     user.role === "COLLABORATORE" ||
     user.role === "COMMERCIALE";
 

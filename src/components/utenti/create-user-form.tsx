@@ -12,29 +12,54 @@ type Opt = { id: string; name: string };
 export function CreateUserForm({
   suppliers,
   collaborators,
+  allowedRoles,
+  isAreaManager = false,
 }: {
   suppliers: Opt[];
   collaborators: Opt[];
+  /** Se impostato, limita i ruoli selezionabili (Area Manager). */
+  allowedRoles?: AppRole[];
+  isAreaManager?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [role, setRole] = useState<AppRole>("COLLABORATORE");
+  const roleOptions = useMemo(() => {
+    const entries = Object.entries(ROLE_LABELS) as [AppRole, string][];
+    if (!allowedRoles?.length) return entries;
+    return entries.filter(([v]) => allowedRoles.includes(v));
+  }, [allowedRoles]);
+
+  const [role, setRole] = useState<AppRole>(
+    () => roleOptions[0]?.[0] ?? "COLLABORATORE",
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [supplierSelected, setSupplierSelected] = useState<Set<string>>(
     () => new Set(),
   );
-  /** true = vede tutti i collaboratori (nessuna riga in UserCollaboratorScope) */
+  const [allSuppliers, setAllSuppliers] = useState(true);
   const [allCollaborators, setAllCollaborators] = useState(true);
   const [collabSelected, setCollabSelected] = useState<Set<string>>(
     () => new Set(),
   );
 
-  const showScope = role === "BACKOFFICE";
+  const showSupplierScope =
+    role === "BACKOFFICE" ||
+    role === "AREA_MANAGER" ||
+    role === "COLLABORATORE" ||
+    role === "COMMERCIALE";
+  const showCollabScope = role === "BACKOFFICE" || role === "AREA_MANAGER";
+  const suppliersRequired = role === "BACKOFFICE";
 
   const roleHelp = useMemo(() => {
     if (role === "BACKOFFICE") {
-      return "Il Backoffice vede solo i fornitori scelti. Con «Tutti i collaboratori» lavora con ogni commerciale/collaboratore su quei fornitori (anche i nuovi in futuro). Riceve le email delle pratiche da lavorare insieme all’Admin.";
+      return "Il Backoffice vede solo i fornitori scelti. Con «Tutti i collaboratori» lavora con ogni commerciale/collaboratore su quei fornitori. Riceve le email delle pratiche da lavorare insieme all’Admin.";
+    }
+    if (role === "AREA_MANAGER") {
+      return "L’Area Manager gestisce un team di collaboratori: può crearli e vedere i loro contratti. Puoi limitare i fornitori (tutti o solo alcuni).";
+    }
+    if (role === "COLLABORATORE" || role === "COMMERCIALE") {
+      return "Puoi limitare i fornitori su cui può inserire/lavorare. «Tutti i fornitori» = nessun limite.";
     }
     return null;
   }, [role]);
@@ -50,29 +75,23 @@ export function CreateUserForm({
     return next;
   }
 
-  function selectAllSuppliers() {
-    setSupplierSelected(new Set(suppliers.map((s) => s.id)));
-  }
-
-  function clearSuppliers() {
-    setSupplierSelected(new Set());
-  }
-
-  function selectAllCollabs() {
-    setAllCollaborators(false);
-    setCollabSelected(new Set(collaborators.map((c) => c.id)));
-  }
-
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setMessage(null);
     const fd = new FormData(e.currentTarget);
-    // Sovrascrivi checkbox controllati
     fd.delete("supplierIds");
     fd.delete("collaboratorIds");
     fd.delete("allCollaborators");
-    for (const id of supplierSelected) fd.append("supplierIds", id);
+    fd.delete("allSuppliers");
+
+    if (allSuppliers) {
+      fd.set("allSuppliers", "1");
+    } else {
+      fd.set("allSuppliers", "0");
+      for (const id of supplierSelected) fd.append("supplierIds", id);
+    }
+
     if (allCollaborators) {
       fd.set("allCollaborators", "1");
     } else {
@@ -87,14 +106,18 @@ export function CreateUserForm({
         return;
       }
       if (res.error && res.ok) {
-        // Creato ma scope parziale
         setMessage(res.error);
       } else {
-        setMessage("Utente creato.");
+        setMessage(
+          isAreaManager
+            ? "Collaboratore creato e aggiunto al tuo team."
+            : "Utente creato.",
+        );
       }
       (e.target as HTMLFormElement).reset();
-      setRole("COLLABORATORE");
+      setRole(roleOptions[0]?.[0] ?? "COLLABORATORE");
       setSupplierSelected(new Set());
+      setAllSuppliers(true);
       setAllCollaborators(true);
       setCollabSelected(new Set());
       router.refresh();
@@ -125,7 +148,7 @@ export function CreateUserForm({
           value={role}
           onChange={(e) => setRole(e.target.value as AppRole)}
         >
-          {Object.entries(ROLE_LABELS).map(([value, label]) => (
+          {roleOptions.map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
@@ -139,110 +162,127 @@ export function CreateUserForm({
         </p>
       ) : null}
 
-      {showScope ? (
-        <>
-          <div className="md:col-span-2">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-slate-800">
-                Fornitori (obbligatorio)
-              </p>
-              <div className="flex gap-2 text-xs">
+      {showSupplierScope ? (
+        <div className="md:col-span-2 space-y-3">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-800">
+              Fornitori{suppliersRequired ? " (obbligatorio)" : ""}
+            </p>
+          </div>
+          <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm">
+            <input
+              type="radio"
+              className="mt-1"
+              checked={allSuppliers}
+              onChange={() => {
+                setAllSuppliers(true);
+                setSupplierSelected(new Set());
+              }}
+            />
+            <span>
+              <strong>Tutti i fornitori</strong>
+              <span className="mt-0.5 block text-xs text-slate-600">
+                Nessun limite (consigliato per collaboratori / Area Manager).
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm">
+            <input
+              type="radio"
+              className="mt-1"
+              checked={!allSuppliers}
+              onChange={() => setAllSuppliers(false)}
+            />
+            <span>
+              <strong>Solo alcuni fornitori</strong>
+            </span>
+          </label>
+          {!allSuppliers ? (
+            <div>
+              <div className="mb-2 flex gap-2 text-xs">
                 <button
                   type="button"
                   className="text-emerald-700 underline"
-                  onClick={selectAllSuppliers}
+                  onClick={() =>
+                    setSupplierSelected(new Set(suppliers.map((s) => s.id)))
+                  }
                 >
                   Seleziona tutti
                 </button>
                 <button
                   type="button"
                   className="text-slate-500 underline"
-                  onClick={clearSuppliers}
+                  onClick={() => setSupplierSelected(new Set())}
                 >
                   Nessuno
                 </button>
               </div>
-            </div>
-            <p className="mb-2 text-xs text-slate-500">
-              Es. solo Enel, oppure Dolomiti + Edison.
-            </p>
-            <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-3 sm:grid-cols-2">
-              {suppliers.map((s) => (
-                <label
-                  key={s.id}
-                  className="flex items-center gap-2 text-sm text-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={supplierSelected.has(s.id)}
-                    onChange={(e) =>
-                      setSupplierSelected((prev) =>
-                        toggleSet(prev, s.id, e.target.checked),
-                      )
-                    }
-                  />
-                  {s.name}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="md:col-span-2 space-y-3">
-            <p className="text-sm font-medium text-slate-800">Collaboratori</p>
-            <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm text-slate-800">
-              <input
-                type="radio"
-                name="collabMode"
-                className="mt-1"
-                checked={allCollaborators}
-                onChange={() => {
-                  setAllCollaborators(true);
-                  setCollabSelected(new Set());
-                }}
-              />
-              <span>
-                <strong>Tutti i collaboratori</strong>
-                <span className="mt-0.5 block text-xs font-normal text-slate-600">
-                  Consigliato. Vede i contratti di chiunque, ma solo sui
-                  fornitori sopra (anche collaboratori aggiunti in futuro).
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm text-slate-800">
-              <input
-                type="radio"
-                name="collabMode"
-                className="mt-1"
-                checked={!allCollaborators}
-                onChange={() => setAllCollaborators(false)}
-              />
-              <span>
-                <strong>Solo alcuni collaboratori</strong>
-                <span className="mt-0.5 block text-xs font-normal text-slate-600">
-                  Limita la vista a persone scelte (usa «Seleziona tutti» per
-                  spuntarli tutti ora).
-                </span>
-              </span>
-            </label>
-
-            {!allCollaborators ? (
-              <div>
-                <div className="mb-2 flex gap-2 text-xs">
-                  <button
-                    type="button"
-                    className="text-emerald-700 underline"
-                    onClick={selectAllCollabs}
+              <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-3 sm:grid-cols-2">
+                {suppliers.map((s) => (
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-2 text-sm text-slate-700"
                   >
-                    Seleziona tutti
-                  </button>
-                  <button
-                    type="button"
-                    className="text-slate-500 underline"
-                    onClick={() => setCollabSelected(new Set())}
-                  >
-                    Nessuno
-                  </button>
-                </div>
+                    <input
+                      type="checkbox"
+                      checked={supplierSelected.has(s.id)}
+                      onChange={(e) =>
+                        setSupplierSelected((prev) =>
+                          toggleSet(prev, s.id, e.target.checked),
+                        )
+                      }
+                    />
+                    {s.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showCollabScope ? (
+        <div className="md:col-span-2 space-y-3">
+          <p className="text-sm font-medium text-slate-800">
+            {role === "AREA_MANAGER" ? "Team collaboratori" : "Collaboratori"}
+          </p>
+          <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm text-slate-800">
+            <input
+              type="radio"
+              className="mt-1"
+              checked={allCollaborators}
+              onChange={() => {
+                setAllCollaborators(true);
+                setCollabSelected(new Set());
+              }}
+            />
+            <span>
+              <strong>
+                {role === "AREA_MANAGER"
+                  ? "Solo sé stessi per ora (aggiungi dopo)"
+                  : "Tutti i collaboratori"}
+              </strong>
+              <span className="mt-0.5 block text-xs font-normal text-slate-600">
+                {role === "AREA_MANAGER"
+                  ? "Potrai creare collaboratori dopo: entreranno automaticamente nel team."
+                  : "Vede i contratti di chiunque, ma solo sui fornitori sopra."}
+              </span>
+            </span>
+          </label>
+          {role === "BACKOFFICE" ? (
+            <>
+              <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm text-slate-800">
+                <input
+                  type="radio"
+                  className="mt-1"
+                  checked={!allCollaborators}
+                  onChange={() => setAllCollaborators(false)}
+                />
+                <span>
+                  <strong>Solo alcuni collaboratori</strong>
+                </span>
+              </label>
+              {!allCollaborators ? (
                 <div className="grid max-h-48 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-3 sm:grid-cols-2">
                   {collaborators.map((c) => (
                     <label
@@ -262,10 +302,10 @@ export function CreateUserForm({
                     </label>
                   ))}
                 </div>
-              </div>
-            ) : null}
-          </div>
-        </>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       {error ? (
@@ -281,7 +321,11 @@ export function CreateUserForm({
 
       <div className="md:col-span-2">
         <Button type="submit" disabled={pending}>
-          {pending ? "Creazione…" : "Crea utente"}
+          {pending
+            ? "Creazione…"
+            : isAreaManager
+              ? "Crea collaboratore"
+              : "Crea utente"}
         </Button>
       </div>
     </form>
