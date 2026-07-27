@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { provinceSiglaFromCap } from "@/lib/italy-cap-province";
 
 type Place = {
   city: string;
@@ -7,7 +8,7 @@ type Place = {
   label: string;
 };
 
-/** Lookup CAP italiano: restituisce TUTTE le località (es. 85025 → Melfi). */
+/** Lookup CAP italiano: restituisce TUTTE le località (es. 85025 → Melfi + PZ). */
 export async function GET(
   _request: Request,
   context: { params: Promise<{ cap: string }> },
@@ -17,6 +18,8 @@ export async function GET(
   if (clean.length !== 5) {
     return NextResponse.json({ error: "CAP non valido" }, { status: 400 });
   }
+
+  const fallbackProvince = provinceSiglaFromCap(clean);
 
   try {
     const res = await fetch(`https://api.zippopotam.us/it/${clean}`, {
@@ -35,7 +38,10 @@ export async function GET(
 
     const places: Place[] = (data.places ?? []).map((p) => {
       const city = (p["place name"] ?? "").trim();
-      const province = (p["state abbreviation"] ?? "").trim();
+      // Zippopotam IT lascia spesso vuota la sigla → usiamo la mappa CAP
+      const fromApi = (p["state abbreviation"] ?? "").trim().toUpperCase();
+      const province =
+        fromApi.length === 2 ? fromApi : fallbackProvince;
       const region = (p.state ?? "").trim();
       return {
         city,
@@ -45,7 +51,6 @@ export async function GET(
       };
     });
 
-    // Dedup per città+provincia
     const seen = new Set<string>();
     const unique = places.filter((p) => {
       const k = `${p.city}|${p.province}`.toLowerCase();
@@ -54,10 +59,11 @@ export async function GET(
       return Boolean(p.city);
     });
 
-    // Preferisci comuni "principali": ordina per nome più corto / senza frazione tipica
     unique.sort((a, b) => {
       const score = (x: Place) =>
-        (x.city.includes("(") ? 2 : 0) + (x.city.includes("-") ? 1 : 0) + x.city.length / 100;
+        (x.city.includes("(") ? 2 : 0) +
+        (x.city.includes("-") ? 1 : 0) +
+        x.city.length / 100;
       return score(a) - score(b);
     });
 
@@ -67,9 +73,8 @@ export async function GET(
       cap: clean,
       multi: unique.length > 1,
       places: unique,
-      // retrocompatibilità: non auto-scegliere se multi
       city: unique.length === 1 ? first?.city ?? "" : "",
-      province: unique.length === 1 ? first?.province ?? "" : "",
+      province: unique.length === 1 ? first?.province ?? fallbackProvince : "",
       region: unique.length === 1 ? first?.region ?? "" : "",
       country: "Italia",
     });

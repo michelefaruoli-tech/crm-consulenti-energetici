@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Field, Input, Select } from "@/components/ui/form";
+import { normalizeProvinceSigla } from "@/lib/italy-cap-province";
 
 type Place = {
   city: string;
@@ -48,7 +49,7 @@ export function CapAddressFields({
   onStreetChange: (v: string) => void;
   onStreetNumberChange: (v: string) => void;
   zipLabel?: string;
-  /** Provincia compilata dal CAP: di solito sola lettura ma sempre inviata nello state. */
+  /** Provincia compilata dal CAP: sola lettura solo se già valorizzata. */
   provinceReadOnly?: boolean;
 }) {
   const [places, setPlaces] = useState<Place[]>([]);
@@ -79,24 +80,23 @@ export function CapAddressFields({
         if (list.length === 1) {
           const p = list[0]!;
           onCityChange(p.city);
-          onProvinceChange(p.province);
+          onProvinceChange(normalizeProvinceSigla(p.province));
           onRegionChange(p.region);
           setCapStatus(p.province ? "ok" : "missing");
         } else if (list.length > 1) {
-          // Se il comune già salvato è nella lista, NON azzerare (evita perdita dopo refresh)
           const match =
             city &&
             list.find(
               (p) =>
                 p.city.toLowerCase() === city.toLowerCase() &&
-                (!province || p.province.toLowerCase() === province.toLowerCase()),
+                (!province ||
+                  p.province.toLowerCase() === province.toLowerCase()),
             );
           if (match) {
             onCityChange(match.city);
-            onProvinceChange(match.province);
+            onProvinceChange(normalizeProvinceSigla(match.province));
             onRegionChange(match.region);
           } else if (capChanged) {
-            // Solo se l'utente ha cambiato CAP: chiedi nuova selezione
             onCityChange("");
             onProvinceChange("");
             onRegionChange("");
@@ -120,26 +120,29 @@ export function CapAddressFields({
     const p = places.find((x) => x.label === label);
     if (!p) return;
     onCityChange(p.city);
-    onProvinceChange(p.province);
+    onProvinceChange(normalizeProvinceSigla(p.province));
     onRegionChange(p.region);
   }
 
   const selectedLabel =
     city && places.length
-      ? places.find((p) => p.city === city && (!province || p.province === province))?.label ??
+      ? places.find(
+          (p) => p.city === city && (!province || p.province === province),
+        )?.label ??
         places.find((p) => p.city === city)?.label ??
         ""
       : "";
 
+  const provinceLocked = provinceReadOnly && Boolean(province);
+
   return (
     <div className="space-y-3">
-      {/* Hidden: garantisce che provincia sia nel DOM anche se il campo è readOnly in form nativi */}
       <input type="hidden" name="province" value={province} readOnly />
       <input type="hidden" name="city" value={city} readOnly />
       <input type="hidden" name="region" value={region} readOnly />
       <input type="hidden" name="zipCode" value={zipCode} readOnly />
 
-      <div className="grid gap-3 md:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">
         <Field label={`${zipLabel}`}>
           <Input
             value={zipCode}
@@ -147,12 +150,16 @@ export function CapAddressFields({
             placeholder="85025"
             inputMode="numeric"
             autoComplete="postal-code"
+            maxLength={5}
           />
         </Field>
         {multi ? (
           <div className="md:col-span-3">
             <Field label="Comune (scegli dalla lista) *">
-              <Select value={selectedLabel} onChange={(e) => pickPlace(e.target.value)}>
+              <Select
+                value={selectedLabel}
+                onChange={(e) => pickPlace(e.target.value)}
+              >
                 <option value="">Seleziona comune / località</option>
                 {places.map((p) => (
                   <option key={p.label} value={p.label}>
@@ -163,48 +170,71 @@ export function CapAddressFields({
             </Field>
           </div>
         ) : (
-          <Field label="Comune">
-            <Input
-              value={city}
-              onChange={(e) => onCityChange(e.target.value)}
-              autoComplete="address-level2"
-            />
-          </Field>
+          <div className="md:col-span-2">
+            <Field label="Comune">
+              <Input
+                value={city}
+                onChange={(e) => onCityChange(e.target.value)}
+                autoComplete="address-level2"
+              />
+            </Field>
+          </div>
         )}
-        <Field label="Provincia">
+        <Field label="Provincia (sigla)">
           <Input
             value={province}
-            onChange={(e) => onProvinceChange(e.target.value)}
-            readOnly={provinceReadOnly && Boolean(province)}
-            className={provinceReadOnly && province ? "bg-slate-50" : undefined}
-            placeholder={capStatus === "loading" ? "…" : "es. PZ"}
-            autoComplete="address-level1"
+            onChange={(e) =>
+              onProvinceChange(normalizeProvinceSigla(e.target.value))
+            }
+            readOnly={provinceLocked}
+            className={provinceLocked ? "bg-slate-50" : undefined}
+            placeholder={capStatus === "loading" ? "…" : "PZ"}
+            maxLength={2}
+            autoComplete="off"
+            spellCheck={false}
+            title="Sigla provincia a 2 lettere (es. PZ, RM, NA)"
           />
         </Field>
-        <Field label="Regione">
-          <Input
-            value={region}
-            onChange={(e) => onRegionChange(e.target.value)}
-            readOnly={provinceReadOnly && Boolean(region)}
-            className={provinceReadOnly && region ? "bg-slate-50" : undefined}
-          />
-        </Field>
-        <Field label="Via/Piazza">
-          <Input value={street} onChange={(e) => onStreetChange(e.target.value)} />
-        </Field>
-        <Field label="Civico">
-          <Input value={streetNumber} onChange={(e) => onStreetNumberChange(e.target.value)} />
-        </Field>
+        <div className="md:col-span-2">
+          <Field label="Regione">
+            <Input
+              value={region}
+              onChange={(e) => onRegionChange(e.target.value)}
+              readOnly={provinceReadOnly && Boolean(region)}
+              className={
+                provinceReadOnly && region ? "bg-slate-50" : undefined
+              }
+            />
+          </Field>
+        </div>
+        <div className="md:col-span-4">
+          <Field label="Via/Piazza">
+            <Input
+              value={street}
+              onChange={(e) => onStreetChange(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="md:col-span-2">
+          <Field label="Civico">
+            <Input
+              value={streetNumber}
+              onChange={(e) => onStreetNumberChange(e.target.value)}
+            />
+          </Field>
+        </div>
       </div>
       {multi ? (
         <p className="text-xs text-amber-800">
-          Questo CAP corrisponde a più località: scegli il comune (es. Melfi — PZ — Basilicata).
-          La provincia si compila automaticamente.
+          Questo CAP corrisponde a più località: scegli il comune (es. Melfi —
+          PZ — Basilicata). La provincia si compila automaticamente.
         </p>
       ) : null}
-      {capStatus === "missing" && zipCode.replace(/\D/g, "").length === 5 ? (
+      {capStatus === "missing" &&
+      zipCode.replace(/\D/g, "").length === 5 ? (
         <p className="text-xs text-amber-800">
-          CAP non trovato in elenco: inserisci manualmente Comune e Provincia (sigla, es. PZ).
+          CAP non trovato in elenco: inserisci manualmente Comune e Provincia
+          (sigla a 2 lettere, es. PZ).
         </p>
       ) : null}
     </div>
