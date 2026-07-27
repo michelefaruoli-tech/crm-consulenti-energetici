@@ -1,6 +1,7 @@
 import "server-only";
 import { clientDisplayName, formatDate } from "@/lib/utils";
 import { formatRomeDateTime } from "@/lib/timezone";
+import { operationTypeLabel } from "@/lib/provvigioni-stato";
 
 type ClientLike = {
   type: string;
@@ -241,6 +242,40 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
   ];
 }
 
+function priceTypeLabel(raw: string | null | undefined): string {
+  const v = (raw ?? "").trim().toUpperCase();
+  if (!v) return "";
+  if (v.includes("FISSO") || v === "FIXED" || v === "FIX") return "Fisso";
+  if (v.includes("VARIAB") || v === "INDEX" || v.includes("INDICIZZ")) return "Variabile";
+  if (v.includes("MISTO")) return "Misto";
+  // Mantieni il testo originale capitalizzato se già leggibile
+  return raw!.trim();
+}
+
+/** Oggetto email lavorazione: Cliente – Servizio – Operazione – Fisso/Variabile (senza n. pratica). */
+function buildLavorazioneSubject(
+  contract: ContractLike,
+  opts?: { resend?: boolean },
+): string {
+  const clientName = clientDisplayName(contract.client);
+  const utility = (contract.utilityType || "").trim().toUpperCase();
+  const operation =
+    contract.operationType?.toUpperCase() === "ALTRO" && contract.operationOther
+      ? contract.operationOther.trim()
+      : operationTypeLabel(contract.operationType);
+  const price = priceTypeLabel(contract.priceType);
+
+  const parts = [
+    opts?.resend ? "REINVIO – Nuovo contratto da lavorare" : "Nuovo contratto da lavorare",
+    clientName,
+    utility || null,
+    operation || null,
+    price || null,
+  ].filter((p) => p && String(p).trim());
+
+  return parts.join(" – ");
+}
+
 function attachmentsBlock(
   contracts: ContractLike[],
   appUrl: string,
@@ -283,11 +318,8 @@ export function buildContractNotificationBody(
 ): { subject: string; body: string } {
   const appUrl =
     opts?.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
-  const clientName = clientDisplayName(contract.client);
   const isResend = Boolean(opts?.resendReason);
-  const subject = isResend
-    ? `REINVIO – Nuovo contratto – ${contract.contractNumber} – ${clientName} – ${contract.utilityType || ""}`
-    : `Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientName} – ${contract.utilityType || ""}`;
+  const subject = buildLavorazioneSubject(contract, { resend: isResend });
 
   const att = attachmentsBlock([contract], appUrl);
   const body = [
@@ -330,10 +362,34 @@ export function buildBatchContractNotificationBody(
     opts?.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
   const first = contracts[0]!;
   const clientName = clientDisplayName(first.client);
-  const utilities = contracts.map((c) => c.utilityType || "?").join("+");
+  const utilities = contracts
+    .map((c) => (c.utilityType || "").trim().toUpperCase() || "?")
+    .join("+");
+  const operations = [
+    ...new Set(
+      contracts.map((c) =>
+        c.operationType?.toUpperCase() === "ALTRO" && c.operationOther
+          ? c.operationOther.trim()
+          : operationTypeLabel(c.operationType),
+      ),
+    ),
+  ].join("/");
+  const prices = [
+    ...new Set(
+      contracts.map((c) => priceTypeLabel(c.priceType)).filter(Boolean),
+    ),
+  ].join("/");
   const numbers = contracts.map((c) => c.contractNumber).join(", ");
 
-  const subject = `Nuovi contratti da lavorare (${contracts.length}) – ${clientName} – ${utilities}`;
+  const subject = [
+    `Nuovi contratti da lavorare (${contracts.length})`,
+    clientName,
+    utilities,
+    operations || null,
+    prices || null,
+  ]
+    .filter((p) => p && String(p).trim())
+    .join(" – ");
   const att = attachmentsBlock(contracts, appUrl);
 
   const body = [
