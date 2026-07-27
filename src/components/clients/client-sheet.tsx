@@ -117,6 +117,10 @@ export type ClientSheetContract = {
   stornoLabel?: string;
   koReason: string | null;
   koNotes: string | null;
+  /** Contratto padre se creato insieme (es. Gas collegato a Luce) */
+  parentContractId?: string | null;
+  emailStatus?: string | null;
+  createdAt?: string | null;
 };
 
 export type ClientSheetSupplier = { id: string; name: string; code: string };
@@ -189,6 +193,80 @@ export function ClientSheet({
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+
+  /** Contratti creati insieme (padre + figli) per invio email unica. */
+  function siblingContractIds(contractId: string): string[] {
+    const c = contracts.find((x) => x.id === contractId);
+    if (!c) return [contractId];
+    const root = c.parentContractId || c.id;
+    const linked = contracts.filter(
+      (x) => x.id === root || x.parentContractId === root,
+    );
+    if (linked.length > 1) return linked.map((x) => x.id);
+
+    // Fallback: stesso collaboratore creati entro 5 minuti (Luce+Gas senza parent link)
+    if (c.createdAt) {
+      const t = new Date(c.createdAt).getTime();
+      const near = contracts.filter((x) => {
+        if (x.collaboratorId !== c.collaboratorId) return false;
+        if (!x.createdAt) return false;
+        return Math.abs(new Date(x.createdAt).getTime() - t) <= 5 * 60 * 1000;
+      });
+      if (near.length > 1) return near.map((x) => x.id);
+    }
+    return [contractId];
+  }
+
+  function sendBackofficeEmail(contractId: string) {
+    const ids = siblingContractIds(contractId);
+    const labels = ids
+      .map((id) => {
+        const c = contracts.find((x) => x.id === id);
+        return c ? `${c.utilityType || "?"} ${c.contractNumber}` : id.slice(-6);
+      })
+      .join(" + ");
+    const ok = window.confirm(
+      ids.length > 1
+        ? `INVIA AL BACK OFFICE\n\nVerrà inviata un'unica email con:\n${labels}\n\n(anagrafica + blocchi servizio + allegati)\n\nConfermi?`
+        : `INVIA AL BACK OFFICE\n\nInviare l'email per ${labels}?\n\nConfermi?`,
+    );
+    if (!ok) return;
+
+    setErr(null);
+    setMsg(null);
+    setSendingEmailId(contractId);
+    start(async () => {
+      try {
+        const res = await fetch("/api/contracts/notify-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contractIds: ids }),
+        });
+        const json = (await res.json().catch(() => null)) as {
+          success?: boolean;
+          emailSent?: boolean;
+          message?: string;
+          recipients?: string;
+        } | null;
+        if (!res.ok || !json?.emailSent) {
+          setErr(json?.message || "Invio email non riuscito");
+          return;
+        }
+        setMsg(
+          json.message ||
+            (ids.length > 1
+              ? `Email inviata per ${ids.length} contratti (${labels}).`
+              : `Email inviata per ${labels}.`),
+        );
+        router.refresh();
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Errore di rete");
+      } finally {
+        setSendingEmailId(null);
+      }
+    });
+  }
 
   useEffect(() => {
     if (!dirty) return;
@@ -496,6 +574,17 @@ export function ClientSheet({
             + Nuovo contratto
           </Link>
         </div>
+        <p className="mb-3 text-xs text-slate-500">
+          Se un invio fallisce, usa <strong>Invia al BACK OFFICE</strong> sulla riga: se Luce e Gas
+          sono stati creati insieme, partono entrambi in un&apos;unica email (non serve rifare il
+          contratto).
+        </p>
+        {msg ? (
+          <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg}</p>
+        ) : null}
+        {err ? (
+          <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{err}</p>
+        ) : null}
         {contracts.length === 0 ? (
           <p className="text-sm text-slate-500">
             Nessun contratto ancora.{" "}
@@ -510,36 +599,71 @@ export function ClientSheet({
               {contracts.map((c) => {
                 const u = resolveUtilityDisplay(c);
                 const active = c.id === selectedId;
+                const siblings = siblingContractIds(c.id);
+                const busy = pending && sendingEmailId === c.id;
                 return (
-                  <button
+                  <div
                     key={c.id}
-                    type="button"
-                    onClick={() => selectContract(c.id)}
                     className={
                       active
-                        ? "rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3 text-left"
-                        : "rounded-xl border border-slate-200 bg-white p-3 text-left active:bg-slate-50"
+                        ? "rounded-xl border-2 border-emerald-500 bg-emerald-50 p-3"
+                        : "rounded-xl border border-slate-200 bg-white p-3"
                     }
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-slate-900">{c.contractNumber}</p>
-                        <p className="text-xs text-slate-500">{c.insertionDate}</p>
+                    <button
+                      type="button"
+                      onClick={() => selectContract(c.id)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-slate-900">{c.contractNumber}</p>
+                          <p className="text-xs text-slate-500">{c.insertionDate}</p>
+                        </div>
+                        <StatusBadge status={c.status} />
                       </div>
-                      <StatusBadge status={c.status} />
+                      <p className="mt-1 text-sm text-slate-800">
+                        {u.serviceLabel}
+                        {c.operationType ? ` · ${c.operationType}` : ""}
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        {c.supplierName} · {c.collaboratorName}
+                      </p>
+                      <p className="mt-1 text-xs font-medium text-slate-700">
+                        Gettone € {c.gettone}
+                        {c.commissionConfirmed ? " · confermato" : " · da confermare"}
+                      </p>
+                      {c.emailStatus ? (
+                        <p className="mt-1 text-[10px] text-slate-500">
+                          Email: {c.emailStatus}
+                          {siblings.length > 1 ? ` · gruppo ${siblings.length} contratti` : ""}
+                        </p>
+                      ) : null}
+                    </button>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={active ? "primary" : "secondary"}
+                        onClick={() => selectContract(c.id)}
+                      >
+                        {active ? "Selezionato" : "Apri"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="bg-emerald-700 text-white hover:bg-emerald-800"
+                        disabled={pending}
+                        onClick={() => sendBackofficeEmail(c.id)}
+                      >
+                        {busy
+                          ? "Invio…"
+                          : siblings.length > 1
+                            ? `Invia al BACK OFFICE (${siblings.length})`
+                            : "Invia al BACK OFFICE"}
+                      </Button>
                     </div>
-                    <p className="mt-1 text-sm text-slate-800">
-                      {u.serviceLabel}
-                      {c.operationType ? ` · ${c.operationType}` : ""}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      {c.supplierName} · {c.collaboratorName}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-slate-700">
-                      Gettone € {c.gettone}
-                      {c.commissionConfirmed ? " · confermato" : " · da confermare"}
-                    </p>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -556,13 +680,15 @@ export function ClientSheet({
                     <th className="px-2 py-2">Collaboratore</th>
                     <th className="px-2 py-2">Stato</th>
                     <th className="px-2 py-2">Gettone</th>
-                    <th className="px-2 py-2" />
+                    <th className="px-2 py-2">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
                   {contracts.map((c) => {
                     const u = resolveUtilityDisplay(c);
                     const active = c.id === selectedId;
+                    const siblings = siblingContractIds(c.id);
+                    const busy = pending && sendingEmailId === c.id;
                     return (
                       <tr
                         key={c.id}
@@ -582,6 +708,11 @@ export function ClientSheet({
                         <td className="px-2 py-2">{c.collaboratorName}</td>
                         <td className="px-2 py-2">
                           <StatusBadge status={c.status} />
+                          {c.emailStatus ? (
+                            <div className="mt-0.5 text-[10px] text-slate-500">
+                              Email: {c.emailStatus}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-2 py-2">
                           <div>€ {c.gettone}</div>
@@ -599,14 +730,34 @@ export function ClientSheet({
                           ) : null}
                         </td>
                         <td className="px-2 py-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={active ? "primary" : "secondary"}
-                            onClick={() => selectContract(c.id)}
-                          >
-                            {active ? "Selezionato" : "Apri"}
-                          </Button>
+                          <div className="flex flex-wrap gap-1.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={active ? "primary" : "secondary"}
+                              onClick={() => selectContract(c.id)}
+                            >
+                              {active ? "Selezionato" : "Apri"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="bg-emerald-700 text-white hover:bg-emerald-800"
+                              disabled={pending}
+                              title={
+                                siblings.length > 1
+                                  ? `Invia email unica per ${siblings.length} contratti collegati`
+                                  : "Invia email al back office"
+                              }
+                              onClick={() => sendBackofficeEmail(c.id)}
+                            >
+                              {busy
+                                ? "Invio…"
+                                : siblings.length > 1
+                                  ? `Invia BO (${siblings.length})`
+                                  : "Invia al BACK OFFICE"}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );

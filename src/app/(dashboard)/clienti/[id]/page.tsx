@@ -228,6 +228,9 @@ export default async function ClienteDetailPage({
     stornoLabel: storno.label,
     koReason: c.koReason,
     koNotes: c.koNotes,
+    parentContractId: c.parentContractId,
+    emailStatus: c.emailStatus,
+    createdAt: c.createdAt.toISOString(),
   };
   });
 
