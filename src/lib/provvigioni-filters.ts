@@ -15,7 +15,7 @@ export type ProvvigioniFilters = {
   collab?: string | null;
   /** Nome fornitore esatto (es. Enel) da ?supplier= */
   supplier?: string | null;
-  /** Stato semplificato: Incassato | Da incassare | KO / Cessato */
+  /** Stato semplificato: Incassato | Da incassare | Pagato | KO / Cessato */
   stato?: string | null;
   /** Tipologia: Business | Domestico */
   tipologia?: string | null;
@@ -77,6 +77,9 @@ export function buildProvvigioniContractWhere(
       collectionDate: null,
       status: { notIn: [...KO_STATUSES] },
     });
+  } else if (stato === "Pagato") {
+    // Pagato collaboratore = provvigione liquidata
+    and.push({ status: { equals: "PROVVIGIONE_LIQUIDATA" } });
   } else if (stato === "KO / Cessato") {
     and.push({
       collectionDate: null,

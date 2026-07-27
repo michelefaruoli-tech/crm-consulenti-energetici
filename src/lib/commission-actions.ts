@@ -19,6 +19,8 @@ import {
   computeSupplyStartDate,
   normalizeOperationType,
 } from "@/lib/supply-dates";
+import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
+import { contractVisibilityWhere } from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
 
@@ -28,6 +30,8 @@ type CommissionWithContract = {
   id: string;
   contractId: string;
   expected: unknown;
+  received: unknown;
+  paid: unknown;
   stornoDate: Date | null;
   stornoAmount: unknown;
   contract: {
@@ -296,6 +300,32 @@ async function applyCommissionField(
         });
       }
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
+    } else if (/pagat/.test(raw)) {
+      // Pagato collaboratore: liquidazione provvigione
+      const received = Number(commission.received ?? 0) || 0;
+      const paid = Number(commission.paid ?? 0) || 0;
+      const remaining = Math.max(0, received - paid);
+
+      if (remaining > 0) {
+        await prisma.commission.update({
+          where: { id: commission.id },
+          data: { paid: paid + remaining },
+        });
+        await prisma.commissionEntry.create({
+          data: {
+            commissionId: commission.id,
+            type: "paid",
+            amount: remaining,
+            paidById: session.id,
+            note: "Liquidazione collaboratore",
+          },
+        });
+      }
+
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: { status: "PROVVIGIONE_LIQUIDATA" },
+      });
     } else if (/incass/.test(raw) && !/da\s*incass/.test(raw) && !/^no$/.test(raw)) {
       await prisma.contract.update({
         where: { id: contractId },
@@ -762,4 +792,195 @@ export async function bulkPayRecurringAction(
   revalidatePath("/provvigioni");
   revalidatePath("/");
   return { ok: true, monthsPaid, contracts: contractsTouched };
+}
+
+type CommissionByContract = {
+  id: string;
+  contractId: string;
+  received: unknown;
+  paid: unknown;
+  contract: { collaboratorId: string };
+};
+
+async function assertCanAccessCommissionsByContractIds(
+  session: { id: string; role: Parameters<typeof hasPermission>[0] },
+  contractIds: string[],
+): Promise<CommissionByContract[]> {
+  if (contractIds.length === 0) throw new Error("Nessuna riga selezionata");
+  if (contractIds.length > 200)
+    throw new Error("Massimo 200 righe per volta");
+
+  const rows = await prisma.commission.findMany({
+    where: { contractId: { in: contractIds } },
+    select: {
+      id: true,
+      contractId: true,
+      received: true,
+      paid: true,
+      contract: { select: { collaboratorId: true } },
+    },
+  });
+
+  if (rows.length === 0) throw new Error("Nessuna provvigione trovata");
+
+  const canAll = hasPermission(session.role, "commissions.view_all");
+  for (const r of rows) {
+    if (!canAll && r.contract.collaboratorId !== session.id) {
+      throw new Error("Permesso negato su una o più righe");
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Liquida provvigioni collaboratori (stato = PROVVIGIONE_LIQUIDATA)
+ * per le righe selezionate. Incrementa commission.paid di (received - paid).
+ */
+export async function bulkLiquidateSelectedAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number }> {
+  const session = await requireSession();
+  const contractIds = parseIdList(formData, "contractIds");
+  const rows = await assertCanAccessCommissionsByContractIds(session, contractIds);
+
+  for (const r of rows) {
+    const received = Number(r.received ?? 0) || 0;
+    const paid = Number(r.paid ?? 0) || 0;
+    const remaining = Math.max(0, received - paid);
+
+    if (remaining > 0) {
+      await prisma.commission.update({
+        where: { id: r.id },
+        data: { paid: paid + remaining },
+      });
+      await prisma.commissionEntry.create({
+        data: {
+          commissionId: r.id,
+          type: "paid",
+          amount: remaining,
+          paidById: session.id,
+          note: "Liquidazione collaboratore",
+        },
+      });
+    }
+
+    await prisma.contract.update({
+      where: { id: r.contractId },
+      data: { status: "PROVVIGIONE_LIQUIDATA" },
+    });
+  }
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Commission",
+    entityId: rows[0]?.contractId ?? "",
+    details: { source: "bulk_liquidate_selected", count: rows.length },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath("/contratti");
+  return { ok: true, count: rows.length };
+}
+
+/**
+ * Liquida TUTTI gli incassati (Incassato) ma non ancora pagati (non PROVVIGIONE_LIQUIDATA)
+ * secondo i filtri correnti della pagina Provvigioni.
+ */
+export async function bulkLiquidateIncassatiAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number }> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "commissions.view_all")) {
+    throw new Error("Permesso negato");
+  }
+
+  const collab = String(formData.get("collab") ?? "").trim() || null;
+  const supplier = String(formData.get("supplier") ?? "").trim() || null;
+  const q = String(formData.get("q") ?? "").trim() || null;
+  const tipologia = String(formData.get("tipologia") ?? "").trim() || null;
+  const vista = String(formData.get("vista") ?? "").trim() || null;
+  const recurrenceMode = vista === "ricorrente" ? "only" : "all";
+
+  const visibility = await contractVisibilityWhere({ id: session.id, role: session.role });
+
+  const baseWhere = buildProvvigioniContractWhere({
+    canViewAll: true,
+    sessionUserId: session.id,
+    collab,
+    supplier,
+    stato: "Incassato",
+    tipologia,
+    q,
+    recurrenceMode,
+    visibility,
+  });
+
+  // Incassato ma NON ancora liquidato
+  const where = {
+    AND: [
+      baseWhere,
+      { status: { not: "PROVVIGIONE_LIQUIDATA" } },
+      {
+        status: {
+          notIn: ["KO", "ANNULLATO", "CHIUSO", "PROVVIGIONE_LIQUIDATA"],
+        },
+      },
+    ],
+  };
+
+  const limit = 5000;
+  const rows = await prisma.commission.findMany({
+    where: { contract: where as any },
+    select: {
+      id: true,
+      contractId: true,
+      received: true,
+      paid: true,
+      contract: { select: { collaboratorId: true } },
+    },
+    take: limit,
+  });
+
+  for (const r of rows) {
+    const received = Number(r.received ?? 0) || 0;
+    const paid = Number(r.paid ?? 0) || 0;
+    const remaining = Math.max(0, received - paid);
+
+    if (remaining > 0) {
+      await prisma.commission.update({
+        where: { id: r.id },
+        data: { paid: paid + remaining },
+      });
+      await prisma.commissionEntry.create({
+        data: {
+          commissionId: r.id,
+          type: "paid",
+          amount: remaining,
+          paidById: session.id,
+          note: "Liquidazione collaboratore",
+        },
+      });
+    }
+
+    await prisma.contract.update({
+      where: { id: r.contractId },
+      data: { status: "PROVVIGIONE_LIQUIDATA" },
+    });
+  }
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Commission",
+    entityId: rows[0]?.contractId ?? "",
+    details: { source: "bulk_liquidate_incassati", count: rows.length, limit },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath("/contratti");
+  return { ok: true, count: rows.length };
 }

@@ -42,12 +42,14 @@ export type ProvvigioneRow = {
 
 /**
  * Stato in Provvigioni.
- * Se c’è una data di incasso → sempre «Incassato» (priorità su KO/Chiuso).
+ * Priorità: se la provvigione è stata liquidata al collaboratore → «Pagato».
  */
 export function simplifiedProvvigioneStato(
   status: string,
   hasCollectionDate: boolean,
 ): string {
+  // Liquidazione collaboratore: deve avere priorità su "Incassato"
+  if (status === "PROVVIGIONE_LIQUIDATA") return "Pagato";
   if (hasCollectionDate) return "Incassato";
   if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
   return "Da incassare";
@@ -57,6 +59,7 @@ export const PROVVIGIONE_STATO_OPTIONS = [
   "KO / Cessato",
   "Da incassare",
   "Incassato",
+  "Pagato",
 ] as const;
 
 /** Opzioni modificabili in tabella Provvigioni (etichette UI). */

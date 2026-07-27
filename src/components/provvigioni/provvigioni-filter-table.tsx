@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
   bulkConfirmCommissionsAction,
+  bulkLiquidateIncassatiAction,
+  bulkLiquidateSelectedAction,
   bulkMarkPaidAction,
   bulkPayRecurringAction,
   bulkUpdateCommissionFieldsAction,
@@ -767,6 +769,24 @@ export function ProvvigioniFilterTable({
             <button
               type="button"
               disabled={pending}
+              className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
+              onClick={() =>
+                runBulk("Segna pagato", async () => {
+                  const fd = new FormData();
+                  fd.set("contractIds", selectedContractIds.join(","));
+                  return bulkLiquidateSelectedAction(fd);
+                })
+              }
+              title="Liquidazione collaboratore: imposta stato PROVVIGIONE_LIQUIDATA"
+            >
+              Segna pagato
+            </button>
+          ) : null}
+
+          {canConfirm ? (
+            <button
+              type="button"
+              disabled={pending}
               className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-800 disabled:opacity-50"
               onClick={() =>
                 runBulk("Conferma gettone", async () => {
@@ -834,6 +854,43 @@ export function ProvvigioniFilterTable({
           >
             Incassa mesi ric. mancanti
           </button>
+
+          {canConfirm ? (
+            <button
+              type="button"
+              disabled={pending}
+              className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-900 disabled:opacity-50"
+              onClick={() => {
+                const label = "Tutti gli incassati → pagato";
+                if (
+                  !window.confirm(
+                    `${label}\n\nVerranno liquidati tutti i contratti incassati non ancora PROVVIGIONE_LIQUIDATA, rispettando i filtri della pagina.`,
+                  )
+                )
+                  return;
+                setError(null);
+                setMessage(null);
+                start(async () => {
+                  try {
+                    const fd = new FormData();
+                    fd.set("collab", listQuery?.collab ?? "");
+                    fd.set("supplier", listQuery?.supplier ?? "");
+                    fd.set("tipologia", listQuery?.tipologia ?? "");
+                    fd.set("q", listQuery?.q ?? "");
+                    fd.set("vista", listQuery?.vista ?? "");
+                    const res = await bulkLiquidateIncassatiAction(fd);
+                    setMessage(`Operazione ok · ${res.count} contratti liquidati`);
+                    router.refresh();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Errore azione multipla");
+                  }
+                });
+              }}
+              title="Liquidazione di tutti gli incassati (filtri correnti)"
+            >
+              Incassati → pagato
+            </button>
+          ) : null}
 
           {canDelete ? (
             <button
