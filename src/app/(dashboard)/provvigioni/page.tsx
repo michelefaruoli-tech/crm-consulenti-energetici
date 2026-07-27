@@ -287,8 +287,16 @@ export default async function ProvvigioniPage({
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
-          // Stesso filtro di Provvigioni: solo attivi (non storici / eliminati)
-          where: { deletedAt: null, isHistorical: false },
+          where: buildProvvigioniContractWhere({
+            canViewAll: canViewAll || isScoped,
+            sessionUserId: session.id,
+            supplier,
+            stato,
+            tipologia,
+            q,
+            recurrenceMode,
+            visibility,
+          }),
           _count: { id: true },
         })
       : Promise.resolve([]),
@@ -318,7 +326,7 @@ export default async function ProvvigioniPage({
     }),
     prisma.contract.count({
       where: buildProvvigioniContractWhere({
-        canViewAll,
+        canViewAll: canViewAll || isScoped,
         sessionUserId: session.id,
         collab,
         supplier,
@@ -326,11 +334,12 @@ export default async function ProvvigioniPage({
         tipologia,
         q,
         recurrenceMode: "exclude",
+        visibility,
       }),
     }),
     prisma.contract.count({
       where: buildProvvigioniContractWhere({
-        canViewAll,
+        canViewAll: canViewAll || isScoped,
         sessionUserId: session.id,
         collab,
         supplier,
@@ -338,6 +347,7 @@ export default async function ProvvigioniPage({
         tipologia,
         q,
         recurrenceMode: "only",
+        visibility,
       }),
     }),
   ]);
@@ -606,7 +616,7 @@ export default async function ProvvigioniPage({
               : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           }
         >
-          Tutti ({countGettoni + countRicorrenti})
+          Tutti ({vista === "tutti" ? total : countGettoni + countRicorrenti})
         </Link>
         <Link
           href={vistaHref("ricorrente")}

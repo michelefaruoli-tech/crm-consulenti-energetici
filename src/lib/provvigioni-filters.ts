@@ -113,8 +113,13 @@ export function buildProvvigioniContractWhere(
   if (recurrenceMode === "only") {
     and.push({ OR: recurringWhereOr });
   } else if (recurrenceMode === "exclude") {
+    // Ricorrenza NULL/vuota = gettone/una tantum (SQL NOT su NULL escludeva migliaia di righe)
     and.push({
-      NOT: { OR: recurringWhereOr },
+      OR: [
+        { recurrence: null },
+        { recurrence: { equals: "" } },
+        { NOT: { OR: recurringWhereOr } },
+      ],
     });
   }
 
