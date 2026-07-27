@@ -12,6 +12,7 @@ import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 import {
   guessCompetenceFromFilename,
   isYearMonthPeriod,
+  periodFromHeliosDate,
   type HeliosImportPreviewRow,
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
@@ -27,6 +28,8 @@ type ParsedHeliosLine = {
   pod: string;
   intestatario: string;
   baseAmount: number;
+  /** Competenza riga (da colonna Inizio) oppure fallback file/form */
+  competencePeriod: string;
 };
 
 function cellStr(value: unknown): string {
@@ -64,13 +67,14 @@ function findHeliosSheet(workbook: ExcelJS.Workbook): ExcelJS.Worksheet | null {
   return workbook.worksheets[0] ?? null;
 }
 
-function headerIndex(headers: string[], ...names: string[]): number {
+function headerIndex(headers: Array<string | undefined>, ...names: string[]): number {
+  // ExcelJS usa colonne 1-based → headers[0] può essere undefined (array sparso)
   for (const name of names) {
-    const i = headers.findIndex((h) => h === name);
+    const i = headers.findIndex((h) => h != null && h === name);
     if (i >= 0) return i;
   }
   for (const name of names) {
-    const i = headers.findIndex((h) => h.includes(name));
+    const i = headers.findIndex((h) => h != null && h.includes(name));
     if (i >= 0) return i;
   }
   return -1;
@@ -102,6 +106,7 @@ async function bufferFromForm(formData: FormData): Promise<
 
 export async function parseHeliosProvvigioniBuffer(
   buffer: Buffer,
+  fallbackCompetence: string,
 ): Promise<{ ok: true; lines: ParsedHeliosLine[] } | { ok: false; error: string }> {
   const workbook = new ExcelJS.Workbook();
   try {
@@ -114,7 +119,7 @@ export async function parseHeliosProvvigioniBuffer(
   if (!sheet) return { ok: false, error: "Foglio Excel vuoto" };
 
   const headerRow = sheet.getRow(1);
-  const headers: string[] = [];
+  const headers: Array<string | undefined> = [];
   headerRow.eachCell((c, col) => {
     headers[col] = cellStr(c.value).toLowerCase();
   });
@@ -139,6 +144,16 @@ export async function parseHeliosProvvigioniBuffer(
     "provvigione base",
     "provvigione",
   );
+  // Competenza riga (file multi-mese dic/gen/feb): colonna Inizio / competenza / periodo
+  const colInizio = headerIndex(
+    headers,
+    "inizio",
+    "data inizio",
+    "competenza",
+    "periodo",
+    "mese competenza",
+    "mese",
+  );
 
   if (colPod < 0) {
     return {
@@ -149,21 +164,36 @@ export async function parseHeliosProvvigioniBuffer(
   }
 
   const lines: ParsedHeliosLine[] = [];
-  const seenPods = new Set<string>();
+  // Dedup per POD + mese competenza (stesso POD può comparire in dic, gen, feb)
+  const seenKeys = new Set<string>();
 
   for (let r = 2; r <= sheet.rowCount; r++) {
     const row = sheet.getRow(r);
     const podRaw = cellStr(row.getCell(colPod).value);
     const pod = normalizePodKey(podRaw);
     if (!pod) continue;
-    if (seenPods.has(pod)) continue;
-    seenPods.add(pod);
+
+    let competencePeriod = fallbackCompetence;
+    if (colInizio >= 0) {
+      const fromCell = periodFromHeliosDate(row.getCell(colInizio).value);
+      if (fromCell) competencePeriod = fromCell;
+    }
+
+    const dedupKey = `${pod}|${competencePeriod}`;
+    if (seenKeys.has(dedupKey)) continue;
+    seenKeys.add(dedupKey);
 
     const intestatario =
       colName >= 0 ? cellStr(row.getCell(colName).value) : "";
     const baseAmount = colBase >= 0 ? cellNum(row.getCell(colBase).value) : 0;
 
-    lines.push({ excelRow: r, pod, intestatario, baseAmount });
+    lines.push({
+      excelRow: r,
+      pod,
+      intestatario,
+      baseAmount,
+      competencePeriod,
+    });
   }
 
   if (lines.length === 0) {
@@ -240,7 +270,6 @@ function buildPreviewRows(
       recurringMonths: Array<{ period: string; status: string }>;
     }>
   >,
-  competencePeriod: string,
 ): HeliosImportPreviewRow[] {
   return lines.map((line) => {
     const matches = byPod.get(line.pod) ?? [];
@@ -250,6 +279,7 @@ function buildPreviewRows(
         pod: line.pod,
         intestatario: line.intestatario,
         baseAmount: line.baseAmount,
+        competencePeriod: line.competencePeriod,
         status: "not_found" as const,
       };
     }
@@ -260,19 +290,23 @@ function buildPreviewRows(
         pod: line.pod,
         intestatario: line.intestatario,
         baseAmount: line.baseAmount,
+        competencePeriod: line.competencePeriod,
         status: "ambiguous" as const,
         contractId: first.id,
         clientName: clientDisplayName(first.client),
       };
     }
     const c = matches[0]!;
-    const month = c.recurringMonths.find((m) => m.period === competencePeriod);
+    const month = c.recurringMonths.find(
+      (m) => m.period === line.competencePeriod,
+    );
     const already = month?.status === "PAID";
     return {
       excelRow: line.excelRow,
       pod: line.pod,
       intestatario: line.intestatario,
       baseAmount: line.baseAmount,
+      competencePeriod: line.competencePeriod,
       status: already ? ("already_paid" as const) : ("will_pay" as const),
       contractId: c.id,
       clientName: clientDisplayName(c.client),
@@ -293,42 +327,63 @@ function summarize(rows: HeliosImportPreviewRow[]) {
 export async function previewHeliosProvvigioniAction(
   formData: FormData,
 ): Promise<HeliosImportPreviewResult | { ok: false; error: string }> {
-  const session = await requireSession();
-  if (!hasPermission(session.role, "commissions.view_all") &&
-      !hasPermission(session.role, "commissions.edit_gettone") &&
-      !hasPermission(session.role, "commissions.edit_own_gettone")) {
-    return { ok: false, error: "Non hai permesso di importare i rendiconti Helios" };
+  try {
+    const session = await requireSession();
+    if (!hasPermission(session.role, "commissions.view_all") &&
+        !hasPermission(session.role, "commissions.edit_gettone") &&
+        !hasPermission(session.role, "commissions.edit_own_gettone")) {
+      return { ok: false, error: "Non hai permesso di importare i rendiconti Helios" };
+    }
+
+    const loaded = await bufferFromForm(formData);
+    if (!loaded.ok) return loaded;
+
+    let competencePeriod = String(formData.get("competencePeriod") ?? "").trim();
+    let settledPeriod = String(formData.get("settledPeriod") ?? "").trim();
+    if (!isYearMonthPeriod(competencePeriod)) {
+      competencePeriod =
+        guessCompetenceFromFilename(loaded.fileName) ??
+        `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    }
+    if (!isYearMonthPeriod(settledPeriod)) settledPeriod = competencePeriod;
+
+    const parsed = await parseHeliosProvvigioniBuffer(
+      loaded.buffer,
+      competencePeriod,
+    );
+    if (!parsed.ok) return parsed;
+
+    const map = await loadHeliosContractsByPod();
+    if (!map.ok) {
+      return { ok: false, error: map.error };
+    }
+
+    const rows = buildPreviewRows(parsed.lines, map.byPod);
+    const competencePeriods = [
+      ...new Set(rows.map((r) => r.competencePeriod)),
+    ].sort();
+    const multiMonth = competencePeriods.length > 1;
+
+    return {
+      ok: true,
+      competencePeriod: competencePeriods[0] ?? competencePeriod,
+      settledPeriod,
+      multiMonth,
+      competencePeriods,
+      fileName: loaded.fileName,
+      rows,
+      summary: summarize(rows),
+    };
+  } catch (e) {
+    console.error("[previewHeliosProvvigioniAction]", e);
+    return {
+      ok: false,
+      error:
+        e instanceof Error
+          ? e.message.slice(0, 200)
+          : "Anteprima Helios non riuscita",
+    };
   }
-
-  const loaded = await bufferFromForm(formData);
-  if (!loaded.ok) return loaded;
-
-  let competencePeriod = String(formData.get("competencePeriod") ?? "").trim();
-  let settledPeriod = String(formData.get("settledPeriod") ?? "").trim();
-  if (!isYearMonthPeriod(competencePeriod)) {
-    competencePeriod =
-      guessCompetenceFromFilename(loaded.fileName) ??
-      `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-  }
-  if (!isYearMonthPeriod(settledPeriod)) settledPeriod = competencePeriod;
-
-  const parsed = await parseHeliosProvvigioniBuffer(loaded.buffer);
-  if (!parsed.ok) return parsed;
-
-  const map = await loadHeliosContractsByPod();
-  if (!map.ok) {
-    return { ok: false, error: map.error };
-  }
-
-  const rows = buildPreviewRows(parsed.lines, map.byPod, competencePeriod);
-  return {
-    ok: true,
-    competencePeriod,
-    settledPeriod,
-    fileName: loaded.fileName,
-    rows,
-    summary: summarize(rows),
-  };
 }
 
 export async function applyHeliosProvvigioniAction(
@@ -345,125 +400,150 @@ export async function applyHeliosProvvigioniAction(
     }
   | { ok: false; error: string }
 > {
-  const session = await requireSession();
-  if (!hasPermission(session.role, "commissions.view_all") &&
-      !hasPermission(session.role, "commissions.edit_gettone") &&
-      !hasPermission(session.role, "commissions.edit_own_gettone")) {
-    return { ok: false, error: "Non hai permesso di importare i rendiconti Helios" };
-  }
-
-  const loaded = await bufferFromForm(formData);
-  if (!loaded.ok) return loaded;
-
-  let competencePeriod = String(formData.get("competencePeriod") ?? "").trim();
-  let settledPeriod = String(formData.get("settledPeriod") ?? "").trim();
-  if (!isYearMonthPeriod(competencePeriod)) {
-    return { ok: false, error: "Mese competenza non valido (usa YYYY-MM)" };
-  }
-  if (!isYearMonthPeriod(settledPeriod)) settledPeriod = competencePeriod;
-
-  const parsed = await parseHeliosProvvigioniBuffer(loaded.buffer);
-  if (!parsed.ok) return parsed;
-
-  const map = await loadHeliosContractsByPod();
-  if (!map.ok) return { ok: false, error: map.error };
-
-  const preview = buildPreviewRows(parsed.lines, map.byPod, competencePeriod);
-  const amountByPod = new Map(parsed.lines.map((l) => [l.pod, l.baseAmount]));
-
-  let paid = 0;
-  let skippedPaid = 0;
-  const notFound = preview.filter((r) => r.status === "not_found").length;
-  const ambiguous = preview.filter((r) => r.status === "ambiguous").length;
-
-  for (const row of preview) {
-    if (row.status === "already_paid") {
-      skippedPaid++;
-      continue;
-    }
-    if (row.status !== "will_pay" || !row.contractId) continue;
-
-    const amount = amountByPod.get(row.pod) || null;
-    const existing = await prisma.recurringMonth.findUnique({
-      where: {
-        contractId_period: {
-          contractId: row.contractId,
-          period: competencePeriod,
-        },
-      },
-    });
-
-    if (existing?.status === "PAID") {
-      skippedPaid++;
-      continue;
+  try {
+    const session = await requireSession();
+    if (!hasPermission(session.role, "commissions.view_all") &&
+        !hasPermission(session.role, "commissions.edit_gettone") &&
+        !hasPermission(session.role, "commissions.edit_own_gettone")) {
+      return { ok: false, error: "Non hai permesso di importare i rendiconti Helios" };
     }
 
-    if (existing) {
-      await prisma.recurringMonth.update({
-        where: { id: existing.id },
-        data: {
-          status: "PAID",
-          paidAt: new Date(),
-          settledPeriod,
-          amount: amount ?? existing.amount,
-          note: existing.note ?? "Import file Helios",
-        },
-      });
-    } else {
-      await prisma.recurringMonth.create({
-        data: {
-          contractId: row.contractId,
-          period: competencePeriod,
-          status: "PAID",
-          paidAt: new Date(),
-          settledPeriod,
-          amount,
-          note: "Import file Helios",
-        },
-      });
+    const loaded = await bufferFromForm(formData);
+    if (!loaded.ok) return loaded;
+
+    let competencePeriod = String(formData.get("competencePeriod") ?? "").trim();
+    let settledPeriod = String(formData.get("settledPeriod") ?? "").trim();
+    if (!isYearMonthPeriod(competencePeriod)) {
+      competencePeriod =
+        guessCompetenceFromFilename(loaded.fileName) ??
+        `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     }
+    if (!isYearMonthPeriod(settledPeriod)) settledPeriod = competencePeriod;
 
-    const [y, mo] = competencePeriod.split("-").map(Number);
-    await prisma.contract.update({
-      where: { id: row.contractId },
-      data: {
-        paymentStatus: "Incassato",
-        collectionDate: new Date(y, mo - 1, 1),
-        recurrence: "Ricorrente",
-      },
-    });
-
-    await syncRecurringMonthsForContract(row.contractId).catch(() => undefined);
-    paid++;
-  }
-
-  await writeAuditLog({
-    userId: session.id,
-    action: "IMPORT",
-    entity: "HeliosProvvigioni",
-    entityId: competencePeriod,
-    details: {
-      fileName: loaded.fileName,
+    const parsed = await parseHeliosProvvigioniBuffer(
+      loaded.buffer,
       competencePeriod,
-      settledPeriod,
+    );
+    if (!parsed.ok) return parsed;
+
+    const map = await loadHeliosContractsByPod();
+    if (!map.ok) return { ok: false, error: map.error };
+
+    const preview = buildPreviewRows(parsed.lines, map.byPod);
+    const amountByKey = new Map(
+      parsed.lines.map((l) => [`${l.pod}|${l.competencePeriod}`, l.baseAmount]),
+    );
+
+    let paid = 0;
+    let skippedPaid = 0;
+    const notFound = preview.filter((r) => r.status === "not_found").length;
+    const ambiguous = preview.filter((r) => r.status === "ambiguous").length;
+    const competencePeriods = [
+      ...new Set(preview.map((r) => r.competencePeriod)),
+    ].sort();
+
+    for (const row of preview) {
+      if (row.status === "already_paid") {
+        skippedPaid++;
+        continue;
+      }
+      if (row.status !== "will_pay" || !row.contractId) continue;
+
+      const rowPeriod = row.competencePeriod;
+      const amount =
+        amountByKey.get(`${row.pod}|${rowPeriod}`) || null;
+      const existing = await prisma.recurringMonth.findUnique({
+        where: {
+          contractId_period: {
+            contractId: row.contractId,
+            period: rowPeriod,
+          },
+        },
+      });
+
+      if (existing?.status === "PAID") {
+        skippedPaid++;
+        continue;
+      }
+
+      if (existing) {
+        await prisma.recurringMonth.update({
+          where: { id: existing.id },
+          data: {
+            status: "PAID",
+            paidAt: new Date(),
+            settledPeriod,
+            amount: amount ?? existing.amount,
+            note: existing.note ?? "Import file Helios",
+          },
+        });
+      } else {
+        await prisma.recurringMonth.create({
+          data: {
+            contractId: row.contractId,
+            period: rowPeriod,
+            status: "PAID",
+            paidAt: new Date(),
+            settledPeriod,
+            amount,
+            note: "Import file Helios",
+          },
+        });
+      }
+
+      const [y, mo] = rowPeriod.split("-").map(Number);
+      await prisma.contract.update({
+        where: { id: row.contractId },
+        data: {
+          paymentStatus: "Incassato",
+          collectionDate: new Date(y, mo - 1, 1),
+          recurrence: "Ricorrente",
+        },
+      });
+
+      await syncRecurringMonthsForContract(row.contractId).catch(() => undefined);
+      paid++;
+    }
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "IMPORT",
+      entity: "HeliosProvvigioni",
+      entityId: competencePeriods.join(",") || competencePeriod,
+      details: {
+        fileName: loaded.fileName,
+        competencePeriod,
+        competencePeriods,
+        settledPeriod,
+        paid,
+        skippedPaid,
+        notFound,
+        ambiguous,
+      },
+    });
+
+    revalidatePath("/provvigioni");
+    revalidatePath("/archivio");
+    revalidatePath("/");
+    revalidatePath("/contratti");
+
+    return {
+      ok: true,
       paid,
       skippedPaid,
       notFound,
       ambiguous,
-    },
-  });
-
-  revalidatePath("/provvigioni");
-  revalidatePath("/");
-  revalidatePath("/contratti");
-
-  return {
-    ok: true,
-    paid,
-    skippedPaid,
-    notFound,
-    ambiguous,
-    competencePeriod,
-    settledPeriod,
-  };
+      competencePeriod: competencePeriods[0] ?? competencePeriod,
+      settledPeriod,
+    };
+  } catch (e) {
+    console.error("[applyHeliosProvvigioniAction]", e);
+    return {
+      ok: false,
+      error:
+        e instanceof Error
+          ? e.message.slice(0, 200)
+          : "Import Helios non riuscito",
+    };
+  }
 }

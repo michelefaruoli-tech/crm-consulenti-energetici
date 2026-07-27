@@ -56,6 +56,8 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     () => months.find((m) => m.endsWith("-04")) ?? months[0] ?? toPeriod(new Date()),
   );
   const [settledPeriod, setSettledPeriod] = useState(competencePeriod);
+  const [multiMonth, setMultiMonth] = useState(false);
+  const [competencePeriods, setCompetencePeriods] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<HeliosImportPreviewRow[] | null>(null);
@@ -75,6 +77,8 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     if (!file) {
       setFileName("");
       setFileB64(null);
+      setMultiMonth(false);
+      setCompetencePeriods([]);
       return;
     }
     setFileName(file.name);
@@ -111,10 +115,15 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
       }
       setCompetencePeriod(res.competencePeriod);
       setSettledPeriod(res.settledPeriod);
+      setMultiMonth(res.multiMonth);
+      setCompetencePeriods(res.competencePeriods);
       setPreview(res.rows);
       setSummary(res.summary);
+      const mesiLabel = res.multiMonth
+        ? `mesi ${res.competencePeriods.map(periodLabel).join(", ")}`
+        : `competenza ${periodLabel(res.competencePeriod)}`;
       setMessage(
-        `Anteprima: ${res.summary.willPay} da pagare · ${res.summary.alreadyPaid} già ok · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui`,
+        `Anteprima (${mesiLabel}): ${res.summary.willPay} da pagare · ${res.summary.alreadyPaid} già ok · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui`,
       );
     });
   }
@@ -126,7 +135,11 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     }
     if (
       !window.confirm(
-        `Segnare come pagati ${summary?.willPay ?? 0} mesi Helios?\nCompetenza ${periodLabel(competencePeriod)} → rendiconto ${periodLabel(settledPeriod)}`,
+        `Segnare come pagati ${summary?.willPay ?? 0} mesi Helios?\n` +
+          (multiMonth
+            ? `Competenze: ${competencePeriods.map(periodLabel).join(", ")}\n`
+            : `Competenza ${periodLabel(competencePeriod)}\n`) +
+          `Rendiconto / bonifico: ${periodLabel(settledPeriod)}`,
       )
     ) {
       return;
@@ -174,7 +187,14 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             onChange={(e) => {
               setCompetencePeriod(e.target.value);
               setPreview(null);
+              setMultiMonth(false);
             }}
+            disabled={multiMonth}
+            title={
+              multiMonth
+                ? "File multi-mese: la competenza è letta dalla colonna Inizio di ogni riga"
+                : undefined
+            }
           >
             {!months.includes(competencePeriod) ? (
               <option value={competencePeriod}>
@@ -187,6 +207,18 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
               </option>
             ))}
           </Select>
+          {multiMonth ? (
+            <p className="mt-1 text-[11px] text-sky-800">
+              File multi-mese rilevato:{" "}
+              {competencePeriods.map(periodLabel).join(" · ")}. Competenza presa
+              dalla colonna <strong>Inizio</strong> di ogni riga.
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Fallback se nel file non c’è la colonna Inizio. Per file tipo
+              dic–gen–feb la competenza viene letta da ogni riga.
+            </p>
+          )}
         </Field>
         <Field label="Mese rendiconto / bonifico">
           <Select
@@ -265,6 +297,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             <thead className="sticky top-0 bg-slate-50 text-left">
               <tr>
                 <th className="px-2 py-1">POD</th>
+                <th className="px-2 py-1">Competenza</th>
                 <th className="px-2 py-1">File</th>
                 <th className="px-2 py-1">CRM</th>
                 <th className="px-2 py-1">€</th>
@@ -273,8 +306,12 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             </thead>
             <tbody>
               {willPayRows.slice(0, 40).map((r) => (
-                <tr key={`${r.excelRow}-${r.pod}`} className="border-t border-slate-100">
+                <tr
+                  key={`${r.excelRow}-${r.pod}-${r.competencePeriod}`}
+                  className="border-t border-slate-100"
+                >
                   <td className="px-2 py-1 font-mono">{r.pod}</td>
+                  <td className="px-2 py-1">{periodLabel(r.competencePeriod)}</td>
                   <td className="px-2 py-1">{r.intestatario}</td>
                   <td className="px-2 py-1">{r.clientName ?? "—"}</td>
                   <td className="px-2 py-1">{r.baseAmount || "—"}</td>
