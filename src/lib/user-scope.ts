@@ -97,7 +97,9 @@ export async function userCanAccessContract(
 
 /**
  * Destinatari email pratica da lavorare:
- * sempre Admin (MASTER_EMAIL) + tutti i Backoffice attivi con scope su quel fornitore.
+ * - sempre Admin (MASTER_EMAIL)
+ * - tutti i Backoffice attivi con scope su quel fornitore
+ * - eventuali email salvate sul fornitore (campo email, più indirizzi separati da virgola)
  */
 export async function getLavorazioneNotifyEmails(
   supplierId: string | null | undefined,
@@ -107,17 +109,29 @@ export async function getLavorazioneNotifyEmails(
   if (admin) set.add(admin);
 
   if (supplierId) {
-    const users = await prisma.user.findMany({
-      where: {
-        active: true,
-        role: "BACKOFFICE",
-        supplierScopes: { some: { supplierId } },
-      },
-      select: { email: true },
-    });
+    const [users, supplier] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          active: true,
+          role: "BACKOFFICE",
+          supplierScopes: { some: { supplierId } },
+        },
+        select: { email: true },
+      }),
+      prisma.supplier.findUnique({
+        where: { id: supplierId },
+        select: { email: true },
+      }),
+    ]);
     for (const u of users) {
       const e = u.email.trim().toLowerCase();
-      if (e && !e.includes("deleted.")) set.add(e);
+      if (e && !e.startsWith("deleted_")) set.add(e);
+    }
+    if (supplier?.email) {
+      for (const part of supplier.email.split(/[,;\s]+/)) {
+        const e = part.trim().toLowerCase();
+        if (e.includes("@") && !e.startsWith("deleted_")) set.add(e);
+      }
     }
   }
 

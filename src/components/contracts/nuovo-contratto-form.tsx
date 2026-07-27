@@ -303,57 +303,61 @@ export function NuovoContrattoForm({
           setErrors(result?.errors ?? ["Non è stato possibile salvare il contratto."]);
           return;
         }
-        const contractId = result.contractIds?.[0];
+        const contractIds = (result.contractIds ?? []).filter(Boolean);
+        const contractId = contractIds[0];
         if (!contractId) {
           setErrors(["Contratto creato ma ID mancante. Controlla in Contratti / In lavorazione."]);
           return;
         }
 
+        // Allegati su TUTTI i contratti (es. Luce + Gas)
         if (attachments.length > 0) {
           let savedTotal = 0;
           const failReasons: string[] = [];
-          for (const a of attachments) {
-            try {
-              let up: Response;
-              if (a.file) {
-                const fd = new FormData();
-                fd.append("files", a.file, a.filename);
-                fd.append("docTypes", a.docType);
-                up = await fetch(`/api/contracts/${contractId}/attachments`, {
-                  method: "POST",
-                  body: fd,
-                });
-              } else if (a.contentBase64) {
-                up = await fetch(`/api/contracts/${contractId}/attachments`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    filename: a.filename,
-                    mimeType: a.mimeType,
-                    docType: a.docType,
-                    contentBase64: a.contentBase64,
-                  }),
-                });
-              } else {
-                failReasons.push(`${a.filename}: file non disponibile`);
-                continue;
-              }
-              const upJson = (await up.json().catch(() => null)) as {
-                success?: boolean;
-                message?: string;
-                saved?: number;
-              } | null;
-              if (!up.ok || !upJson?.success || !upJson.saved) {
+          for (const cid of contractIds) {
+            for (const a of attachments) {
+              try {
+                let up: Response;
+                if (a.file) {
+                  const fd = new FormData();
+                  fd.append("files", a.file, a.filename);
+                  fd.append("docTypes", a.docType);
+                  up = await fetch(`/api/contracts/${cid}/attachments`, {
+                    method: "POST",
+                    body: fd,
+                  });
+                } else if (a.contentBase64) {
+                  up = await fetch(`/api/contracts/${cid}/attachments`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      filename: a.filename,
+                      mimeType: a.mimeType,
+                      docType: a.docType,
+                      contentBase64: a.contentBase64,
+                    }),
+                  });
+                } else {
+                  failReasons.push(`${a.filename}: file non disponibile`);
+                  continue;
+                }
+                const upJson = (await up.json().catch(() => null)) as {
+                  success?: boolean;
+                  message?: string;
+                  saved?: number;
+                } | null;
+                if (!up.ok || !upJson?.success || !upJson.saved) {
+                  failReasons.push(
+                    `${a.filename}: ${upJson?.message ?? `HTTP ${up.status}`}`,
+                  );
+                } else {
+                  savedTotal += upJson.saved;
+                }
+              } catch (err) {
                 failReasons.push(
-                  `${a.filename}: ${upJson?.message ?? `HTTP ${up.status}`}`,
+                  `${a.filename}: ${err instanceof Error ? err.message : "errore rete"}`,
                 );
-              } else {
-                savedTotal += upJson.saved;
               }
-            } catch (err) {
-              failReasons.push(
-                `${a.filename}: ${err instanceof Error ? err.message : "errore rete"}`,
-              );
             }
           }
           if (savedTotal === 0) {
@@ -365,36 +369,57 @@ export function NuovoContrattoForm({
           }
           if (failReasons.length > 0) {
             setErrors([
-              `Contratto salvato. Allegati parziali (${savedTotal}/${attachments.length}): ${failReasons.slice(0, 2).join(" · ")}. Completa dalla scheda lavorazione.`,
+              `Contratto salvato. Allegati parziali (${savedTotal} upload): ${failReasons.slice(0, 2).join(" · ")}. Completa dalla scheda lavorazione.`,
             ]);
           }
         }
 
         if (sendToMaster && !draft) {
           await new Promise((r) => setTimeout(r, 400));
-          const mailRes = await fetch(`/api/contracts/${contractId}/attachments`, {
-            method: "PUT",
-          });
-          const mailJson = (await mailRes.json().catch(() => null)) as {
-            success?: boolean;
-            emailSent?: boolean;
-            message?: string;
-            code?: string;
-            attachmentsInEmail?: number;
-          } | null;
+          const mailFailures: string[] = [];
+          let mailOkCount = 0;
+          for (const cid of contractIds) {
+            const mailRes = await fetch(`/api/contracts/${cid}/attachments`, {
+              method: "PUT",
+            });
+            const mailJson = (await mailRes.json().catch(() => null)) as {
+              success?: boolean;
+              emailSent?: boolean;
+              message?: string;
+            } | null;
+            if (!mailRes.ok || !mailJson?.emailSent) {
+              mailFailures.push(
+                mailJson?.message ||
+                  `Email non inviata per pratica …${cid.slice(-6)}`,
+              );
+            } else {
+              mailOkCount += 1;
+            }
+          }
 
-          if (!mailRes.ok || !mailJson?.emailSent) {
+          if (mailOkCount === 0) {
             setErrors([
-              mailJson?.message ||
+              mailFailures[0] ||
                 "Il contratto è stato salvato, ma l'email non è stata inviata. Usa «Reinvia al Master» dalla scheda lavorazione.",
             ]);
             setMessage(`Pratica creata. Apri /lavorazione/${contractId} per reinviare l'email.`);
             return;
           }
 
+          if (mailFailures.length > 0) {
+            setErrors([
+              `${mailOkCount}/${contractIds.length} email inviate. Problemi: ${mailFailures.slice(0, 2).join(" · ")}`,
+            ]);
+            setMessage(`Parte delle pratiche è stata inviata. Controlla /lavorazione/${contractId}`);
+            router.push(`/lavorazione/${contractId}`);
+            router.refresh();
+            return;
+          }
+
           setMessage(
-            mailJson.message ||
-              "Contratto creato e inviato al back office.",
+            contractIds.length > 1
+              ? `${contractIds.length} contratti creati e inviati al back office (uno per servizio).`
+              : "Contratto creato e inviato al back office.",
           );
           router.push(`/lavorazione/${contractId}?ok=email`);
           router.refresh();

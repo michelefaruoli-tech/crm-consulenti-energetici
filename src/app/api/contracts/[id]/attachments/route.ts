@@ -7,8 +7,7 @@ import {
   formatEmailList,
   getLavorazioneNotifyEmails,
 } from "@/lib/user-scope";
-import { clientDisplayName } from "@/lib/utils";
-import { formatRomeDateTime } from "@/lib/timezone";
+import { buildContractNotificationBody } from "@/lib/contract-notification-email";
 import { createHash } from "node:crypto";
 import {
   STORAGE_PROVIDER,
@@ -291,45 +290,13 @@ export async function PUT(
       return NextResponse.json({ success: false, message: "Contratto non trovato" }, { status: 404 });
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
     const docsWithContent = contract.documents.filter((d) => d.contentBase64);
     const docsMissing = contract.documents.filter((d) => !d.contentBase64);
-    const docLinks = contract.documents.map(
-      (d) =>
-        `- ${d.filename} (${d.docType || "file"}, ${Math.round(d.size / 1024)}KB)${
-          d.contentBase64 ? "" : " [solo metadati]"
-        }: ${appUrl}/api/documents/${d.id}`,
-    );
-
-    const subject = `Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientDisplayName(contract.client)} – ${contract.utilityType || ""}`;
-    const body = [
-      "Il contratto è nella coda «In lavorazione».",
-      `Numero pratica: ${contract.contractNumber}`,
-      `Data: ${formatRomeDateTime(new Date())}`,
-      `Collaboratore: ${contract.collaborator.name}`,
-      `Cliente: ${clientDisplayName(contract.client)}`,
-      `CF: ${contract.client.fiscalCode || "—"}`,
-      `P.IVA: ${contract.client.vatNumber || "—"}`,
-      `Telefono: ${contract.client.phone || "—"}`,
-      `Email: ${contract.client.email || "—"}`,
-      `Servizio: ${contract.utilityType || "—"}`,
-      `Operazione: ${contract.operationType || "—"}`,
-      `Fornitore: ${contract.supplier.name}`,
-      `POD: ${contract.pod || "—"}`,
-      `PDR: ${contract.pdr || "—"}`,
-      `Note: ${contract.masterNotes || contract.notes || "—"}`,
-      "",
-      "Allegati (link protetti, accesso autenticato al CRM):",
-      ...(docLinks.length ? docLinks : ["- Nessun allegato caricato"]),
-      "",
-      `Scheda lavorazione: ${appUrl}/lavorazione/${contract.id}`,
-      "",
-      "Nota: file grandi possono arrivare solo come link (non in allegato SMTP) per limiti del provider.",
-    ].join("\n");
+    const { subject, body } = buildContractNotificationBody(contract);
 
     const hash = createHash("sha256")
       .update(
-        `master:${contract.id}:${contract.contractNumber}:docs:${contract.documents.length}`,
+        `master:${contract.id}:${contract.contractNumber}:docs:${contract.documents.length}:v2`,
       )
       .digest("hex");
 

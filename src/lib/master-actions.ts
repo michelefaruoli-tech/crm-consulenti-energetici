@@ -14,6 +14,7 @@ import {
   getLavorazioneNotifyEmails,
   userCanAccessContract,
 } from "@/lib/user-scope";
+import { buildContractNotificationBody } from "@/lib/contract-notification-email";
 import {
   KO_REASON_OPTIONS,
   validateMasterTransition,
@@ -197,27 +198,12 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     redirect("/lavorazione?error=not_found");
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
-  const docLinks = contract.documents.map(
-    (d) => `- ${d.filename} (${d.docType || "file"}): ${appUrl}/api/documents/${d.id}`,
-  );
-  const subject = `REINVIO – Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientDisplayName(contract.client)}`;
-  const body = [
-    `REINVIO richiesto da ${session.name}`,
-    `Motivo: ${reason}`,
-    `Pratica: ${contract.contractNumber}`,
-    `Stato: ${contract.status}`,
-    `Cliente: ${clientDisplayName(contract.client)}`,
-    `Collaboratore: ${contract.collaborator.name}`,
-    `Fornitore: ${contract.supplier.name}`,
-    `Servizio: ${contract.utilityType || "—"}`,
-    `POD / PDR: ${contract.podPdr || contract.pod || contract.pdr || "—"}`,
-    "",
-    "Allegati (scarica dal gestionale, accesso autenticato):",
-    ...(docLinks.length ? docLinks : ["- Nessun allegato"]),
-    "",
-    `Link: ${appUrl}/lavorazione/${contract.id}`,
-  ].join("\n");
+  const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
+  const toEmail = formatEmailList(recipients);
+  const { subject, body } = buildContractNotificationBody(contract, {
+    resendReason: reason,
+    resentBy: session.name,
+  });
 
   const hash = createHash("sha256")
     .update(`resend:${contractId}:${reason}:${Date.now()}`)
@@ -242,8 +228,6 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     }
   }
 
-  const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
-  const toEmail = formatEmailList(recipients);
   const mail = await sendMail({
     to: recipients,
     subject,
