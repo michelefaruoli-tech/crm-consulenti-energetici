@@ -7,7 +7,6 @@ import { ContractStatus } from "@/generated/prisma/client";
 import { requireSession, hashPassword } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { clientDisplayName } from "@/lib/utils";
 import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import {
   formatEmailList,
