@@ -34,7 +34,7 @@ type ClientLike = {
   supplyAddress?: string | null;
 };
 
-type ContractLike = {
+export type ContractLike = {
   id: string;
   contractNumber: string;
   utilityType?: string | null;
@@ -125,20 +125,7 @@ function formatAddr(parts: {
   return [main || parts.fallback, cityLine, parts.region].filter(Boolean).join(" · ") || "—";
 }
 
-/** Corpo email completo: anagrafica + fornitura + contratto + pagamento + note + allegati. */
-export function buildContractNotificationBody(
-  contract: ContractLike,
-  opts?: { appUrl?: string; resendReason?: string; resentBy?: string },
-): { subject: string; body: string } {
-  const appUrl =
-    opts?.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
-  const clientName = clientDisplayName(contract.client);
-  const isResend = Boolean(opts?.resendReason);
-
-  const subject = isResend
-    ? `REINVIO – Nuovo contratto – ${contract.contractNumber} – ${clientName} – ${contract.utilityType || ""}`
-    : `Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientName} – ${contract.utilityType || ""}`;
-
+function anagraficaBlock(contract: ContractLike): string[] {
   const residence = formatAddr({
     street: contract.client.street,
     streetNumber: contract.client.streetNumber,
@@ -148,41 +135,11 @@ export function buildContractNotificationBody(
     region: contract.client.region,
     fallback: contract.client.address,
   });
-
-  const supply = formatAddr({
-    street: contract.supplyStreet ?? contract.client.supplyStreet,
-    streetNumber: contract.supplyStreetNumber ?? contract.client.supplyStreetNumber,
-    zipCode: contract.supplyZipCode ?? contract.client.supplyZipCode,
-    city: contract.supplyCity ?? contract.client.supplyCity,
-    province: contract.supplyProvince ?? contract.client.supplyProvince,
-    region: contract.supplyRegion ?? contract.client.supplyRegion,
-    fallback: contract.supplyAddress ?? contract.client.supplyAddress,
-  });
-
-  const docLinks = contract.documents.map(
-    (d) =>
-      `- ${d.filename} (${d.docType || "file"}, ${Math.round(d.size / 1024)}KB)${
-        d.contentBase64 ? "" : " [solo metadati / link]"
-      }: ${appUrl}/api/documents/${d.id}`,
-  );
-
-  const body = [
-    isResend
-      ? `REINVIO richiesto da ${opts?.resentBy || "admin"}`
-      : "Il contratto è nella coda «In lavorazione» (invio al BACK OFFICE).",
-    ...(opts?.resendReason ? [line("Motivo reinvio", opts.resendReason)] : []),
-    "",
-    "========== INTESTAZIONE ==========",
-    line("Numero pratica", contract.contractNumber),
-    line("Data invio", formatRomeDateTime(new Date())),
-    line("Stato", contract.status),
-    line("Collaboratore", contract.collaborator.name),
-    "",
+  return [
     "========== BLOCCO ANAGRAFICA CLIENTE ==========",
-    line("Cliente", clientName),
+    line("Cliente", clientDisplayName(contract.client)),
     line("Tipo cliente", contract.client.type === "AZIENDA" ? "Business" : "Privato / Domestico"),
     line("Classificazione (Residente / Non residente / …)", contract.client.classification),
-    line("Tipologia contratto (Domestico / Non domestico)", contract.contractKind),
     line("Codice fiscale", contract.client.fiscalCode),
     line("Partita IVA", contract.client.vatNumber),
     line("Telefono", contract.client.phone),
@@ -203,22 +160,31 @@ export function buildContractNotificationBody(
     line("Comune", contract.client.city),
     line("Provincia", contract.client.province),
     line("Regione", contract.client.region),
+  ];
+}
+
+function serviceBlock(contract: ContractLike, index: number, total: number): string[] {
+  const supply = formatAddr({
+    street: contract.supplyStreet ?? contract.client.supplyStreet,
+    streetNumber: contract.supplyStreetNumber ?? contract.client.supplyStreetNumber,
+    zipCode: contract.supplyZipCode ?? contract.client.supplyZipCode,
+    city: contract.supplyCity ?? contract.client.supplyCity,
+    province: contract.supplyProvince ?? contract.client.supplyProvince,
+    region: contract.supplyRegion ?? contract.client.supplyRegion,
+    fallback: contract.supplyAddress ?? contract.client.supplyAddress,
+  });
+  const utility = (contract.utilityType || `SERVIZIO ${index + 1}`).toUpperCase();
+  const title =
+    total > 1
+      ? `========== BLOCCO ${utility} (${index + 1}/${total}) – ${contract.contractNumber} ==========`
+      : "========== BLOCCO FORNITORE / CONTRATTO ==========";
+
+  return [
     "",
-    "— Indirizzo di fornitura —",
-    line(
-      "Coincide con residenza",
-      contract.addressesMatch == null ? null : contract.addressesMatch ? "Sì" : "No",
-    ),
-    line("Indirizzo fornitura (via e civico)", supply),
-    line("CAP fornitura", contract.supplyZipCode ?? contract.client.supplyZipCode),
-    line("Comune fornitura", contract.supplyCity ?? contract.client.supplyCity),
-    line("Provincia fornitura", contract.supplyProvince ?? contract.client.supplyProvince),
-    line("Regione fornitura", contract.supplyRegion ?? contract.client.supplyRegion),
-    line("Nazione", contract.supplyCountry),
-    line("Classificazione fornitura", contract.supplyClassification),
-    line("Tensione", contract.voltageLevel),
-    "",
-    "========== BLOCCO FORNITORE / CONTRATTO ==========",
+    title,
+    line("Numero pratica", contract.contractNumber),
+    line("Stato", contract.status),
+    line("Tipologia contratto (Domestico / Non domestico)", contract.contractKind),
     line("Fornitore", contract.supplier.name),
     line("Servizio / utility", contract.utilityType),
     line("Prodotto / offerta", contract.productName),
@@ -245,6 +211,20 @@ export function buildContractNotificationBody(
     line("Data attivazione", formatDate(contract.activationDate)),
     line("Scadenza", formatDate(contract.expiryDate)),
     "",
+    "— Indirizzo di fornitura —",
+    line(
+      "Coincide con residenza",
+      contract.addressesMatch == null ? null : contract.addressesMatch ? "Sì" : "No",
+    ),
+    line("Indirizzo fornitura (via e civico)", supply),
+    line("CAP fornitura", contract.supplyZipCode ?? contract.client.supplyZipCode),
+    line("Comune fornitura", contract.supplyCity ?? contract.client.supplyCity),
+    line("Provincia fornitura", contract.supplyProvince ?? contract.client.supplyProvince),
+    line("Regione fornitura", contract.supplyRegion ?? contract.client.supplyRegion),
+    line("Nazione", contract.supplyCountry),
+    line("Classificazione fornitura", contract.supplyClassification),
+    line("Tensione", contract.voltageLevel),
+    "",
     "— Pagamento —",
     line("Metodo di pagamento", contract.paymentMethod),
     line("IBAN contratto", contract.contractIban),
@@ -258,14 +238,115 @@ export function buildContractNotificationBody(
     line("Note contratto", contract.notes),
     line("Note economiche", contract.economicNotes),
     line("Note interne", contract.internalNotes),
+  ];
+}
+
+function attachmentsBlock(
+  contracts: ContractLike[],
+  appUrl: string,
+): { lines: string[]; docsWithContent: ContractLike["documents"] } {
+  // Preferisci i documenti del contratto che ne ha di più (con contenuto)
+  const richest = [...contracts].sort(
+    (a, b) =>
+      b.documents.filter((d) => d.contentBase64).length -
+      a.documents.filter((d) => d.contentBase64).length,
+  )[0]!;
+  const docs = richest.documents;
+  const links = docs.map(
+    (d) =>
+      `- ${d.filename} (${d.docType || "file"}, ${Math.round(d.size / 1024)}KB)${
+        d.contentBase64 ? "" : " [solo metadati / link]"
+      }: ${appUrl}/api/documents/${d.id}`,
+  );
+  const schede = contracts.map(
+    (c) => `- ${c.utilityType || "contratto"} ${c.contractNumber}: ${appUrl}/lavorazione/${c.id}`,
+  );
+  return {
+    lines: [
+      "",
+      "========== ALLEGATI ==========",
+      ...(links.length ? links : ["- Nessun allegato caricato"]),
+      "",
+      "Schede lavorazione CRM:",
+      ...schede,
+      "",
+      "Nota: i file sotto soglia SMTP partono anche come allegati; i file grandi restano scaricabili dai link (accesso autenticato).",
+    ],
+    docsWithContent: docs.filter((d) => d.contentBase64),
+  };
+}
+
+/** Corpo email completo per un singolo contratto. */
+export function buildContractNotificationBody(
+  contract: ContractLike,
+  opts?: { appUrl?: string; resendReason?: string; resentBy?: string },
+): { subject: string; body: string } {
+  const appUrl =
+    opts?.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
+  const clientName = clientDisplayName(contract.client);
+  const isResend = Boolean(opts?.resendReason);
+  const subject = isResend
+    ? `REINVIO – Nuovo contratto – ${contract.contractNumber} – ${clientName} – ${contract.utilityType || ""}`
+    : `Nuovo contratto da lavorare – ${contract.contractNumber} – ${clientName} – ${contract.utilityType || ""}`;
+
+  const att = attachmentsBlock([contract], appUrl);
+  const body = [
+    isResend
+      ? `REINVIO richiesto da ${opts?.resentBy || "admin"}`
+      : "Il contratto è nella coda «In lavorazione» (invio al BACK OFFICE).",
+    ...(opts?.resendReason ? [line("Motivo reinvio", opts.resendReason)] : []),
     "",
-    "========== ALLEGATI ==========",
-    ...(docLinks.length ? docLinks : ["- Nessun allegato caricato"]),
+    "========== INTESTAZIONE ==========",
+    line("Numero pratica", contract.contractNumber),
+    line("Data invio", formatRomeDateTime(new Date())),
+    line("Collaboratore", contract.collaborator.name),
     "",
-    `Scheda lavorazione CRM: ${appUrl}/lavorazione/${contract.id}`,
-    "",
-    "Nota: i file sotto soglia SMTP partono anche come allegati; i file grandi restano scaricabili dai link (accesso autenticato).",
+    ...anagraficaBlock(contract),
+    ...serviceBlock(contract, 0, 1),
+    ...att.lines,
   ].join("\n");
 
   return { subject, body };
+}
+
+/**
+ * Una sola email per più contratti creati insieme (es. Luce + Gas):
+ * anagrafica condivisa + blocco per ogni servizio + allegati una volta.
+ */
+export function buildBatchContractNotificationBody(
+  contracts: ContractLike[],
+  opts?: { appUrl?: string },
+): { subject: string; body: string; docsWithContent: ContractLike["documents"] } {
+  if (contracts.length === 0) {
+    return { subject: "Nuovi contratti", body: "Nessun contratto", docsWithContent: [] };
+  }
+  if (contracts.length === 1) {
+    const single = buildContractNotificationBody(contracts[0]!, opts);
+    const att = attachmentsBlock(contracts, opts?.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it");
+    return { ...single, docsWithContent: att.docsWithContent };
+  }
+
+  const appUrl =
+    opts?.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://crm.fmconsulenza.it";
+  const first = contracts[0]!;
+  const clientName = clientDisplayName(first.client);
+  const utilities = contracts.map((c) => c.utilityType || "?").join("+");
+  const numbers = contracts.map((c) => c.contractNumber).join(", ");
+
+  const subject = `Nuovi contratti da lavorare (${contracts.length}) – ${clientName} – ${utilities}`;
+  const att = attachmentsBlock(contracts, appUrl);
+
+  const body = [
+    `Sono stati creati ${contracts.length} contratti insieme e sono in coda «In lavorazione» (BACK OFFICE).`,
+    line("Data invio", formatRomeDateTime(new Date())),
+    line("Collaboratore", first.collaborator.name),
+    line("Pratiche", numbers),
+    line("Servizi", utilities),
+    "",
+    ...anagraficaBlock(first),
+    ...contracts.flatMap((c, i) => serviceBlock(c, i, contracts.length)),
+    ...att.lines,
+  ].join("\n");
+
+  return { subject, body, docsWithContent: att.docsWithContent };
 }
