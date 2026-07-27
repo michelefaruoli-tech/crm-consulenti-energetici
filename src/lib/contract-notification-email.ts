@@ -99,12 +99,33 @@ export type ContractLike = {
   }>;
 };
 
-function line(label: string, value: unknown): string {
-  const v =
-    value === null || value === undefined || value === ""
-      ? "—"
-      : String(value);
-  return `${label}: ${v}`;
+function isEmptyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t === "" || t === "—";
+  }
+  return false;
+}
+
+/** Riga etichetta: valore; se vuoto non viene inviata. */
+function line(label: string, value: unknown): string | null {
+  if (isEmptyValue(value)) return null;
+  return `${label}: ${String(value)}`;
+}
+
+/** Tiene solo righe valorizzate; sezioni senza dati vengono omesse. */
+function compactLines(...parts: Array<string | null | undefined>): string[] {
+  return parts.filter((p): p is string => typeof p === "string" && p.length > 0);
+}
+
+function section(
+  title: string,
+  lines: Array<string | null | undefined>,
+): string[] {
+  const filled = compactLines(...lines);
+  if (filled.length === 0) return [];
+  return ["", title, ...filled];
 }
 
 function formatAddr(parts: {
@@ -115,7 +136,7 @@ function formatAddr(parts: {
   province?: string | null;
   region?: string | null;
   fallback?: string | null;
-}): string {
+}): string | null {
   const main = [parts.street, parts.streetNumber].filter(Boolean).join(" ");
   const cityLine = [
     parts.zipCode,
@@ -124,7 +145,15 @@ function formatAddr(parts: {
   ]
     .filter(Boolean)
     .join(" ");
-  return [main || parts.fallback, cityLine, parts.region].filter(Boolean).join(" · ") || "—";
+  const out = [main || parts.fallback, cityLine, parts.region]
+    .filter(Boolean)
+    .join(" · ");
+  return out || null;
+}
+
+function dateLine(label: string, date: Date | string | null | undefined): string | null {
+  if (!date) return null;
+  return line(label, formatDate(date));
 }
 
 function anagraficaBlock(contract: ContractLike): string[] {
@@ -137,7 +166,7 @@ function anagraficaBlock(contract: ContractLike): string[] {
     region: contract.client.region,
     fallback: contract.client.address,
   });
-  return [
+  return compactLines(
     "========== BLOCCO ANAGRAFICA CLIENTE ==========",
     line("Cliente", clientDisplayName(contract.client)),
     line("Tipo cliente", contract.client.type === "AZIENDA" ? "Business" : "Privato / Domestico"),
@@ -155,14 +184,14 @@ function anagraficaBlock(contract: ContractLike): string[] {
     ),
     line("CF legale", contract.client.legalFiscalCode),
     line("Codice SDI", contract.client.sdiCode),
-    "",
-    "— Indirizzo residenza / sede —",
-    line("Indirizzo (via e civico)", residence),
-    line("CAP", contract.client.zipCode),
-    line("Comune", contract.client.city),
-    line("Provincia", contract.client.province),
-    line("Regione", contract.client.region),
-  ];
+    ...section("— Indirizzo residenza / sede —", [
+      line("Indirizzo (via e civico)", residence),
+      line("CAP", contract.client.zipCode),
+      line("Comune", contract.client.city),
+      line("Provincia", contract.client.province),
+      line("Regione", contract.client.region),
+    ]),
+  );
 }
 
 function serviceBlock(contract: ContractLike, index: number, total: number): string[] {
@@ -181,7 +210,15 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
       ? `========== BLOCCO ${utility} (${index + 1}/${total}) – ${contract.contractNumber} ==========`
       : "========== BLOCCO FORNITORE / CONTRATTO ==========";
 
-  return [
+  const isAltro = (contract.operationType ?? "").toUpperCase() === "ALTRO";
+  const operationValue =
+    isAltro && contract.operationOther?.trim()
+      ? contract.operationOther.trim()
+      : contract.operationType
+        ? operationTypeLabel(contract.operationType)
+        : null;
+
+  return compactLines(
     "",
     title,
     line("Numero pratica", contract.contractNumber),
@@ -191,15 +228,9 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
     line("Servizio / utility", contract.utilityType),
     line("Prodotto / offerta", contract.productName),
     line("Codice offerta", contract.offerCode),
-    line(
-      "Operazione",
-      contract.operationType?.toUpperCase() === "ALTRO" && contract.operationOther
-        ? contract.operationOther
-        : contract.operationType
-          ? operationTypeLabel(contract.operationType)
-          : null,
-    ),
-    line("Altro operazione", contract.operationOther),
+    line("Operazione", operationValue),
+    // Se ALTRO: il testo è già in «Operazione», non ripetere
+    line("Altro operazione", isAltro ? null : contract.operationOther),
     line("Altro servizio", contract.serviceOther),
     line("POD", contract.pod || (contract.utilityType === "LUCE" ? contract.podPdr : null)),
     line("PDR", contract.pdr || (contract.utilityType === "GAS" ? contract.podPdr : null)),
@@ -215,39 +246,39 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
     line("Consumo annuo kWh", contract.annualKwh),
     line("Consumo annuo Smc", contract.annualSmc),
     line("Durata mesi", contract.durationMonths),
-    line("Data inserimento", formatDate(contract.insertionDate)),
-    line("Data inizio fornitura", formatDate(contract.supplyStartDate)),
-    line("Data attivazione", formatDate(contract.activationDate)),
-    line("Scadenza", formatDate(contract.expiryDate)),
-    "",
-    "— Indirizzo di fornitura —",
-    line(
-      "Coincide con residenza",
-      contract.addressesMatch == null ? null : contract.addressesMatch ? "Sì" : "No",
-    ),
-    line("Indirizzo fornitura (via e civico)", supply),
-    line("CAP fornitura", contract.supplyZipCode ?? contract.client.supplyZipCode),
-    line("Comune fornitura", contract.supplyCity ?? contract.client.supplyCity),
-    line("Provincia fornitura", contract.supplyProvince ?? contract.client.supplyProvince),
-    line("Regione fornitura", contract.supplyRegion ?? contract.client.supplyRegion),
-    line("Nazione", contract.supplyCountry),
-    line("Classificazione fornitura", contract.supplyClassification),
-    line("Tensione", contract.voltageLevel),
-    "",
-    "— Pagamento —",
-    line("Metodo di pagamento", contract.paymentMethod),
-    line("IBAN contratto", contract.contractIban),
-    line("Intestatario IBAN", contract.ibanHolder),
-    line("CF intestatario IBAN", contract.ibanHolderCf),
-    line("Email fatturazione", contract.invoiceEmail),
-    line("Note pagamento", contract.paymentNotes),
-    "",
-    "— Note —",
-    line("Note Master / back office", contract.masterNotes),
-    line("Note contratto", contract.notes),
-    line("Note economiche", contract.economicNotes),
-    line("Note interne", contract.internalNotes),
-  ];
+    dateLine("Data inserimento", contract.insertionDate),
+    dateLine("Data inizio fornitura", contract.supplyStartDate),
+    dateLine("Data attivazione", contract.activationDate),
+    dateLine("Scadenza", contract.expiryDate),
+    ...section("— Indirizzo di fornitura —", [
+      line(
+        "Coincide con residenza",
+        contract.addressesMatch == null ? null : contract.addressesMatch ? "Sì" : "No",
+      ),
+      line("Indirizzo fornitura (via e civico)", supply),
+      line("CAP fornitura", contract.supplyZipCode ?? contract.client.supplyZipCode),
+      line("Comune fornitura", contract.supplyCity ?? contract.client.supplyCity),
+      line("Provincia fornitura", contract.supplyProvince ?? contract.client.supplyProvince),
+      line("Regione fornitura", contract.supplyRegion ?? contract.client.supplyRegion),
+      line("Nazione", contract.supplyCountry),
+      line("Classificazione fornitura", contract.supplyClassification),
+      line("Tensione", contract.voltageLevel),
+    ]),
+    ...section("— Pagamento —", [
+      line("Metodo di pagamento", contract.paymentMethod),
+      line("IBAN contratto", contract.contractIban),
+      line("Intestatario IBAN", contract.ibanHolder),
+      line("CF intestatario IBAN", contract.ibanHolderCf),
+      line("Email fatturazione", contract.invoiceEmail),
+      line("Note pagamento", contract.paymentNotes),
+    ]),
+    ...section("— Note —", [
+      line("Note Master / back office", contract.masterNotes),
+      line("Note contratto", contract.notes),
+      line("Note economiche", contract.economicNotes),
+      line("Note interne", contract.internalNotes),
+    ]),
+  );
 }
 
 function priceTypeLabel(raw: string | null | undefined): string {
@@ -343,11 +374,11 @@ export function buildContractNotificationBody(
   const subject = buildLavorazioneSubject(contract, { resend: isResend });
 
   const att = attachmentsBlock([contract], appUrl);
-  const body = [
+  const body = compactLines(
     isResend
       ? `REINVIO richiesto da ${opts?.resentBy || "admin"}`
       : "Il contratto è nella coda «In lavorazione» (invio al BACK OFFICE).",
-    ...(opts?.resendReason ? [line("Motivo reinvio", opts.resendReason)] : []),
+    line("Motivo reinvio", opts?.resendReason),
     "",
     "========== INTESTAZIONE ==========",
     line("Numero pratica", contract.contractNumber),
@@ -357,7 +388,7 @@ export function buildContractNotificationBody(
     ...anagraficaBlock(contract),
     ...serviceBlock(contract, 0, 1),
     ...att.lines,
-  ].join("\n");
+  ).join("\n");
 
   return { subject, body };
 }
@@ -407,7 +438,7 @@ export function buildBatchContractNotificationBody(
     .join(" – ");
   const att = attachmentsBlock(contracts, appUrl);
 
-  const body = [
+  const body = compactLines(
     `Sono stati creati ${contracts.length} contratti insieme e sono in coda «In lavorazione» (BACK OFFICE).`,
     line("Data invio", formatRomeDateTime(new Date())),
     line("Collaboratore", first.collaborator.name),
@@ -417,7 +448,7 @@ export function buildBatchContractNotificationBody(
     ...anagraficaBlock(first),
     ...contracts.flatMap((c, i) => serviceBlock(c, i, contracts.length)),
     ...att.lines,
-  ].join("\n");
+  ).join("\n");
 
   return { subject, body, docsWithContent: att.docsWithContent };
 }
