@@ -38,6 +38,7 @@ export function ServiceContractBlocks({
   clientIban,
   residence,
   highlightRequired = false,
+  highlightBase = false,
 }: {
   line: ContractServiceLine;
   index: number;
@@ -56,8 +57,13 @@ export function ServiceContractBlocks({
     province: string;
     region: string;
   };
-  /** Evidenza giallo/verde campi obbligatori (invio back office). */
+  /** Evidenza completa campi obbligatori (invio back office). */
   highlightRequired?: boolean;
+  /**
+   * Evidenza campi minimi anche senza Master:
+   * operazione, pagamento, POD/PDR, fornitore.
+   */
+  highlightBase?: boolean;
 }) {
   const supplySame = line.supplySameAsResidence !== false;
   const isEnergy =
@@ -67,8 +73,12 @@ export function ServiceContractBlocks({
   const rulesForSupplier = listinoRules.filter(
     (r) => r.supplierId === line.supplierId,
   );
+  /** Tutti i campi Master. */
   const fs = (filled: boolean): "off" | "empty" | "filled" =>
     highlightRequired ? (filled ? "filled" : "empty") : "off";
+  /** Campi base (sempre se highlightBase o Master). */
+  const fsBase = (filled: boolean): "off" | "empty" | "filled" =>
+    highlightRequired || highlightBase ? (filled ? "filled" : "empty") : "off";
   const hasSupplier = Boolean(line.supplierId || line.supplierName?.trim());
   const hasPayment = Boolean(line.paymentMethod);
   const hasPod =
@@ -130,7 +140,7 @@ export function ServiceContractBlocks({
           <h3 className="font-semibold text-slate-900">Operazione</h3>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Tipo operazione" fillStatus={fs(Boolean(line.operationType))}>
+          <Field label="Tipo operazione" fillStatus={fsBase(Boolean(line.operationType))}>
             <Select
               value={line.operationType ?? "SWITCH"}
               onChange={(e) => onChange({ operationType: e.target.value })}
@@ -158,7 +168,7 @@ export function ServiceContractBlocks({
         {line.operationType === "ALTRO" ? (
           <Field
             label="Specifica operazione"
-            fillStatus={fs(Boolean(line.operationOther?.trim()))}
+            fillStatus={fsBase(Boolean(line.operationOther?.trim()))}
           >
             <Input
               value={line.operationOther ?? ""}
@@ -178,7 +188,7 @@ export function ServiceContractBlocks({
           </Field>
         ) : null}
 
-        <Field label="Metodo di pagamento" fillStatus={fs(hasPayment)}>
+        <Field label="Metodo di pagamento" fillStatus={fsBase(hasPayment)}>
           <Select
             value={line.paymentMethod ?? ""}
             onChange={(e) => onChange({ paymentMethod: e.target.value })}
@@ -275,7 +285,7 @@ export function ServiceContractBlocks({
 
         {(line.service === "LUCE" || line.service === "DUAL") && (
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="POD" fillStatus={fs(hasPod && Boolean(line.pod?.trim()))}>
+            <Field label="POD" fillStatus={fsBase(hasPod && Boolean(line.pod?.trim()))}>
               <Input
                 value={line.pod ?? ""}
                 onChange={(e) => onChange({ pod: e.target.value })}
@@ -300,7 +310,7 @@ export function ServiceContractBlocks({
         )}
         {(line.service === "GAS" || line.service === "DUAL") && (
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="PDR" fillStatus={fs(hasPdr && Boolean(line.pdr?.trim()))}>
+            <Field label="PDR" fillStatus={fsBase(hasPdr && Boolean(line.pdr?.trim()))}>
               <Input
                 value={line.pdr ?? ""}
                 onChange={(e) => onChange({ pdr: e.target.value })}
@@ -319,7 +329,7 @@ export function ServiceContractBlocks({
         {!isEnergy ? (
           <Field
             label="POD / PDR / Codice migrazione"
-            fillStatus={fs(Boolean((line.migrationCode || line.techNotes || "").trim()))}
+            fillStatus={fsBase(Boolean((line.migrationCode || line.techNotes || "").trim()))}
           >
             <Input
               value={line.migrationCode ?? line.techNotes ?? ""}
@@ -341,7 +351,7 @@ export function ServiceContractBlocks({
           <h3 className="font-semibold text-slate-900">Fornitore e condizioni</h3>
         </div>
 
-        <Field label="Fornitore" fillStatus={fs(hasSupplier)}>
+        <Field label="Fornitore" fillStatus={fsBase(hasSupplier)}>
           <Select
             value={creatingSupplier ? "__NEW__" : line.supplierId ?? ""}
             onChange={(e) => {
@@ -375,7 +385,7 @@ export function ServiceContractBlocks({
         {creatingSupplier ? (
           <Field
             label="Nome nuovo fornitore"
-            fillStatus={fs(Boolean(line.supplierName?.trim()))}
+            fillStatus={fsBase(Boolean(line.supplierName?.trim()))}
           >
             <Input
               value={line.supplierName ?? ""}

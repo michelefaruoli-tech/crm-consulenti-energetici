@@ -141,6 +141,8 @@ export function NuovoContrattoForm({
   );
 
   const req = sendToMaster;
+  /** Evidenza campi minimi anche senza invio al Master. */
+  const reqBase = true;
   const identityOk = useMemo(() => hasIdentityDoc(attachments), [attachments]);
   const billOk = useMemo(() => hasBillDoc(attachments), [attachments]);
   const addressOk = Boolean(
@@ -261,6 +263,10 @@ export function NuovoContrattoForm({
       if (!addressOk) missing.push("Indirizzo completo (CAP, comune, provincia, via)");
       for (const [i, s] of services.entries()) {
         const n = i + 1;
+        if (!s.operationType) missing.push(`Servizio ${n}: tipo operazione`);
+        if (s.operationType === "ALTRO" && !s.operationOther?.trim()) {
+          missing.push(`Servizio ${n}: specifica operazione`);
+        }
         if (!s.supplierId && !s.supplierName?.trim()) missing.push(`Servizio ${n}: fornitore`);
         if (!s.paymentMethod) missing.push(`Servizio ${n}: metodo pagamento`);
         if ((s.service === "LUCE" || s.service === "DUAL") && !s.pod?.trim()) {
@@ -292,6 +298,40 @@ export function NuovoContrattoForm({
       );
       if (!ok) return;
     } else if (!draft) {
+      const missing: string[] = [];
+      if (clientType === "PRIVATO") {
+        if (!firstName.trim()) missing.push("Nome");
+        if (!lastName.trim()) missing.push("Cognome");
+        if (!fiscalCode.trim()) missing.push("Codice fiscale");
+      } else {
+        if (!companyName.trim()) missing.push("Ragione sociale");
+        if (!fiscalCode.trim() && !vatNumber.trim()) {
+          missing.push("Codice fiscale o Partita IVA");
+        }
+      }
+      if (!clientOk && !creatingClient) missing.push("Cliente");
+      for (const [i, s] of services.entries()) {
+        const n = i + 1;
+        if (!s.operationType) missing.push(`Servizio ${n}: tipo operazione`);
+        if (s.operationType === "ALTRO" && !s.operationOther?.trim()) {
+          missing.push(`Servizio ${n}: specifica operazione`);
+        }
+        if (!s.supplierId && !s.supplierName?.trim()) missing.push(`Servizio ${n}: fornitore`);
+        if (!s.paymentMethod) missing.push(`Servizio ${n}: metodo pagamento`);
+        if ((s.service === "LUCE" || s.service === "DUAL") && !s.pod?.trim()) {
+          missing.push(`Servizio ${n}: POD`);
+        }
+        if ((s.service === "GAS" || s.service === "DUAL") && !s.pdr?.trim()) {
+          missing.push(`Servizio ${n}: PDR`);
+        }
+      }
+      if (missing.length) {
+        setErrors([
+          "Completa i campi evidenziati in giallo prima di salvare:",
+          ...missing,
+        ]);
+        return;
+      }
       const ok = window.confirm(
         "Confermi la creazione del contratto?\n\n(Non verrà inviato al back office)",
       );
@@ -641,6 +681,14 @@ export function NuovoContrattoForm({
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
         <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Dati cliente</h2>
+        {!req ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+            Obbligatori anche senza invio al back office:{" "}
+            <strong>cognome e nome</strong> (o ragione sociale), <strong>codice fiscale</strong>,{" "}
+            <strong>tipo operazione</strong>, <strong>POD/PDR</strong>, <strong>fornitore</strong> e{" "}
+            <strong>metodo di pagamento</strong>. Giallo = manca · Verde = ok.
+          </p>
+        ) : null}
         <AutocompleteSearch
           label="Cliente"
           required
@@ -739,15 +787,15 @@ export function NuovoContrattoForm({
 
         {clientType === "PRIVATO" ? (
           <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Cognome" fillStatus={fillStatus(req, Boolean(lastName.trim()))}>
+            <Field label="Cognome" fillStatus={fillStatus(reqBase, Boolean(lastName.trim()))}>
               <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
             </Field>
-            <Field label="Nome" fillStatus={fillStatus(req, Boolean(firstName.trim()))}>
+            <Field label="Nome" fillStatus={fillStatus(reqBase, Boolean(firstName.trim()))}>
               <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
             </Field>
             <Field
               label="Codice fiscale"
-              fillStatus={fillStatus(req, Boolean(fiscalCode.trim()))}
+              fillStatus={fillStatus(reqBase, Boolean(fiscalCode.trim()))}
             >
               <Input value={fiscalCode} onChange={(e) => setFiscalCode(e.target.value)} />
             </Field>
@@ -765,19 +813,25 @@ export function NuovoContrattoForm({
           <div className="grid gap-3 md:grid-cols-2">
             <Field
               label="Ragione sociale"
-              fillStatus={fillStatus(req, Boolean(companyName.trim()))}
+              fillStatus={fillStatus(reqBase, Boolean(companyName.trim()))}
             >
               <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
             </Field>
             <Field
               label="Partita IVA"
-              fillStatus={fillStatus(req, Boolean(vatNumber.trim() || fiscalCode.trim()))}
+              fillStatus={fillStatus(
+                reqBase,
+                Boolean(vatNumber.trim() || fiscalCode.trim()),
+              )}
             >
               <Input value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} />
             </Field>
             <Field
               label="CF aziendale"
-              fillStatus={fillStatus(req, Boolean(vatNumber.trim() || fiscalCode.trim()))}
+              fillStatus={fillStatus(
+                reqBase,
+                Boolean(vatNumber.trim() || fiscalCode.trim()),
+              )}
             >
               <Input value={fiscalCode} onChange={(e) => setFiscalCode(e.target.value)} />
             </Field>
@@ -906,6 +960,7 @@ export function NuovoContrattoForm({
               region,
             }}
             highlightRequired={req}
+            highlightBase={reqBase}
           />
         ))}
         <div className="pt-1">

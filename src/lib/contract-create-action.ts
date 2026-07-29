@@ -57,16 +57,41 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   const errors: string[] = [];
   const c = payload.client;
 
-  // Senza Master: solo anagrafica minima + fornitore + tipologia (privato/business)
+  // Anagrafica minima (sempre)
   if (c.type === "PRIVATO") {
     if (!c.firstName?.trim()) errors.push("Nome obbligatorio");
     if (!c.lastName?.trim()) errors.push("Cognome obbligatorio");
+    if (!c.fiscalCode?.trim()) errors.push("Codice fiscale obbligatorio");
   } else {
     if (!c.companyName?.trim()) errors.push("Ragione sociale obbligatoria");
+    if (!c.fiscalCode?.trim() && !c.vatNumber?.trim()) {
+      errors.push("Codice fiscale o Partita IVA obbligatori");
+    }
   }
   if (!c.type) errors.push("Tipologia cliente (Privato / Business) obbligatoria");
   if (!payload.services.length) {
     errors.push("Aggiungi almeno un servizio");
+  }
+
+  // Campi base servizio (sempre, anche senza Master)
+  for (const [i, s] of payload.services.entries()) {
+    const n = i + 1;
+    const op = s.operationType || payload.operationType;
+    if (!op) errors.push(`Servizio #${n}: tipo operazione obbligatorio`);
+    if (op === "ALTRO" && !(s.operationOther || payload.operationOther)?.trim()) {
+      errors.push(`Servizio #${n}: specifica operazione obbligatoria`);
+    }
+    const pay = s.paymentMethod || payload.paymentMethod;
+    if (!pay) errors.push(`Servizio #${n}: metodo di pagamento obbligatorio`);
+    if (!(s.supplierId || s.supplierName || payload.supplierId || payload.supplierName)) {
+      errors.push(`Servizio #${n}: fornitore obbligatorio`);
+    }
+    if ((s.service === "LUCE" || s.service === "DUAL") && !s.pod?.trim()) {
+      errors.push(`Servizio #${n}: POD obbligatorio`);
+    }
+    if ((s.service === "GAS" || s.service === "DUAL") && !s.pdr?.trim()) {
+      errors.push(`Servizio #${n}: PDR obbligatorio`);
+    }
   }
 
   // Fornitore: top-level oppure su ogni riga
@@ -81,26 +106,15 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     return errors;
   }
 
-  // Con Master: validazione completa
+  // Con Master: validazione completa aggiuntiva
   if (c.type === "AZIENDA" && !c.vatNumber?.trim()) {
     errors.push("Partita IVA obbligatoria per invio al Master");
   }
   for (const [i, s] of payload.services.entries()) {
     const n = i + 1;
-    const op = s.operationType || payload.operationType;
-    if (!op) errors.push(`Servizio #${n}: tipo operazione obbligatorio`);
-    if (op === "ALTRO" && !(s.operationOther || payload.operationOther)?.trim()) {
-      errors.push(`Servizio #${n}: specifica operazione obbligatoria`);
-    }
     if (!s.service) errors.push(`Servizio #${n}: tipologia obbligatoria`);
     if (s.service === "ALTRO" && !s.serviceOther?.trim()) {
       errors.push(`Servizio #${n}: specifica servizio obbligatoria`);
-    }
-    if (s.service === "LUCE" && !s.pod?.trim()) {
-      errors.push(`Servizio #${n}: POD obbligatorio per Luce`);
-    }
-    if (s.service === "GAS" && !s.pdr?.trim()) {
-      errors.push(`Servizio #${n}: PDR obbligatorio per Gas`);
     }
     if (
       !["LUCE", "GAS", "DUAL"].includes(s.service) &&
@@ -112,13 +126,7 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     ) {
       errors.push(`Servizio #${n}: codice / identificativo tecnico obbligatorio`);
     }
-    const pay = s.paymentMethod || payload.paymentMethod;
-    if (!pay) errors.push(`Servizio #${n}: metodo di pagamento obbligatorio`);
-    if (!(s.supplierId || s.supplierName || payload.supplierId || payload.supplierName)) {
-      errors.push(`Servizio #${n}: fornitore obbligatorio`);
-    }
   }
-  if (!c.fiscalCode?.trim()) errors.push("Codice fiscale obbligatorio per invio al Master");
   if (!c.phone?.trim()) errors.push("Telefono obbligatorio per invio al Master");
   if (!c.email?.trim()) errors.push("Email obbligatoria per invio al Master");
   if (!c.zipCode?.trim() || !c.city?.trim()) {
@@ -138,7 +146,7 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     errors.push("Classificazione (Residente / Non residente / Altri usi) obbligatoria");
   }
   const hasId = payload.attachments.some((a) =>
-    ["CI_FRONTE", "CI_RETRO"].includes(a.docType),
+    ["CI_FRONTE", "CI_RETRO", "CI_UNICO"].includes(a.docType),
   );
   const hasBill = payload.attachments.some((a) => a.docType === "BOLLETTA");
   // Gli allegati possono essere caricati subito dopo via API (evita body troppo grande).
