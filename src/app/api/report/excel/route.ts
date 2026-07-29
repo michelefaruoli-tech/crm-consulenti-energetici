@@ -6,6 +6,11 @@ import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { simplifiedProvvigioneStato } from "@/lib/provvigioni-stato";
+import { periodLabel } from "@/lib/recurring";
+import {
+  loadReportRecurringPaid,
+  sumReportRecurring,
+} from "@/lib/report-recurring";
 import {
   buildReportContractWhere,
   reportPeriodUsesCollectionDate,
@@ -44,6 +49,16 @@ export async function GET(req: NextRequest) {
       ? { collectionDate: "desc" }
       : { insertionDate: "desc" },
   });
+
+  const recurringRows = await loadReportRecurringPaid({
+    from,
+    to,
+    month,
+    collaboratorId,
+    supplierId,
+    visibility,
+  });
+  const recurringTotals = sumReportRecurring(recurringRows);
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Contratti");
@@ -85,6 +100,33 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const sheet2 = workbook.addWorksheet("Rate ricorrenti");
+  sheet2.columns = [
+    { header: "Competenza", key: "competence", width: 14 },
+    { header: "Rendiconto (bonifico)", key: "settled", width: 18 },
+    { header: "Cliente", key: "client", width: 28 },
+    { header: "Tipo", key: "tipo", width: 12 },
+    { header: "POD/PDR", key: "pod", width: 18 },
+    { header: "Collaboratore", key: "collaborator", width: 18 },
+    { header: "Fornitore", key: "supplier", width: 16 },
+    { header: "Importo", key: "amount", width: 12 },
+    { header: "N. contratto", key: "number", width: 16 },
+  ];
+
+  for (const r of recurringRows) {
+    sheet2.addRow({
+      competence: periodLabel(r.period),
+      settled: r.settledPeriod ? periodLabel(r.settledPeriod) : "",
+      client: r.clientName,
+      tipo: r.clientType === "AZIENDA" ? "ALTRI USI" : "DOMESTICO",
+      pod: r.podPdr ?? "",
+      collaborator: r.collaboratorName,
+      supplier: r.supplierName,
+      amount: r.amount,
+      number: r.contractNumber,
+    });
+  }
+
   const meta = workbook.addWorksheet("Filtri");
   meta.addRow(["Mese", month ?? ""]);
   meta.addRow(["Dal", from ?? ""]);
@@ -93,10 +135,12 @@ export async function GET(req: NextRequest) {
   meta.addRow(["Fornitore ID", supplierId ?? "Tutti"]);
   meta.addRow(["Stato provvigione", stato]);
   meta.addRow([
-    "Data periodo",
+    "Data periodo contratti",
     reportPeriodUsesCollectionDate(stato) ? "collectionDate (incasso)" : "insertionDate",
   ]);
-  meta.addRow(["N° righe", contracts.length]);
+  meta.addRow(["N° contratti", contracts.length]);
+  meta.addRow(["N° rate ricorrenti", recurringTotals.count]);
+  meta.addRow(["Totale ricorrenti €", recurringTotals.amount]);
 
   const buffer = await workbook.xlsx.writeBuffer();
 

@@ -11,6 +11,11 @@ import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { getMasterEmail } from "@/lib/mail";
+import { isRecurring } from "@/lib/recurring";
+import {
+  loadReportRecurringPaid,
+  sumReportRecurring,
+} from "@/lib/report-recurring";
 import {
   REPORT_MONTH_LABELS,
   REPORT_STATO_OPTIONS,
@@ -105,23 +110,40 @@ export default async function ReportPage({
     include: { commission: true, supplier: true, collaborator: true },
   });
 
+  const recurringRows = await loadReportRecurringPaid({
+    from,
+    to,
+    month,
+    collaboratorId,
+    supplierId,
+    visibility,
+  });
+  const recurringTotals = sumReportRecurring(recurringRows);
+
+  // Una tantum: evita di contare due volte i contratti R (già in RecurringMonth)
+  const oneShot = contracts.filter((c) => !isRecurring(c.recurrence));
   const totalContracts = contracts.length;
-  const totalExpected = contracts.reduce(
+  const totalExpected = oneShot.reduce(
     (s, c) => s + Number(c.commission?.expected ?? 0),
     0,
   );
-  const totalReceived = contracts.reduce(
+  const totalReceivedOneShot = oneShot.reduce(
     (s, c) => s + Number(c.commission?.received ?? 0),
     0,
   );
-  const totalPaid = contracts.reduce(
+  const totalPaid = oneShot.reduce(
     (s, c) => s + Number(c.commission?.paid ?? 0),
     0,
   );
+  const totalReceived =
+    totalReceivedOneShot +
+    (stato === "Incassato" || stato === "Pagato" || stato === "Tutti"
+      ? recurringTotals.amount
+      : 0);
 
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
   const groupByCollection = reportPeriodUsesCollectionDate(stato);
-  for (const c of contracts) {
+  for (const c of oneShot) {
     const baseDate = groupByCollection
       ? c.collectionDate ?? c.insertionDate
       : c.insertionDate;
@@ -131,6 +153,14 @@ export default async function ReportPage({
     cur.count += 1;
     cur.received += Number(c.commission?.received ?? 0);
     cur.expected += Number(c.commission?.expected ?? 0);
+    monthMap.set(key, cur);
+  }
+  for (const r of recurringRows) {
+    if (!(stato === "Incassato" || stato === "Pagato" || stato === "Tutti")) break;
+    const key = r.settledPeriod || r.period;
+    const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
+    cur.count += 1;
+    cur.received += r.amount;
     monthMap.set(key, cur);
   }
   const monthly = [...monthMap.entries()]
@@ -146,9 +176,9 @@ export default async function ReportPage({
 
   const byCollab = new Map<
     string,
-    { name: string; count: number; expected: number; received: number; paid: number }
+    { name: string; count: number; expected: number; received: number; paid: number; recurring: number }
   >();
-  for (const c of contracts) {
+  for (const c of oneShot) {
     const id = c.collaboratorId;
     const cur = byCollab.get(id) ?? {
       name: c.collaborator.name,
@@ -156,12 +186,28 @@ export default async function ReportPage({
       expected: 0,
       received: 0,
       paid: 0,
+      recurring: 0,
     };
     cur.count += 1;
     cur.expected += Number(c.commission?.expected ?? 0);
     cur.received += Number(c.commission?.received ?? 0);
     cur.paid += Number(c.commission?.paid ?? 0);
     byCollab.set(id, cur);
+  }
+  if (stato === "Incassato" || stato === "Pagato" || stato === "Tutti") {
+    for (const r of recurringRows) {
+      const cur = byCollab.get(r.collaboratorId) ?? {
+        name: r.collaboratorName,
+        count: 0,
+        expected: 0,
+        received: 0,
+        paid: 0,
+        recurring: 0,
+      };
+      cur.recurring += r.amount;
+      cur.received += r.amount;
+      byCollab.set(r.collaboratorId, cur);
+    }
   }
   const collaboratorTotals = [...byCollab.values()].sort((a, b) =>
     a.name.localeCompare(b.name, "it"),
@@ -257,19 +303,36 @@ export default async function ReportPage({
         </ul>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Contratti ({stato})</p>
           <p className="mt-2 text-3xl font-bold">{totalContracts}</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Gettone previsto</p>
+          <p className="text-sm text-slate-500">Gettone previsto (una tantum)</p>
           <p className="mt-2 text-3xl font-bold">{formatCurrency(totalExpected)}</p>
         </div>
+        <div className="rounded-xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
+          <p className="text-sm text-violet-700">Rate ricorrenti pagate</p>
+          <p className="mt-2 text-3xl font-bold text-violet-900">
+            {recurringTotals.count}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-violet-800">
+            {formatCurrency(recurringTotals.amount)}
+          </p>
+        </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm text-emerald-700">Importo ricevuto (incasso)</p>
+          <p className="text-sm text-emerald-700">Totale ricevuto</p>
           <p className="mt-2 text-3xl font-bold text-emerald-900">
             {formatCurrency(totalReceived)}
+          </p>
+          <p className="mt-1 text-[11px] text-emerald-800">
+            una tantum {formatCurrency(totalReceivedOneShot)} + ricorrenti{" "}
+            {formatCurrency(
+              stato === "Incassato" || stato === "Pagato" || stato === "Tutti"
+                ? recurringTotals.amount
+                : 0,
+            )}
           </p>
         </div>
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
@@ -298,7 +361,8 @@ export default async function ReportPage({
                   <th className="px-3 py-2">Collaboratore</th>
                   <th className="px-3 py-2">N° contratti</th>
                   <th className="px-3 py-2">Previsto</th>
-                  <th className="px-3 py-2">Ricevuto</th>
+                  <th className="px-3 py-2">Ricorrenti</th>
+                  <th className="px-3 py-2">Ricevuto tot.</th>
                   <th className="px-3 py-2">Liquidato</th>
                 </tr>
               </thead>
@@ -308,6 +372,9 @@ export default async function ReportPage({
                     <td className="px-3 py-2 font-medium">{row.name}</td>
                     <td className="px-3 py-2">{row.count}</td>
                     <td className="px-3 py-2">{formatCurrency(row.expected)}</td>
+                    <td className="px-3 py-2 text-violet-700">
+                      {formatCurrency(row.recurring)}
+                    </td>
                     <td className="px-3 py-2 text-emerald-700">
                       {formatCurrency(row.received)}
                     </td>
@@ -370,12 +437,8 @@ export default async function ReportPage({
             </Link>
           </div>
           <p className="mt-4 text-sm text-slate-600">
-            Per le rate <strong>Helios</strong> dell&apos;ultimo rendiconto (quanto dare a
-            ciascun collaboratore) vai in{" "}
-            <Link href="/provvigioni" className="font-medium text-emerald-700 underline">
-              Provvigioni → Rendiconto ricorrenze
-            </Link>
-            .
+            L&apos;Excel include anche il foglio <strong>Rate ricorrenti</strong>{" "}
+            (competenza / bonifico nel periodo, es. giugno €4/€6).
           </p>
         </section>
 
