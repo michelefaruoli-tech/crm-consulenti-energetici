@@ -6,32 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { sendReportEmailAction } from "@/lib/actions";
 import { BackupButton } from "@/components/report/backup-button";
+import { ReportPeriodFields } from "@/components/report/report-period-fields";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { getMasterEmail } from "@/lib/mail";
 import {
+  REPORT_MONTH_LABELS,
   REPORT_STATO_OPTIONS,
   buildReportContractWhere,
+  formatMonthLabel,
+  recentMonthOptions,
   reportDateRange,
   reportStatoHint,
+  resolveReportPeriod,
   resolveReportStato,
 } from "@/lib/report-filters";
-
-const MONTH_LABELS = [
-  "Gennaio",
-  "Febbraio",
-  "Marzo",
-  "Aprile",
-  "Maggio",
-  "Giugno",
-  "Luglio",
-  "Agosto",
-  "Settembre",
-  "Ottobre",
-  "Novembre",
-  "Dicembre",
-];
 
 export default async function ReportPage({
   searchParams,
@@ -39,6 +29,7 @@ export default async function ReportPage({
   searchParams: Promise<{
     from?: string;
     to?: string;
+    month?: string;
     collaboratorId?: string;
     supplierId?: string;
     stato?: string;
@@ -47,8 +38,23 @@ export default async function ReportPage({
   const session = await requireSession();
   if (!hasPermission(session.role, "reports.export")) redirect("/");
 
-  const { from, to, collaboratorId, supplierId, stato: statoRaw } = await searchParams;
+  const {
+    from: fromRaw,
+    to: toRaw,
+    month: monthRaw,
+    collaboratorId,
+    supplierId,
+    stato: statoRaw,
+  } = await searchParams;
   const stato = resolveReportStato(statoRaw);
+  const period = resolveReportPeriod({
+    from: fromRaw,
+    to: toRaw,
+    month: monthRaw,
+  });
+  const from = period.from;
+  const to = period.to;
+  const month = period.month;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
 
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
@@ -86,9 +92,10 @@ export default async function ReportPage({
     getMasterEmail();
 
   const { dateFrom, dateTo } = reportDateRange(from, to);
+  const monthOptions = recentMonthOptions(24);
 
   const contractWhere = buildReportContractWhere(
-    { from, to, collaboratorId, supplierId, stato },
+    { from, to, month, collaboratorId, supplierId, stato },
     visibility,
   );
 
@@ -111,7 +118,6 @@ export default async function ReportPage({
     0,
   );
 
-  // Stats per mese (nel periodo filtrato)
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
   for (const c of contracts) {
     const d = new Date(c.insertionDate);
@@ -128,12 +134,11 @@ export default async function ReportPage({
       const [y, m] = key.split("-");
       return {
         key,
-        label: `${MONTH_LABELS[Number(m) - 1]} ${y}`,
+        label: `${REPORT_MONTH_LABELS[Number(m) - 1]} ${y}`,
         ...val,
       };
     });
 
-  // Riepilogo per collaboratore (utile per capire quanto liquidare)
   const byCollab = new Map<
     string,
     { name: string; count: number; expected: number; received: number; paid: number }
@@ -158,33 +163,35 @@ export default async function ReportPage({
   );
 
   const qs = new URLSearchParams();
-  if (from) qs.set("from", from);
-  if (to) qs.set("to", to);
+  if (month) qs.set("month", month);
+  qs.set("from", from);
+  qs.set("to", to);
   if (collaboratorId) qs.set("collaboratorId", collaboratorId);
   if (supplierId) qs.set("supplierId", supplierId);
   qs.set("stato", stato);
   const exportQs = `?${qs.toString()}`;
 
-  const fromStr = (from ?? dateFrom.toISOString().slice(0, 10));
-  const toStr = (to ?? dateTo.toISOString().slice(0, 10));
+  const periodLabelText = month
+    ? formatMonthLabel(month)
+    : `${dateFrom.toLocaleDateString("it-IT")} – ${dateTo.toLocaleDateString("it-IT")}`;
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
-          Filtra per periodo, collaboratore, fornitore e stato provvigione · statistiche in
-          tempo reale
+          Scegli un mese intero (es. Luglio 2026) oppure un periodo personalizzato ·
+          collaboratore, fornitore e stato
         </p>
       </div>
 
-      <form className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3 lg:grid-cols-6">
-        <Field label="Dal">
-          <Input type="date" name="from" defaultValue={fromStr} />
-        </Field>
-        <Field label="Al">
-          <Input type="date" name="to" defaultValue={toStr} />
-        </Field>
+      <form className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <ReportPeriodFields
+          monthOptions={monthOptions}
+          initialMonth={month ?? ""}
+          initialFrom={from}
+          initialTo={to}
+        />
         <Field label="Collaboratore">
           <Select name="collaboratorId" defaultValue={collaboratorId ?? ""}>
             <option value="">Tutti</option>
@@ -220,6 +227,13 @@ export default async function ReportPage({
           </Button>
         </div>
       </form>
+
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+        <p className="font-semibold">
+          Periodo: {periodLabelText}
+          {month ? " (mese intero)" : " (date personalizzate)"}
+        </p>
+      </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
         <p className="font-semibold">Filtro attivo: {stato}</p>
@@ -339,7 +353,7 @@ export default async function ReportPage({
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-2 font-semibold text-slate-900">Esporta (filtri attuali)</h2>
           <p className="mb-4 text-sm text-slate-500">
-            Excel e PDF usano gli stessi filtri sopra (periodo, collaboratore, fornitore,
+            Excel e PDF usano gli stessi filtri sopra (mese/periodo, collaboratore, fornitore,
             stato).
           </p>
           <div className="flex flex-wrap gap-3">
@@ -367,13 +381,16 @@ export default async function ReportPage({
               <Input name="to" type="email" required />
             </Field>
             <Field label="Oggetto">
-              <Input name="subject" defaultValue="Report produzione CRM Energia" />
+              <Input
+                name="subject"
+                defaultValue={`Report ${periodLabelText} — CRM Energia`}
+              />
             </Field>
             <Field label="Messaggio">
               <Textarea
                 name="body"
                 rows={3}
-                defaultValue={`Report ${stato} dal ${dateFrom.toLocaleDateString("it-IT")} al ${dateTo.toLocaleDateString("it-IT")}: ${totalContracts} contratti, previsto ${formatCurrency(totalExpected)}, ricevuto ${formatCurrency(totalReceived)}.`}
+                defaultValue={`Report ${stato} — ${periodLabelText}: ${totalContracts} contratti, previsto ${formatCurrency(totalExpected)}, ricevuto ${formatCurrency(totalReceived)}.`}
               />
             </Field>
             <Button type="submit">Invia email</Button>

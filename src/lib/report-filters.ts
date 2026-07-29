@@ -4,10 +4,13 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { PROVVIGIONE_STATO_OPTIONS } from "@/lib/provvigioni-stato";
 import { provvigioneStatoWhere } from "@/lib/provvigioni-filters";
+import { resolveReportPeriod } from "@/lib/report-month";
 
 export type ReportFilterParams = {
   from?: string | null;
   to?: string | null;
+  /** Mese intero YYYY-MM (ha priorità su from/to se valorizzato) */
+  month?: string | null;
   collaboratorId?: string | null;
   supplierId?: string | null;
   /** Da incassare | Incassato | Pagato | KO / Cessato | Tutti */
@@ -21,6 +24,15 @@ export const REPORT_STATO_OPTIONS = [
   "Tutti",
   ...PROVVIGIONE_STATO_OPTIONS,
 ] as const;
+
+export {
+  REPORT_MONTH_LABELS,
+  monthToDateRange,
+  formatMonthLabel,
+  recentMonthOptions,
+  currentMonthValue,
+  resolveReportPeriod,
+} from "@/lib/report-month";
 
 export function resolveReportStato(raw: string | null | undefined): string {
   const s = raw?.trim();
@@ -41,7 +53,8 @@ export function buildReportContractWhere(
   params: ReportFilterParams,
   visibility: Prisma.ContractWhereInput,
 ): Prisma.ContractWhereInput {
-  const { dateFrom, dateTo } = reportDateRange(params.from, params.to);
+  const period = resolveReportPeriod(params);
+  const { dateFrom, dateTo } = reportDateRange(period.from, period.to);
   const stato = resolveReportStato(params.stato);
   const statoWhere = provvigioneStatoWhere(stato === "Tutti" ? undefined : stato);
 

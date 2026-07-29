@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const from = sp.get("from");
   const to = sp.get("to");
+  const month = sp.get("month");
   const collaboratorId = sp.get("collaboratorId");
   const supplierId = sp.get("supplierId");
   const stato = resolveReportStato(sp.get("stato"));
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   const contracts = await prisma.contract.findMany({
     where: buildReportContractWhere(
-      { from, to, collaboratorId, supplierId, stato },
+      { from, to, month, collaboratorId, supplierId, stato },
       visibility,
     ),
     include: {
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest) {
   doc.setFontSize(10);
   doc.text(`Generato il ${new Date().toLocaleString("it-IT")}`, 14, 26);
   doc.text(
-    `Filtri: ${stato}${from ? ` · dal ${from}` : ""}${to ? ` · al ${to}` : ""} · ${contracts.length} contratti`,
+    `Filtri: ${stato}${month ? ` · ${month}` : ""}${from ? ` · dal ${from}` : ""}${to ? ` · al ${to}` : ""} · ${contracts.length} contratti`,
     14,
     32,
   );

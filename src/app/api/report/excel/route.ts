@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const from = sp.get("from");
   const to = sp.get("to");
+  const month = sp.get("month");
   const collaboratorId = sp.get("collaboratorId");
   const supplierId = sp.get("supplierId");
   const stato = resolveReportStato(sp.get("stato"));
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   const contracts = await prisma.contract.findMany({
     where: buildReportContractWhere(
-      { from, to, collaboratorId, supplierId, stato },
+      { from, to, month, collaboratorId, supplierId, stato },
       visibility,
     ),
     include: {
@@ -78,6 +79,7 @@ export async function GET(req: NextRequest) {
   }
 
   const meta = workbook.addWorksheet("Filtri");
+  meta.addRow(["Mese", month ?? ""]);
   meta.addRow(["Dal", from ?? ""]);
   meta.addRow(["Al", to ?? ""]);
   meta.addRow(["Collaboratore ID", collaboratorId ?? "Tutti"]);
