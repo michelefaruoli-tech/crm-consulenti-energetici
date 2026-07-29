@@ -1,18 +1,18 @@
 /**
  * Filtri condivisi Report (pagina + export Excel/PDF).
  *
- * Importante — quale data usa il periodo:
- * - Incassato / Pagato → `collectionDate` (quando il fornitore ha pagato)
- * - Da incassare / KO / Tutti → `insertionDate` (quando è entrato in CRM)
+ * Regola: il mese del Report = mese della colonna «Incasso» in Provvigioni
+ * (`collectionDate`), per TUTTI i fornitori.
+ * Esempio: Incasso 06/2026 → scegli Giugno 2026 nel Report.
  *
- * Prima il Report filtrava SEMPRE su insertionDate: così un contratto inserito
- * a maggio e incassato a luglio spariva dal report di luglio (ma restava
- * in Provvigioni → Incassato).
+ * Eccezione: «Da incassare» / «KO» (senza data incasso) → data inserimento.
  */
 import type { Prisma } from "@/generated/prisma/client";
+import { fromZonedTime } from "date-fns-tz";
 import { PROVVIGIONE_STATO_OPTIONS } from "@/lib/provvigioni-stato";
 import { provvigioneStatoWhere } from "@/lib/provvigioni-filters";
 import { resolveReportPeriod } from "@/lib/report-month";
+import { APP_TZ } from "@/lib/timezone";
 
 export type ReportFilterParams = {
   from?: string | null;
@@ -49,20 +49,33 @@ export function resolveReportStato(raw: string | null | undefined): string {
   return REPORT_DEFAULT_STATO;
 }
 
+/**
+ * Intervallo date in Europe/Rome (allineato alla colonna Incasso MM/AAAA).
+ * Evita che su Vercel (UTC) un 01/06 Roma finisca fuori dal mese.
+ */
 export function reportDateRange(from?: string | null, to?: string | null) {
-  const dateFrom = from
-    ? new Date(`${from}T00:00:00.000`)
-    : new Date(new Date().getFullYear(), 0, 1);
-  const dateTo = to ? new Date(`${to}T23:59:59.999`) : new Date();
-  return { dateFrom, dateTo };
+  if (from && to) {
+    const dateFrom = fromZonedTime(`${from}T00:00:00.000`, APP_TZ);
+    const dateTo = fromZonedTime(`${to}T23:59:59.999`, APP_TZ);
+    return { dateFrom, dateTo };
+  }
+  if (from) {
+    const dateFrom = fromZonedTime(`${from}T00:00:00.000`, APP_TZ);
+    return { dateFrom, dateTo: new Date() };
+  }
+  const y = new Date().getFullYear();
+  return {
+    dateFrom: fromZonedTime(`${y}-01-01T00:00:00.000`, APP_TZ),
+    dateTo: new Date(),
+  };
 }
 
 /**
- * Per Incassato/Pagato il periodo deve seguire la data di incasso,
- * altrimenti i totali non combaciano con Provvigioni.
+ * Incassato / Pagato / Tutti → periodo = data incasso (colonna Provvigioni).
+ * Da incassare / KO → data inserimento (non hanno incasso).
  */
 export function reportPeriodUsesCollectionDate(stato: string): boolean {
-  return stato === "Incassato" || stato === "Pagato";
+  return stato === "Incassato" || stato === "Pagato" || stato === "Tutti";
 }
 
 export function buildReportContractWhere(
@@ -100,12 +113,12 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":
-      return "Periodo = data di incasso (come in Provvigioni). Fornitore ha pagato: importi da liquidare ai collaboratori.";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni, tutti i fornitori. Es. Giugno = Incasso 06/2026.";
     case "Pagato":
-      return "Periodo = data di incasso. Hai già liquidato i collaboratori.";
+      return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori.";
     case "KO / Cessato":
       return "Periodo = data inserimento. Pratiche KO / annullate / chiuse.";
     default:
-      return "Periodo = data inserimento. Tutti gli stati.";
+      return "Periodo = data di incasso (colonna Incasso). Include tutti gli stati con incasso in quel mese.";
   }
 }

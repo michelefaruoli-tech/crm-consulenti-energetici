@@ -231,8 +231,8 @@ export default async function ReportPage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
-          Con stato Incassato/Pagato il mese segue la <strong>data di incasso</strong>{" "}
-          (come in Provvigioni). Altrimenti segue la data di inserimento.
+          Il mese segue la colonna <strong>Incasso</strong> di Provvigioni (es. 06/2026 →
+          Giugno), per tutti i fornitori. Rate ricorrenti incluse.
         </p>
       </div>
 
@@ -282,7 +282,14 @@ export default async function ReportPage({
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
         <p className="font-semibold">
           Periodo: {periodLabelText}
-          {month ? " (mese intero)" : " (date personalizzate)"}
+          {month ? " (mese di incasso)" : " (date personalizzate)"}
+        </p>
+        <p className="mt-1 text-xs text-emerald-900/80">
+          Coincide con le righe Provvigioni che in colonna Incasso hanno{" "}
+          {month
+            ? `${month.slice(5)}/${month.slice(0, 4)}`
+            : "una data in questo intervallo"}
+          .
         </p>
       </div>
 

@@ -1,3 +1,6 @@
+import { formatInTimeZone } from "date-fns-tz";
+import { APP_TZ } from "@/lib/timezone";
+
 /** Parsing date italiane: DD/MM/YYYY, MM/YYYY, YYYY-MM-DD */
 export function parseFlexibleDate(value: string): Date | null {
   const raw = value.trim();
@@ -34,10 +37,10 @@ export function parseFlexibleDate(value: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** Colonna Incasso Provvigioni: MM/yyyy in Europe/Rome (allineata al mese Report). */
 export function formatMonthYear(date: Date | string | null | undefined): string {
   if (!date) return "";
   const d = typeof date === "string" ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return "";
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${mm}/${d.getFullYear()}`;
+  return formatInTimeZone(d, APP_TZ, "MM/yyyy");
 }

@@ -44,7 +44,7 @@ export function ReportPeriodFields({
 
   return (
     <>
-      <Field label="Mese intero">
+      <Field label="Mese di incasso">
         <Select
           name="month"
           value={month}

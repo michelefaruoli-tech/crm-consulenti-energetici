@@ -5,8 +5,7 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { toPeriod } from "@/lib/recurring";
-import { resolveReportPeriod, reportDateRange } from "@/lib/report-filters";
+import { resolveReportPeriod } from "@/lib/report-filters";
 
 export type ReportRecurringRow = {
   id: string;
@@ -23,14 +22,24 @@ export type ReportRecurringRow = {
   clientType: string;
 };
 
-function periodsInRange(from: string, to: string): string[] {
-  const { dateFrom, dateTo } = reportDateRange(from, to);
+function periodsInRange(from: string, to: string, month?: string | null): string[] {
+  if (month && /^\d{4}-\d{2}$/.test(month.trim())) {
+    return [month.trim()];
+  }
+  // from/to sono YYYY-MM-DD (già risolti come mese o periodo)
+  const start = from.slice(0, 7);
+  const end = to.slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(start) || !/^\d{4}-\d{2}$/.test(end)) return [];
   const out: string[] = [];
-  const cur = new Date(dateFrom.getFullYear(), dateFrom.getMonth(), 1);
-  const end = new Date(dateTo.getFullYear(), dateTo.getMonth(), 1);
-  while (cur <= end) {
-    out.push(toPeriod(cur));
-    cur.setMonth(cur.getMonth() + 1);
+  let [y, m] = start.split("-").map(Number);
+  const [ey, em] = end.split("-").map(Number);
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
   }
   return out;
 }
@@ -52,7 +61,7 @@ export async function loadReportRecurringPaid(params: {
   visibility: Prisma.ContractWhereInput;
 }): Promise<ReportRecurringRow[]> {
   const period = resolveReportPeriod(params);
-  const periods = periodsInRange(period.from, period.to);
+  const periods = periodsInRange(period.from, period.to, period.month);
   if (periods.length === 0) return [];
 
   const rows = await prisma.recurringMonth.findMany({
