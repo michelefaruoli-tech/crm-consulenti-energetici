@@ -83,7 +83,22 @@ export default async function ReportPage({
             select: { id: true, name: true },
           })
         : Promise.resolve([{ id: session.id, name: session.name }]),
-    prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    prisma.supplier.findMany({
+      where: {
+        // Attivi, oppure inattivi ancora usati nei contratti (es. ATS).
+        // Esclude i duplicati uniti (Enel Box / Enel Energia → Enel).
+        AND: [
+          {
+            OR: [{ active: true }, { contracts: { some: {} } }],
+          },
+          { NOT: { code: { contains: "_MERGED_" } } },
+          { NOT: { name: { contains: "(unito in" } } },
+          { NOT: { name: { startsWith: "_archivio_" } } },
+        ],
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
     hasPermission(session.role, "backup.manage")
       ? prisma.backupLog.findMany({
           orderBy: { createdAt: "desc" },

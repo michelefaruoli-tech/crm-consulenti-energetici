@@ -119,7 +119,7 @@ async function main() {
         where: { id: other.id },
         data: {
           active: false,
-          name: `${other.name} (unito in ${canonical})`,
+          name: `_archivio_${canonical.toLowerCase()}_${other.id.slice(-6)}`,
           code: `${other.code}_MERGED_${Date.now()}`.slice(0, 60),
         },
       });

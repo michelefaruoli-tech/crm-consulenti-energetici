@@ -5,10 +5,16 @@ import { prisma } from "@/lib/prisma";
  * Enel / Enel Energia / ENEL BOX → «Enel»
  * Edison / Edison Energia → «Edison»
  */
-export function canonicalSupplierName(raw: string): string {
-  const n = String(raw ?? "")
+/** Toglie eventuali suffissi tipo «(unito in Enel)» da vecchi merge. */
+export function stripMergedSupplierLabel(raw: string): string {
+  return String(raw ?? "")
+    .replace(/\s*\(unito in [^)]+\)\s*/gi, "")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+export function canonicalSupplierName(raw: string): string {
+  const n = stripMergedSupplierLabel(raw);
   if (!n) return n;
   const key = n
     .toLowerCase()
@@ -134,13 +140,14 @@ export async function mergeDuplicateSuppliers(): Promise<MergeSuppliersResult> {
         data: { supplierId: keep.id },
       });
 
-      // Disattiva e rinomina per non ricomparire in elenco
+      // Disattiva con nome interno: niente «Enel (unito in…)» in filtri/ricerche
+      const mergedCode = `${other.code}_MERGED_${Date.now()}`.slice(0, 60);
       await prisma.supplier.update({
         where: { id: other.id },
         data: {
           active: false,
-          name: `${other.name} (unito in ${canonical})`,
-          code: `${other.code}_MERGED_${Date.now()}`.slice(0, 60),
+          name: `_archivio_${canonical.toLowerCase()}_${other.id.slice(-6)}`,
+          code: mergedCode,
         },
       });
     }

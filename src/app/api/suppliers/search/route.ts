@@ -13,6 +13,11 @@ export async function GET(request: Request) {
   const suppliers = await prisma.supplier.findMany({
     where: {
       active: true,
+      NOT: [
+        { code: { contains: "_MERGED_" } },
+        { name: { startsWith: "_archivio_" } },
+        { name: { contains: "(unito in" } },
+      ],
       OR: [
         { name: { contains: q, mode: "insensitive" } },
         { code: { contains: q, mode: "insensitive" } },
