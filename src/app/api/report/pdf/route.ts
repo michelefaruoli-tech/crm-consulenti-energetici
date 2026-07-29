@@ -8,6 +8,7 @@ import { clientDisplayName } from "@/lib/utils";
 import { simplifiedProvvigioneStato } from "@/lib/provvigioni-stato";
 import {
   buildReportContractWhere,
+  reportPeriodUsesCollectionDate,
   resolveReportStato,
 } from "@/lib/report-filters";
 
@@ -39,7 +40,9 @@ export async function GET(req: NextRequest) {
       collaborator: { select: { name: true } },
       commission: true,
     },
-    orderBy: { insertionDate: "desc" },
+    orderBy: reportPeriodUsesCollectionDate(stato)
+      ? { collectionDate: "desc" }
+      : { insertionDate: "desc" },
   });
 
   const doc = new jsPDF();

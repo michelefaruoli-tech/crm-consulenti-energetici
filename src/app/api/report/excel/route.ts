@@ -8,6 +8,7 @@ import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { simplifiedProvvigioneStato } from "@/lib/provvigioni-stato";
 import {
   buildReportContractWhere,
+  reportPeriodUsesCollectionDate,
   resolveReportStato,
 } from "@/lib/report-filters";
 
@@ -39,7 +40,9 @@ export async function GET(req: NextRequest) {
       collaborator: { select: { name: true } },
       commission: true,
     },
-    orderBy: { insertionDate: "desc" },
+    orderBy: reportPeriodUsesCollectionDate(stato)
+      ? { collectionDate: "desc" }
+      : { insertionDate: "desc" },
   });
 
   const workbook = new ExcelJS.Workbook();
@@ -48,6 +51,7 @@ export async function GET(req: NextRequest) {
   sheet.columns = [
     { header: "Numero", key: "number", width: 18 },
     { header: "Data inserimento", key: "insertion", width: 14 },
+    { header: "Data incasso", key: "collection", width: 14 },
     { header: "Cliente", key: "client", width: 28 },
     { header: "Fornitore", key: "supplier", width: 20 },
     { header: "Collaboratore", key: "collaborator", width: 20 },
@@ -63,6 +67,9 @@ export async function GET(req: NextRequest) {
       number: contract.contractNumber,
       insertion: contract.insertionDate
         ? contract.insertionDate.toISOString().slice(0, 10)
+        : "",
+      collection: contract.collectionDate
+        ? contract.collectionDate.toISOString().slice(0, 10)
         : "",
       client: clientDisplayName(contract.client),
       supplier: contract.supplier.name,
@@ -85,6 +92,10 @@ export async function GET(req: NextRequest) {
   meta.addRow(["Collaboratore ID", collaboratorId ?? "Tutti"]);
   meta.addRow(["Fornitore ID", supplierId ?? "Tutti"]);
   meta.addRow(["Stato provvigione", stato]);
+  meta.addRow([
+    "Data periodo",
+    reportPeriodUsesCollectionDate(stato) ? "collectionDate (incasso)" : "insertionDate",
+  ]);
   meta.addRow(["N° righe", contracts.length]);
 
   const buffer = await workbook.xlsx.writeBuffer();

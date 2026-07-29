@@ -1,5 +1,13 @@
 /**
  * Filtri condivisi Report (pagina + export Excel/PDF).
+ *
+ * Importante — quale data usa il periodo:
+ * - Incassato / Pagato → `collectionDate` (quando il fornitore ha pagato)
+ * - Da incassare / KO / Tutti → `insertionDate` (quando è entrato in CRM)
+ *
+ * Prima il Report filtrava SEMPRE su insertionDate: così un contratto inserito
+ * a maggio e incassato a luglio spariva dal report di luglio (ma restava
+ * in Provvigioni → Incassato).
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { PROVVIGIONE_STATO_OPTIONS } from "@/lib/provvigioni-stato";
@@ -49,6 +57,14 @@ export function reportDateRange(from?: string | null, to?: string | null) {
   return { dateFrom, dateTo };
 }
 
+/**
+ * Per Incassato/Pagato il periodo deve seguire la data di incasso,
+ * altrimenti i totali non combaciano con Provvigioni.
+ */
+export function reportPeriodUsesCollectionDate(stato: string): boolean {
+  return stato === "Incassato" || stato === "Pagato";
+}
+
 export function buildReportContractWhere(
   params: ReportFilterParams,
   visibility: Prisma.ContractWhereInput,
@@ -57,11 +73,15 @@ export function buildReportContractWhere(
   const { dateFrom, dateTo } = reportDateRange(period.from, period.to);
   const stato = resolveReportStato(params.stato);
   const statoWhere = provvigioneStatoWhere(stato === "Tutti" ? undefined : stato);
+  const useCollection = reportPeriodUsesCollectionDate(stato);
 
   const and: Prisma.ContractWhereInput[] = [
     visibility,
     { deletedAt: null },
-    { insertionDate: { gte: dateFrom, lte: dateTo } },
+    { isHistorical: false },
+    useCollection
+      ? { collectionDate: { gte: dateFrom, lte: dateTo } }
+      : { insertionDate: { gte: dateFrom, lte: dateTo } },
   ];
 
   if (params.collaboratorId) {
@@ -78,14 +98,14 @@ export function buildReportContractWhere(
 export function reportStatoHint(stato: string): string {
   switch (stato) {
     case "Da incassare":
-      return "Contratti inseriti: il fornitore non ha ancora pagato a te.";
+      return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":
-      return "Il fornitore ha pagato a te: questi importi restano da liquidare ai collaboratori.";
+      return "Periodo = data di incasso (come in Provvigioni). Fornitore ha pagato: importi da liquidare ai collaboratori.";
     case "Pagato":
-      return "Hai già pagato i collaboratori (provvigione liquidata).";
+      return "Periodo = data di incasso. Hai già liquidato i collaboratori.";
     case "KO / Cessato":
-      return "Pratiche KO / annullate / chiuse senza incasso.";
+      return "Periodo = data inserimento. Pratiche KO / annullate / chiuse.";
     default:
-      return "Tutti gli stati (da incassare, incassato, pagato, KO).";
+      return "Periodo = data inserimento. Tutti gli stati.";
   }
 }

@@ -18,6 +18,7 @@ import {
   formatMonthLabel,
   recentMonthOptions,
   reportDateRange,
+  reportPeriodUsesCollectionDate,
   reportStatoHint,
   resolveReportPeriod,
   resolveReportStato,
@@ -119,8 +120,12 @@ export default async function ReportPage({
   );
 
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
+  const groupByCollection = reportPeriodUsesCollectionDate(stato);
   for (const c of contracts) {
-    const d = new Date(c.insertionDate);
+    const baseDate = groupByCollection
+      ? c.collectionDate ?? c.insertionDate
+      : c.insertionDate;
+    const d = new Date(baseDate);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
     cur.count += 1;
@@ -180,8 +185,8 @@ export default async function ReportPage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
-          Scegli un mese intero (es. Luglio 2026) oppure un periodo personalizzato ·
-          collaboratore, fornitore e stato
+          Con stato Incassato/Pagato il mese segue la <strong>data di incasso</strong>{" "}
+          (come in Provvigioni). Altrimenti segue la data di inserimento.
         </p>
       </div>
 
