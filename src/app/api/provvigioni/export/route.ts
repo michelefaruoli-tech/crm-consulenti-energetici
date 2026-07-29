@@ -108,11 +108,14 @@ export async function GET(request: Request) {
     });
   }
 
-  // Foglio rendiconto ricorrenze (opzionale: mese settled o tutti i PAID recenti)
+  // Foglio rendiconto: mese scelto = competenza OPPURE mese bonifico
+  // (prima solo settledPeriod → se scaricavi luglio ma le rate erano settled=giugno, foglio vuoto)
+  const monthKey =
+    settledPeriod && /^\d{4}-\d{2}$/.test(settledPeriod) ? settledPeriod : "";
   const rendicontoWhere = {
     status: "PAID" as const,
-    ...(settledPeriod && /^\d{4}-\d{2}$/.test(settledPeriod)
-      ? { settledPeriod }
+    ...(monthKey
+      ? { OR: [{ settledPeriod: monthKey }, { period: monthKey }] }
       : {}),
     contract: contractWhere,
   };
@@ -142,7 +145,7 @@ export async function GET(request: Request) {
   });
 
   const sheet2 = workbook.addWorksheet(
-    settledPeriod ? `Rendiconto ${settledPeriod}` : "Ricorrenze pagate",
+    monthKey ? `Rendiconto ${monthKey}` : "Ricorrenze pagate",
   );
   sheet2.columns = [
     { header: "Competenza", key: "competence", width: 14 },
@@ -155,6 +158,22 @@ export async function GET(request: Request) {
     { header: "Pagato il", key: "paidAt", width: 14 },
     { header: "N. contratto", key: "number", width: 16 },
   ];
+
+  if (paidMonths.length === 0) {
+    sheet2.addRow({
+      competence: monthKey
+        ? `Nessuna rate PAID con competenza o bonifico ${monthKey}`
+        : "Nessuna rate PAID",
+      settled: "",
+      client: "Prova il mese di competenza (es. 2026-06 per giugno Helios)",
+      pod: "",
+      collaborator: "",
+      supplier: "",
+      amount: "",
+      paidAt: "",
+      number: "",
+    });
+  }
 
   for (const m of paidMonths) {
     sheet2.addRow({
