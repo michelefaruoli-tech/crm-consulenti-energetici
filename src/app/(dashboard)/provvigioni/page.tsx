@@ -25,11 +25,12 @@ import {
   syncAllRecurringMonths,
 } from "@/lib/recurring-sync";
 import {
+  effectiveCollectionDate,
   markEarlyReswitchContracts,
   markLatestContractsByPod,
   resolveStornoInfo,
 } from "@/lib/storno-status";
-import { computeSupplyStartDate } from "@/lib/supply-dates";
+import { computeSupplyStartDate, isInFornitura } from "@/lib/supply-dates";
 import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import {
   buildProvvigioniContractWhere,
@@ -371,11 +372,45 @@ export default async function ProvvigioniPage({
 
   // Allinea in memoria subito; scrittura DB in background (pagina più veloce)
   const alignJobs: Promise<unknown>[] = [];
+  const now = new Date();
   for (const c of contracts) {
-    const hasDate = Boolean(c.collectionDate);
-    // NON riscrivere KO/CHIUSO → Incassato solo perché c’è collectionDate:
-    // un contratto può essere chiuso dopo aver già incassato (Helios in fornitura)
-    // senza dover mettere storno automatico.
+    const supply =
+      c.supplyStartDate ??
+      computeSupplyStartDate(c.insertionDate, c.operationType);
+    const inFornitura = isInFornitura(supply, now);
+
+    // Incasso/Pagato prematuro: data futura = attivazione prevista, non pagamento
+    if (
+      c.collectionDate &&
+      !inFornitura &&
+      !["KO", "ANNULLATO", "CHIUSO"].includes(c.status)
+    ) {
+      const prevStatus = c.status;
+      (c as { collectionDate: Date | null }).collectionDate = null;
+      (c as { paymentStatus: string | null }).paymentStatus = "Da incassare";
+      const revertStatus =
+        prevStatus === "PAGATO_DAL_FORNITORE" ||
+        prevStatus === "PROVVIGIONE_LIQUIDATA";
+      if (revertStatus) {
+        (c as { status: string }).status = "IN_ATTESA_PAGAMENTO";
+      }
+      alignJobs.push(
+        prisma.contract
+          .update({
+            where: { id: c.id },
+            data: {
+              collectionDate: null,
+              paymentStatus: "Da incassare",
+              ...(revertStatus ? { status: "IN_ATTESA_PAGAMENTO" } : {}),
+            },
+          })
+          .catch(() => null),
+      );
+    }
+
+    const hasDate = Boolean(c.collectionDate) && inFornitura;
+    // NON riscrivere KO/CHIUSO → Incassato solo perché c’è collectionDate.
+    // Solo se già in fornitura.
     if (hasDate && c.status === "IN_ATTESA_PAGAMENTO") {
       (c as { status: string }).status = "PAGATO_DAL_FORNITORE";
       (c as { paymentStatus: string | null }).paymentStatus = "Incassato";
@@ -446,12 +481,25 @@ export default async function ProvvigioniPage({
 
   const rows: ProvvigioneRow[] = contracts.map((contract) => {
     const item = contract.commission;
-    const hasDate = Boolean(contract.collectionDate);
-    const paidLabel = hasDate ? "Incassato" : "Da incassare";
-    const collectionMonth = hasDate ? formatMonthYear(contract.collectionDate) : "";
     const supply =
       contract.supplyStartDate ??
       computeSupplyStartDate(contract.insertionDate, contract.operationType);
+    const inFornitura = isInFornitura(supply);
+    const effectiveCollection = effectiveCollectionDate(
+      contract.collectionDate,
+      supply,
+    );
+    const hasDate = Boolean(effectiveCollection);
+    const paidLabel = hasDate ? "Incassato" : "Da incassare";
+    // Colonna Incasso: solo pagamento reale. Se non in fornitura, mostra
+    // la data ingresso come nota (attivazione prevista), non come incasso.
+    const collectionMonth = hasDate
+      ? formatMonthYear(effectiveCollection)
+      : "";
+    const activationNote =
+      !inFornitura && supply
+        ? `attiv. ${formatMonthYear(supply)}`
+        : undefined;
     const storno = resolveStornoInfo({
       status: contract.status,
       recurrence: contract.recurrence,
@@ -461,11 +509,13 @@ export default async function ProvvigioniPage({
       expiryDate: contract.expiryDate,
       durationMonths: contract.durationMonths,
       isLatestForPod: latestMap.get(contract.id) ?? true,
-      collectionDate: contract.collectionDate,
+      collectionDate: effectiveCollection,
       isEarlyReswitch: earlyMap.get(contract.id) ?? false,
     });
 
-    const stato = simplifiedProvvigioneStato(contract.status, hasDate);
+    const stato = simplifiedProvvigioneStato(contract.status, hasDate, {
+      inFornitura,
+    });
 
     return {
       id: contract.id,
@@ -489,9 +539,11 @@ export default async function ProvvigioniPage({
       paymentStatus: paidLabel,
       confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,
-      recurringIncassoNote: isRecurring(contract.recurrence)
-        ? lastRecurringIncassoNote(contract.recurringMonths, stato)
-        : undefined,
+      recurringIncassoNote: activationNote
+        ? activationNote
+        : isRecurring(contract.recurrence)
+          ? lastRecurringIncassoNote(contract.recurringMonths, stato)
+          : undefined,
       stornoFlag: item?.stornoDate ? "Sì" : "No",
       stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
       stornoAmount: item?.stornoAmount != null ? String(Number(item.stornoAmount)) : "",

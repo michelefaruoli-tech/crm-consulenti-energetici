@@ -55,20 +55,33 @@ export function provvigioneStatoWhere(
 ): Prisma.ContractWhereInput | undefined {
   const s = stato?.trim();
   if (!s || s === "Tutti") return undefined;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   if (s === "Incassato") {
     return {
       collectionDate: { not: null },
       status: { notIn: ["PROVVIGIONE_LIQUIDATA", ...KO_STATUSES] },
+      // Solo già in fornitura (altrimenti la data è attivazione, non incasso)
+      supplyStartDate: { lte: today },
     };
   }
   if (s === "Da incassare") {
     return {
-      collectionDate: null,
       status: { notIn: [...KO_STATUSES] },
+      OR: [
+        { collectionDate: null },
+        // Incasso/Pagato prematuro: non ancora in fornitura
+        { supplyStartDate: { gt: today } },
+        { supplyStartDate: null },
+      ],
     };
   }
   if (s === "Pagato") {
-    return { status: { equals: "PROVVIGIONE_LIQUIDATA" } };
+    return {
+      status: { equals: "PROVVIGIONE_LIQUIDATA" },
+      supplyStartDate: { lte: today },
+    };
   }
   if (s === "KO / Cessato") {
     return {

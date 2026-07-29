@@ -13,6 +13,7 @@
  */
 
 import { isRecurring as isRecurringCanonical } from "@/lib/recurring";
+import { isInFornitura } from "@/lib/supply-dates";
 
 export type StornoKind =
   | "cessato"
@@ -116,6 +117,20 @@ function isPaid(collectionDate: Date | null | undefined): boolean {
   return Boolean(collectionDate);
 }
 
+/**
+ * Incasso “effettivo” per colori/stato: se non è ancora in fornitura,
+ * una collectionDate futura (spesso = attivazione prevista) NON conta come pagamento.
+ */
+export function effectiveCollectionDate(
+  collectionDate: Date | null | undefined,
+  supplyStartDate: Date | null | undefined,
+  now: Date = new Date(),
+): Date | null {
+  if (!collectionDate) return null;
+  if (!isInFornitura(supplyStartDate, now)) return null;
+  return collectionDate;
+}
+
 export function resolveStornoInfo(input: {
   status: string;
   recurrence?: string | null;
@@ -137,6 +152,12 @@ export function resolveStornoInfo(input: {
 }): StornoInfo {
   const now = input.now ?? new Date();
   const missingSupply = !input.supplyStartDate;
+  const inFornitura = isInFornitura(input.supplyStartDate, now);
+  const paidCollection = effectiveCollectionDate(
+    input.collectionDate,
+    input.supplyStartDate,
+    now,
+  );
 
   if (CESSATI.has(input.status)) {
     return {
@@ -186,19 +207,6 @@ export function resolveStornoInfo(input: {
     };
   }
 
-  // 4 — Ricorrente a vita (sempre distinguibile)
-  if (isRecurring(input.recurrence)) {
-    return {
-      kind: "ricorrente",
-      label: "Ricorrente a vita",
-      rowClassName: `border-l-4 border-cyan-600 bg-cyan-100 ${ROW_TEXT}`,
-      stornoEndDate: stornoEnd,
-      isFuoriStorno: true,
-      warnOnEdit: false,
-      missingSupplyStart: missingSupply,
-    };
-  }
-
   // Manca ingresso fornitura → da sistemare (POD in rosso in tabella)
   if (missingSupply) {
     return {
@@ -212,8 +220,35 @@ export function resolveStornoInfo(input: {
     };
   }
 
-  // 1 — Da incassare
-  if (!isPaid(input.collectionDate)) {
+  // Non ancora in fornitura → giallo «Da incassare»
+  // (anche se c’è collectionDate / Pagato in DB: spesso è attivazione prevista)
+  if (!inFornitura) {
+    return {
+      kind: "da_pagare",
+      label: "Da incassare (non ancora in fornitura)",
+      rowClassName: `border-l-4 border-amber-500 bg-amber-100 ${ROW_TEXT}`,
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: true,
+      warnOnEdit: false,
+      missingSupplyStart: false,
+    };
+  }
+
+  // 4 — Ricorrente a vita (sempre distinguibile)
+  if (isRecurring(input.recurrence)) {
+    return {
+      kind: "ricorrente",
+      label: "Ricorrente a vita",
+      rowClassName: `border-l-4 border-cyan-600 bg-cyan-100 ${ROW_TEXT}`,
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: true,
+      warnOnEdit: false,
+      missingSupplyStart: missingSupply,
+    };
+  }
+
+  // 1 — Da incassare (in fornitura ma senza incasso reale)
+  if (!isPaid(paidCollection)) {
     return {
       kind: "da_pagare",
       label: "Da incassare",

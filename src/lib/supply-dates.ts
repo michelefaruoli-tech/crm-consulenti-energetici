@@ -64,3 +64,25 @@ export function formatItDate(date: Date | string | null | undefined): string {
   const yyyy = d.getFullYear();
   return `${dd}/${mm}/${yyyy}`;
 }
+
+/** Inizio giornata per confronti data fornitura. */
+function startOfDayLocal(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/**
+ * True se l’utenza è già in fornitura (data ingresso ≤ oggi).
+ * Senza data ingresso → non ancora in fornitura (non trattare come incassato).
+ */
+export function isInFornitura(
+  supplyStartDate: Date | string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!supplyStartDate) return false;
+  const s =
+    typeof supplyStartDate === "string"
+      ? new Date(supplyStartDate)
+      : supplyStartDate;
+  if (Number.isNaN(s.getTime())) return false;
+  return startOfDayLocal(s).getTime() <= startOfDayLocal(now).getTime();
+}
