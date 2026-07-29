@@ -48,7 +48,7 @@ const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
  * - Da incassare = contratto inserito, fornitore non ha ancora pagato a te
  * - Incassato = fornitore ha pagato a te, tu non hai ancora liquidato il collab.
  * - Pagato = tu hai già pagato il collaboratore (PROVVIGIONE_LIQUIDATA)
- * - KO / Cessato = pratica chiusa senza incasso
+ * - KO / Cessato = pratica chiusa (anche se aveva già un incasso storico)
  */
 export function provvigioneStatoWhere(
   stato: string | null | undefined,
@@ -58,7 +58,7 @@ export function provvigioneStatoWhere(
   if (s === "Incassato") {
     return {
       collectionDate: { not: null },
-      status: { not: "PROVVIGIONE_LIQUIDATA" },
+      status: { notIn: ["PROVVIGIONE_LIQUIDATA", ...KO_STATUSES] },
     };
   }
   if (s === "Da incassare") {
@@ -72,7 +72,6 @@ export function provvigioneStatoWhere(
   }
   if (s === "KO / Cessato") {
     return {
-      collectionDate: null,
       status: { in: [...KO_STATUSES] },
     };
   }

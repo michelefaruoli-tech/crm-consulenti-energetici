@@ -53,10 +53,12 @@ export function simplifiedProvvigioneStato(
   status: string,
   hasCollectionDate: boolean,
 ): string {
+  // KO / cessato: ha priorità anche se c’è già una data di incasso (Helios).
+  // L’incasso storico resta; lo stato contratto può essere chiuso senza storno automatico.
+  if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
   // Liquidazione collaboratore: deve avere priorità su "Incassato"
   if (status === "PROVVIGIONE_LIQUIDATA") return "Pagato";
   if (hasCollectionDate) return "Incassato";
-  if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
   return "Da incassare";
 }
 

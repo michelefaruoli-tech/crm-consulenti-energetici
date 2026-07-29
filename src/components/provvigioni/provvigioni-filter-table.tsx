@@ -360,6 +360,19 @@ export function ProvvigioniFilterTable({
       }
     }
 
+    // Stato prima, storno dopo: le scelte manuali su Storno restano prioritarie
+    const FIELD_ORDER: Record<string, number> = {
+      stato: 50,
+      storno: 80,
+      stornoDate: 90,
+      stornoAmount: 100,
+    };
+    changes.sort((a, b) => {
+      const idCmp = a.commissionId.localeCompare(b.commissionId);
+      if (idCmp !== 0) return idCmp;
+      return (FIELD_ORDER[a.field] ?? 10) - (FIELD_ORDER[b.field] ?? 10);
+    });
+
     setError(null);
     setMessage(null);
     start(async () => {
@@ -651,7 +664,7 @@ export function ProvvigioniFilterTable({
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={current === "Sì" ? "Sì" : "No"}
-            title="Segna storno: gettone a compensazione (negativo)"
+            title="Storno gettone: solo se lo imposti tu (Sì/No). KO/cessato NON attiva storno automatico."
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {
               const v = e.target.value;

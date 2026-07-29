@@ -271,7 +271,7 @@ async function applyCommissionField(
         data: { status: "KO" },
       });
       if (!wasPaid) {
-        // KO / cessato mai incassato → gettone 0
+        // Mai incassato → gettone a 0, niente storno
         await prisma.commission.update({
           where: { id: commission.id },
           data: {
@@ -282,23 +282,10 @@ async function applyCommissionField(
             stornoAmount: null,
           },
         });
-      } else {
-        // Già incassato → storno sì + gettone compensazione negativo
-        const amt = Math.abs(
-          effectiveGettone({
-            expected: Number(commission.expected ?? 0),
-            clientType: commission.contract.client.type,
-            supplierName: commission.contract.supplier.name,
-          }),
-        );
-        await prisma.commission.update({
-          where: { id: commission.id },
-          data: {
-            stornoDate: commission.stornoDate ?? new Date(),
-            stornoAmount: amt > 0 ? -amt : 0,
-          },
-        });
       }
+      // Già incassato (es. Helios in fornitura): NON auto-storno.
+      // Helios paga solo in fornitura: lo storno gettone si mette solo a mano
+      // (colonna Storno Sì/No) o se altrove cambia il periodo di storno.
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
     } else if (/pagat/.test(raw)) {
       // Pagato collaboratore: liquidazione provvigione
@@ -533,7 +520,24 @@ export async function bulkUpdateCommissionFieldsAction(
 
     let count = 0;
     const clientIds = new Set<string>();
-    for (const ch of changes) {
+
+    // Ordine sicuro per riga: prima i campi «normali», poi stato, infine storno
+    // (così un Storno Sì/No manuale non viene sovrascritto dallo stato).
+    const FIELD_ORDER: Record<string, number> = {
+      stato: 50,
+      storno: 80,
+      stornoDate: 90,
+      stornoAmount: 100,
+    };
+    const ordered = [...changes].sort((a, b) => {
+      const idCmp = String(a.commissionId).localeCompare(String(b.commissionId));
+      if (idCmp !== 0) return idCmp;
+      const oa = FIELD_ORDER[String(a.field)] ?? 10;
+      const ob = FIELD_ORDER[String(b.field)] ?? 10;
+      return oa - ob;
+    });
+
+    for (const ch of ordered) {
       const commissionId = String(ch.commissionId ?? "").trim();
       const field = String(ch.field ?? "").trim();
       if (!commissionId || !field) continue;

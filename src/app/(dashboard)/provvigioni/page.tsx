@@ -373,7 +373,10 @@ export default async function ProvvigioniPage({
   const alignJobs: Promise<unknown>[] = [];
   for (const c of contracts) {
     const hasDate = Boolean(c.collectionDate);
-    if (hasDate && ["KO", "ANNULLATO", "CHIUSO", "IN_ATTESA_PAGAMENTO"].includes(c.status)) {
+    // NON riscrivere KO/CHIUSO → Incassato solo perché c’è collectionDate:
+    // un contratto può essere chiuso dopo aver già incassato (Helios in fornitura)
+    // senza dover mettere storno automatico.
+    if (hasDate && c.status === "IN_ATTESA_PAGAMENTO") {
       (c as { status: string }).status = "PAGATO_DAL_FORNITORE";
       (c as { paymentStatus: string | null }).paymentStatus = "Incassato";
       alignJobs.push(
