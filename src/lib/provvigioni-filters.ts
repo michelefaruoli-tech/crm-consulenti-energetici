@@ -7,6 +7,7 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { contractTextSearchWhere } from "@/lib/list-search";
 
 export type ProvvigioniFilters = {
   canViewAll: boolean;
@@ -129,16 +130,8 @@ export function buildProvvigioniContractWhere(
   }
 
   if (q) {
-    and.push({
-      OR: [
-        { client: { firstName: { contains: q, mode: "insensitive" } } },
-        { client: { lastName: { contains: q, mode: "insensitive" } } },
-        { client: { companyName: { contains: q, mode: "insensitive" } } },
-        { client: { fiscalCode: { contains: q, mode: "insensitive" } } },
-        { client: { vatNumber: { contains: q, mode: "insensitive" } } },
-        { podPdr: { contains: q, mode: "insensitive" } },
-      ],
-    });
+    const text = contractTextSearchWhere(q);
+    if (text) and.push(text);
   }
 
   if (recurrenceMode === "only") {

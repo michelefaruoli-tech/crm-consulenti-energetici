@@ -6,10 +6,12 @@ import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
 import { PaginationNav } from "@/components/ui/pagination-nav";
+import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { StatusBadge } from "@/components/ui/badge";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
 import { sumProvvigioniTotals } from "@/lib/provvigioni-filters";
+import { contractTextSearchWhere } from "@/lib/list-search";
 import { clientDisplayName } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +19,10 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
   const session = await requireSession();
-  const { page: pageRaw } = await searchParams;
+  const { page: pageRaw, q } = await searchParams;
   const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
@@ -29,13 +31,17 @@ export default async function DashboardPage({
   );
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
+  const textSearch = contractTextSearchWhere(q);
   const whereActive = {
     isHistorical: false as const,
     deletedAt: null as null,
     ...visibility,
   };
   const whereAll = { deletedAt: null as null, ...visibility };
-  const where = whereActive;
+  const listTotalWhere = {
+    ...whereActive,
+    ...(textSearch ? { AND: [textSearch] } : {}),
+  };
 
   try {
     const [
@@ -50,6 +56,7 @@ export default async function DashboardPage({
       inLavorazioneList,
       moneyTotals,
       topCollaborators,
+      listTotal,
       recentContracts,
       collaboratorOptions,
     ] = await Promise.all([
@@ -62,7 +69,7 @@ export default async function DashboardPage({
       }),
       prisma.contract.count({
         where: {
-          ...where,
+          ...whereActive,
           sendToMaster: true,
           assignedToMaster: true,
           status: "IN_LAVORAZIONE",
@@ -70,33 +77,33 @@ export default async function DashboardPage({
       }),
       prisma.contract.count({
         where: {
-          ...where,
+          ...whereActive,
           status: { in: ["COMPLETATO", "ATTIVATO"] },
         },
       }),
       prisma.contract.count({
         where: {
-          ...where,
+          ...whereActive,
           status: "KO",
         },
       }),
       prisma.contract.count({
         where: {
-          ...where,
+          ...whereActive,
           sendToMaster: true,
           emailStatus: { in: ["FAILED", "ERROR", "ATTACHMENT_ERROR", "SKIPPED_NO_SMTP"] },
         },
       }),
       prisma.contract.count({
         where: {
-          ...where,
+          ...whereActive,
           expiryDate: { lt: new Date() },
           status: { notIn: ["CHIUSO", "ANNULLATO", "KO", "COMPLETATO"] },
         },
       }),
       prisma.contract.findMany({
         where: {
-          ...where,
+          ...whereActive,
           sendToMaster: true,
           assignedToMaster: true,
           status: "IN_LAVORAZIONE",
@@ -129,8 +136,9 @@ export default async function DashboardPage({
             take: 20,
           })
         : Promise.resolve([]),
+      prisma.contract.count({ where: listTotalWhere }),
       prisma.contract.findMany({
-        where,
+        where: listTotalWhere,
         select: {
           id: true,
           clientId: true,
@@ -335,7 +343,9 @@ export default async function DashboardPage({
 
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">Contratti recenti</h2>
+            <h2 className="text-lg font-semibold text-slate-900">
+              {q?.trim() ? `Risultati ricerca` : "Contratti recenti"}
+            </h2>
             <Link
               href="/contratti?vista=tutti"
               className="text-sm font-medium text-emerald-700 hover:underline"
@@ -343,11 +353,19 @@ export default async function DashboardPage({
               Vedi tutti
             </Link>
           </div>
+          <ListSearchForm action="/" q={q} />
           <p className="text-xs text-slate-500">
-            Ordinati per data inserimento (più recenti prima). Usa ▾ sulle colonne per
-            filtrare; usa le pagine sotto per scorrere tutti i collaboratori.
+            {q?.trim()
+              ? `${listTotal} contratti trovati per «${q.trim()}».`
+              : "Ordinati per data inserimento (più recenti prima)."}{" "}
+            Usa ▾ sulle colonne per filtrare; usa le pagine sotto per scorrere.
           </p>
-          <PaginationNav path="/" page={page} total={totalContracts} />
+          <PaginationNav
+            path="/"
+            page={page}
+            total={listTotal}
+            query={{ q: q?.trim() || undefined }}
+          />
           <ContractsFilterTable
             rows={tableRows}
             editable
@@ -355,7 +373,12 @@ export default async function DashboardPage({
             canChangeCollaborator={canChangeCollaborator}
             collaborators={collaborators}
           />
-          <PaginationNav path="/" page={page} total={totalContracts} />
+          <PaginationNav
+            path="/"
+            page={page}
+            total={listTotal}
+            query={{ q: q?.trim() || undefined }}
+          />
         </section>
       </div>
     );

@@ -17,6 +17,7 @@ import {
   toSettledRow,
 } from "@/components/provvigioni/recurring-rendiconto-panel";
 import { PaginationNav } from "@/components/ui/pagination-nav";
+import { ListSearchForm } from "@/components/ui/list-search-form";
 import { Button } from "@/components/ui/button";
 import {
   getMissingRecurringAlerts,
@@ -710,37 +711,20 @@ export default async function ProvvigioniPage({
         </Link>
       </div>
 
-      <form className="flex flex-wrap gap-2" action="/provvigioni" method="get">
-        {collabFilter ? (
-          <input type="hidden" name="collab" value={collabFilter} />
-        ) : null}
-        <input type="hidden" name="settled" value={settledPeriod} />
-        {supplier ? <input type="hidden" name="supplier" value={supplier} /> : null}
-        {stato ? <input type="hidden" name="stato" value={stato} /> : null}
-        {tipologia ? (
-          <input type="hidden" name="tipologia" value={tipologia} />
-        ) : null}
-        {vista !== "tutti" ? (
-          <input type="hidden" name="vista" value={vista} />
-        ) : null}
-        <input
-          name="q"
-          defaultValue={q ?? ""}
-          placeholder="Cerca cliente, CF, P.IVA o POD… (es. Mecca, Moschetta)"
-          className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 placeholder:text-slate-400 sm:min-w-[16rem] sm:py-2 sm:text-sm"
-        />
-        <Button type="submit" variant="secondary">
-          Cerca
-        </Button>
-        {q ? (
-          <Link
-            href={vistaHref(vista)}
-            className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            Pulisci
-          </Link>
-        ) : null}
-      </form>
+      <ListSearchForm
+        action="/provvigioni"
+        q={q}
+        placeholder="Cerca cliente, CF, P.IVA o POD… (es. Mecca, Moschetta)"
+        hidden={{
+          collab: collabFilter,
+          settled: settledPeriod,
+          supplier: supplier || undefined,
+          stato: stato || undefined,
+          tipologia: tipologia || undefined,
+          vista: vista !== "tutti" ? vista : undefined,
+        }}
+        clearHref={vistaHref(vista)}
+      />
 
       {canViewAll ? (
         <div className="flex flex-wrap gap-2 text-sm">

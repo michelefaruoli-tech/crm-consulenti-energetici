@@ -8,6 +8,8 @@ import { ClientsFilterTable } from "@/components/clients/clients-filter-table";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { CleanupDuplicatesButton } from "@/components/clients/cleanup-duplicates-button";
 import { FixSwappedNamesButton } from "@/components/clients/fix-swapped-names-button";
+import { ListSearchForm } from "@/components/ui/list-search-form";
+import { clientTextSearchWhere } from "@/lib/list-search";
 import {
   isRecurring,
   markEarlyReswitchContracts,
@@ -76,19 +78,7 @@ export default async function ClientiPage({
               },
             }
           : {}),
-        ...(q
-          ? {
-              OR: [
-                { firstName: { contains: q, mode: "insensitive" } },
-                { lastName: { contains: q, mode: "insensitive" } },
-                { companyName: { contains: q, mode: "insensitive" } },
-                { fiscalCode: { contains: q, mode: "insensitive" } },
-                { vatNumber: { contains: q, mode: "insensitive" } },
-                { email: { contains: q, mode: "insensitive" } },
-                { phone: { contains: q, mode: "insensitive" } },
-              ],
-            }
-          : {}),
+        ...(clientTextSearchWhere(q) ?? {}),
       },
       select: {
         id: true,
@@ -247,20 +237,12 @@ export default async function ClientiPage({
 
         <StornoLegend />
 
-        <form className="flex gap-3">
-          {onlyRecurring ? (
-            <input type="hidden" name="ricorrenza" value="1" />
-          ) : null}
-          <input
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Cerca nome, CF, P.IVA, email, telefono..."
-            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
-          <Button type="submit" variant="secondary">
-            Cerca
-          </Button>
-        </form>
+        <ListSearchForm
+          action="/clienti"
+          q={q}
+          placeholder="Cerca nome, CF, P.IVA, email, telefono…"
+          hidden={{ ricorrenza: onlyRecurring ? "1" : undefined }}
+        />
 
         <ClientsFilterTable rows={rows} canDelete showRicorrenza />
       </div>

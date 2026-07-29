@@ -5,23 +5,35 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { formatCurrency } from "@/lib/commission";
-import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
+import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toContractRows } from "@/lib/contract-row";
 import { ArchiveImportForm } from "@/components/archive/archive-import-form";
 import { HeliosImportPanel } from "@/components/provvigioni/helios-import-panel";
+import { contractTextSearchWhere } from "@/lib/list-search";
 
 export const dynamic = "force-dynamic";
 
-export default async function ArchivioPage() {
+export default async function ArchivioPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   const session = await requireSession();
   if (!hasPermission(session.role, "contracts.edit_all")) {
     redirect("/contratti");
   }
 
-  const [contracts, batches, totals, collaborators] = await Promise.all([
+  const { q } = await searchParams;
+  const textSearch = contractTextSearchWhere(q);
+  const where = {
+    isHistorical: true as const,
+    ...(textSearch ? { AND: [textSearch] } : {}),
+  };
+
+  const [contracts, batches, totals, collaborators, archiveCount] = await Promise.all([
     prisma.contract.findMany({
-      where: { isHistorical: true },
+      where,
       select: {
         id: true,
         clientId: true,
@@ -64,11 +76,14 @@ export default async function ArchivioPage() {
     prisma.user.findMany({
       where: {
         active: true,
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
+        role: {
+          in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"],
+        },
       },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }),
+    prisma.contract.count({ where: { isHistorical: true } }),
   ]);
 
   const rows = toContractRows(contracts);
@@ -89,7 +104,7 @@ export default async function ArchivioPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Contratti in archivio</p>
-          <p className="mt-2 text-2xl font-bold">{contracts.length}</p>
+          <p className="mt-2 text-2xl font-bold">{archiveCount}</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
           <p className="text-sm text-emerald-700">Totale gettoni storico</p>
@@ -147,12 +162,19 @@ export default async function ArchivioPage() {
         <HeliosImportPanel embedded />
       </section>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-slate-900">Contratti archiviati</h2>
         <Link href="/report" className="text-sm text-emerald-700 hover:underline">
           Vai ai report
         </Link>
       </div>
+
+      <ListSearchForm action="/archivio" q={q} />
+      <p className="text-xs text-slate-500">
+        {q?.trim()
+          ? `${contracts.length} risultati (max 500) per «${q.trim()}».`
+          : "Mostra fino a 500 contratti. Usa la ricerca per trovare un cliente o POD."}
+      </p>
 
       <ContractsFilterTable rows={rows} editable={false} canDelete />
     </div>

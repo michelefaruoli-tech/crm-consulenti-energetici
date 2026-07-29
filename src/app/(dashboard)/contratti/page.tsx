@@ -6,18 +6,25 @@ import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
 import { PaginationNav } from "@/components/ui/pagination-nav";
+import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
+import { contractTextSearchWhere } from "@/lib/list-search";
 
 export const dynamic = "force-dynamic";
 
 export default async function ContrattiPage({
   searchParams,
 }: {
-  searchParams: Promise<{ vista?: string; collab?: string; page?: string }>;
+  searchParams: Promise<{
+    vista?: string;
+    collab?: string;
+    page?: string;
+    q?: string;
+  }>;
 }) {
   const session = await requireSession();
-  const { vista, collab, page: pageRaw } = await searchParams;
+  const { vista, collab, page: pageRaw, q } = await searchParams;
   const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
@@ -36,6 +43,7 @@ export default async function ContrattiPage({
 
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
+  const textSearch = contractTextSearchWhere(q);
 
   const where = {
     deletedAt: null as null,
@@ -46,6 +54,7 @@ export default async function ContrattiPage({
       : mode === "storico"
         ? { isHistorical: true as const }
         : {}),
+    ...(textSearch ? { AND: [textSearch] } : {}),
   };
 
   const chipWhere = {
@@ -56,6 +65,9 @@ export default async function ContrattiPage({
         ? { isHistorical: true as const }
         : {}),
   };
+
+  const qParam = q?.trim() ? `&q=${encodeURIComponent(q.trim())}` : "";
+  const vistaQ = mode === "tutti" ? "tutti" : mode;
 
   try {
     const [total, contracts, collaboratorOptions, collabGroups] = await Promise.all([
@@ -123,11 +135,11 @@ export default async function ContrattiPage({
       }))
       .sort((a, b) => b.n - a.n);
 
-    const vistaQ = mode === "tutti" ? "tutti" : mode;
     const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
     const queryBase = {
       vista: vistaQ,
       collab: collabFilter,
+      q: q?.trim() || undefined,
     };
 
     return (
@@ -136,8 +148,9 @@ export default async function ContrattiPage({
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Contratti</h1>
             <p className="text-slate-500">
-              {total} contratti in questa vista · ordinati per data inserimento (più recenti
-              prima)
+              {total} contratti
+              {q?.trim() ? ` trovati per «${q.trim()}»` : " in questa vista"} · ordinati per
+              data inserimento (più recenti prima)
               {canViewAll
                 ? ` · accesso ${roleLabel} (${session.email})`
                 : ` · solo i tuoi`}
@@ -163,9 +176,18 @@ export default async function ContrattiPage({
           </div>
         </div>
 
+        <ListSearchForm
+          action="/contratti"
+          q={q}
+          hidden={{
+            vista: vistaQ,
+            collab: collabFilter,
+          }}
+        />
+
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
-            href={`/contratti?vista=attivi${collabFilter ? `&collab=${collabFilter}` : ""}`}
+            href={`/contratti?vista=attivi${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}`}
             className={
               mode === "attivi"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
@@ -175,7 +197,7 @@ export default async function ContrattiPage({
             Attivi
           </Link>
           <Link
-            href={`/contratti?vista=storico${collabFilter ? `&collab=${collabFilter}` : ""}`}
+            href={`/contratti?vista=storico${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}`}
             className={
               mode === "storico"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
@@ -185,7 +207,7 @@ export default async function ContrattiPage({
             Storico
           </Link>
           <Link
-            href={`/contratti?vista=tutti${collabFilter ? `&collab=${collabFilter}` : ""}`}
+            href={`/contratti?vista=tutti${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}`}
             className={
               mode === "tutti"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
@@ -199,7 +221,7 @@ export default async function ContrattiPage({
         {canViewAll ? (
           <div className="flex flex-wrap gap-2 text-sm">
             <Link
-              href={`/contratti?vista=${vistaQ}`}
+              href={`/contratti?vista=${vistaQ}${qParam}`}
               className={
                 !collabFilter
                   ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
@@ -211,7 +233,7 @@ export default async function ContrattiPage({
             {allCollabCounts.map((c) => (
               <Link
                 key={c.id}
-                href={`/contratti?vista=${vistaQ}&collab=${c.id}`}
+                href={`/contratti?vista=${vistaQ}&collab=${c.id}${qParam}`}
                 className={
                   collabFilter === c.id
                     ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
