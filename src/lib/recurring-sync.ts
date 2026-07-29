@@ -251,7 +251,8 @@ export async function getSettledRecurringForPeriod(
         select: {
           id: true,
           podPdr: true,
-          collaborator: { select: { name: true } },
+          collaboratorId: true,
+          collaborator: { select: { id: true, name: true } },
           client: {
             select: {
               type: true,
@@ -265,6 +266,5 @@ export async function getSettledRecurringForPeriod(
       },
     },
     orderBy: [{ period: "asc" }],
-    take: 200,
   });
 }

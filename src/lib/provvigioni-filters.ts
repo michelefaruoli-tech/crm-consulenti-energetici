@@ -42,6 +42,43 @@ export const recurringWhereOr: Prisma.ContractWhereInput[] = [
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
+/**
+ * Filtro Prisma per stato semplificato (stessa logica Report + Provvigioni).
+ *
+ * - Da incassare = contratto inserito, fornitore non ha ancora pagato a te
+ * - Incassato = fornitore ha pagato a te, tu non hai ancora liquidato il collab.
+ * - Pagato = tu hai già pagato il collaboratore (PROVVIGIONE_LIQUIDATA)
+ * - KO / Cessato = pratica chiusa senza incasso
+ */
+export function provvigioneStatoWhere(
+  stato: string | null | undefined,
+): Prisma.ContractWhereInput | undefined {
+  const s = stato?.trim();
+  if (!s || s === "Tutti") return undefined;
+  if (s === "Incassato") {
+    return {
+      collectionDate: { not: null },
+      status: { not: "PROVVIGIONE_LIQUIDATA" },
+    };
+  }
+  if (s === "Da incassare") {
+    return {
+      collectionDate: null,
+      status: { notIn: [...KO_STATUSES] },
+    };
+  }
+  if (s === "Pagato") {
+    return { status: { equals: "PROVVIGIONE_LIQUIDATA" } };
+  }
+  if (s === "KO / Cessato") {
+    return {
+      collectionDate: null,
+      status: { in: [...KO_STATUSES] },
+    };
+  }
+  return undefined;
+}
+
 export function buildProvvigioniContractWhere(
   f: ProvvigioniFilters,
 ): Prisma.ContractWhereInput {
@@ -70,26 +107,8 @@ export function buildProvvigioniContractWhere(
     });
   }
 
-  if (stato === "Incassato") {
-    // Incassato dal fornitore ma non ancora liquidato al collaboratore
-    and.push({
-      collectionDate: { not: null },
-      status: { not: "PROVVIGIONE_LIQUIDATA" },
-    });
-  } else if (stato === "Da incassare") {
-    and.push({
-      collectionDate: null,
-      status: { notIn: [...KO_STATUSES] },
-    });
-  } else if (stato === "Pagato") {
-    // Pagato collaboratore = provvigione liquidata
-    and.push({ status: { equals: "PROVVIGIONE_LIQUIDATA" } });
-  } else if (stato === "KO / Cessato") {
-    and.push({
-      collectionDate: null,
-      status: { in: [...KO_STATUSES] },
-    });
-  }
+  const statoWhere = provvigioneStatoWhere(stato);
+  if (statoWhere) and.push(statoWhere);
 
   if (tipologia === "Business") {
     and.push({ client: { type: "AZIENDA" } });

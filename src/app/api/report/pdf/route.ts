@@ -1,30 +1,44 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
-import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
+import { simplifiedProvvigioneStato } from "@/lib/provvigioni-stato";
+import {
+  buildReportContractWhere,
+  resolveReportStato,
+} from "@/lib/report-filters";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session || !hasPermission(session.role, "reports.export")) {
     return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
   }
 
+  const sp = req.nextUrl.searchParams;
+  const from = sp.get("from");
+  const to = sp.get("to");
+  const collaboratorId = sp.get("collaboratorId");
+  const supplierId = sp.get("supplierId");
+  const stato = resolveReportStato(sp.get("stato"));
+
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
 
   const contracts = await prisma.contract.findMany({
-    where: visibility,
+    where: buildReportContractWhere(
+      { from, to, collaboratorId, supplierId, stato },
+      visibility,
+    ),
     include: {
       client: true,
       supplier: true,
       collaborator: { select: { name: true } },
       commission: true,
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: { insertionDate: "desc" },
   });
 
   const doc = new jsPDF();
@@ -32,19 +46,38 @@ export async function GET() {
   doc.text("Report Contratti - CRM Energia", 14, 18);
   doc.setFontSize(10);
   doc.text(`Generato il ${new Date().toLocaleString("it-IT")}`, 14, 26);
+  doc.text(
+    `Filtri: ${stato}${from ? ` · dal ${from}` : ""}${to ? ` · al ${to}` : ""} · ${contracts.length} contratti`,
+    14,
+    32,
+  );
 
   autoTable(doc, {
-    startY: 32,
-    head: [["Numero", "Cliente", "Fornitore", "Stato", "Prevista", "Ricevuta"]],
+    startY: 38,
+    head: [
+      [
+        "Numero",
+        "Cliente",
+        "Fornitore",
+        "Collab.",
+        "Stato prov.",
+        "Prevista",
+        "Ricevuta",
+      ],
+    ],
     body: contracts.map((contract) => [
       contract.contractNumber,
       clientDisplayName(contract.client),
       contract.supplier.name,
-      CONTRACT_STATUS_LABELS[contract.status],
+      contract.collaborator.name,
+      simplifiedProvvigioneStato(
+        contract.status,
+        Boolean(contract.collectionDate),
+      ),
       `€ ${Number(contract.commission?.expected ?? 0).toFixed(2)}`,
       `€ ${Number(contract.commission?.received ?? 0).toFixed(2)}`,
     ]),
-    styles: { fontSize: 8 },
+    styles: { fontSize: 7 },
   });
 
   const pdf = doc.output("arraybuffer");
@@ -52,7 +85,7 @@ export async function GET() {
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="report-contratti-${Date.now()}.pdf"`,
+      "Content-Disposition": `attachment; filename="report-${stato.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.pdf"`,
     },
   });
 }

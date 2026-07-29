@@ -10,6 +10,13 @@ import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { getMasterEmail } from "@/lib/mail";
+import {
+  REPORT_STATO_OPTIONS,
+  buildReportContractWhere,
+  reportDateRange,
+  reportStatoHint,
+  resolveReportStato,
+} from "@/lib/report-filters";
 
 const MONTH_LABELS = [
   "Gennaio",
@@ -34,12 +41,14 @@ export default async function ReportPage({
     to?: string;
     collaboratorId?: string;
     supplierId?: string;
+    stato?: string;
   }>;
 }) {
   const session = await requireSession();
   if (!hasPermission(session.role, "reports.export")) redirect("/");
 
-  const { from, to, collaboratorId, supplierId } = await searchParams;
+  const { from, to, collaboratorId, supplierId, stato: statoRaw } = await searchParams;
+  const stato = resolveReportStato(statoRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
 
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
@@ -76,15 +85,12 @@ export default async function ReportPage({
     process.env.MASTER_EMAIL?.trim() ||
     getMasterEmail();
 
-  const dateFrom = from ? new Date(from) : new Date(new Date().getFullYear(), 0, 1);
-  const dateTo = to ? new Date(to) : new Date();
+  const { dateFrom, dateTo } = reportDateRange(from, to);
 
-  const contractWhere = {
-    ...visibility,
-    ...(collaboratorId ? { collaboratorId } : {}),
-    ...(supplierId ? { supplierId } : {}),
-    insertionDate: { gte: dateFrom, lte: dateTo },
-  };
+  const contractWhere = buildReportContractWhere(
+    { from, to, collaboratorId, supplierId, stato },
+    visibility,
+  );
 
   const contracts = await prisma.contract.findMany({
     where: contractWhere,
@@ -100,8 +106,12 @@ export default async function ReportPage({
     (s, c) => s + Number(c.commission?.received ?? 0),
     0,
   );
+  const totalPaid = contracts.reduce(
+    (s, c) => s + Number(c.commission?.paid ?? 0),
+    0,
+  );
 
-  // Stats per mese (ultimi 12 mesi o nel periodo)
+  // Stats per mese (nel periodo filtrato)
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
   for (const c of contracts) {
     const d = new Date(c.insertionDate);
@@ -123,28 +133,57 @@ export default async function ReportPage({
       };
     });
 
+  // Riepilogo per collaboratore (utile per capire quanto liquidare)
+  const byCollab = new Map<
+    string,
+    { name: string; count: number; expected: number; received: number; paid: number }
+  >();
+  for (const c of contracts) {
+    const id = c.collaboratorId;
+    const cur = byCollab.get(id) ?? {
+      name: c.collaborator.name,
+      count: 0,
+      expected: 0,
+      received: 0,
+      paid: 0,
+    };
+    cur.count += 1;
+    cur.expected += Number(c.commission?.expected ?? 0);
+    cur.received += Number(c.commission?.received ?? 0);
+    cur.paid += Number(c.commission?.paid ?? 0);
+    byCollab.set(id, cur);
+  }
+  const collaboratorTotals = [...byCollab.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "it"),
+  );
+
   const qs = new URLSearchParams();
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
   if (collaboratorId) qs.set("collaboratorId", collaboratorId);
   if (supplierId) qs.set("supplierId", supplierId);
-  const exportQs = qs.toString() ? `?${qs.toString()}` : "";
+  qs.set("stato", stato);
+  const exportQs = `?${qs.toString()}`;
+
+  const fromStr = (from ?? dateFrom.toISOString().slice(0, 10));
+  const toStr = (to ?? dateTo.toISOString().slice(0, 10));
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
-          Filtra per periodo, collaboratore e fornitore · statistiche mensili in tempo reale
+          Filtra per periodo, collaboratore, fornitore e stato provvigione · statistiche in
+          tempo reale
         </p>
       </div>
 
-      <form className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-5">
+      <form className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3 lg:grid-cols-6">
         <Field label="Dal">
-          <Input type="date" name="from" defaultValue={from ?? dateFrom.toISOString().slice(0, 10)} />
+          <Input type="date" name="from" defaultValue={fromStr} />
         </Field>
         <Field label="Al">
-          <Input type="date" name="to" defaultValue={to ?? dateTo.toISOString().slice(0, 10)} />
+          <Input type="date" name="to" defaultValue={toStr} />
         </Field>
         <Field label="Collaboratore">
           <Select name="collaboratorId" defaultValue={collaboratorId ?? ""}>
@@ -166,6 +205,15 @@ export default async function ReportPage({
             ))}
           </Select>
         </Field>
+        <Field label="Stato provvigione">
+          <Select name="stato" defaultValue={stato}>
+            {REPORT_STATO_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <div className="flex items-end">
           <Button type="submit" className="w-full">
             Applica filtri
@@ -173,9 +221,26 @@ export default async function ReportPage({
         </div>
       </form>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <p className="font-semibold">Filtro attivo: {stato}</p>
+        <p className="mt-1">{reportStatoHint(stato)}</p>
+        <ul className="mt-2 list-inside list-disc text-xs text-amber-900/90">
+          <li>
+            <strong>Da incassare</strong> = contratto inserito, non ancora pagato a te dal
+            fornitore
+          </li>
+          <li>
+            <strong>Incassato</strong> = fornitore ha pagato a te → da pagare ai collaboratori
+          </li>
+          <li>
+            <strong>Pagato</strong> = tu hai già liquidato i collaboratori
+          </li>
+        </ul>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Contratti nel periodo</p>
+          <p className="text-sm text-slate-500">Contratti ({stato})</p>
           <p className="mt-2 text-3xl font-bold">{totalContracts}</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -183,12 +248,60 @@ export default async function ReportPage({
           <p className="mt-2 text-3xl font-bold">{formatCurrency(totalExpected)}</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm text-emerald-700">Importo incassato</p>
+          <p className="text-sm text-emerald-700">Importo ricevuto (incasso)</p>
           <p className="mt-2 text-3xl font-bold text-emerald-900">
             {formatCurrency(totalReceived)}
           </p>
         </div>
+        <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
+          <p className="text-sm text-sky-700">Già liquidato ai collab.</p>
+          <p className="mt-2 text-3xl font-bold text-sky-900">
+            {formatCurrency(totalPaid)}
+          </p>
+        </div>
       </div>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-1 font-semibold text-slate-900">
+          Per collaboratore ({stato})
+        </h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Con stato <strong>Incassato</strong> vedi quanto resta da liquidare a ciascuno. Con{" "}
+          <strong>Pagato</strong> vedi quanto hai già versato.
+        </p>
+        {collaboratorTotals.length === 0 ? (
+          <p className="text-sm text-slate-500">Nessun dato con i filtri selezionati.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Collaboratore</th>
+                  <th className="px-3 py-2">N° contratti</th>
+                  <th className="px-3 py-2">Previsto</th>
+                  <th className="px-3 py-2">Ricevuto</th>
+                  <th className="px-3 py-2">Liquidato</th>
+                </tr>
+              </thead>
+              <tbody>
+                {collaboratorTotals.map((row) => (
+                  <tr key={row.name} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-medium">{row.name}</td>
+                    <td className="px-3 py-2">{row.count}</td>
+                    <td className="px-3 py-2">{formatCurrency(row.expected)}</td>
+                    <td className="px-3 py-2 text-emerald-700">
+                      {formatCurrency(row.received)}
+                    </td>
+                    <td className="px-3 py-2 text-sky-700">
+                      {formatCurrency(row.paid)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-semibold text-slate-900">Produzione per mese</h2>
@@ -224,7 +337,11 @@ export default async function ReportPage({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 font-semibold text-slate-900">Esporta (filtri attuali)</h2>
+          <h2 className="mb-2 font-semibold text-slate-900">Esporta (filtri attuali)</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Excel e PDF usano gli stessi filtri sopra (periodo, collaboratore, fornitore,
+            stato).
+          </p>
           <div className="flex flex-wrap gap-3">
             <Link href={`/api/report/excel${exportQs}`}>
               <Button variant="secondary">Scarica Excel</Button>
@@ -233,6 +350,14 @@ export default async function ReportPage({
               <Button variant="secondary">Scarica PDF</Button>
             </Link>
           </div>
+          <p className="mt-4 text-sm text-slate-600">
+            Per le rate <strong>Helios</strong> dell&apos;ultimo rendiconto (quanto dare a
+            ciascun collaboratore) vai in{" "}
+            <Link href="/provvigioni" className="font-medium text-emerald-700 underline">
+              Provvigioni → Rendiconto ricorrenze
+            </Link>
+            .
+          </p>
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -248,7 +373,7 @@ export default async function ReportPage({
               <Textarea
                 name="body"
                 rows={3}
-                defaultValue={`Report periodo ${dateFrom.toLocaleDateString("it-IT")} - ${dateTo.toLocaleDateString("it-IT")}: ${totalContracts} contratti, incassato ${formatCurrency(totalReceived)}.`}
+                defaultValue={`Report ${stato} dal ${dateFrom.toLocaleDateString("it-IT")} al ${dateTo.toLocaleDateString("it-IT")}: ${totalContracts} contratti, previsto ${formatCurrency(totalExpected)}, ricevuto ${formatCurrency(totalReceived)}.`}
               />
             </Field>
             <Button type="submit">Invia email</Button>
