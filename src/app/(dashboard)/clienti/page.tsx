@@ -7,6 +7,7 @@ import { hasPermission } from "@/lib/permissions";
 import { ClientsFilterTable } from "@/components/clients/clients-filter-table";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { CleanupDuplicatesButton } from "@/components/clients/cleanup-duplicates-button";
+import { FixSwappedNamesButton } from "@/components/clients/fix-swapped-names-button";
 import {
   isRecurring,
   markEarlyReswitchContracts,
@@ -171,6 +172,11 @@ export default async function ClientiPage({
       return {
         id: c.id,
         name: clientDisplayName(c),
+        firstName:
+          c.type === "AZIENDA"
+            ? c.companyName || clientDisplayName(c)
+            : (c.firstName || "").trim() || "—",
+        lastName: c.type === "AZIENDA" ? "" : (c.lastName || "").trim() || "—",
         type: c.type === "AZIENDA" ? "Business" : "Privato",
         fiscalCode: c.fiscalCode || c.vatNumber || "—",
         phone: c.phone || "—",
@@ -202,7 +208,12 @@ export default async function ClientiPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {canViewAll ? <CleanupDuplicatesButton /> : null}
+            {canViewAll ? (
+              <>
+                <FixSwappedNamesButton />
+                <CleanupDuplicatesButton />
+              </>
+            ) : null}
             {hasPermission(session.role, "clients.create") ? (
               <Link href="/clienti/nuovo">
                 <Button>Nuovo cliente</Button>

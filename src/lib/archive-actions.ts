@@ -212,6 +212,8 @@ async function loadSheetFromForm(formData: FormData): Promise<
     for (const name of names) {
       for (let i = 1; i < headers.length; i++) {
         const h = headers[i] ?? "";
+        // Evita che la ricerca di "nome" prenda la colonna "cognome"
+        if (name === "nome" && h.includes("cognome")) continue;
         if (h.includes(name)) return i;
       }
     }

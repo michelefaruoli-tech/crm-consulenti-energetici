@@ -8,6 +8,8 @@ import { DeleteRowButton } from "@/components/ui/delete-row-button";
 type Row = {
   id: string;
   name: string;
+  firstName: string;
+  lastName: string;
   type: string;
   fiscalCode: string;
   phone: string;
@@ -37,11 +39,15 @@ export function ClientsFilterTable({
 
   const columns: FilterColumn[] = [
     {
-      key: "name",
-      label: "Cliente",
-      getValue: (r) => String(r.name ?? ""),
+      key: "firstName",
+      label: "Nome",
+      getValue: (r) => String(r.firstName ?? ""),
       render: (r) => {
         const alert = Boolean(r.nameAlert);
+        const isCompany = String(r.type) === "Business";
+        const label = isCompany
+          ? String(r.name)
+          : String(r.firstName || "—");
         return (
           <Link
             href={`/clienti/${String(r.id)}`}
@@ -53,9 +59,20 @@ export function ClientsFilterTable({
             }
             onClick={(e) => e.stopPropagation()}
           >
-            {String(r.name)}
+            {label}
           </Link>
         );
+      },
+    },
+    {
+      key: "lastName",
+      label: "Cognome",
+      getValue: (r) => String(r.lastName ?? ""),
+      render: (r) => {
+        if (String(r.type) === "Business") {
+          return <span className="text-slate-400">—</span>;
+        }
+        return <span>{String(r.lastName || "—")}</span>;
       },
     },
     { key: "type", label: "Tipo", getValue: (r) => String(r.type ?? "") },

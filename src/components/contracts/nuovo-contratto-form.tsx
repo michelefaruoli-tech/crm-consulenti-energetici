@@ -27,6 +27,7 @@ import type { OcrApplyPayload } from "@/lib/ocr/schema";
 import { format } from "date-fns";
 import { AttachmentDropZone } from "@/components/contracts/attachment-drop-zone";
 import { X } from "lucide-react";
+import { splitItalianPersonName } from "@/lib/italian-person-name";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -682,13 +683,9 @@ export function NuovoContrattoForm({
             setClientId(undefined);
             setClientLabel(undefined);
             setCreatingClient(true);
-            if (q.includes(" ")) {
-              const [a, ...rest] = q.split(" ");
-              setLastName(a ?? "");
-              setFirstName(rest.join(" "));
-            } else {
-              setLastName(q);
-            }
+            const parsed = splitItalianPersonName(q);
+            setFirstName(parsed.firstName);
+            setLastName(parsed.lastName);
           }}
         />
 
@@ -742,11 +739,11 @@ export function NuovoContrattoForm({
 
         {clientType === "PRIVATO" ? (
           <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Nome" fillStatus={fillStatus(req, Boolean(firstName.trim()))}>
-              <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-            </Field>
             <Field label="Cognome" fillStatus={fillStatus(req, Boolean(lastName.trim()))}>
               <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </Field>
+            <Field label="Nome" fillStatus={fillStatus(req, Boolean(firstName.trim()))}>
+              <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
             </Field>
             <Field
               label="Codice fiscale"

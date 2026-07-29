@@ -463,11 +463,11 @@ export function ClientSheet({
 
             {clientType === "PRIVATO" ? (
               <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Nome">
-                  <Input name="firstName" defaultValue={client.firstName ?? ""} />
-                </Field>
                 <Field label="Cognome">
                   <Input name="lastName" defaultValue={client.lastName ?? ""} />
+                </Field>
+                <Field label="Nome">
+                  <Input name="firstName" defaultValue={client.firstName ?? ""} />
                 </Field>
               </div>
             ) : (

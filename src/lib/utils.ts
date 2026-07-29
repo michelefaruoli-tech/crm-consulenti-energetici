@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { it } from "date-fns/locale";
+import { splitItalianPersonName } from "@/lib/italian-person-name";
 
 export function formatDate(date: Date | string | null | undefined): string {
   if (!date) return "—";
@@ -17,25 +18,24 @@ function samePersonPart(a: string, b: string): boolean {
 }
 
 /**
- * Da testo «Cognome Nome…» (come in Provvigioni) a campi DB.
- * Evita «ALVINO ALVINO» se nome e cognome coincidono.
+ * Da testo libero (Provvigioni / Helios) a campi DB Nome + Cognome.
+ * Riconosce sia «Nome Cognome» sia «Cognome Nome» con euristiche IT.
  */
 export function parsePrivatoDisplayName(raw: string): {
   lastName: string;
   firstName: string | null;
 } {
   let text = raw.trim().replace(/\s+/g, " ");
-  // «COGNOME COGNOME» incollato come unico pezzo
   const dupWhole = text.match(/^(.+?)\s+\1$/i);
   if (dupWhole) text = dupWhole[1].trim();
 
-  const parts = text.split(" ").filter(Boolean);
-  const lastName = parts[0] ?? text;
-  let firstName = parts.slice(1).join(" ") || null;
-  if (firstName && samePersonPart(firstName, lastName)) {
-    firstName = null;
+  const { firstName, lastName } = splitItalianPersonName(text);
+  let first = firstName || null;
+  const last = lastName || text;
+  if (first && samePersonPart(first, last)) {
+    first = null;
   }
-  return { lastName, firstName };
+  return { lastName: last, firstName: first };
 }
 
 export function clientDisplayName(client: {
@@ -53,8 +53,8 @@ export function clientDisplayName(client: {
   if (first && last && samePersonPart(first, last)) {
     return last || "Cliente senza nome";
   }
-  // Cognome Nome (uso italiano in elenchi)
-  return [last, first].filter(Boolean).join(" ") || "Cliente senza nome";
+  // Nome Cognome (stesso ordine dei campi del form)
+  return [first, last].filter(Boolean).join(" ") || "Cliente senza nome";
 }
 
 /** Chiave ordinamento cliente unica A→Z (senza split Domestico/Business). */

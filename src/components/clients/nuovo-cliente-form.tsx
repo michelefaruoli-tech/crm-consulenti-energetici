@@ -36,11 +36,11 @@ export function NuovoClienteForm() {
 
       {clientType === "PRIVATO" ? (
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Nome">
-            <Input name="firstName" />
-          </Field>
           <Field label="Cognome">
             <Input name="lastName" />
+          </Field>
+          <Field label="Nome">
+            <Input name="firstName" />
           </Field>
         </div>
       ) : (
