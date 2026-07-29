@@ -194,11 +194,11 @@ export function LavorazioneEditForm({
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-semibold text-slate-900">Dati cliente</h2>
         <div className="grid gap-3 md:grid-cols-3">
-          <Field label="Nome">
-            <Input name="clientFirstName" defaultValue={data.client.firstName ?? ""} />
-          </Field>
           <Field label="Cognome">
             <Input name="clientLastName" defaultValue={data.client.lastName ?? ""} />
+          </Field>
+          <Field label="Nome">
+            <Input name="clientFirstName" defaultValue={data.client.firstName ?? ""} />
           </Field>
           <Field label="Ragione sociale">
             <Input name="clientCompanyName" defaultValue={data.client.companyName ?? ""} />

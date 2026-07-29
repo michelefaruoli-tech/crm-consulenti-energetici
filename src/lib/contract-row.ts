@@ -1,3 +1,4 @@
+import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS, ROLE_LABELS, type AppContractStatus, type AppRole } from "@/lib/constants";
 import {
   computeSupplyStartDate,
@@ -88,11 +89,7 @@ export function toContractRow(
   contract: ContractForRow,
   options?: { isLatestForPod?: boolean; isEarlyReswitch?: boolean },
 ): ContractTableRow {
-  const clientName =
-    contract.client.type === "AZIENDA" && contract.client.companyName
-      ? contract.client.companyName
-      : [contract.client.firstName, contract.client.lastName].filter(Boolean).join(" ") ||
-        "Cliente senza nome";
+  const clientName = clientDisplayName(contract.client);
 
   const insertion =
     typeof contract.insertionDate === "string"

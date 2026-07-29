@@ -395,7 +395,7 @@ async function buildPreviewRows(
     const clientLabel =
       type === "AZIENDA"
         ? companyName || firstName || "—"
-        : [firstName, lastName].filter(Boolean).join(" ") || "—";
+        : [lastName, firstName].filter(Boolean).join(" ") || "—";
 
     rows.push({
       row: r,

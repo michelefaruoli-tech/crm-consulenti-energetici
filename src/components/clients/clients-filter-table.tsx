@@ -39,15 +39,15 @@ export function ClientsFilterTable({
 
   const columns: FilterColumn[] = [
     {
-      key: "firstName",
-      label: "Nome",
-      getValue: (r) => String(r.firstName ?? ""),
+      key: "lastName",
+      label: "Cognome",
+      getValue: (r) => String(r.lastName ?? ""),
       render: (r) => {
         const alert = Boolean(r.nameAlert);
         const isCompany = String(r.type) === "Business";
         const label = isCompany
           ? String(r.name)
-          : String(r.firstName || "—");
+          : String(r.lastName || "—");
         return (
           <Link
             href={`/clienti/${String(r.id)}`}
@@ -65,14 +65,14 @@ export function ClientsFilterTable({
       },
     },
     {
-      key: "lastName",
-      label: "Cognome",
-      getValue: (r) => String(r.lastName ?? ""),
+      key: "firstName",
+      label: "Nome",
+      getValue: (r) => String(r.firstName ?? ""),
       render: (r) => {
         if (String(r.type) === "Business") {
           return <span className="text-slate-400">—</span>;
         }
-        return <span>{String(r.lastName || "—")}</span>;
+        return <span>{String(r.firstName || "—")}</span>;
       },
     },
     { key: "type", label: "Tipo", getValue: (r) => String(r.type ?? "") },

@@ -6,96 +6,163 @@
 /** Nomi di battesimo italiani più comuni (e varianti). */
 const ITALIAN_FIRST_NAMES = new Set(
   [
+    "alessandra",
     "alessandro",
     "alessio",
+    "alfredo",
+    "alice",
+    "ambra",
     "andrea",
+    "angela",
     "angelo",
     "anna",
+    "annalisa",
+    "antonella",
     "antonio",
+    "assunta",
     "barbara",
+    "beatrice",
+    "benedetta",
+    "biagio",
     "brunella",
+    "bruno",
     "carlo",
     "carmela",
     "carmine",
     "caterina",
     "chiara",
+    "cinzia",
     "claudia",
+    "concetta",
     "cosimo",
     "cristina",
+    "damiano",
     "daniela",
     "daniele",
     "davide",
+    "diego",
     "domenico",
+    "donatella",
+    "edoardo",
     "elena",
     "elisa",
+    "elvira",
+    "emanuela",
     "emanuele",
     "enzo",
+    "ernesto",
+    "eugenio",
+    "fabiana",
     "fabio",
+    "fabrizio",
     "federica",
     "federico",
     "filippo",
+    "flavia",
     "francesca",
     "francesco",
+    "franco",
     "gabriele",
+    "gaetano",
+    "gerardo",
     "giacomo",
+    "giada",
+    "gianluca",
+    "gianni",
+    "giorgia",
+    "giorgio",
     "giovanna",
     "giovanni",
     "giulia",
+    "giulio",
     "giuseppe",
+    "giuseppina",
     "grazia",
+    "graziano",
+    "ilaria",
     "irene",
     "ivano",
-    "laura",
-    "leonardo",
+    "jacopo",
+    "loredana",
     "lorenzo",
     "luca",
     "lucia",
+    "luciano",
     "luigi",
+    "luisa",
+    "manuela",
+    "marcella",
     "marco",
     "maria",
+    "mariangela",
     "marina",
     "mario",
     "marta",
+    "martina",
     "massimo",
+    "matilde",
     "matteo",
     "mattia",
     "maurizio",
     "michele",
+    "mirko",
+    "monica",
+    "nadia",
     "nicola",
+    "nicolo",
+    "nicolò",
+    "nunzia",
+    "ornella",
     "paolo",
     "pasquale",
     "patrizia",
     "piero",
     "pietro",
     "raffaele",
+    "raffaella",
     "riccardo",
+    "roberta",
     "roberto",
+    "rocco",
     "rosa",
     "rosario",
+    "rossella",
+    "sabrina",
     "salvatore",
     "samuele",
+    "sandra",
     "sara",
+    "serena",
     "sergio",
+    "silvana",
     "silvia",
     "simona",
+    "simone",
     "stefania",
     "stefano",
+    "tiziana",
+    "tiziano",
     "thomas",
     "tommaso",
+    "umberto",
     "valentina",
     "valeria",
     "vincenzo",
     "vito",
     "vittorio",
-    // composti / secondi nomi tipici
-    "rosa",
-    "luisa",
-    "antonella",
-    "giuseppina",
-    "concetta",
-    "assunta",
-    "nunzia",
-    "raffaella",
+    "luciano",
+    "raffaela",
+    "enrico",
+    "manuel",
+    "mariapia",
+    "fulvio",
+    "antonia",
+    "antonino",
+    "margherita",
+    "bernardo",
+    "laura",
+    "leonardo",
+    "giovanna",
   ].map((s) => s.toLowerCase()),
 );
 
@@ -164,8 +231,10 @@ export function isLikelyItalianFirstName(word: string): boolean {
   const w = foldIt(word);
   if (!w) return false;
   if (ITALIAN_FIRST_NAMES.has(w)) return true;
-  // Nomi composti tipo "Maria Rosa" → controlla pezzi
-  return w.split(/\s+/).every((p) => ITALIAN_FIRST_NAMES.has(p) || p.length <= 2);
+  const parts = w.split(/\s+/).filter(Boolean);
+  // Nomi composti (Maria Rosa): tutti i pezzi devono essere nomi noti (non bastano 1-2 lettere)
+  if (parts.length <= 1) return false;
+  return parts.every((p) => ITALIAN_FIRST_NAMES.has(p));
 }
 
 export function isSurnameParticle(word: string): boolean {
@@ -263,15 +332,53 @@ export function suggestPersonNameOrder(
     }
   }
 
-  const normal = scoreAsGivenName(first) + scoreAsSurname(last);
-  const swapped = scoreAsGivenName(last) + scoreAsSurname(first);
+  const firstIsGiven = isLikelyItalianFirstName(first);
+  const lastIsGiven = isLikelyItalianFirstName(last);
+  const firstHasParticle = first.split(/\s+/).some((p) => isSurnameParticle(p));
+  const lastHasParticle = last.split(/\s+/).some((p) => isSurnameParticle(p));
 
-  if (swapped >= normal + 3) {
+  // Entrambi sembrano nomi di battesimo → non auto-correggere (doppio nome / ambiguo)
+  if (firstIsGiven && lastIsGiven) {
+    return {
+      firstName: first,
+      lastName: last,
+      swapped: false,
+      confidence: "low",
+      reason: "entrambi sembrano nomi di battesimo",
+    };
+  }
+
+  // Cognome = nome tipico, Nome = non è un nome tipico (è il cognome) → invertiti
+  if (lastIsGiven && !firstIsGiven) {
     return {
       firstName: last,
       lastName: first,
       swapped: true,
-      confidence: swapped >= normal + 5 ? "high" : "medium",
+      confidence: "high",
+      reason: "cognome sembra nome di battesimo, nome sembra cognome",
+    };
+  }
+
+  // Particella del cognome finita nel campo Nome
+  if (firstHasParticle && lastIsGiven && !lastHasParticle) {
+    return {
+      firstName: last,
+      lastName: first,
+      swapped: true,
+      confidence: "high",
+      reason: "particella cognome nel campo nome",
+    };
+  }
+
+  const normal = scoreAsGivenName(first) + scoreAsSurname(last);
+  const swappedScore = scoreAsGivenName(last) + scoreAsSurname(first);
+
+  if (swappedScore >= normal + 5 && lastIsGiven && !firstIsGiven) {
+    return {
+      firstName: last,
+      lastName: first,
+      swapped: true,
+      confidence: "medium",
       reason: "euristica nomi italiani: invertiti",
     };
   }
@@ -280,7 +387,7 @@ export function suggestPersonNameOrder(
     firstName: first,
     lastName: last,
     swapped: false,
-    confidence: normal >= swapped + 2 ? "medium" : "low",
+    confidence: normal >= swappedScore + 2 ? "medium" : "low",
     reason: "ordine attuale plausibile",
   };
 }

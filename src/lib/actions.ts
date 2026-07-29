@@ -16,6 +16,7 @@ import {
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { writeClientHistoryBatch } from "@/lib/audit";
 import { canonicalSupplierName } from "@/lib/supplier-merge";
+import { suggestPersonNameOrder } from "@/lib/italian-person-name";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const { isHoneypotFilled, logSecurityEvent } = await import("@/lib/security-log");
@@ -110,12 +111,26 @@ export async function createClientAction(formData: FormData): Promise<void> {
     throw new Error("Dati non validi");
   }
 
+  let firstName = parsed.data.firstName || null;
+  let lastName = parsed.data.lastName || null;
+  if (parsed.data.type === "PRIVATO" && firstName && lastName) {
+    const ordered = suggestPersonNameOrder(
+      firstName,
+      lastName,
+      parsed.data.fiscalCode,
+    );
+    if (ordered.swapped && ordered.confidence !== "low") {
+      firstName = ordered.firstName;
+      lastName = ordered.lastName;
+    }
+  }
+
   const data = {
     ...parsed.data,
     email: parsed.data.email || null,
     companyName: parsed.data.companyName || null,
-    firstName: parsed.data.firstName || null,
-    lastName: parsed.data.lastName || null,
+    firstName,
+    lastName,
     fiscalCode: parsed.data.fiscalCode || null,
     vatNumber: parsed.data.vatNumber || null,
     phone: parsed.data.phone || null,
@@ -199,6 +214,18 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     sdiCode: String(formData.get("sdiCode") ?? "") || null,
     notes: String(formData.get("notes") ?? "") || null,
   };
+
+  if (next.type === "PRIVATO" && next.firstName && next.lastName) {
+    const ordered = suggestPersonNameOrder(
+      next.firstName,
+      next.lastName,
+      next.fiscalCode,
+    );
+    if (ordered.swapped && ordered.confidence !== "low") {
+      next.firstName = ordered.firstName;
+      next.lastName = ordered.lastName;
+    }
+  }
 
   // Indirizzo fornitura NON si aggiorna più dall'anagrafica (resta solo sul contratto)
   await prisma.client.update({

@@ -10,6 +10,7 @@ import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { StatusBadge } from "@/components/ui/badge";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
 import { sumProvvigioniTotals } from "@/lib/provvigioni-filters";
+import { clientDisplayName } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -279,12 +280,7 @@ export default async function DashboardPage({
             ) : (
               <ul className="space-y-3">
                 {inLavorazioneList.map((contract) => {
-                  const name =
-                    contract.client.type === "AZIENDA" && contract.client.companyName
-                      ? contract.client.companyName
-                      : [contract.client.firstName, contract.client.lastName]
-                          .filter(Boolean)
-                          .join(" ") || "Cliente";
+                  const name = clientDisplayName(contract.client);
                   return (
                     <li
                       key={contract.id}

@@ -59,6 +59,7 @@ export async function fixSwappedClientNamesAction(): Promise<{
       skipped += 1;
       continue;
     }
+    // high + medium: correggi (CF o nomi italiani tipici)
 
     await prisma.client.update({
       where: { id: c.id },

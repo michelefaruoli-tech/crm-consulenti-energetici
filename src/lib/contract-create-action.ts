@@ -18,6 +18,23 @@ import {
   syncContractNumberSequenceFromExisting,
 } from "@/lib/contract-number";
 import { canonicalSupplierName } from "@/lib/supplier-merge";
+import { suggestPersonNameOrder } from "@/lib/italian-person-name";
+
+function normalizePrivatoNames(client: NewContractPayload["client"]) {
+  if (client.type !== "PRIVATO") return client;
+  const first = client.firstName?.trim() || "";
+  const last = client.lastName?.trim() || "";
+  if (!first || !last) return client;
+  const ordered = suggestPersonNameOrder(first, last, client.fiscalCode);
+  if (ordered.swapped && ordered.confidence !== "low") {
+    return {
+      ...client,
+      firstName: ordered.firstName,
+      lastName: ordered.lastName,
+    };
+  }
+  return client;
+}
 
 async function nextContractNumber(): Promise<string> {
   try {
@@ -194,6 +211,11 @@ async function createFullContractActionInner(
   const sendToMaster = Boolean(payload.sendToMaster) && !payload.draft;
   const errors = validatePayload(payload, sendToMaster);
   if (errors.length) return { ok: false, errors };
+
+  payload = {
+    ...payload,
+    client: normalizePrivatoNames(payload.client),
+  };
 
   if (payload.idempotencyKey?.trim()) {
     const existing = await prisma.createIdempotency.findUnique({

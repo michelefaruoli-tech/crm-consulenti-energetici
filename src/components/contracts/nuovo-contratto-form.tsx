@@ -1066,7 +1066,9 @@ export function NuovoContrattoForm({
         <div className="space-y-1 rounded-lg bg-slate-50 p-4 text-sm">
           <p>
             <strong>Cliente:</strong>{" "}
-            {clientLabel || `${firstName} ${lastName} ${companyName}`.trim() || "—"}
+            {clientLabel ||
+              [lastName, firstName, companyName].filter((x) => x.trim()).join(" ") ||
+              "—"}
           </p>
           <p>
             <strong>Tipologia:</strong> {clientType === "AZIENDA" ? "Business" : "Privato"}

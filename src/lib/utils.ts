@@ -53,8 +53,8 @@ export function clientDisplayName(client: {
   if (first && last && samePersonPart(first, last)) {
     return last || "Cliente senza nome";
   }
-  // Nome Cognome (stesso ordine dei campi del form)
-  return [first, last].filter(Boolean).join(" ") || "Cliente senza nome";
+  // Cognome Nome (formato italiano richiesto ovunque: elenchi, report, contratti)
+  return [last, first].filter(Boolean).join(" ") || "Cliente senza nome";
 }
 
 /** Chiave ordinamento cliente unica A→Z (senza split Domestico/Business). */
