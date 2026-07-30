@@ -17,6 +17,7 @@ import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { writeClientHistoryBatch } from "@/lib/audit";
 import { canonicalSupplierName } from "@/lib/supplier-merge";
 import { suggestPersonNameOrder } from "@/lib/italian-person-name";
+import { notifyCollaboratorStatusChange } from "@/lib/notify-collaborator-status";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const { isHoneypotFilled, logSecurityEvent } = await import("@/lib/security-log");
@@ -426,6 +427,17 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
   } catch (e) {
     console.error("[updateContractStatusAction]", e);
     redirect(`/contratti/${contractId}?error=aggiornamento_stato`);
+  }
+
+  // Solo se Admin/Backoffice (non se l’agente cambia da solo)
+  if (canChangeAll) {
+    await notifyCollaboratorStatusChange({
+      contractId,
+      fromStatus: contract.status,
+      toStatus,
+      changedByName: session.name,
+      note,
+    });
   }
 
   revalidatePath("/contratti");

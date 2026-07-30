@@ -14,6 +14,7 @@ import {
   userCanAccessContract,
 } from "@/lib/user-scope";
 import { buildContractNotificationBody } from "@/lib/contract-notification-email";
+import { notifyCollaboratorStatusChange } from "@/lib/notify-collaborator-status";
 import {
   KO_REASON_OPTIONS,
   validateMasterTransition,
@@ -164,6 +165,21 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
       )}`,
     );
   }
+
+  // Avvisa l’agente (non blocca se SMTP fallisce)
+  await notifyCollaboratorStatusChange({
+    contractId,
+    fromStatus: contract.status,
+    toStatus,
+    changedByName: session.name,
+    note,
+    detailNotes:
+      toStatus === "DOCUMENTAZIONE_INCOMPLETA"
+        ? integrationNotes ?? koNotes ?? workNotes
+        : toStatus === "KO"
+          ? [resolvedKo, koNotes].filter(Boolean).join(" — ")
+          : workNotes ?? note,
+  });
 
   revalidatePath("/lavorazione");
   revalidatePath(`/lavorazione/${contractId}`);

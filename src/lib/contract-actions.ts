@@ -10,6 +10,7 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
+import { notifyCollaboratorStatusChange } from "@/lib/notify-collaborator-status";
 
 function statusFromLabel(value: string): AppContractStatus | null {
   const raw = value.trim();
@@ -73,6 +74,7 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     }
     const status = statusFromLabel(value);
     if (!status) throw new Error("Stato non riconosciuto");
+    const fromStatus = contract.status;
     await prisma.contract.update({
       where: { id: contractId },
       data: { status },
@@ -80,11 +82,18 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     await prisma.contractStatusHistory.create({
       data: {
         contractId,
-        fromStatus: contract.status,
+        fromStatus,
         toStatus: status,
         changedById: session.id,
         note: "Modifica da elenco",
       },
+    });
+    await notifyCollaboratorStatusChange({
+      contractId,
+      fromStatus,
+      toStatus: status,
+      changedByName: session.name,
+      note: "Modifica da elenco",
     });
   } else if (field === "notes") {
     await prisma.contract.update({
