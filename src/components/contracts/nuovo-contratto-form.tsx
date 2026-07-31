@@ -7,9 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { createFullContractAction } from "@/lib/contract-create-action";
 import {
-  DOC_TYPE_OPTIONS,
-} from "@/lib/constants";
-import {
   calcExpiryDate,
   createEmptyServiceLine,
   type ContractServiceLine,
@@ -25,8 +22,7 @@ import {
 } from "@/components/contracts/service-contract-blocks";
 import type { OcrApplyPayload } from "@/lib/ocr/schema";
 import { format } from "date-fns";
-import { AttachmentDropZone } from "@/components/contracts/attachment-drop-zone";
-import { X } from "lucide-react";
+import { ContractAttachmentsPanel } from "@/components/contracts/contract-attachments-panel";
 import { splitItalianPersonName } from "@/lib/italian-person-name";
 
 function uid() {
@@ -488,33 +484,6 @@ export function NuovoContrattoForm({
     });
   }
 
-  async function onFilesSelected(files: FileList | null, docType: string) {
-    if (!files?.length) return;
-    const next = [...attachments];
-    for (const file of Array.from(files)) {
-      const okType =
-        ["application/pdf", "image/jpeg", "image/png", "image/jpg"].includes(file.type) ||
-        /\.(pdf|jpe?g|png)$/i.test(file.name);
-      if (!okType) {
-        setErrors((e) => [...e, `Formato non supportato: ${file.name}`]);
-        continue;
-      }
-      if (file.size > 15 * 1024 * 1024) {
-        setErrors((e) => [...e, `File troppo grande (max 15MB): ${file.name}`]);
-        continue;
-      }
-      next.push({
-        id: uid(),
-        filename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-        docType,
-        file, // mantiene il File originale → upload affidabile
-      });
-    }
-    setAttachments(next);
-  }
-
   async function attachOcrFiles(
     items: Array<{ file: File; docType: string }>,
   ) {
@@ -532,6 +501,7 @@ export function NuovoContrattoForm({
         mimeType: file.type || "application/octet-stream",
         size: file.size,
         docType: item.docType,
+        file,
         contentBase64: btoa(binary),
       });
     }
@@ -617,7 +587,39 @@ export function NuovoContrattoForm({
         }}
       />
 
-      <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+        {/* Solo Master/Admin: assegna a chi appartiene il contratto (default = Master) */}
+        {canPickCollaborator ? (
+          <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 sm:p-4">
+            <Field label="Assegna contratto a (solo Master)">
+              <Select
+                value={collaboratorId}
+                onChange={(e) => setCollaboratorId(e.target.value)}
+              >
+                {/* Master sempre in cima e selezionato di default */}
+                <option value={session.id}>
+                  {session.name} — Master (predefinito)
+                </option>
+                {collaborators
+                  .filter((u) => u.id !== session.id)
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+            <p className="mt-1.5 text-xs text-sky-900/80">
+              Di default il contratto resta assegnato a te (Master). Cambia solo se vuoi
+              attribuirlo a un collaboratore.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">
+            Collaboratore: <strong>{session.name}</strong> (assegnato automaticamente)
+          </p>
+        )}
+
         <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
           <div className="flex flex-col justify-center gap-3">
             <div>
@@ -628,24 +630,6 @@ export function NuovoContrattoForm({
                 Salva in gestionale oppure invia al back office per la lavorazione
               </p>
             </div>
-            {canPickCollaborator ? (
-              <Field label="Collaboratore">
-                <Select
-                  value={collaboratorId}
-                  onChange={(e) => setCollaboratorId(e.target.value)}
-                >
-                  {collaborators.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            ) : (
-              <p className="text-sm text-slate-600">
-                Collaboratore: <strong>{session.name}</strong> (assegnato automaticamente)
-              </p>
-            )}
           </div>
 
           <button
@@ -982,139 +966,13 @@ export function NuovoContrattoForm({
         </Field>
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Documenti / Allegati</h2>
-        {req ? (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
-            Obbligatori per il back office:{" "}
-            <strong>documento identità</strong> (unico <em>oppure</em> fronte + retro) e{" "}
-            <strong>almeno una fattura/bolletta</strong> (anche più di una). Giallo = manca ·
-            Verde = ok.
-          </p>
-        ) : null}
-
-        <div
-          className={[
-            "space-y-3 rounded-xl p-3 ring-2 transition-colors",
-            req
-              ? identityOk
-                ? "bg-emerald-50 ring-emerald-400"
-                : "bg-amber-50 ring-amber-400"
-              : "bg-slate-50 ring-slate-200",
-          ].join(" ")}
-        >
-          <div>
-            <p className="text-sm font-bold text-slate-900">
-              Documento identità {req ? (identityOk ? "✓" : "*") : ""}
-            </p>
-            <p className="text-xs text-slate-600">
-              Carica un <strong>documento unico</strong>, oppure <strong>fronte + retro</strong>.
-            </p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <AttachmentDropZone
-              title="Documento unico"
-              hint="CI / passaporto in un solo file"
-              fillStatus={fillStatus(
-                req,
-                attachments.some((a) => a.docType === "CI_UNICO"),
-              )}
-              onAdd={(files) => void onFilesSelected(files, "CI_UNICO")}
-            />
-            <AttachmentDropZone
-              title="Fronte"
-              hint="Solo se non usi documento unico"
-              fillStatus={fillStatus(
-                req && !attachments.some((a) => a.docType === "CI_UNICO"),
-                attachments.some((a) => a.docType === "CI_FRONTE"),
-              )}
-              onAdd={(files) => void onFilesSelected(files, "CI_FRONTE")}
-            />
-            <AttachmentDropZone
-              title="Retro"
-              hint="Solo se non usi documento unico"
-              fillStatus={fillStatus(
-                req && !attachments.some((a) => a.docType === "CI_UNICO"),
-                attachments.some((a) => a.docType === "CI_RETRO"),
-              )}
-              onAdd={(files) => void onFilesSelected(files, "CI_RETRO")}
-            />
-          </div>
-        </div>
-
-        <div
-          className={[
-            "space-y-3 rounded-xl p-3 ring-2 transition-colors",
-            req
-              ? billOk
-                ? "bg-emerald-50 ring-emerald-400"
-                : "bg-amber-50 ring-amber-400"
-              : "bg-slate-50 ring-slate-200",
-          ].join(" ")}
-        >
-          <div>
-            <p className="text-sm font-bold text-slate-900">
-              Fattura / bolletta {req ? (billOk ? "✓" : "*") : ""}
-            </p>
-            <p className="text-xs text-slate-600">
-              Obbligatoria almeno una. Puoi caricare anche più fatture.
-            </p>
-          </div>
-          <AttachmentDropZone
-            title="Fattura / bolletta"
-            hint="Trascina una o più fatture"
-            fillStatus={fillStatus(req, billOk)}
-            onAdd={(files) => void onFilesSelected(files, "BOLLETTA")}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-slate-700">Altri allegati (facoltativi)</p>
-          <div className="grid gap-3 md:grid-cols-2">
-            {DOC_TYPE_OPTIONS.filter(
-              (d) =>
-                !["CI_UNICO", "CI_FRONTE", "CI_RETRO", "BOLLETTA"].includes(d.value),
-            ).map((doc) => (
-              <AttachmentDropZone
-                key={doc.value}
-                title={doc.label}
-                hint="1) Trascina · 2) Scegli file · 3) Foto (telefono)"
-                onAdd={(files) => void onFilesSelected(files, doc.value)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {attachments.length > 0 ? (
-          <ul className="space-y-2 text-sm">
-            {attachments.map((a) => (
-              <li
-                key={a.id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-slate-900">{a.filename}</p>
-                  <p className="text-xs text-slate-500">
-                    {DOC_TYPE_OPTIONS.find((d) => d.value === a.docType)?.label ?? a.docType}
-                    {a.mimeType ? ` · ${a.mimeType}` : ""}
-                    {a.size
-                      ? ` · ${Math.max(1, Math.round(a.size / 1024))} KB`
-                      : ""}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 text-xs text-red-600 hover:underline"
-                  onClick={() => setAttachments((all) => all.filter((x) => x.id !== a.id))}
-                >
-                  <X className="h-3.5 w-3.5" />
-                  Elimina
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </section>
+      <ContractAttachmentsPanel
+        attachments={attachments}
+        onChange={setAttachments}
+        requireDocs={req}
+        identityOk={identityOk}
+        billOk={billOk}
+      />
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
         <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Conferma</h2>

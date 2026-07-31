@@ -21,7 +21,20 @@ export default async function NuovoContrattoPage({
       ? prisma.user.findMany({
           where: {
             active: true,
-            role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
+            OR: [
+              { id: session.id },
+              {
+                role: {
+                  in: [
+                    "COLLABORATORE",
+                    "COMMERCIALE",
+                    "AREA_MANAGER",
+                    "ADMIN",
+                    "SEGRETERIA",
+                  ],
+                },
+              },
+            ],
           },
           select: { id: true, name: true },
           orderBy: { name: "asc" },
