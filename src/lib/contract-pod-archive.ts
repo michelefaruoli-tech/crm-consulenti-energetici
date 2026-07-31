@@ -1,8 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import {
-  computeStornoEndDate,
-  normalizePodKey,
-} from "@/lib/storno-status";
+import { normalizePodKey } from "@/lib/storno-status";
 
 const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
 
@@ -14,7 +11,8 @@ const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
 export async function reactivateImportedHistoricalContracts(): Promise<{
   reactivated: number;
 }> {
-  const result = await prisma.contract.updateMany({
+  // update uno-a-uno: updateMany non supportato in HTTP mode Neon
+  const rows = await prisma.contract.findMany({
     where: {
       deletedAt: null,
       isHistorical: true,
@@ -23,15 +21,27 @@ export async function reactivateImportedHistoricalContracts(): Promise<{
         { NOT: { archiveLabel: { startsWith: POD_ARCHIVE_LABEL } } },
       ],
     },
-    data: { isHistorical: false },
+    select: { id: true },
+    take: 5000,
   });
-
-  return { reactivated: result.count };
+  let reactivated = 0;
+  for (const r of rows) {
+    try {
+      await prisma.contract.update({
+        where: { id: r.id },
+        data: { isHistorical: false },
+      });
+      reactivated += 1;
+    } catch (e) {
+      console.error("[reactivateImportedHistoricalContracts]", r.id, e);
+    }
+  }
+  return { reactivated };
 }
 
 /**
  * Archivia contratti «precedenti» sullo stesso POD quando ne esiste uno più recente.
- * Così in Clienti/Contratti/Provvigioni resta il contratto attuale (CRM leggero).
+ * In Contratti attivi / Provvigioni resta solo il nuovo; i vecchi vanno in Archivio.
  */
 export async function archiveSupersededPodContracts(options?: {
   /** Se valorizzato, archivia solo questo POD (dopo nuovo contratto). */
@@ -45,18 +55,12 @@ export async function archiveSupersededPodContracts(options?: {
     },
     select: {
       id: true,
-      status: true,
       podPdr: true,
       pod: true,
       pdr: true,
       supplyStartDate: true,
       insertionDate: true,
       createdAt: true,
-      collectionDate: true,
-      stornoEndDate: true,
-      expiryDate: true,
-      durationMonths: true,
-      supplier: { select: { stornoMonths: true } },
     },
     take: 12000,
   });
@@ -73,6 +77,7 @@ export async function archiveSupersededPodContracts(options?: {
     scored.push({
       ...c,
       podKey,
+      // Priorità: ingresso fornitura, poi inserimento, poi creazione
       score: supply * 1e6 + insert * 1e3 + created,
     });
   }
@@ -85,50 +90,33 @@ export async function archiveSupersededPodContracts(options?: {
   }
 
   const toArchive: string[] = [];
-  const now = new Date();
-
   for (const [, list] of byPod) {
     if (list.length < 2) continue;
     list.sort((a, b) => b.score - a.score);
     const latest = list[0]!;
     for (const older of list.slice(1)) {
       if (older.id === latest.id) continue;
-      // Cessati / annullati → sempre in archivio
-      if (["KO", "ANNULLATO", "CHIUSO"].includes(older.status)) {
-        toArchive.push(older.id);
-        continue;
-      }
-      // Ancora in periodo storno E pagato → tieni in elenco (rischio storno)
-      const stornoEnd = computeStornoEndDate(
-        older.supplyStartDate,
-        older.supplier.stornoMonths,
-        older.stornoEndDate,
-      );
-      if (
-        older.collectionDate &&
-        stornoEnd &&
-        stornoEnd.getTime() >= now.getTime()
-      ) {
-        continue;
-      }
-      // Ricontrattualizzato: archivia il precedente (CRM snello)
       toArchive.push(older.id);
     }
   }
 
   if (toArchive.length === 0) return { archived: 0 };
 
+  // update uno-a-uno: updateMany usa transazioni non supportate da PrismaNeonHttp
   let archived = 0;
-  for (let i = 0; i < toArchive.length; i += 100) {
-    const chunk = toArchive.slice(i, i + 100);
-    const res = await prisma.contract.updateMany({
-      where: { id: { in: chunk }, isHistorical: false },
-      data: {
-        isHistorical: true,
-        archiveLabel: POD_ARCHIVE_LABEL,
-      },
-    });
-    archived += res.count;
+  for (const id of toArchive) {
+    try {
+      await prisma.contract.update({
+        where: { id },
+        data: {
+          isHistorical: true,
+          archiveLabel: POD_ARCHIVE_LABEL,
+        },
+      });
+      archived += 1;
+    } catch (e) {
+      console.error("[archiveSupersededPodContracts] update", id, e);
+    }
   }
   return { archived };
 }

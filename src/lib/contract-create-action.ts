@@ -664,11 +664,12 @@ async function createFullContractActionInner(
   // Email Master inviata dal client via API dopo upload allegati (evita body/timeout Server Action)
 
   // POD ricontrattualizzato → archivia i precedenti (CRM snello)
+  let archivedOlder = 0;
   try {
     const { archiveOlderForContractPods } = await import(
       "@/lib/contract-pod-archive"
     );
-    await archiveOlderForContractPods(createdIds);
+    archivedOlder = await archiveOlderForContractPods(createdIds);
   } catch (e) {
     console.error("[archiveOlderForContractPods]", e);
   }
@@ -679,7 +680,12 @@ async function createFullContractActionInner(
       action: "CREATE",
       entity: "Contract",
       entityId: firstId,
-      details: JSON.stringify({ createdIds, draft: payload.draft, sendToMaster }),
+      details: JSON.stringify({
+        createdIds,
+        draft: payload.draft,
+        sendToMaster,
+        archivedOlderPods: archivedOlder,
+      }),
     },
   });
 
@@ -701,16 +707,23 @@ async function createFullContractActionInner(
   revalidatePath("/lavorazione");
   revalidatePath("/clienti");
   revalidatePath("/provvigioni");
+  revalidatePath("/archivio");
   revalidatePath("/");
+
+  const baseMsg = payload.draft
+    ? "Bozza salvata"
+    : sendToMaster
+      ? "Contratto creato. Invio email in corso…"
+      : `Creat${createdIds.length > 1 ? "i" : "o"} ${createdIds.length} contrat${createdIds.length > 1 ? "ti" : "to"}`;
+  const archiveMsg =
+    archivedOlder > 0
+      ? ` · Archiviati ${archivedOlder} contratto/i precedenti sullo stesso POD`
+      : "";
 
   return {
     ok: true,
     contractIds: createdIds,
-    message: payload.draft
-      ? "Bozza salvata"
-      : sendToMaster
-        ? "Contratto creato. Invio email in corso…"
-        : `Creat${createdIds.length > 1 ? "i" : "o"} ${createdIds.length} contrat${createdIds.length > 1 ? "ti" : "to"}`,
+    message: `${baseMsg}${archiveMsg}`,
     code: sendToMaster ? "CREATED_PENDING_EMAIL" : "CREATED",
     emailSent: false,
   };
