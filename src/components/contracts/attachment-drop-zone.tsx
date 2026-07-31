@@ -43,7 +43,7 @@ export function AttachmentDropZone({
   return (
     <div
       className={cn(
-        "rounded-xl border-2 border-dashed p-3 transition-colors sm:p-4",
+        "rounded-xl border-2 border-dashed p-2.5 transition-colors sm:p-3",
         dragOver
           ? "border-emerald-500 bg-emerald-50"
           : fillStatus === "filled"
@@ -85,37 +85,36 @@ export function AttachmentDropZone({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
           className={cn(
-            "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm",
+            "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm",
             "hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-900",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500",
           )}
           onClick={() => fileRef.current?.click()}
         >
-          <FolderOpen className="h-4 w-4" />
-          Scegli file
+          <FolderOpen className="h-3.5 w-3.5" />
+          Scegli file (anche più di uno)
         </button>
         <button
           type="button"
           className={cn(
-            "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm",
+            "inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm",
             "hover:border-sky-500 hover:bg-sky-50 hover:text-sky-900",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
-            "sm:flex-none",
           )}
           onClick={() => cameraRef.current?.click()}
         >
-          <Camera className="h-4 w-4" />
+          <Camera className="h-3.5 w-3.5" />
           Foto
         </button>
       </div>
 
-      <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+      <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500">
         <Upload className="h-3.5 w-3.5" />
-        Oppure trascina qui PDF o immagini
+        Trascina qui uno o più PDF/immagini
         {dragOver ? " — rilascia ora" : ""}
       </p>
 
