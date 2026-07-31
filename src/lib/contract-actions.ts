@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { parseFlexibleDate } from "@/lib/date-parse";
 import {
   computeSupplyStartDate,
+  fixSwitchEqualInsertionSupply,
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
@@ -53,21 +54,46 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
   } else if (field === "supplyStartDate") {
     const d = parseFlexibleDate(value);
     if (!d) throw new Error("Data non valida (usa GG/MM/AAAA)");
+    const op = normalizeOperationType(contract.operationType);
+    const fixed = fixSwitchEqualInsertionSupply(
+      contract.insertionDate ?? d,
+      d,
+      op,
+    );
     await prisma.contract.update({
       where: { id: contractId },
-      data: { supplyStartDate: d },
+      data: {
+        supplyStartDate: fixed.supplyStartDate,
+        insertionDate: fixed.insertionDate,
+      },
     });
   } else if (field === "insertionDate") {
     const d = parseFlexibleDate(value);
     if (!d) throw new Error("Data non valida (usa GG/MM/AAAA)");
     const op = normalizeOperationType(contract.operationType);
-    await prisma.contract.update({
-      where: { id: contractId },
-      data: {
-        insertionDate: d,
-        supplyStartDate: computeSupplyStartDate(d, op),
-      },
-    });
+    // Se c’è già una fornitura segnata, la teniamo e sistemiamo solo se Switch uguali
+    if (contract.supplyStartDate) {
+      const fixed = fixSwitchEqualInsertionSupply(
+        d,
+        contract.supplyStartDate,
+        op,
+      );
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+          insertionDate: fixed.insertionDate,
+          supplyStartDate: fixed.supplyStartDate,
+        },
+      });
+    } else {
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+          insertionDate: d,
+          supplyStartDate: computeSupplyStartDate(d, op),
+        },
+      });
+    }
   } else if (field === "status") {
     if (!hasPermission(session.role, "contracts.change_status")) {
       throw new Error("Non puoi cambiare lo stato");
