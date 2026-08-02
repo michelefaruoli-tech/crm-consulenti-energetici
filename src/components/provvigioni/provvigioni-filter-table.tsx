@@ -83,6 +83,7 @@ const STORAGE_KEY_ADVANCED = "provvigioni-colonne-avanzate";
 /** Ordine colonne vista semplificata */
 const SIMPLE_COLUMN_ORDER = [
   "clientName",
+  "collaboratorName",
   "supplierName",
   "amount",
   "stato",
@@ -803,9 +804,15 @@ export function ProvvigioniFilterTable({
   const columns = useMemo(() => {
     if (advancedView) return allColumns;
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
-    return SIMPLE_COLUMN_ORDER.map((k) => byKey.get(k)).filter(
-      (c): c is FilterColumn => Boolean(c),
-    );
+    return SIMPLE_COLUMN_ORDER.map((k) => {
+      const col = byKey.get(k);
+      if (!col) return undefined;
+      // In semplificata «Incasso» si chiama «Data pagato» (stesso campo)
+      if (k === "collectionMonth") {
+        return { ...col, label: "Data pagato" };
+      }
+      return col;
+    }).filter((c): c is FilterColumn => Boolean(c));
   }, [advancedView, allColumns]);
 
   return (
@@ -1050,8 +1057,8 @@ export function ProvvigioniFilterTable({
             </>
           ) : (
             <>
-              Vista <strong>semplificata</strong>: Cliente · Fornitore · Gettone ·
-              Stato · Incasso · Note · R/G
+              Vista <strong>semplificata</strong>: Cliente · Collab. · Fornitore ·
+              Gettone · Stato · Data pagato · Note · R/G
               {canDelete ? " · ×" : ""}.{" "}
             </>
           )}
