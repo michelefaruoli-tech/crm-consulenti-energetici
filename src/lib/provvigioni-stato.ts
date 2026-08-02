@@ -16,6 +16,8 @@ export type ProvvigioneRow = {
   clientType: string;
   /** Gettone effettivo mostrato in colonna Gettone */
   amount: string;
+  /** Data inizio fornitura (gg/mm/aaaa) — vista avanzata */
+  supplyStartDate: string;
   /** Etichetta tipo operazione (Switch, Voltura, …) */
   operationType: string;
   recurrence: string;

@@ -31,7 +31,11 @@ import {
   markLatestContractsByPod,
   resolveStornoInfo,
 } from "@/lib/storno-status";
-import { computeSupplyStartDate, isInFornitura } from "@/lib/supply-dates";
+import {
+  computeSupplyStartDate,
+  formatItDate,
+  isInFornitura,
+} from "@/lib/supply-dates";
 import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import {
   buildProvvigioniContractWhere,
@@ -534,6 +538,7 @@ export default async function ProvvigioniPage({
           supplierName: contract.supplier.name,
         }),
       ),
+      supplyStartDate: supply ? formatItDate(supply) : "",
       operationType: operationTypeLabel(contract.operationType),
       recurrence: contract.recurrence || "Una tantum",
       stato,

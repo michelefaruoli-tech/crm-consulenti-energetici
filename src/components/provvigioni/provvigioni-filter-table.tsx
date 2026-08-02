@@ -78,6 +78,20 @@ function commissionIdOf(row: { commissionId?: string; id?: string } | Record<str
   return String((row as { id?: string }).id || "");
 }
 
+const STORAGE_KEY_ADVANCED = "provvigioni-colonne-avanzate";
+
+/** Ordine colonne vista semplificata */
+const SIMPLE_COLUMN_ORDER = [
+  "clientName",
+  "supplierName",
+  "amount",
+  "stato",
+  "collectionMonth",
+  "notes",
+  "recurrence",
+  "_del",
+] as const;
+
 function originalCellValue(row: ProvvigioneRow, key: string): string {
   switch (key) {
     case "clientName":
@@ -92,6 +106,8 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return shortClientType(row.clientType ?? "");
     case "amount":
       return row.amount ?? "";
+    case "supplyStartDate":
+      return row.supplyStartDate ?? "";
     case "operationType":
       return row.operationType ?? "";
     case "stato":
@@ -150,6 +166,25 @@ export function ProvvigioniFilterTable({
   const [error, setError] = useState<string | null>(null);
   /** Bozze: rowId → { colonna → valore } */
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
+  /** false = semplificata (default), true = tutte le colonne + inizio fornitura */
+  const [advancedView, setAdvancedView] = useState(false);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(STORAGE_KEY_ADVANCED) === "1") {
+        setAdvancedView(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function toggleAdvancedView(next: boolean) {
+    setAdvancedView(next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY_ADVANCED, next ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
   const settleOpts = useMemo(() => settledOptions(), []);
   const [settledPeriod, setSettledPeriod] = useState(settleOpts[0] ?? toPeriod(new Date()));
   const [paidMonth, setPaidMonth] = useState(() => {
@@ -168,6 +203,7 @@ export function ProvvigioniFilterTable({
     String(page),
     serverSortKey ?? "",
     serverSortDir,
+    advancedView ? "adv" : "simple",
   ].join("|");
 
   useEffect(() => {
@@ -436,7 +472,8 @@ export function ProvvigioniFilterTable({
     });
   }
 
-  const columns: FilterColumn[] = [
+  const allColumns: FilterColumn[] = useMemo(() => {
+    const cols: FilterColumn[] = [
     {
       key: "clientName",
       label: "Cliente",
@@ -554,6 +591,32 @@ export function ProvvigioniFilterTable({
       editable: true,
       sortKind: "number",
       inputClassName: "max-w-[4.5rem] text-right tabular-nums",
+    },
+    {
+      key: "supplyStartDate",
+      label: "Inizio forn.",
+      getValue: (r) => String(r.supplyStartDate ?? ""),
+      editable: false,
+      sortKind: "date",
+      render: (r) => {
+        const row = r as unknown as ProvvigioneRow;
+        const val = String(row.supplyStartDate ?? "").trim();
+        const missing = Boolean(row.missingSupplyStart) || !val || val === "—";
+        return (
+          <span
+            className={`whitespace-nowrap tabular-nums text-[11px] ${
+              missing ? "font-semibold text-red-700" : "text-slate-800"
+            }`}
+            title={
+              missing
+                ? "Manca o va verificata la data inizio fornitura"
+                : "Data inizio fornitura"
+            }
+          >
+            {missing ? "—" : val}
+          </span>
+        );
+      },
     },
     {
       key: "operationType",
@@ -722,16 +785,28 @@ export function ProvvigioniFilterTable({
     },
   ];
 
-  if (canDelete) {
-    columns.push({
-      key: "_del",
-      label: "",
-      getValue: () => "",
-      render: (r) => (
-        <DeleteRowButton kind="contract" id={String(r.id)} compact />
-      ),
-    });
-  }
+    if (canDelete) {
+      cols.push({
+        key: "_del",
+        label: "",
+        getValue: () => "",
+        render: (r) => (
+          <DeleteRowButton kind="contract" id={String(r.id)} compact />
+        ),
+      });
+    }
+    return cols;
+    // Funzioni di bozza stabili sul ciclo corrente; non metterle nelle deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canDelete, collaboratorByName, supplierNames, drafts, rows]);
+
+  const columns = useMemo(() => {
+    if (advancedView) return allColumns;
+    const byKey = new Map(allColumns.map((c) => [c.key, c]));
+    return SIMPLE_COLUMN_ORDER.map((k) => byKey.get(k)).filter(
+      (c): c is FilterColumn => Boolean(c),
+    );
+  }, [advancedView, allColumns]);
 
   return (
     <div className="space-y-2">
@@ -965,14 +1040,57 @@ export function ProvvigioniFilterTable({
         {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
       </div>
 
-      <p className="text-xs text-slate-500">
-        Celle modificabili = bozza (giallo) finché non salvi. Colori riga (legenda sotto):
-        1 da incassare · 2 rosso BLOCCA storno · 3 verde fuori storno · 4 ciano ricorrente ·
-        5 viola fine storno · 6 arancio scadenza 12 mesi · POD rosso = manca ingresso
-        fornitura. <strong>R/G</strong>: R ricorrente · G gettone. Privati: Dolomiti 45 ·
-        Plenitude 60 · Enel 65.
-        {canDelete ? " × rossa = elimina." : ""}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-slate-500">
+          {advancedView ? (
+            <>
+              Vista <strong>avanzata</strong>: tutte le colonne (POD, collab., tip.,
+              inizio fornitura, tipo op., storno…). Celle modificabili = bozza
+              (giallo) finché non salvi.{" "}
+            </>
+          ) : (
+            <>
+              Vista <strong>semplificata</strong>: Cliente · Fornitore · Gettone ·
+              Stato · Incasso · Note · R/G
+              {canDelete ? " · ×" : ""}.{" "}
+            </>
+          )}
+          Colori riga (legenda sotto): 1 da incassare · 2 rosso BLOCCA storno · 3
+          verde fuori storno · 4 ciano ricorrente · 5 viola fine storno · 6 arancio
+          scadenza 12 mesi.
+          {advancedView
+            ? " POD rosso = manca ingresso fornitura."
+            : ""}{" "}
+          <strong>R/G</strong>: R ricorrente · G gettone.
+          {canDelete ? " × rossa = elimina." : ""}
+        </p>
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+              !advancedView
+                ? "bg-slate-800 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+            onClick={() => toggleAdvancedView(false)}
+            title="Poche colonne essenziali"
+          >
+            Semplificata
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+              advancedView
+                ? "bg-slate-800 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+            onClick={() => toggleAdvancedView(true)}
+            title="Tutte le colonne + data inizio fornitura"
+          >
+            Avanzata
+          </button>
+        </div>
+      </div>
       <ExcelFilterTable
         dense
         rows={displayRows as unknown as Record<string, unknown>[]}
