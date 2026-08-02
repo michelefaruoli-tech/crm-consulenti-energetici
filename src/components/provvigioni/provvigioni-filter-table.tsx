@@ -724,8 +724,8 @@ export function ProvvigioniFilterTable({
         if (!note) return null;
         return (
           <p
-            className="mt-0.5 text-[10px] leading-tight text-slate-500"
-            title="Ultima competenza mensile (ricorrente)"
+            className="mt-0.5 max-w-[11rem] text-[10px] leading-tight text-slate-600"
+            title={note}
           >
             {note}
           </p>

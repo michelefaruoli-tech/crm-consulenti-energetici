@@ -25,6 +25,10 @@ function defaultSettledOptions(): string[] {
   return out;
 }
 
+/**
+ * Solo mesi già scaduti e non ancora incassati.
+ * Incassato → passa alla lista «Pagato» sotto; Pagato → esce del tutto.
+ */
 export function RecurringMissingPanel({
   alerts,
   otherRecurringCount = 0,
@@ -35,22 +39,19 @@ export function RecurringMissingPanel({
   kind?: "monthly" | "annual";
 }) {
   const settledOptions = useMemo(() => defaultSettledOptions(), []);
-  const [settledPeriod, setSettledPeriod] = useState(settledOptions[0] ?? toPeriod(new Date()));
+  const [settledPeriod, setSettledPeriod] = useState(
+    settledOptions[0] ?? toPeriod(new Date()),
+  );
   const titleKind =
-    kind === "annual" ? "Ricorrenti annuali (12 mesi)" : "Ricorrenti mensili";
+    kind === "annual" ? "Ricorrenti annuali" : "Ricorrenti mensili";
 
   if (alerts.length === 0) {
     return (
-      <div className="space-y-2">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          Nessuna competenza in ritardo su {titleKind.toLowerCase()}.
-        </div>
-        {otherRecurringCount > 0 ? (
-          <p className="text-xs text-slate-600">
-            Hai comunque <strong>{otherRecurringCount}</strong> contratti in elenco senza mesi
-            ancora da incassare.
-          </p>
-        ) : null}
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        Nessun mese da incassare su {titleKind.toLowerCase()}
+        {otherRecurringCount > 0
+          ? ` (${otherRecurringCount} contratti in elenco, tutti già a posto).`
+          : "."}
       </div>
     );
   }
@@ -65,23 +66,13 @@ export function RecurringMissingPanel({
   return (
     <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
       <h2 className="text-base font-semibold text-amber-950">
-        {titleKind}: da incassare ({alerts.length})
+        {titleKind}: da incassare ({alerts.length} mesi)
       </h2>
       <p className="mt-1 text-xs text-amber-900/80">
-        {kind === "annual" ? (
-          <>
-            Scadenze a <strong>12 mesi</strong> dall&apos;ultimo pagamento ricevuto (o
-            dall&apos;ingresso in fornitura se non c&apos;è ancora un pagamento). Segna{" "}
-            <strong>Incassato</strong> quando il fornitore paga; poi usa il pannello sotto per{" "}
-            <strong>Pagato</strong> (liquidazione collaboratore).
-          </>
-        ) : (
-          <>
-            Mesi di competenza già scaduti e non incassati. Quando segni{" "}
-            <strong>Incassato</strong>, scegli il mese del rendiconto fornitore. Poi in lista
-            «da liquidare» puoi segnare <strong>Pagato</strong> e togliere la riga.
-          </>
-        )}
+        Qui vedi <strong>solo</strong> i mesi che dovevano già essere pagati dal fornitore e
+        non lo sono. Clicca <strong>Incassato</strong> quando li segnali / li ricevi; poi in
+        basso potrai segnare <strong>Pagato</strong> (liquidazione collaboratore) e la riga
+        sparisce.
       </p>
 
       <label className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-950">
@@ -99,9 +90,9 @@ export function RecurringMissingPanel({
         </select>
       </label>
 
-      <ul className="mt-3 max-h-72 space-y-2 overflow-auto text-sm">
+      <ul className="mt-3 max-h-80 space-y-2 overflow-auto text-sm">
         {[...byContract.entries()].map(([contractId, months]) => {
-          const first = months[0];
+          const first = months[0]!;
           return (
             <li
               key={contractId}
@@ -120,15 +111,15 @@ export function RecurringMissingPanel({
                     {first.collaboratorName ? ` · ${first.collaboratorName}` : ""}
                     {first.podPdr ? ` · ${first.podPdr}` : ""}
                   </p>
-                  <p className="mt-1 text-xs font-medium text-amber-800">
-                    Competenze: {months.map((m) => periodLabel(m.period)).join(", ")}
-                  </p>
                 </div>
-                <div className="flex flex-col gap-2">
-                  {months.slice(0, 6).map((m) => (
-                    <div key={m.id} className="flex flex-wrap items-center gap-1">
-                      <span className="text-[11px] text-slate-600">
-                        {periodLabel(m.period)}
+                <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+                  {months.map((m) => (
+                    <div
+                      key={m.id}
+                      className="flex flex-wrap items-center justify-end gap-1"
+                    >
+                      <span className="mr-auto text-[11px] font-medium text-amber-900 sm:mr-2">
+                        {periodLabel(m.period)} · da incassare
                       </span>
                       <form action={updateRecurringMonthStatusAction}>
                         <input type="hidden" name="recurringMonthId" value={m.id} />
@@ -136,19 +127,22 @@ export function RecurringMissingPanel({
                         <input type="hidden" name="settledPeriod" value={settledPeriod} />
                         <button
                           type="submit"
-                          className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] text-white"
+                          className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] text-white hover:bg-emerald-700"
+                          title="Fornitore ha pagato / lo segnalo come incassato"
                         >
                           Incassato
                         </button>
                       </form>
                       <form action={updateRecurringMonthStatusAction}>
                         <input type="hidden" name="recurringMonthId" value={m.id} />
-                        <input type="hidden" name="status" value="CLOSED" />
+                        <input type="hidden" name="status" value="LIQUIDATED" />
+                        <input type="hidden" name="settledPeriod" value={settledPeriod} />
                         <button
                           type="submit"
-                          className="rounded bg-slate-600 px-2 py-0.5 text-[11px] text-white"
+                          className="rounded bg-teal-700 px-2 py-0.5 text-[11px] text-white hover:bg-teal-800"
+                          title="Incassato e già liquidato al collaboratore → esce dalla lista"
                         >
-                          Chiuso
+                          Incassato + Pagato
                         </button>
                       </form>
                     </div>

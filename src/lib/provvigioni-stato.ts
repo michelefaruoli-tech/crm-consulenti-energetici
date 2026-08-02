@@ -145,40 +145,50 @@ export function effectiveGettone(opts: {
 
 export { isRecurringMonthly };
 
-/** Ultima competenza mensile da mostrare sotto «Incasso» (solo ricorrenti). */
+/** Ultima competenza pagata (Incassato o Pagato) — sempre utile in tabella. */
+export function lastRecurringPaidNote(
+  months: Array<{ period: string; status: string }>,
+): string {
+  if (months.length === 0) return "";
+  const paid = [...months]
+    .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
+    .sort((a, b) => a.period.localeCompare(b.period));
+  if (paid.length === 0) return "";
+  const last = paid[paid.length - 1]!;
+  const tag = last.status === "LIQUIDATED" ? "pagato" : "incassato";
+  return `ultimo mese ${tag}: ${periodLabel(last.period)}`;
+}
+
+/**
+ * Nota sotto «Incasso» / Data pagato per i ricorrenti.
+ * Mostra sempre l’ultimo mese pagato; se ci sono ritardi, aggiunge «da incassare».
+ */
 export function lastRecurringIncassoNote(
   months: Array<{ period: string; status: string }>,
-  statoSemplificato: string,
+  _statoSemplificato?: string,
 ): string {
   if (months.length === 0) return "";
 
   const now = toPeriod(new Date());
   const sorted = [...months].sort((a, b) => a.period.localeCompare(b.period));
+  const parts: string[] = [];
+
+  const lastPaid = lastRecurringPaidNote(sorted);
+  if (lastPaid) parts.push(lastPaid);
 
   const pastMissing = sorted.filter(
     (m) => m.status === "MISSING" && m.period < now,
   );
   if (pastMissing.length > 0) {
     const last = pastMissing[pastMissing.length - 1]!;
-    return `${periodLabel(last.period)} · da incassare`;
+    parts.push(
+      pastMissing.length === 1
+        ? `${periodLabel(last.period)} da incassare`
+        : `${pastMissing.length} mesi da incassare (fino a ${periodLabel(last.period)})`,
+    );
   }
 
-  const paid = sorted.filter((m) => m.status === "PAID" || m.status === "LIQUIDATED");
-  if (paid.length > 0) {
-    const last = paid[paid.length - 1]!;
-    if (statoSemplificato === "Pagato" || last.status === "LIQUIDATED") {
-      return `${periodLabel(last.period)} · pagato`;
-    }
-    return `${periodLabel(last.period)} · incassato`;
-  }
-
-  const pending = sorted.filter((m) => m.status === "PENDING");
-  if (pending.length > 0) {
-    const last = pending[pending.length - 1]!;
-    return `${periodLabel(last.period)} · in attesa`;
-  }
-
-  return "";
+  return parts.join(" · ");
 }
 
 /**

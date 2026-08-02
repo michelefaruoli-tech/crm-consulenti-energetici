@@ -546,6 +546,13 @@ export default async function ProvvigioniPage({
       inFornitura,
     });
 
+    const lastPaidNote = isRecurring(contract.recurrence)
+      ? lastRecurringIncassoNote(contract.recurringMonths, stato)
+      : "";
+    const recurringIncassoNote = [activationNote, lastPaidNote]
+      .filter(Boolean)
+      .join(" · ") || undefined;
+
     return {
       id: contract.id,
       clientId: contract.clientId,
@@ -569,11 +576,7 @@ export default async function ProvvigioniPage({
       paymentStatus: paidLabel,
       confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
       collectionMonth,
-      recurringIncassoNote: activationNote
-        ? activationNote
-        : isRecurring(contract.recurrence)
-          ? lastRecurringIncassoNote(contract.recurringMonths, stato)
-          : undefined,
+      recurringIncassoNote,
       stornoFlag: item?.stornoDate ? "Sì" : "No",
       stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
       stornoAmount: item?.stornoAmount != null ? String(Number(item.stornoAmount)) : "",

@@ -220,9 +220,16 @@ export async function getMissingRecurringAlerts(
         ? { OR: recurringAnnualWhereOr }
         : { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] };
 
+  const now = toPeriod(new Date());
+  // Solo mesi che DOVEVANO già essere incassati (non il mese corrente in attesa)
+  // Annuali: anche il mese di scadenza corrente conta come dovuto
+  const periodFilter =
+    kind === "annual" ? { lte: now } : { lt: now };
+
   return prisma.recurringMonth.findMany({
     where: {
       status: "MISSING",
+      period: periodFilter,
       contract: {
         isHistorical: false,
         deletedAt: null,
@@ -252,7 +259,7 @@ export async function getMissingRecurringAlerts(
       },
     },
     orderBy: [{ period: "asc" }],
-    take: 80,
+    take: 120,
   });
 }
 

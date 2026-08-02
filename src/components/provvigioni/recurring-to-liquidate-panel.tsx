@@ -17,8 +17,8 @@ export type ToLiquidateAlert = {
 };
 
 /**
- * Rate già «Incassato» dal fornitore: qui segni «Pagato» (liquidazione collab)
- * e la riga scompare dalla lista.
+ * Rate già Incassate: qui segni Pagato e la riga scompare.
+ * Se la lista è vuota non mostriamo nulla (niente box grigio inutile).
  */
 export function RecurringToLiquidatePanel({
   alerts,
@@ -27,25 +27,21 @@ export function RecurringToLiquidatePanel({
   alerts: ToLiquidateAlert[];
   kind?: "monthly" | "annual";
 }) {
+  if (alerts.length === 0) return null;
+
   const titleKind =
     kind === "annual" ? "Ricorrenti annuali" : "Ricorrenti mensili";
-
-  if (alerts.length === 0) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-        Nessuna rata {titleKind.toLowerCase()} in stato Incassato in attesa di Pagato.
-      </div>
-    );
-  }
 
   return (
     <section className="rounded-xl border border-sky-300 bg-sky-50 p-4 shadow-sm">
       <h2 className="text-base font-semibold text-sky-950">
-        {titleKind}: incassati da liquidare ({alerts.length})
+        {titleKind}: già incassati → segna Pagato ({alerts.length})
       </h2>
       <p className="mt-1 text-xs text-sky-900/80">
-        Il fornitore ha già pagato (Incassato). Clicca <strong>Pagato</strong> quando hai
-        liquidato il collaboratore: la riga esce da questa lista.
+        Questi mesi sono <strong>Incassato</strong> (fornitore ok). Clicca{" "}
+        <strong>Pagato</strong> quando hai liquidato il collaboratore: la riga viene{" "}
+        <strong>eliminata</strong> da questa lista. Sotto in tabella resta la data
+        dell&apos;ultimo mese pagato.
       </p>
 
       <ul className="mt-3 max-h-72 space-y-2 overflow-auto text-sm">
@@ -72,6 +68,7 @@ export function RecurringToLiquidatePanel({
                   ? ` · rendiconto ${periodLabel(a.settledPeriod)}`
                   : ""}
                 {a.amount != null ? ` · € ${a.amount}` : ""}
+                {" · stato: Incassato"}
               </p>
             </div>
             <form action={updateRecurringMonthStatusAction}>

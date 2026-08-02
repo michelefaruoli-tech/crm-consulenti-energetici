@@ -47,12 +47,10 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
   }
 
   let settledPeriod: string | null = row.settledPeriod;
-  if (status === "PAID") {
+  if (status === "PAID" || status === "LIQUIDATED") {
     const raw = String(formData.get("settledPeriod") ?? "").trim();
-    settledPeriod = /^\d{4}-\d{2}$/.test(raw) ? raw : toPeriod(new Date());
-  }
-  if (status === "LIQUIDATED" && !settledPeriod) {
-    settledPeriod = toPeriod(new Date());
+    if (/^\d{4}-\d{2}$/.test(raw)) settledPeriod = raw;
+    else if (!settledPeriod) settledPeriod = toPeriod(new Date());
   }
 
   await prisma.recurringMonth.update({
@@ -78,7 +76,7 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
     },
   });
 
-  if (status === "PAID") {
+  if (status === "PAID" || status === "LIQUIDATED") {
     const latestPaid = await prisma.recurringMonth.findFirst({
       where: {
         contractId: row.contractId,
@@ -92,7 +90,7 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
     await prisma.contract.update({
       where: { id: row.contractId },
       data: {
-        paymentStatus: "Incassato",
+        paymentStatus: status === "LIQUIDATED" ? "Pagato" : "Incassato",
         collectionDate: new Date(y, m - 1, 1),
       },
     });
