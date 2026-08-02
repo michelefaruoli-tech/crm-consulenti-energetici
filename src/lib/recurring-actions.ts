@@ -7,12 +7,19 @@ import { prisma } from "@/lib/prisma";
 import { toPeriod } from "@/lib/recurring";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 
-const ALLOWED = new Set(["PAID", "PENDING", "MISSING", "CLOSED", "ERROR_UNPAID"]);
+const ALLOWED = new Set([
+  "PAID",
+  "PENDING",
+  "MISSING",
+  "CLOSED",
+  "ERROR_UNPAID",
+  "LIQUIDATED",
+]);
 
 /**
  * Aggiorna lo stato di un mese di competenza ricorrente.
- * Se PAID: chiede `settledPeriod` (mese del bonifico/rendiconto).
- * Es. competenza aprile + settledPeriod luglio = pagato a luglio per aprile.
+ * - PAID = incassato dal fornitore (chiede settledPeriod)
+ * - LIQUIDATED = pagato al collaboratore (esce dalle liste da liquidare)
  */
 export async function updateRecurringMonthStatusAction(formData: FormData): Promise<void> {
   const session = await requireSession();
@@ -22,7 +29,15 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
 
   const row = await prisma.recurringMonth.findUnique({
     where: { id },
-    include: { contract: { select: { collaboratorId: true, id: true } } },
+    include: {
+      contract: {
+        select: {
+          collaboratorId: true,
+          id: true,
+          commission: { select: { id: true, expected: true, received: true, paid: true } },
+        },
+      },
+    },
   });
   if (!row) throw new Error("Mese non trovato");
 
@@ -31,10 +46,13 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
     throw new Error("Permesso negato");
   }
 
-  let settledPeriod: string | null = null;
+  let settledPeriod: string | null = row.settledPeriod;
   if (status === "PAID") {
     const raw = String(formData.get("settledPeriod") ?? "").trim();
     settledPeriod = /^\d{4}-\d{2}$/.test(raw) ? raw : toPeriod(new Date());
+  }
+  if (status === "LIQUIDATED" && !settledPeriod) {
+    settledPeriod = toPeriod(new Date());
   }
 
   await prisma.recurringMonth.update({
@@ -42,25 +60,30 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
     data: {
       status,
       paidAt:
-        status === "PAID"
-          ? new Date()
+        status === "PAID" || status === "LIQUIDATED"
+          ? row.paidAt ?? new Date()
           : status === "MISSING" || status === "PENDING"
             ? null
             : row.paidAt,
-      settledPeriod: status === "PAID" ? settledPeriod : null,
+      settledPeriod:
+        status === "PAID" || status === "LIQUIDATED" ? settledPeriod : null,
       note:
         status === "ERROR_UNPAID"
           ? "Segnato come non pagato per errore"
           : status === "CLOSED"
             ? "Contratto chiuso"
-            : row.note,
+            : status === "LIQUIDATED"
+              ? "Liquidato al collaboratore"
+              : row.note,
     },
   });
 
-  // Riepilogo UX: ultimo mese di COMPETENZA pagato (non il mese del bonifico)
   if (status === "PAID") {
     const latestPaid = await prisma.recurringMonth.findFirst({
-      where: { contractId: row.contractId, status: "PAID" },
+      where: {
+        contractId: row.contractId,
+        status: { in: ["PAID", "LIQUIDATED"] },
+      },
       orderBy: { period: "desc" },
       select: { period: true },
     });
@@ -73,6 +96,22 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
         collectionDate: new Date(y, m - 1, 1),
       },
     });
+  }
+
+  if (status === "LIQUIDATED") {
+    const commission = row.contract.commission;
+    if (commission) {
+      const amount = Number(row.amount ?? commission.expected ?? 0) || 0;
+      const paid = Number(commission.paid ?? 0) || 0;
+      const received = Number(commission.received ?? 0) || 0;
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: {
+          paid: paid + amount,
+          received: Math.max(received, paid + amount),
+        },
+      });
+    }
   }
 
   await syncRecurringMonthsForContract(row.contractId);

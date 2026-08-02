@@ -422,7 +422,7 @@ export async function applyHeliosProvvigioniAction(
             : { status: "PAGATO_DAL_FORNITORE" }),
           paymentStatus: "Incassato",
           collectionDate: new Date(y, mo - 1, 1),
-          recurrence: "Ricorrente",
+          recurrence: "M",
         },
       });
 

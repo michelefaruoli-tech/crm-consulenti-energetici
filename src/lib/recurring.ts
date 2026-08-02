@@ -48,30 +48,80 @@ export function monthsBetween(from: string, to: string): string[] {
   return out;
 }
 
+/**
+ * Valori canonici in DB:
+ * - «Una tantum» = gettone una tantum (ex G)
+ * - «M» = ricorrente mensile (Helios, Sorgenia Business, …)
+ * - «R» = ricorrente annuale dopo 12 mesi (Etruria, Sinergy, …)
+ * Legacy «Ricorrente» = trattato come M.
+ */
+export type RecurrenceKind = "Una tantum" | "M" | "R";
+
+export const RECURRENCE_OPTIONS = [
+  { value: "Una tantum" as const, short: "UT", label: "Gettone (una tantum)" },
+  { value: "M" as const, short: "M", label: "Ricorrente mensile" },
+  { value: "R" as const, short: "R", label: "Ricorrente annuale (12 mesi)" },
+] as const;
+
 export const RECURRING_STATUS_LABELS: Record<string, string> = {
-  PAID: "Pagato",
+  PAID: "Incassato",
+  LIQUIDATED: "Pagato",
   PENDING: "In attesa",
   MISSING: "Mancato",
   CLOSED: "Chiuso",
   ERROR_UNPAID: "Non pagato (errore)",
 };
 
+/** Qualsiasi forma di ricorrenza (mensile o annuale). */
 export function isRecurring(recurrence: string | null | undefined): boolean {
-  const r = (recurrence ?? "").trim();
-  if (!r) return false;
-  // Colonna R/G in Provvigioni: «R» / «Ricorrente» / «mensile»
-  if (/^r$/i.test(r)) return true;
-  return /ricor|mensil/i.test(r);
+  return isRecurringMonthly(recurrence) || isRecurringAnnual(recurrence);
 }
 
-/** Valore canonico da salvare in DB (evita «R » o varianti che rompono i filtri). */
+/** R = ricorrente annuale (dopo 12 mesi dall’ultimo pagamento / ingresso). */
+export function isRecurringAnnual(recurrence: string | null | undefined): boolean {
+  const r = (recurrence ?? "").trim();
+  if (!r) return false;
+  if (/^r$/i.test(r)) return true;
+  if (/annu|12\s*mes|dopo\s*12/i.test(r)) return true;
+  return false;
+}
+
+/** M = ricorrente mensile (include legacy «Ricorrente»). */
+export function isRecurringMonthly(recurrence: string | null | undefined): boolean {
+  const r = (recurrence ?? "").trim();
+  if (!r) return false;
+  if (isRecurringAnnual(r)) return false;
+  if (/^m$/i.test(r)) return true;
+  if (/^ricorrente$/i.test(r)) return true;
+  if (/mensil/i.test(r)) return true;
+  if (/ricor/i.test(r)) return true;
+  return false;
+}
+
+/** Valore canonico da salvare in DB. */
 export function normalizeRecurrence(
   raw: string | null | undefined,
-): "Ricorrente" | "Una tantum" {
+): RecurrenceKind {
   const v = (raw ?? "").trim();
   if (!v) return "Una tantum";
-  if (isRecurring(v)) return "Ricorrente";
-  if (/^g$/i.test(v) || /ut|tantum|una|gettone/i.test(v)) return "Una tantum";
-  // Default conservativo: se non riconosciuto come R, è gettone
+  if (isRecurringAnnual(v)) return "R";
+  if (isRecurringMonthly(v)) return "M";
+  if (/^g$/i.test(v) || /^(ut)$/i.test(v) || /tantum|una\s*tantum|gettone/i.test(v)) {
+    return "Una tantum";
+  }
   return "Una tantum";
+}
+
+/** Codice corto in tabella: UT | M | R */
+export function shortRecurrenceCode(recurrence: string | null | undefined): string {
+  const n = normalizeRecurrence(recurrence);
+  if (n === "M") return "M";
+  if (n === "R") return "R";
+  return "UT";
+}
+
+/** Etichetta lunga per select / tooltip */
+export function recurrenceLabel(recurrence: string | null | undefined): string {
+  const n = normalizeRecurrence(recurrence);
+  return RECURRENCE_OPTIONS.find((o) => o.value === n)?.label ?? "Gettone (una tantum)";
 }

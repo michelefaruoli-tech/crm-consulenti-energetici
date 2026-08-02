@@ -15,7 +15,7 @@ import {
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
-import { toPeriod, periodLabel } from "@/lib/recurring";
+import { toPeriod, periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
   PROVVIGIONE_OPERATION_OPTIONS,
@@ -45,10 +45,7 @@ const FIELD_MAP: Record<string, string> = {
 };
 
 function shortRecurrence(value: string): string {
-  const v = value.toLowerCase().trim();
-  if (v === "r" || v.includes("ricor") || v.includes("mensil")) return "R";
-  // G = Gettone / una tantum
-  return "G";
+  return shortRecurrenceCode(value);
 }
 
 function shortClientType(value: string): string {
@@ -689,11 +686,32 @@ export function ProvvigioniFilterTable({
     },
     {
       key: "recurrence",
-      label: "R/G",
+      label: "Tipo",
       getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
-      editable: true,
       sortKind: "text",
-      inputClassName: "max-w-[2.5rem] text-center font-semibold",
+      render: (r) => {
+        const currentCode = shortRecurrence(getDraftValue(r, "recurrence"));
+        const dirty = isDraftDirty(r, "recurrence");
+        const value =
+          currentCode === "M" ? "M" : currentCode === "R" ? "R" : "Una tantum";
+        return (
+          <select
+            className={`max-w-[7.5rem] rounded border px-0.5 py-0.5 text-[11px] font-semibold ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={value}
+            title="UT = gettone · M = mensile · R = annuale (12 mesi)"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "recurrence", e.target.value)}
+          >
+            {RECURRENCE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.short} · {o.label}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
     {
       key: "collectionMonth",
@@ -1058,7 +1076,7 @@ export function ProvvigioniFilterTable({
           ) : (
             <>
               Vista <strong>semplificata</strong>: Cliente · Collab. · Fornitore ·
-              Gettone · Stato · Data pagato · Note · R/G
+              Gettone · Stato · Data pagato · Note · Tipo (UT/M/R)
               {canDelete ? " · ×" : ""}.{" "}
             </>
           )}
@@ -1068,7 +1086,7 @@ export function ProvvigioniFilterTable({
           {advancedView
             ? " POD rosso = manca ingresso fornitura."
             : ""}{" "}
-          <strong>R/G</strong>: R ricorrente · G gettone.
+          <strong>Tipo</strong>: UT gettone · M mensile · R annuale (12 mesi).
           {canDelete ? " × rossa = elimina." : ""}
         </p>
         <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
@@ -1150,6 +1168,7 @@ export function ProvvigioniFilterTable({
           stato: [...PROVVIGIONE_STATO_OPTIONS],
           clientType: ["Business", "Domestico"],
           operationType: [...PROVVIGIONE_OPERATION_OPTIONS],
+          recurrence: ["UT", "M", "R"],
         }}
         getRowClassName={(r) => {
           const storno = String(r.stornoRowClass ?? "");

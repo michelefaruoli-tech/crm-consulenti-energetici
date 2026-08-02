@@ -22,23 +22,48 @@ export type ProvvigioniFilters = {
   tipologia?: string | null;
   /** Cerca cliente (nome, cognome, ragione sociale, CF, POD) */
   q?: string | null;
-  /**
+/**
    * Scheda:
    * - all = tutti (default)
-   * - exclude = solo gettoni/una tantum (nasconde R)
-   * - only = solo ricorrenti
+   * - exclude = solo gettoni/una tantum
+   * - only = solo ricorrenti (M+R)
+   * - monthly = solo ricorrenti mensili (M)
+   * - annual = solo ricorrenti annuali (R)
    */
-  recurrenceMode?: "exclude" | "only" | "all" | null;
+  recurrenceMode?: "exclude" | "only" | "all" | "monthly" | "annual" | null;
   /** Scope backoffice / collaboratore (AND aggiuntivo) */
   visibility?: Prisma.ContractWhereInput | null;
 };
 
-/** Filtro Prisma: contratti ricorrenti (R in Provvigioni). */
+/** Qualsiasi ricorrenza (mensile M o annuale R + legacy). */
 export const recurringWhereOr: Prisma.ContractWhereInput[] = [
+  { recurrence: { equals: "M", mode: "insensitive" } },
   { recurrence: { equals: "R", mode: "insensitive" } },
   { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
   { recurrence: { contains: "ricor", mode: "insensitive" } },
   { recurrence: { contains: "mensil", mode: "insensitive" } },
+  { recurrence: { contains: "annu", mode: "insensitive" } },
+];
+
+/** Solo ricorrenti mensili (M + legacy Ricorrente). */
+export const recurringMonthlyWhereOr: Prisma.ContractWhereInput[] = [
+  { recurrence: { equals: "M", mode: "insensitive" } },
+  { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
+  { recurrence: { contains: "mensil", mode: "insensitive" } },
+  {
+    AND: [
+      { recurrence: { contains: "ricor", mode: "insensitive" } },
+      { NOT: { recurrence: { contains: "annu", mode: "insensitive" } } },
+      { NOT: { recurrence: { equals: "R", mode: "insensitive" } } },
+    ],
+  },
+];
+
+/** Solo ricorrenti annuali (R / 12 mesi). */
+export const recurringAnnualWhereOr: Prisma.ContractWhereInput[] = [
+  { recurrence: { equals: "R", mode: "insensitive" } },
+  { recurrence: { contains: "annu", mode: "insensitive" } },
+  { recurrence: { contains: "12 mes", mode: "insensitive" } },
 ];
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
@@ -136,6 +161,10 @@ export function buildProvvigioniContractWhere(
 
   if (recurrenceMode === "only") {
     and.push({ OR: recurringWhereOr });
+  } else if (recurrenceMode === "monthly") {
+    and.push({ OR: recurringMonthlyWhereOr });
+  } else if (recurrenceMode === "annual") {
+    and.push({ OR: recurringAnnualWhereOr });
   } else if (recurrenceMode === "exclude") {
     // Ricorrenza NULL/vuota = gettone/una tantum (SQL NOT su NULL escludeva migliaia di righe)
     and.push({

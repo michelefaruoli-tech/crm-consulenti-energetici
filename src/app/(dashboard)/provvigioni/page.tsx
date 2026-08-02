@@ -11,6 +11,7 @@ import {
 } from "@/components/provvigioni/provvigioni-filter-table";
 import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
+import { RecurringToLiquidatePanel } from "@/components/provvigioni/recurring-to-liquidate-panel";
 import { HeliosAbsentPanel } from "@/components/provvigioni/helios-absent-panel";
 import {
   RecurringRendicontoPanel,
@@ -23,6 +24,7 @@ import {
   getMissingRecurringAlerts,
   getHeliosAbsentAlerts,
   getSettledRecurringForPeriod,
+  getPaidToLiquidateAlerts,
   syncAllRecurringMonths,
 } from "@/lib/recurring-sync";
 import {
@@ -41,7 +43,7 @@ import {
   buildProvvigioniContractWhere,
   sumProvvigioniTotals,
 } from "@/lib/provvigioni-filters";
-import { toPeriod } from "@/lib/recurring";
+import { toPeriod, isRecurring } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   defaultGettonePrivato,
@@ -51,7 +53,6 @@ import {
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
-import { isRecurring } from "@/lib/recurring";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ type SearchParams = {
   dir?: string;
   /** Cerca cliente / POD */
   q?: string;
-  /** tutti (default) | ricorrente */
+  /** tutti | mensile | annuale (ricorrente → mensile per link vecchi) */
   vista?: string;
 };
 
@@ -104,9 +105,16 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
-  // Default = tutti. Scheda Ricorrente = solo R. (gettoni legacy → tutti)
-  const vista = vistaRaw === "ricorrente" ? "ricorrente" : "tutti";
-  const recurrenceMode = vista === "ricorrente" ? "only" : "all";
+  // Default = tutti. Tab: mensile (M) | annuale (R). Legacy «ricorrente» → mensile.
+  const vista =
+    vistaRaw === "annuale"
+      ? "annuale"
+      : vistaRaw === "mensile" || vistaRaw === "ricorrente"
+        ? "mensile"
+        : "tutti";
+  const recurrenceMode =
+    vista === "mensile" ? "monthly" : vista === "annuale" ? "annual" : "all";
+  const recurringKind = vista === "annuale" ? "annual" : "monthly";
 
   const contractWhere = buildProvvigioniContractWhere({
     // Backoffice: non forzare collaboratorId = sé (usa solo visibility)
@@ -259,12 +267,14 @@ export default async function ProvvigioniPage({
     collaboratorOptions,
     supplierOptions,
     missing,
+    toLiquidate,
     heliosAbsent,
     collabGroups,
     settledRowsRaw,
     deletedRecent,
     countGettoni,
-    countRicorrenti,
+    countMensili,
+    countAnnuali,
   ] = await Promise.all([
     pageContractIds
       ? pageContractIds.length === 0
@@ -298,7 +308,8 @@ export default async function ProvvigioniPage({
       select: { name: true },
       orderBy: { name: "asc" },
     }),
-    getMissingRecurringAlerts(sessionCollabFilter),
+    getMissingRecurringAlerts(sessionCollabFilter, recurringKind),
+    getPaidToLiquidateAlerts(sessionCollabFilter, recurringKind),
     getHeliosAbsentAlerts(sessionCollabFilter),
     canViewAll
       ? prisma.contract.groupBy({
@@ -362,7 +373,20 @@ export default async function ProvvigioniPage({
         stato,
         tipologia,
         q,
-        recurrenceMode: "only",
+        recurrenceMode: "monthly",
+        visibility,
+      }),
+    }),
+    prisma.contract.count({
+      where: buildProvvigioniContractWhere({
+        canViewAll: canViewAll || isScoped,
+        sessionUserId: session.id,
+        collab,
+        supplier,
+        stato,
+        tipologia,
+        q,
+        recurrenceMode: "annual",
         visibility,
       }),
     }),
@@ -584,9 +608,22 @@ export default async function ProvvigioniPage({
     podPdr: m.contract.podPdr || "",
     supplierName: m.contract.supplier.name,
     clientName: clientDisplayName(m.contract.client),
+    collaboratorName: m.contract.collaborator?.name,
   }));
+  const toLiquidateRows = toLiquidate.map((m) => ({
+    id: m.id,
+    period: m.period,
+    settledPeriod: m.settledPeriod,
+    contractId: m.contractId,
+    podPdr: m.contract.podPdr || "",
+    supplierName: m.contract.supplier.name,
+    clientName: clientDisplayName(m.contract.client),
+    collaboratorName: m.contract.collaborator?.name,
+    amount: m.amount != null ? Number(m.amount) : undefined,
+  }));
+  const tabRecurringCount = vista === "annuale" ? countAnnuali : countMensili;
   const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
-  const otherRecurringCount = Math.max(0, countRicorrenti - missingContractCount);
+  const otherRecurringCount = Math.max(0, tabRecurringCount - missingContractCount);
 
   const heliosAbsentRows = heliosAbsent.map((m) => ({
     id: m.id,
@@ -617,7 +654,11 @@ export default async function ProvvigioniPage({
     stato ? `stato ${stato}` : null,
     tipologia ? `tipologia ${tipologia}` : null,
     q ? `cerca «${q}»` : null,
-    vista === "ricorrente" ? "scheda Ricorrente" : "tutti (gettoni+R)",
+    vista === "mensile"
+      ? "scheda Mensile (M)"
+      : vista === "annuale"
+        ? "scheda Annuale (R)"
+        : "tutti (gettoni+M+R)",
   ].filter(Boolean);
   const collabQs = [
     collabFilter ? `collab=${encodeURIComponent(collabFilter)}` : null,
@@ -640,7 +681,7 @@ export default async function ProvvigioniPage({
   if (vista !== "tutti") exportParams.set("vista", vista);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
-  function vistaHref(nextVista: "ricorrente" | "tutti") {
+  function vistaHref(nextVista: "mensile" | "annuale" | "tutti") {
     return `/provvigioni?${new URLSearchParams({
       settled: settledPeriod,
       ...(collabFilter ? { collab: collabFilter } : {}),
@@ -661,7 +702,11 @@ export default async function ProvvigioniPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            {vista === "ricorrente" ? "Provvigioni · Ricorrente" : "Provvigioni"}
+            {vista === "mensile"
+              ? "Provvigioni · Ricorrenti mensili"
+              : vista === "annuale"
+                ? "Provvigioni · Ricorrenti annuali"
+                : "Provvigioni"}
           </h1>
           <p className="text-sm text-slate-500 sm:text-base">
             {total} contratti
@@ -702,17 +747,27 @@ export default async function ProvvigioniPage({
               : "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           }
         >
-          Tutti ({vista === "tutti" ? total : countGettoni + countRicorrenti})
+          Tutti ({vista === "tutti" ? total : countGettoni + countMensili + countAnnuali})
         </Link>
         <Link
-          href={vistaHref("ricorrente")}
+          href={vistaHref("mensile")}
           className={
-            vista === "ricorrente"
+            vista === "mensile"
               ? "rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white"
               : "rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-sm font-medium text-teal-950 hover:bg-teal-100"
           }
         >
-          Ricorrente ({countRicorrenti})
+          Ricorrenti mensili ({countMensili})
+        </Link>
+        <Link
+          href={vistaHref("annuale")}
+          className={
+            vista === "annuale"
+              ? "rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+              : "rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-950 hover:bg-indigo-100"
+          }
+        >
+          Ricorrenti annuali ({countAnnuali})
         </Link>
       </div>
 
@@ -774,12 +829,18 @@ export default async function ProvvigioniPage({
         </div>
       ) : null}
 
-      <RecurringMissingPanel
-        alerts={alertRows}
-        otherRecurringCount={otherRecurringCount}
-      />
+      {vista === "mensile" || vista === "annuale" ? (
+        <>
+          <RecurringMissingPanel
+            alerts={alertRows}
+            otherRecurringCount={otherRecurringCount}
+            kind={recurringKind}
+          />
+          <RecurringToLiquidatePanel alerts={toLiquidateRows} kind={recurringKind} />
+        </>
+      ) : null}
 
-      <HeliosAbsentPanel alerts={heliosAbsentRows} />
+      {vista === "mensile" ? <HeliosAbsentPanel alerts={heliosAbsentRows} /> : null}
 
       <ProvvigioniTrashPanel
         rows={deletedRecent.map((c) => ({
@@ -816,12 +877,14 @@ export default async function ProvvigioniPage({
           </p>
         </div>
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
-          <p className="text-sm text-sky-800">Ricorrenti mensili</p>
+          <p className="text-sm text-sky-800">
+            {vista === "annuale" ? "Ricorrenti annuali" : "Ricorrenti mensili"}
+          </p>
           <p className="mt-2 text-2xl font-bold text-sky-950">
             {formatCurrency(totals.ricorrenti)}
           </p>
           <p className="mt-1 text-xs text-sky-800/70">
-            Solo contratti ricorrenti · somma gettoni
+            Solo contratti ricorrenti del filtro · somma gettoni
           </p>
         </div>
       </div>

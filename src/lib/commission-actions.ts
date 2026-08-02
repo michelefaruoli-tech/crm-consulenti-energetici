@@ -906,7 +906,12 @@ export async function bulkLiquidateIncassatiAction(
   const q = String(formData.get("q") ?? "").trim() || null;
   const tipologia = String(formData.get("tipologia") ?? "").trim() || null;
   const vista = String(formData.get("vista") ?? "").trim() || null;
-  const recurrenceMode = vista === "ricorrente" ? "only" : "all";
+  const recurrenceMode =
+    vista === "mensile" || vista === "ricorrente"
+      ? "monthly"
+      : vista === "annuale"
+        ? "annual"
+        : "all";
 
   const visibility = await contractVisibilityWhere({ id: session.id, role: session.role });
 

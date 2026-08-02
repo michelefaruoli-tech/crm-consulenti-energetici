@@ -12,6 +12,7 @@ export type MissingAlert = {
   podPdr: string;
   supplierName: string;
   clientName: string;
+  collaboratorName?: string;
 };
 
 function defaultSettledOptions(): string[] {
@@ -27,25 +28,27 @@ function defaultSettledOptions(): string[] {
 export function RecurringMissingPanel({
   alerts,
   otherRecurringCount = 0,
+  kind = "monthly",
 }: {
   alerts: MissingAlert[];
-  /** Quanti contratti R esistono ma non hanno mesi MISSING (inizio recente / già ok) */
   otherRecurringCount?: number;
+  kind?: "monthly" | "annual";
 }) {
   const settledOptions = useMemo(() => defaultSettledOptions(), []);
   const [settledPeriod, setSettledPeriod] = useState(settledOptions[0] ?? toPeriod(new Date()));
+  const titleKind =
+    kind === "annual" ? "Ricorrenti annuali (12 mesi)" : "Ricorrenti mensili";
 
   if (alerts.length === 0) {
     return (
       <div className="space-y-2">
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          Nessun mese di competenza in ritardo sulle ricorrenze.
+          Nessuna competenza in ritardo su {titleKind.toLowerCase()}.
         </div>
         {otherRecurringCount > 0 ? (
           <p className="text-xs text-slate-600">
-            Hai comunque <strong>{otherRecurringCount}</strong> contratti ricorrenti (R) in elenco:
-            non compaiono qui perché non hanno mesi passati ancora da incassare (inizio fornitura
-            recente, oppure mesi già segnati Incassato/Chiuso).
+            Hai comunque <strong>{otherRecurringCount}</strong> contratti in elenco senza mesi
+            ancora da incassare.
           </p>
         ) : null}
       </div>
@@ -62,21 +65,24 @@ export function RecurringMissingPanel({
   return (
     <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
       <h2 className="text-base font-semibold text-amber-950">
-        Ricorrenze: mesi di competenza non incassati ({alerts.length})
+        {titleKind}: da incassare ({alerts.length})
       </h2>
       <p className="mt-1 text-xs text-amber-900/80">
-        Qui vedi solo i contratti R con <strong>mesi già scaduti e non incassati</strong> (es. mag/giu),
-        non tutti i ricorrenti della tabella sotto. La competenza non è il mese del bonifico: quando
-        segni <strong>Incassato</strong>, scegli sotto il <strong>mese del rendiconto fornitore</strong>.
+        {kind === "annual" ? (
+          <>
+            Scadenze a <strong>12 mesi</strong> dall&apos;ultimo pagamento ricevuto (o
+            dall&apos;ingresso in fornitura se non c&apos;è ancora un pagamento). Segna{" "}
+            <strong>Incassato</strong> quando il fornitore paga; poi usa il pannello sotto per{" "}
+            <strong>Pagato</strong> (liquidazione collaboratore).
+          </>
+        ) : (
+          <>
+            Mesi di competenza già scaduti e non incassati. Quando segni{" "}
+            <strong>Incassato</strong>, scegli il mese del rendiconto fornitore. Poi in lista
+            «da liquidare» puoi segnare <strong>Pagato</strong> e togliere la riga.
+          </>
+        )}
       </p>
-      {otherRecurringCount > 0 ? (
-        <p className="mt-1 text-xs text-amber-900/70">
-          Altri <strong>{otherRecurringCount}</strong> contratti R in tabella non compaiono qui
-          (inizio fornitura ancora nel mese corrente, oppure senza mesi in ritardo). La colonna{" "}
-          <strong>Data</strong> sotto è la data <em>incasso gettone</em>, non l&apos;inizio
-          fornitura.
-        </p>
-      ) : null}
 
       <label className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-950">
         <span className="font-medium">Mese rendiconto fornitore:</span>
@@ -111,11 +117,11 @@ export function RecurringMissingPanel({
                   </Link>
                   <p className="text-xs text-slate-500">
                     {first.supplierName}
+                    {first.collaboratorName ? ` · ${first.collaboratorName}` : ""}
                     {first.podPdr ? ` · ${first.podPdr}` : ""}
                   </p>
                   <p className="mt-1 text-xs font-medium text-amber-800">
-                    Competenze mancanti:{" "}
-                    {months.map((m) => periodLabel(m.period)).join(", ")}
+                    Competenze: {months.map((m) => periodLabel(m.period)).join(", ")}
                   </p>
                 </div>
                 <div className="flex flex-col gap-2">
@@ -131,7 +137,6 @@ export function RecurringMissingPanel({
                         <button
                           type="submit"
                           className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] text-white"
-                          title={`Competenza ${periodLabel(m.period)} → rendiconto ${periodLabel(settledPeriod)}`}
                         >
                           Incassato
                         </button>
@@ -144,16 +149,6 @@ export function RecurringMissingPanel({
                           className="rounded bg-slate-600 px-2 py-0.5 text-[11px] text-white"
                         >
                           Chiuso
-                        </button>
-                      </form>
-                      <form action={updateRecurringMonthStatusAction}>
-                        <input type="hidden" name="recurringMonthId" value={m.id} />
-                        <input type="hidden" name="status" value="ERROR_UNPAID" />
-                        <button
-                          type="submit"
-                          className="rounded bg-red-700 px-2 py-0.5 text-[11px] text-white"
-                        >
-                          Errore
                         </button>
                       </form>
                     </div>

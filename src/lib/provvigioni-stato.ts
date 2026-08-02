@@ -3,7 +3,7 @@
  * sia dal Client Component (tabella). Non mettere "use client" qui.
  */
 
-import { isRecurring, periodLabel, toPeriod } from "@/lib/recurring";
+import { isRecurring, isRecurringMonthly, periodLabel, toPeriod } from "@/lib/recurring";
 
 export type ProvvigioneRow = {
   id: string;
@@ -143,9 +143,7 @@ export function effectiveGettone(opts: {
   return 0;
 }
 
-export function isRecurringMonthly(recurrence: string | null | undefined): boolean {
-  return isRecurring(recurrence);
-}
+export { isRecurringMonthly };
 
 /** Ultima competenza mensile da mostrare sotto «Incasso» (solo ricorrenti). */
 export function lastRecurringIncassoNote(
@@ -165,10 +163,10 @@ export function lastRecurringIncassoNote(
     return `${periodLabel(last.period)} · da incassare`;
   }
 
-  const paid = sorted.filter((m) => m.status === "PAID");
+  const paid = sorted.filter((m) => m.status === "PAID" || m.status === "LIQUIDATED");
   if (paid.length > 0) {
     const last = paid[paid.length - 1]!;
-    if (statoSemplificato === "Pagato") {
+    if (statoSemplificato === "Pagato" || last.status === "LIQUIDATED") {
       return `${periodLabel(last.period)} · pagato`;
     }
     return `${periodLabel(last.period)} · incassato`;

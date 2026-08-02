@@ -1,17 +1,32 @@
 import { prisma } from "@/lib/prisma";
-import { isRecurring, monthsBetween, normalizeRecurrence, toPeriod } from "@/lib/recurring";
+import {
+  addMonths,
+  isRecurring,
+  isRecurringAnnual,
+  isRecurringMonthly,
+  monthsBetween,
+  normalizeRecurrence,
+  toPeriod,
+} from "@/lib/recurring";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
+import {
+  recurringAnnualWhereOr,
+  recurringMonthlyWhereOr,
+} from "@/lib/provvigioni-filters";
+
+const PRESERVED_STATUSES = new Set([
+  "CLOSED",
+  "ERROR_UNPAID",
+  "PAID",
+  "LIQUIDATED",
+]);
 
 /**
- * Per contratti ricorrenti genera i mesi di competenza da inizio fornitura → oggi.
+ * Per contratti ricorrenti mensili (M): genera mesi da inizio fornitura → oggi.
+ * Per contratti ricorrenti annuali (R): genera solo le scadenze a +12 mesi
+ * dall’ultimo pagamento (o dall’ingresso se mai pagato).
  *
- * Fonte di verità sullo stato = riga RecurringMonth (non collectionDate).
- * - PAID / CLOSED / ERROR_UNPAID esistenti non vengono sovrascritti
- * - mesi passati senza pagamento → MISSING
- * - mese corrente → PENDING
- *
- * Nota: non usare collectionDate per marcare “pagato fino a X”, altrimenti
- * un bonifico di luglio segnato come luglio marcherebbe anche aprile–giugno.
+ * Stati PAID / LIQUIDATED / CLOSED / ERROR_UNPAID non vengono sovrascritti.
  */
 export async function syncRecurringMonthsForContract(contractId: string): Promise<void> {
   const contract = await prisma.contract.findUnique({
@@ -29,7 +44,6 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   });
   if (!contract) return;
 
-  // Allinea etichetta R/G (es. «R » → «Ricorrente») così i filtri scheda funzionano
   const normalized = normalizeRecurrence(contract.recurrence);
   if (contract.recurrence?.trim() !== normalized) {
     await prisma.contract.update({
@@ -46,7 +60,6 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     contract.status === "ANNULLATO" ||
     contract.status === "KO"
   ) {
-    // Neon HTTP: niente updateMany (usa transaction interna). Chiudi uno per uno.
     const open = await prisma.recurringMonth.findMany({
       where: { contractId, status: { in: ["PENDING", "MISSING"] } },
       select: { id: true },
@@ -60,80 +73,117 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  // Stessa logica della scheda: supplyStart salvato, altrimenti calcolato da inserimento+operazione
   const startDate =
     contract.supplyStartDate ??
     computeSupplyStartDate(contract.insertionDate, contract.operationType);
   const start = toPeriod(startDate);
   const now = toPeriod(new Date());
-  const periods = monthsBetween(start, now);
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
+  if (isRecurringAnnual(contract.recurrence)) {
+    await syncAnnualPeriods(contractId, start, now, amount);
+    return;
+  }
+
+  if (!isRecurringMonthly(contract.recurrence)) return;
+
+  const periods = monthsBetween(start, now);
   for (const period of periods) {
-    const existing = await prisma.recurringMonth.findUnique({
-      where: { contractId_period: { contractId, period } },
-    });
-
-    if (
-      existing &&
-      (existing.status === "CLOSED" ||
-        existing.status === "ERROR_UNPAID" ||
-        existing.status === "PAID")
-    ) {
-      if (amount != null && existing.amount == null) {
-        await prisma.recurringMonth.update({
-          where: { id: existing.id },
-          data: { amount },
-        });
-      }
-      continue;
-    }
-
-    const status = period < now ? "MISSING" : "PENDING";
-
-    if (existing) {
-      await prisma.recurringMonth.update({
-        where: { id: existing.id },
-        data: {
-          status,
-          amount: amount ?? existing.amount,
-          paidAt: null,
-        },
-      });
-    } else {
-      await prisma.recurringMonth.create({
-        data: {
-          contractId,
-          period,
-          status,
-          amount,
-          paidAt: null,
-        },
-      });
-    }
+    await upsertMonthStatus(contractId, period, now, amount);
   }
 }
 
-/** Normalizza etichette R e sync mesi per tutti i ricorrenti (o un collaboratore). */
+async function syncAnnualPeriods(
+  contractId: string,
+  supplyStart: string,
+  now: string,
+  amount: number | null,
+): Promise<void> {
+  const paidRows = await prisma.recurringMonth.findMany({
+    where: {
+      contractId,
+      status: { in: ["PAID", "LIQUIDATED"] },
+    },
+    select: { period: true },
+    orderBy: { period: "desc" },
+  });
+
+  // Baseline: ultimo pagamento ricevuto, altrimenti ingresso fornitura
+  // Prima rata dovuta = ingresso + 12 mesi
+  let nextDue =
+    paidRows.length > 0
+      ? addMonths(paidRows[0]!.period, 12)
+      : addMonths(supplyStart, 12);
+
+  // Genera tutte le scadenze annuali già maturate (max 10 anni)
+  for (let i = 0; i < 10; i++) {
+    if (nextDue > now) break;
+    // Scadenza annuale già maturata (anche nel mese corrente) → da incassare
+    await upsertMonthStatus(contractId, nextDue, now, amount, { treatCurrentAsMissing: true });
+    nextDue = addMonths(nextDue, 12);
+  }
+}
+
+async function upsertMonthStatus(
+  contractId: string,
+  period: string,
+  now: string,
+  amount: number | null,
+  opts?: { treatCurrentAsMissing?: boolean },
+): Promise<void> {
+  const existing = await prisma.recurringMonth.findUnique({
+    where: { contractId_period: { contractId, period } },
+  });
+
+  if (existing && PRESERVED_STATUSES.has(existing.status)) {
+    if (amount != null && existing.amount == null) {
+      await prisma.recurringMonth.update({
+        where: { id: existing.id },
+        data: { amount },
+      });
+    }
+    return;
+  }
+
+  const finalStatus =
+    period < now || (opts?.treatCurrentAsMissing && period <= now)
+      ? "MISSING"
+      : "PENDING";
+
+  if (existing) {
+    await prisma.recurringMonth.update({
+      where: { id: existing.id },
+      data: {
+        status: finalStatus,
+        amount: amount ?? existing.amount,
+        paidAt: null,
+      },
+    });
+  } else {
+    await prisma.recurringMonth.create({
+      data: {
+        contractId,
+        period,
+        status: finalStatus,
+        amount,
+        paidAt: null,
+      },
+    });
+  }
+}
+
+/** Normalizza etichette e sync mesi per ricorrenti (o un collaboratore). */
 export async function syncAllRecurringMonths(collaboratorId?: string): Promise<number> {
   const contracts = await prisma.contract.findMany({
     where: {
       isHistorical: false,
       deletedAt: null,
       ...(collaboratorId ? { collaboratorId } : {}),
-      OR: [
-        { recurrence: { equals: "R", mode: "insensitive" } },
-        { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
-        { recurrence: { contains: "ricor", mode: "insensitive" } },
-        { recurrence: { contains: "mensil", mode: "insensitive" } },
-        // Varianti corte / spazi che altrimenti non entrano nel filtro scheda
-        { recurrence: { startsWith: "R", mode: "insensitive" } },
-      ],
+      OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr],
     },
     select: { id: true, recurrence: true },
   });
 
-  // Passata extra: etichette strane (solo «r», spazi) non catturate da startsWith se minuscole già ok
   const maybeR = await prisma.contract.findMany({
     where: {
       isHistorical: false,
@@ -148,7 +198,6 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   const extra = maybeR.filter((c) => isRecurring(c.recurrence));
   const all = [...contracts, ...extra];
   const seen = new Set<string>();
-  // Cap: poche sync per richiesta → non martella il DB ad ogni apertura Provvigioni
   const MAX_PER_RUN = 12;
 
   for (const c of all) {
@@ -160,7 +209,17 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   return seen.size;
 }
 
-export async function getMissingRecurringAlerts(collaboratorId?: string) {
+export async function getMissingRecurringAlerts(
+  collaboratorId?: string,
+  kind: "monthly" | "annual" | "all" = "monthly",
+) {
+  const recurrenceFilter =
+    kind === "monthly"
+      ? { OR: recurringMonthlyWhereOr }
+      : kind === "annual"
+        ? { OR: recurringAnnualWhereOr }
+        : { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] };
+
   return prisma.recurringMonth.findMany({
     where: {
       status: "MISSING",
@@ -168,6 +227,55 @@ export async function getMissingRecurringAlerts(collaboratorId?: string) {
         isHistorical: false,
         deletedAt: null,
         ...(collaboratorId ? { collaboratorId } : {}),
+        ...recurrenceFilter,
+      },
+    },
+    include: {
+      contract: {
+        select: {
+          id: true,
+          podPdr: true,
+          recurrence: true,
+          supplyStartDate: true,
+          collectionDate: true,
+          client: {
+            select: {
+              type: true,
+              firstName: true,
+              lastName: true,
+              companyName: true,
+            },
+          },
+          supplier: { select: { name: true } },
+          collaborator: { select: { name: true } },
+        },
+      },
+    },
+    orderBy: [{ period: "asc" }],
+    take: 80,
+  });
+}
+
+/** Mesi già incassati dal fornitore ma non ancora liquidati al collaboratore. */
+export async function getPaidToLiquidateAlerts(
+  collaboratorId?: string,
+  kind: "monthly" | "annual" | "all" = "monthly",
+) {
+  const recurrenceFilter =
+    kind === "monthly"
+      ? { OR: recurringMonthlyWhereOr }
+      : kind === "annual"
+        ? { OR: recurringAnnualWhereOr }
+        : { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] };
+
+  return prisma.recurringMonth.findMany({
+    where: {
+      status: "PAID",
+      contract: {
+        isHistorical: false,
+        deletedAt: null,
+        ...(collaboratorId ? { collaboratorId } : {}),
+        ...recurrenceFilter,
       },
     },
     include: {
@@ -185,11 +293,12 @@ export async function getMissingRecurringAlerts(collaboratorId?: string) {
             },
           },
           supplier: { select: { name: true } },
+          collaborator: { select: { name: true } },
         },
       },
     },
-    orderBy: [{ period: "asc" }],
-    take: 40,
+    orderBy: [{ settledPeriod: "desc" }, { period: "asc" }],
+    take: 80,
   });
 }
 
@@ -231,14 +340,14 @@ export async function getHeliosAbsentAlerts(collaboratorId?: string) {
   });
 }
 
-/** Mesi pagati in un certo rendiconto (es. bonifico di luglio). */
+/** Mesi pagati in un certo rendiconto (es. bonifico di luglio). Incl. LIQUIDATED. */
 export async function getSettledRecurringForPeriod(
   settledPeriod: string,
   collaboratorId?: string,
 ) {
   return prisma.recurringMonth.findMany({
     where: {
-      status: "PAID",
+      status: { in: ["PAID", "LIQUIDATED"] },
       settledPeriod,
       contract: {
         isHistorical: false,
