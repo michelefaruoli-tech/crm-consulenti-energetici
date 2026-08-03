@@ -34,19 +34,6 @@ function fillStatus(active: boolean, filled: boolean): "off" | "empty" | "filled
   return filled ? "filled" : "empty";
 }
 
-function hasIdentityDoc(
-  attachments: { docType: string }[],
-): boolean {
-  const unico = attachments.some((a) => a.docType === "CI_UNICO");
-  const fronte = attachments.some((a) => a.docType === "CI_FRONTE");
-  const retro = attachments.some((a) => a.docType === "CI_RETRO");
-  return unico || (fronte && retro);
-}
-
-function hasBillDoc(attachments: { docType: string }[]): boolean {
-  return attachments.some((a) => a.docType === "BOLLETTA");
-}
-
 type Props = {
   session: { id: string; name: string; role: string };
   collaborators: { id: string; name: string }[];
@@ -139,8 +126,6 @@ export function NuovoContrattoForm({
   const req = sendToMaster;
   /** Evidenza campi minimi anche senza invio al Master. */
   const reqBase = true;
-  const identityOk = useMemo(() => hasIdentityDoc(attachments), [attachments]);
-  const billOk = useMemo(() => hasBillDoc(attachments), [attachments]);
   const addressOk = Boolean(
     (street || streetNumber).trim() &&
       zipCode.replace(/\D/g, "").length === 5 &&
@@ -256,6 +241,7 @@ export function NuovoContrattoForm({
         missing.push("Partita IVA o CF aziendale");
       }
       if (!phone.trim()) missing.push("Telefono");
+      if (!email.trim()) missing.push("Email");
       if (!addressOk) missing.push("Indirizzo completo (CAP, comune, provincia, via)");
       for (const [i, s] of services.entries()) {
         const n = i + 1;
@@ -272,13 +258,8 @@ export function NuovoContrattoForm({
           missing.push(`Servizio ${n}: PDR`);
         }
       }
-      if (!identityOk) {
-        missing.push(
-          "Documento identità: carica documento unico OPPURE fronte + retro",
-        );
-      }
-      if (!billOk) {
-        missing.push("Almeno una fattura / bolletta");
+      if (attachments.length === 0) {
+        missing.push("Allega almeno un documento (qualsiasi tipo)");
       }
       if (missing.length) {
         setErrors([
@@ -786,7 +767,10 @@ export function NuovoContrattoForm({
             <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
-            <Field label="Email">
+            <Field
+              label="Email"
+              fillStatus={fillStatus(req, Boolean(email.trim()))}
+            >
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
             <Field label="PEC (facoltativa)">
@@ -822,7 +806,10 @@ export function NuovoContrattoForm({
             <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
-            <Field label="Email">
+            <Field
+              label="Email"
+              fillStatus={fillStatus(req, Boolean(email.trim()))}
+            >
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
             <Field label="PEC (facoltativa)">
@@ -970,8 +957,6 @@ export function NuovoContrattoForm({
         attachments={attachments}
         onChange={setAttachments}
         requireDocs={req}
-        identityOk={identityOk}
-        billOk={billOk}
       />
 
       <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
