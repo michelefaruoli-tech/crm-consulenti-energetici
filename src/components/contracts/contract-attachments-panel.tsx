@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, X } from "lucide-react";
+import { X } from "lucide-react";
 import { AttachmentDropZone } from "@/components/contracts/attachment-drop-zone";
 import { Select } from "@/components/ui/form";
 import { DOC_TYPE_OPTIONS } from "@/lib/constants";
@@ -52,15 +52,14 @@ export function ContractAttachmentsPanel({
   attachments,
   onChange,
   requireDocs,
-  identityOk,
-  billOk,
 }: {
   attachments: ContractAttachmentItem[];
   onChange: (next: ContractAttachmentItem[]) => void;
+  /** Se true (invio back office): serve almeno 1 allegato; casella gialla finché manca */
   requireDocs: boolean;
-  identityOk: boolean;
-  billOk: boolean;
 }) {
+  /** Tipi spuntati dall'utente (cosa intende allegare / ha allegato) */
+  const [checkedTypes, setCheckedTypes] = useState<Set<string>>(new Set());
   const [defaultType, setDefaultType] = useState<string>("AUTO");
 
   const counts = useMemo(() => {
@@ -71,10 +70,25 @@ export function ContractAttachmentsPanel({
     return m;
   }, [attachments]);
 
+  const hasAny = attachments.length > 0;
+
+  function toggleType(value: string) {
+    setCheckedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else {
+        next.add(value);
+        setDefaultType(value);
+      }
+      return next;
+    });
+  }
+
   function addFiles(files: FileList | null) {
     if (!files?.length) return;
     const next = [...attachments];
     const errors: string[] = [];
+    const newlyUsed = new Set<string>();
     for (const file of Array.from(files)) {
       const okType =
         ["application/pdf", "image/jpeg", "image/png", "image/jpg"].includes(
@@ -90,6 +104,7 @@ export function ContractAttachmentsPanel({
       }
       const docType =
         defaultType === "AUTO" ? guessDocType(file.name) : defaultType;
+      newlyUsed.add(docType);
       next.push({
         id: Math.random().toString(36).slice(2, 10),
         filename: file.name,
@@ -97,6 +112,13 @@ export function ContractAttachmentsPanel({
         size: file.size,
         docType,
         file,
+      });
+    }
+    if (newlyUsed.size) {
+      setCheckedTypes((prev) => {
+        const s = new Set(prev);
+        for (const t of newlyUsed) s.add(t);
+        return s;
       });
     }
     onChange(next);
@@ -107,6 +129,7 @@ export function ContractAttachmentsPanel({
 
   function setType(id: string, docType: string) {
     onChange(attachments.map((a) => (a.id === id ? { ...a, docType } : a)));
+    setCheckedTypes((prev) => new Set(prev).add(docType));
   }
 
   function remove(id: string) {
@@ -118,96 +141,87 @@ export function ContractAttachmentsPanel({
       <div>
         <h2 className="text-base font-semibold text-slate-900">Documenti / Allegati</h2>
         <p className="text-xs text-slate-500">
-          Una sola casella: trascina uno o più file insieme. Poi assegna il tipo a ciascun
-          documento.
+          Spunta i documenti che alleghi, poi trascina i file (anche più di uno insieme).
+          Per inviare al back office basta <strong>almeno un allegato</strong>.
         </p>
       </div>
 
       {requireDocs ? (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
-          Obbligatori: <strong>documento identità</strong> (unico{" "}
-          <em>oppure</em> fronte+retro) e <strong>almeno una fattura/bolletta</strong>.
+        <p
+          className={cn(
+            "rounded-lg px-3 py-2 text-xs ring-1",
+            hasAny
+              ? "bg-emerald-50 text-emerald-900 ring-emerald-300"
+              : "bg-amber-50 text-amber-900 ring-amber-300",
+          )}
+        >
+          {hasAny
+            ? `✓ ${attachments.length} documento/i allegato/i — puoi inviare al back office.`
+            : "Obbligatorio: allega almeno un documento (spunta i tipi sotto e carica i file)."}
         </p>
       ) : null}
 
-      {/* Checklist tipi principali */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* Spunte tipi documento */}
+      <div className="grid gap-1.5 sm:grid-cols-2">
         {MAIN_DOC_TYPES.map((value) => {
           const label = labelOf(value);
           const n = counts.get(value) ?? 0;
-          const requiredId =
-            value === "CI_UNICO" ||
-            value === "CI_FRONTE" ||
-            value === "CI_RETRO"
-              ? "identity"
-              : value === "BOLLETTA"
-                ? "bill"
-                : null;
-          const ok =
-            requiredId === "identity"
-              ? identityOk
-              : requiredId === "bill"
-                ? billOk
-                : n > 0;
-          const highlightRequired =
-            requireDocs &&
-            ((requiredId === "identity" && !identityOk) ||
-              (requiredId === "bill" && !billOk));
+          const checked = checkedTypes.has(value) || n > 0;
           return (
-            <button
+            <label
               key={value}
-              type="button"
-              title={`Imposta «${label}» come tipo per i prossimi file`}
-              onClick={() => setDefaultType(value)}
               className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition",
-                defaultType === value
-                  ? "border-emerald-600 bg-emerald-600 text-white"
-                  : n > 0 || ok
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                    : highlightRequired
-                      ? "border-amber-400 bg-amber-50 text-amber-950"
-                      : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300",
+                "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition",
+                checked
+                  ? "border-emerald-400 bg-emerald-50 text-emerald-950"
+                  : requireDocs && !hasAny
+                    ? "border-amber-200 bg-amber-50/40 text-slate-800"
+                    : "border-slate-200 bg-slate-50 text-slate-800 hover:border-slate-300",
               )}
             >
-              {n > 0 || (requiredId && ok) ? (
-                <Check className="h-3 w-3" />
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-emerald-600"
+                checked={checked}
+                onChange={() => toggleType(value)}
+              />
+              <span className="min-w-0 flex-1 font-medium">{label}</span>
+              {n > 0 ? (
+                <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {n}
+                </span>
               ) : null}
-              {label}
-              {n > 0 ? ` (${n})` : ""}
-            </button>
+            </label>
           );
         })}
-        <button
-          type="button"
-          onClick={() => setDefaultType("AUTO")}
-          className={cn(
-            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium",
-            defaultType === "AUTO"
-              ? "border-slate-800 bg-slate-800 text-white"
-              : "border-slate-200 bg-white text-slate-600",
-          )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+        <span>Tipo per i prossimi file:</span>
+        <Select
+          className="h-9 max-w-xs text-xs"
+          value={defaultType}
+          onChange={(e) => setDefaultType(e.target.value)}
         >
-          Auto (dal nome file)
-        </button>
+          <option value="AUTO">Auto (dal nome file)</option>
+          {MAIN_DOC_TYPES.map((v) => (
+            <option key={v} value={v}>
+              {labelOf(v)}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <AttachmentDropZone
         title={
           defaultType === "AUTO"
-            ? "Trascina qui tutti i documenti"
+            ? "Trascina qui i documenti (anche più file)"
             : `Prossimi file → ${labelOf(defaultType)}`
         }
-        hint="Puoi selezionare o trascinare più PDF/foto insieme (anche 5–10 file)"
+        hint="Seleziona o trascina più PDF/foto insieme"
         multiple
         fillStatus={
-          requireDocs
-            ? identityOk && billOk
-              ? "filled"
-              : "empty"
-            : attachments.length
-              ? "filled"
-              : "off"
+          requireDocs ? (hasAny ? "filled" : "empty") : hasAny ? "filled" : "off"
         }
         className="!p-2.5 sm:!p-3"
         onAdd={addFiles}
@@ -253,8 +267,7 @@ export function ContractAttachmentsPanel({
         </ul>
       ) : (
         <p className="text-xs text-slate-500">
-          Nessun documento ancora. Tipi tipici: documento identità, fattura, visura,
-          SEPA, modulo firmato…
+          Nessun file ancora. Spunta i tipi e carica i documenti.
         </p>
       )}
     </section>

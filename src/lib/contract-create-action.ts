@@ -145,16 +145,8 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   if (!classification?.trim()) {
     errors.push("Classificazione (Residente / Non residente / Altri usi) obbligatoria");
   }
-  const hasId = payload.attachments.some((a) =>
-    ["CI_FRONTE", "CI_RETRO", "CI_UNICO"].includes(a.docType),
-  );
-  const hasBill = payload.attachments.some((a) => a.docType === "BOLLETTA");
-  // Gli allegati possono essere caricati subito dopo via API (evita body troppo grande).
-  // Se non ci sono nell'payload, non blocchiamo qui: il client li invia dopo.
-  if (payload.attachments.length > 0) {
-    if (!hasId) errors.push("Allegato documento di identità obbligatorio");
-    if (!hasBill) errors.push("Allegato bolletta/fattura obbligatorio");
-  }
+  // Gli allegati spesso arrivano dopo via API: non bloccare se il payload è vuoto.
+  // Se presenti nel payload, qualsiasi documento è sufficiente (non più CI+fattura obbligatori).
 
   // IBAN obbligatorio solo con Master + RID (su almeno una riga)
   const usesRid =
