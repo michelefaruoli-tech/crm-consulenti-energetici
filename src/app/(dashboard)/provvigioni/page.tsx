@@ -777,7 +777,7 @@ export default async function ProvvigioniPage({
       <ListSearchForm
         action="/provvigioni"
         q={q}
-        placeholder="Cerca cliente, CF, P.IVA o POD… (es. Mecca, Moschetta)"
+        placeholder="Cerca nome, cognome, CF, POD, telefono, note, fornitore…"
         hidden={{
           collab: collabFilter,
           settled: settledPeriod,

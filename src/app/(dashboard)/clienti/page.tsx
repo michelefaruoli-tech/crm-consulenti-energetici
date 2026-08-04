@@ -240,7 +240,7 @@ export default async function ClientiPage({
         <ListSearchForm
           action="/clienti"
           q={q}
-          placeholder="Cerca nome, CF, P.IVA, email, telefono…"
+          placeholder="Cerca nome, CF, P.IVA, email, telefono, note, POD…"
           hidden={{ ricorrenza: onlyRecurring ? "1" : undefined }}
         />
 

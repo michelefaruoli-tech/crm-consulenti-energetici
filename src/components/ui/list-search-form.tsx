@@ -10,7 +10,7 @@ type Hidden = Record<string, string | undefined | null>;
 export function ListSearchForm({
   action,
   q,
-  placeholder = "Cerca cliente, CF, P.IVA, POD o n. contratto…",
+  placeholder = "Cerca nome, cognome, CF, POD, telefono, note, fornitore…",
   hidden = {},
   clearHref,
 }: {
