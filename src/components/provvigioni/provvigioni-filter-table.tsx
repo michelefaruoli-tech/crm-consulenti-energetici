@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
@@ -165,6 +165,9 @@ export function ProvvigioniFilterTable({
   const [error, setError] = useState<string | null>(null);
   /** Bozze: rowId → { colonna → valore } */
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
+  /** Ref per leggere le bozze senza ricreare le definizioni colonna (evita salto focus). */
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
   /** false = semplificata (default), true = tutte le colonne + inizio fornitura */
   const [advancedView, setAdvancedView] = useState(false);
   useEffect(() => {
@@ -321,15 +324,6 @@ export function ProvvigioniFilterTable({
     [rows, selectedKeys],
   );
 
-  const displayRows = useMemo(() => {
-    return rows.map((r) => {
-      const id = rowId(r);
-      const d = drafts[id];
-      if (!d) return r;
-      return { ...r, ...d } as ProvvigioneRow;
-    });
-  }, [rows, drafts]);
-
   function queueDraft(row: Record<string, unknown>, key: string, value: string) {
     const id = rowId(row);
     if (!id) return;
@@ -352,7 +346,7 @@ export function ProvvigioniFilterTable({
 
   function getDraftValue(row: Record<string, unknown>, key: string): string {
     const id = rowId(row);
-    const drafted = drafts[id]?.[key];
+    const drafted = draftsRef.current[id]?.[key];
     if (drafted != null) return drafted;
     const base = rows.find((r) => rowId(r) === id);
     return base ? originalCellValue(base, key) : String(row[key] ?? "");
@@ -360,7 +354,13 @@ export function ProvvigioniFilterTable({
 
   function isDraftDirty(row: Record<string, unknown>, key: string): boolean {
     const id = rowId(row);
-    return Boolean(drafts[id] && key in drafts[id]);
+    return Boolean(draftsRef.current[id] && key in draftsRef.current[id]);
+  }
+
+  function baseCellValue(row: Record<string, unknown>, key: string): string {
+    const id = rowId(row);
+    const base = rows.find((r) => rowId(r) === id);
+    return base ? originalCellValue(base, key) : String(row[key] ?? "");
   }
 
   function discardDrafts() {
@@ -613,7 +613,7 @@ export function ProvvigioniFilterTable({
     {
       key: "operationType",
       label: "Tipo op.",
-      getValue: (r) => getDraftValue(r, "operationType"),
+      getValue: (r) => baseCellValue(r, "operationType"),
       sortKind: "text",
       render: (r) => {
         const current = getDraftValue(r, "operationType") || "Switch";
@@ -649,7 +649,7 @@ export function ProvvigioniFilterTable({
     {
       key: "stato",
       label: "Stato",
-      getValue: (r) => getDraftValue(r, "stato"),
+      getValue: (r) => baseCellValue(r, "stato"),
       sortKind: "text",
       render: (r) => {
         const current = getDraftValue(r, "stato") || "Da incassare";
@@ -681,7 +681,7 @@ export function ProvvigioniFilterTable({
     {
       key: "recurrence",
       label: "Tipo",
-      getValue: (r) => shortRecurrence(String(r.recurrence ?? "")),
+      getValue: (r) => baseCellValue(r, "recurrence"),
       sortKind: "text",
       render: (r) => {
         const currentCode = shortRecurrence(getDraftValue(r, "recurrence"));
@@ -729,7 +729,7 @@ export function ProvvigioniFilterTable({
     {
       key: "stornoFlag",
       label: "Storno",
-      getValue: (r) => getDraftValue(r, "stornoFlag"),
+      getValue: (r) => baseCellValue(r, "stornoFlag"),
       sortKind: "text",
       render: (r) => {
         const current = getDraftValue(r, "stornoFlag") || "No";
@@ -746,7 +746,7 @@ export function ProvvigioniFilterTable({
               const v = e.target.value;
               queueDraft(r, "stornoFlag", v);
               if (v === "Sì") {
-                const amount = String(r.amount ?? "").trim();
+                const amount = getDraftValue(r, "amount").trim();
                 if (amount && !getDraftValue(r, "stornoAmount")) {
                   const n = Number(amount.replace(",", ".")) || 0;
                   queueDraft(
@@ -809,9 +809,9 @@ export function ProvvigioniFilterTable({
       });
     }
     return cols;
-    // Funzioni di bozza stabili sul ciclo corrente; non metterle nelle deps
+    // getDraftValue/isDraftDirty usano draftsRef: non mettere drafts nelle deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canDelete, collaboratorByName, supplierNames, drafts, rows]);
+  }, [canDelete, collaboratorByName, supplierNames, rows]);
 
   const columns = useMemo(() => {
     if (advancedView) return allColumns;
@@ -1111,7 +1111,7 @@ export function ProvvigioniFilterTable({
       </div>
       <ExcelFilterTable
         dense
-        rows={displayRows as unknown as Record<string, unknown>[]}
+        rows={rows as unknown as Record<string, unknown>[]}
         columns={columns}
         rowKey={(r) => rowId(r)}
         draftMode

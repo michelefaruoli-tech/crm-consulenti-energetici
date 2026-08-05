@@ -537,6 +537,7 @@ export function ExcelFilterTable({
                     : baseVal;
                   const dirty =
                     draftMode && isDraftDirty ? isDraftDirty(row, col.key) : false;
+                  const cellKey = `${key}-${col.key}`;
                   return (
                   <td
                     key={col.key}
@@ -552,6 +553,7 @@ export function ExcelFilterTable({
                     {col.editable && (draftMode ? onCellDraft : onCellEdit) ? (
                       <div>
                         <input
+                          key={cellKey}
                           className={cn(
                             "w-full rounded border bg-transparent focus:border-emerald-500 focus:outline-none",
                             dirty
@@ -567,6 +569,7 @@ export function ExcelFilterTable({
                               ? "Modifica in bozza — poi premi «Salva tutte le modifiche»"
                               : "Modifica e premi Invio oppure clicca fuori per salvare"
                           }
+                          onClick={(e) => e.stopPropagation()}
                           onChange={
                             draftMode && onCellDraft
                               ? (e) => onCellDraft(row, col.key, e.target.value)
