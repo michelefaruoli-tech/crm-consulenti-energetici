@@ -38,6 +38,7 @@ const FIELD_MAP: Record<string, string> = {
   stato: "stato",
   recurrence: "recurrence",
   collectionMonth: "collectionDate",
+  supplyStartDate: "supplyStartDate",
   stornoFlag: "storno",
   stornoMonth: "stornoDate",
   stornoAmount: "stornoAmount",
@@ -594,25 +595,18 @@ export function ProvvigioniFilterTable({
       key: "supplyStartDate",
       label: "Inizio forn.",
       getValue: (r) => String(r.supplyStartDate ?? ""),
-      editable: false,
+      editable: true,
       sortKind: "date",
-      render: (r) => {
-        const row = r as unknown as ProvvigioneRow;
+      inputClassName: "max-w-[6.5rem] tabular-nums text-[11px]",
+      cellExtra: (r) => {
+        const row = r as ProvvigioneRow;
         const val = String(row.supplyStartDate ?? "").trim();
         const missing = Boolean(row.missingSupplyStart) || !val || val === "—";
+        if (!missing) return null;
         return (
-          <span
-            className={`whitespace-nowrap tabular-nums text-[11px] ${
-              missing ? "font-semibold text-red-700" : "text-slate-800"
-            }`}
-            title={
-              missing
-                ? "Manca o va verificata la data inizio fornitura"
-                : "Data inizio fornitura"
-            }
-          >
-            {missing ? "—" : val}
-          </span>
+          <p className="mt-0.5 text-[10px] font-medium text-red-700">
+            da verificare
+          </p>
         );
       },
     },
@@ -825,9 +819,8 @@ export function ProvvigioniFilterTable({
     return SIMPLE_COLUMN_ORDER.map((k) => {
       const col = byKey.get(k);
       if (!col) return undefined;
-      // In semplificata «Incasso» si chiama «Data pagato» (stesso campo)
       if (k === "collectionMonth") {
-        return { ...col, label: "Data pagato" };
+        return { ...col, label: "Data incasso" };
       }
       return col;
     }).filter((c): c is FilterColumn => Boolean(c));
@@ -1076,7 +1069,7 @@ export function ProvvigioniFilterTable({
           ) : (
             <>
               Vista <strong>semplificata</strong>: Cliente · Collab. · Fornitore ·
-              Gettone · Stato · Data pagato · Note · Tipo (UT/M/R)
+              Gettone · Stato · Data incasso · Note · Tipo (UT/M/R)
               {canDelete ? " · ×" : ""}.{" "}
             </>
           )}

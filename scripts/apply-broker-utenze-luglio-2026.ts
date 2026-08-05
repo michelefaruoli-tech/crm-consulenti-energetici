@@ -329,7 +329,6 @@ async function main() {
   let updated = 0;
   for (const m of matches) {
     const keepStatus =
-      m.contract.status === "PROVVIGIONE_LIQUIDATA" ||
       m.contract.status === "KO" ||
       m.contract.status === "CHIUSO" ||
       m.contract.status === "ANNULLATO";

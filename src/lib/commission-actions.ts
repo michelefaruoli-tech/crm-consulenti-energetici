@@ -17,6 +17,7 @@ import {
 } from "@/lib/provvigioni-stato";
 import {
   computeSupplyStartDate,
+  fixSwitchEqualInsertionSupply,
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
@@ -40,6 +41,9 @@ type CommissionWithContract = {
     collaboratorId: string;
     collectionDate: Date | null;
     insertionDate: Date;
+    operationType: string | null;
+    supplyStartDate: Date | null;
+    status: string;
     deletedAt: Date | null;
     client: { type: string };
     supplier: { name: string };
@@ -57,6 +61,9 @@ async function loadCommission(commissionId: string) {
           collaboratorId: true,
           collectionDate: true,
           insertionDate: true,
+          operationType: true,
+          supplyStartDate: true,
+          status: true,
           deletedAt: true,
           client: { select: { type: true } },
           supplier: { select: { name: true } },
@@ -135,10 +142,17 @@ async function applyCommissionField(
     }
   } else if (field === "collectionDate") {
     const raw = value.trim();
+    const terminal = ["KO", "ANNULLATO", "CHIUSO"].includes(commission.contract.status);
     if (!raw) {
       await prisma.contract.update({
         where: { id: commission.contractId },
-        data: { collectionDate: null, paymentStatus: "Da incassare" },
+        data: {
+          collectionDate: null,
+          paymentStatus: "Da incassare",
+          ...(terminal || commission.contract.status === "PROVVIGIONE_LIQUIDATA"
+            ? {}
+            : { status: "IN_ATTESA_PAGAMENTO" }),
+        },
       });
     } else {
       const d = parseFlexibleDate(raw);
@@ -148,10 +162,36 @@ async function applyCommissionField(
         data: {
           collectionDate: d,
           paymentStatus: "Incassato",
+          ...(terminal ? {} : { status: "PAGATO_DAL_FORNITORE" }),
         },
       });
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     }
+  } else if (field === "supplyStartDate") {
+    const raw = value.trim();
+    if (!raw) {
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: { supplyStartDate: null },
+      });
+    } else {
+      const d = parseFlexibleDate(raw);
+      if (!d) throw new Error("Data non valida (usa GG/MM/AAAA)");
+      const op = normalizeOperationType(commission.contract.operationType);
+      const fixed = fixSwitchEqualInsertionSupply(
+        commission.contract.insertionDate ?? d,
+        d,
+        op,
+      );
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: {
+          supplyStartDate: fixed.supplyStartDate,
+          insertionDate: fixed.insertionDate,
+        },
+      });
+    }
+    await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
   } else if (field === "recurrence") {
     const { normalizeRecurrence } = await import("@/lib/recurring");
     const normalized = normalizeRecurrence(value);
