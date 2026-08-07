@@ -12,13 +12,13 @@ import { contractTextSearchWhere } from "@/lib/list-search";
 export type ProvvigioniFilters = {
   canViewAll: boolean;
   sessionUserId: string;
-  /** ID collaboratore da query ?collab= */
+  /** ID collaboratore (uno o più, separati da |) da query ?collab= */
   collab?: string | null;
-  /** Nome fornitore esatto (es. Enel) da ?supplier= */
+  /** Nome fornitore (uno o più, separati da |) da ?supplier= */
   supplier?: string | null;
   /** Stato semplificato: uno o più (es. "Da incassare|Incassato") */
   stato?: string | null;
-  /** Tipologia: Business | Domestico */
+  /** Tipologia: Business | Domestico (anche multi con |) */
   tipologia?: string | null;
   /** Cerca cliente (nome, cognome, ragione sociale, CF, POD) */
   q?: string | null;
@@ -68,21 +68,31 @@ export const recurringAnnualWhereOr: Prisma.ContractWhereInput[] = [
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
-/** Separatore URL per multi-stato (es. Da+incassare|Incassato). */
-export const STATO_FILTER_SEP = "|";
+/** Separatore URL per filtri multipli (es. Da+incassare|Incassato). */
+export const FILTER_LIST_SEP = "|";
+/** @deprecated usa FILTER_LIST_SEP */
+export const STATO_FILTER_SEP = FILTER_LIST_SEP;
 
-export function parseStatoFilter(raw: string | null | undefined): string[] {
+export function parseFilterList(raw: string | null | undefined): string[] {
   if (!raw?.trim()) return [];
   return raw
-    .split(STATO_FILTER_SEP)
+    .split(FILTER_LIST_SEP)
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
-export function formatStatoFilter(values: string[]): string | null {
+export function formatFilterList(values: string[]): string | null {
   const cleaned = values.map((s) => s.trim()).filter(Boolean);
   if (cleaned.length === 0) return null;
-  return cleaned.join(STATO_FILTER_SEP);
+  return cleaned.join(FILTER_LIST_SEP);
+}
+
+export function parseStatoFilter(raw: string | null | undefined): string[] {
+  return parseFilterList(raw);
+}
+
+export function formatStatoFilter(values: string[]): string | null {
+  return formatFilterList(values);
 }
 
 /**
@@ -169,13 +179,19 @@ function provvigioneStatoWhereOne(
 export function buildProvvigioniContractWhere(
   f: ProvvigioniFilters,
 ): Prisma.ContractWhereInput {
-  const collabFilter =
-    f.canViewAll && f.collab && f.collab !== "tutti" ? f.collab : undefined;
-  const collaboratorId = f.canViewAll ? collabFilter : f.sessionUserId;
+  const collabIds = parseFilterList(f.collab).filter((id) => id !== "tutti");
+  let collaboratorFilter: string | { in: string[] } | undefined;
+  if (!f.canViewAll) {
+    collaboratorFilter = f.sessionUserId;
+  } else if (collabIds.length === 1) {
+    collaboratorFilter = collabIds[0];
+  } else if (collabIds.length > 1) {
+    collaboratorFilter = { in: collabIds };
+  }
 
-  const supplierName = f.supplier?.trim() || undefined;
+  const supplierNames = parseFilterList(f.supplier);
   const stato = f.stato?.trim() || undefined;
-  const tipologia = f.tipologia?.trim() || undefined;
+  const tipologie = parseFilterList(f.tipologia);
   const q = f.q?.trim() || undefined;
   const recurrenceMode = f.recurrenceMode ?? "all";
 
@@ -188,19 +204,30 @@ export function buildProvvigioniContractWhere(
     and.push(f.visibility);
   }
 
-  if (supplierName) {
+  if (supplierNames.length === 1) {
     and.push({
-      supplier: { name: { equals: supplierName, mode: "insensitive" } },
+      supplier: { name: { equals: supplierNames[0], mode: "insensitive" } },
+    });
+  } else if (supplierNames.length > 1) {
+    and.push({
+      OR: supplierNames.map((name) => ({
+        supplier: { name: { equals: name, mode: "insensitive" as const } },
+      })),
     });
   }
 
   const statoWhere = provvigioneStatoWhere(stato);
   if (statoWhere) and.push(statoWhere);
 
-  if (tipologia === "Business") {
-    and.push({ client: { type: "AZIENDA" } });
-  } else if (tipologia === "Domestico") {
-    and.push({ client: { type: "PRIVATO" } });
+  const clientTypes = tipologie
+    .map((t) =>
+      t === "Business" ? "AZIENDA" : t === "Domestico" ? "PRIVATO" : null,
+    )
+    .filter((t): t is "AZIENDA" | "PRIVATO" => Boolean(t));
+  if (clientTypes.length === 1) {
+    and.push({ client: { type: clientTypes[0] } });
+  } else if (clientTypes.length > 1) {
+    and.push({ client: { type: { in: clientTypes } } });
   }
 
   if (q) {
@@ -227,7 +254,7 @@ export function buildProvvigioniContractWhere(
 
   return {
     deletedAt: null,
-    ...(collaboratorId ? { collaboratorId } : {}),
+    ...(collaboratorFilter ? { collaboratorId: collaboratorFilter } : {}),
     ...(and.length ? { AND: and } : {}),
   };
 }

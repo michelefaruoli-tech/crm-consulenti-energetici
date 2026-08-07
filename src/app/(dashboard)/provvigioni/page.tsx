@@ -133,7 +133,9 @@ export default async function ProvvigioniPage({
   const sessionCollabFilter = isScoped
     ? undefined
     : canViewAll
-      ? collabFilter
+      ? collabFilter && !collabFilter.includes("|")
+        ? collabFilter
+        : undefined
       : session.id;
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
@@ -612,9 +614,19 @@ export default async function ProvvigioniPage({
     }))
     .sort((a, b) => b.n - a.n);
 
-  const selectedCollabName = collabFilter
-    ? nameById[collabFilter] ?? collabCounts.find((c) => c.id === collabFilter)?.name
-    : null;
+  const selectedCollabIds = (collabFilter ?? "")
+    .split("|")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const selectedCollabName =
+    selectedCollabIds.length > 0
+      ? selectedCollabIds
+          .map(
+            (id) =>
+              nameById[id] ?? collabCounts.find((c) => c.id === id)?.name ?? id,
+          )
+          .join(" + ")
+      : null;
 
   const alertRows = missing.map((m) => ({
     id: m.id,
@@ -665,9 +677,9 @@ export default async function ProvvigioniPage({
   };
   const filterHints = [
     selectedCollabName ? `collab. ${selectedCollabName}` : null,
-    supplier ? `fornitore ${supplier}` : null,
+    supplier ? `fornitore ${supplier.split("|").join(" + ")}` : null,
     stato ? `stato ${stato.split("|").join(" + ")}` : null,
-    tipologia ? `tipologia ${tipologia}` : null,
+    tipologia ? `tipologia ${tipologia.split("|").join(" + ")}` : null,
     q ? `cerca «${q}»` : null,
     vista === "mensile"
       ? "scheda Mensile (M)"
@@ -833,7 +845,7 @@ export default async function ProvvigioniPage({
                 ...(vista !== "tutti" ? { vista } : {}),
               }).toString()}`}
               className={
-                collabFilter === c.id
+                selectedCollabIds.includes(c.id)
                   ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
                   : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-800"
               }

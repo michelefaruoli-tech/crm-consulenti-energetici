@@ -260,26 +260,32 @@ export function ProvvigioniFilterTable({
   function onServerColumnFilter(columnKey: string, values: string[]) {
     if (!confirmLeaveDrafts()) return;
 
-    const value = values[0] ?? "";
-
     if (columnKey === "collaboratorName") {
       if (values.length === 0) {
         router.push(buildPageHref("/provvigioni", baseQuery({ collab: null })));
         return;
       }
-      const id = collaboratorByName?.[value];
-      if (!id) {
-        setError(`Collaboratore non trovato: ${value}`);
-        return;
+      const ids: string[] = [];
+      for (const name of values) {
+        const id = collaboratorByName?.[name];
+        if (!id) {
+          setError(`Collaboratore non trovato: ${name}`);
+          return;
+        }
+        ids.push(id);
       }
-      router.push(buildPageHref("/provvigioni", baseQuery({ collab: id })));
+      router.push(
+        buildPageHref("/provvigioni", baseQuery({ collab: ids.join("|") })),
+      );
       return;
     }
 
     if (columnKey === "supplierName") {
       router.push(
         buildPageHref("/provvigioni", {
-          ...baseQuery({ supplier: values.length ? value : null }),
+          ...baseQuery({
+            supplier: values.length ? values.join("|") : null,
+          }),
         }),
       );
       return;
@@ -299,7 +305,9 @@ export function ProvvigioniFilterTable({
     if (columnKey === "clientType") {
       router.push(
         buildPageHref("/provvigioni", {
-          ...baseQuery({ tipologia: values.length ? value : null }),
+          ...baseQuery({
+            tipologia: values.length ? values.join("|") : null,
+          }),
         }),
       );
       return;
@@ -1164,20 +1172,36 @@ export function ProvvigioniFilterTable({
             "stato",
             "clientType",
           ],
-          multiSelectKeys: ["stato"],
+          multiSelectKeys: [
+            "collaboratorName",
+            "supplierName",
+            "stato",
+            "clientType",
+          ],
           onFilter: onServerColumnFilter,
           activeValues: {
             ...(listQuery?.collab && collaboratorByName
               ? {
-                  collaboratorName: [
-                    Object.entries(collaboratorByName).find(
-                      ([, id]) => id === listQuery.collab,
-                    )?.[0] ?? "",
-                  ].filter(Boolean),
+                  collaboratorName: listQuery.collab
+                    .split("|")
+                    .map((id) => id.trim())
+                    .filter(Boolean)
+                    .map(
+                      (id) =>
+                        Object.entries(collaboratorByName).find(
+                          ([, v]) => v === id,
+                        )?.[0] ?? "",
+                    )
+                    .filter(Boolean),
                 }
               : {}),
             ...(listQuery?.supplier
-              ? { supplierName: [listQuery.supplier] }
+              ? {
+                  supplierName: listQuery.supplier
+                    .split("|")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }
               : {}),
             ...(listQuery?.stato
               ? {
@@ -1188,7 +1212,12 @@ export function ProvvigioniFilterTable({
                 }
               : {}),
             ...(listQuery?.tipologia
-              ? { clientType: [listQuery.tipologia] }
+              ? {
+                  clientType: listQuery.tipologia
+                    .split("|")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }
               : {}),
           },
         }}
