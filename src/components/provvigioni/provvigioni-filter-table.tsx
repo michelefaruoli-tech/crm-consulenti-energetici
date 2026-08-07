@@ -288,7 +288,9 @@ export function ProvvigioniFilterTable({
     if (columnKey === "stato") {
       router.push(
         buildPageHref("/provvigioni", {
-          ...baseQuery({ stato: values.length ? value : null }),
+          ...baseQuery({
+            stato: values.length ? values.join("|") : null,
+          }),
         }),
       );
       return;
@@ -1162,6 +1164,7 @@ export function ProvvigioniFilterTable({
             "stato",
             "clientType",
           ],
+          multiSelectKeys: ["stato"],
           onFilter: onServerColumnFilter,
           activeValues: {
             ...(listQuery?.collab && collaboratorByName
@@ -1176,7 +1179,14 @@ export function ProvvigioniFilterTable({
             ...(listQuery?.supplier
               ? { supplierName: [listQuery.supplier] }
               : {}),
-            ...(listQuery?.stato ? { stato: [listQuery.stato] } : {}),
+            ...(listQuery?.stato
+              ? {
+                  stato: listQuery.stato
+                    .split("|")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }
+              : {}),
             ...(listQuery?.tipologia
               ? { clientType: [listQuery.tipologia] }
               : {}),

@@ -62,7 +62,7 @@ type SearchParams = {
   settled?: string;
   /** Nome fornitore (es. Enel) — filtro su tutto il DB */
   supplier?: string;
-  /** Incassato | Da incassare | KO / Cessato */
+  /** Uno o più stati separati da | (es. Da incassare|Incassato) */
   stato?: string;
   /** Business | Domestico */
   tipologia?: string;
@@ -666,7 +666,7 @@ export default async function ProvvigioniPage({
   const filterHints = [
     selectedCollabName ? `collab. ${selectedCollabName}` : null,
     supplier ? `fornitore ${supplier}` : null,
-    stato ? `stato ${stato}` : null,
+    stato ? `stato ${stato.split("|").join(" + ")}` : null,
     tipologia ? `tipologia ${tipologia}` : null,
     q ? `cerca «${q}»` : null,
     vista === "mensile"

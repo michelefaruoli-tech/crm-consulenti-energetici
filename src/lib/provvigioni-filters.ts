@@ -16,7 +16,7 @@ export type ProvvigioniFilters = {
   collab?: string | null;
   /** Nome fornitore esatto (es. Enel) da ?supplier= */
   supplier?: string | null;
-  /** Stato semplificato: Incassato | Da incassare | Pagato | KO / Cessato */
+  /** Stato semplificato: uno o più (es. "Da incassare|Incassato") */
   stato?: string | null;
   /** Tipologia: Business | Domestico */
   tipologia?: string | null;
@@ -68,8 +68,27 @@ export const recurringAnnualWhereOr: Prisma.ContractWhereInput[] = [
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
+/** Separatore URL per multi-stato (es. Da+incassare|Incassato). */
+export const STATO_FILTER_SEP = "|";
+
+export function parseStatoFilter(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(STATO_FILTER_SEP)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function formatStatoFilter(values: string[]): string | null {
+  const cleaned = values.map((s) => s.trim()).filter(Boolean);
+  if (cleaned.length === 0) return null;
+  return cleaned.join(STATO_FILTER_SEP);
+}
+
 /**
  * Filtro Prisma per stato semplificato (stessa logica Report + Provvigioni).
+ *
+ * Accetta un solo stato oppure più stati uniti con `|` (OR).
  *
  * - Da controllare = inserito ma non ancora contrattualizzato (da visionare)
  * - Da incassare = contratto inserito, fornitore non ha ancora pagato a te
@@ -81,7 +100,22 @@ const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 export function provvigioneStatoWhere(
   stato: string | null | undefined,
 ): Prisma.ContractWhereInput | undefined {
-  const s = stato?.trim();
+  const parts = parseStatoFilter(stato);
+  if (parts.length === 0) return undefined;
+  if (parts.length === 1) return provvigioneStatoWhereOne(parts[0]!);
+
+  const ors = parts
+    .map((p) => provvigioneStatoWhereOne(p))
+    .filter((w): w is Prisma.ContractWhereInput => Boolean(w));
+  if (ors.length === 0) return undefined;
+  if (ors.length === 1) return ors[0];
+  return { OR: ors };
+}
+
+function provvigioneStatoWhereOne(
+  stato: string,
+): Prisma.ContractWhereInput | undefined {
+  const s = stato.trim();
   if (!s || s === "Tutti") return undefined;
   const today = new Date();
   today.setHours(0, 0, 0, 0);

@@ -63,6 +63,11 @@ type Props = {
     onFilter: (columnKey: string, values: string[]) => void;
     /** Valori attivi da URL (es. fornitore Enel) per evidenziare il filtro */
     activeValues?: Record<string, string[]>;
+    /**
+     * Colonne con multi-selezione: spunta più checkbox, poi «Applica».
+     * (es. Stato → Da incassare + Incassato insieme)
+     */
+    multiSelectKeys?: string[];
   };
   /**
    * Opzioni filtro forzate per colonna (es. tutti i collaboratori, non solo quelli in pagina).
@@ -105,6 +110,10 @@ export function ExcelFilterTable({
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
+  /** Bozza multi-selezione filtri server (prima di «Applica») */
+  const [draftServerFilter, setDraftServerFilter] = useState<
+    Record<string, Set<string>>
+  >({});
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [scrollWidth, setScrollWidth] = useState(0);
@@ -117,14 +126,29 @@ export function ExcelFilterTable({
     () => new Set(serverColumnFilter?.keys ?? []),
     [serverColumnFilter?.keys],
   );
+  const multiSelectServerKeys = useMemo(
+    () => new Set(serverColumnFilter?.multiSelectKeys ?? []),
+    [serverColumnFilter?.multiSelectKeys],
+  );
 
   // Cambio collaboratore / pagina → mostra di nuovo tutte le righe caricate (fino a 100)
   useEffect(() => {
     setSelected({});
     setOpenFilter(null);
+    setDraftServerFilter({});
     setSortKey(null);
     setSortDir("asc");
   }, [resetKey]);
+
+  // Apri filtro multi: copia i valori attivi dall’URL nella bozza
+  useEffect(() => {
+    if (!openFilter || !multiSelectServerKeys.has(openFilter)) return;
+    const active = serverColumnFilter?.activeValues?.[openFilter] ?? [];
+    setDraftServerFilter((prev) => ({
+      ...prev,
+      [openFilter]: new Set(active),
+    }));
+  }, [openFilter, multiSelectServerKeys, serverColumnFilter?.activeValues]);
 
   const optionsByColumn = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -502,19 +526,29 @@ export function ExcelFilterTable({
                     </button>
                   </div>
                   {openFilter === col.key ? (
-                    <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-56 overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                    <div className="absolute left-0 top-full z-20 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
                       {serverFilterKeys.has(col.key) ? (
                         <p className="mb-2 text-[10px] leading-snug text-slate-500">
-                          Questo filtro ricarica il database (pagine da 100 righe),
-                          non riduce solo questa pagina.
+                          {multiSelectServerKeys.has(col.key)
+                            ? "Spunta una o più opzioni, poi premi Applica (ricarica il database)."
+                            : "Questo filtro ricarica il database (pagine da 100 righe), non riduce solo questa pagina."}
                         </p>
                       ) : null}
-                      <div className="mb-2 flex gap-2 text-xs">
+                      <div className="mb-2 flex flex-wrap gap-2 text-xs">
                         <button
                           type="button"
                           className="text-emerald-700"
                           onClick={() => {
                             if (serverFilterKeys.has(col.key) && serverColumnFilter) {
+                              if (multiSelectServerKeys.has(col.key)) {
+                                setDraftServerFilter((prev) => ({
+                                  ...prev,
+                                  [col.key]: new Set(
+                                    optionsByColumn[col.key] ?? [],
+                                  ),
+                                }));
+                                return;
+                              }
                               serverColumnFilter.onFilter(col.key, []);
                               setOpenFilter(null);
                               return;
@@ -529,6 +563,13 @@ export function ExcelFilterTable({
                           className="text-slate-500"
                           onClick={() => {
                             if (serverFilterKeys.has(col.key) && serverColumnFilter) {
+                              if (multiSelectServerKeys.has(col.key)) {
+                                setDraftServerFilter((prev) => ({
+                                  ...prev,
+                                  [col.key]: new Set(),
+                                }));
+                                return;
+                              }
                               serverColumnFilter.onFilter(col.key, []);
                               setOpenFilter(null);
                               return;
@@ -541,11 +582,21 @@ export function ExcelFilterTable({
                       </div>
                       {(optionsByColumn[col.key] ?? []).map((opt) => {
                         const isServerCol = serverFilterKeys.has(col.key);
+                        const isMulti = multiSelectServerKeys.has(col.key);
                         const isActive = (selected[col.key]?.size ?? 0) > 0;
                         const serverChecked =
                           serverColumnFilter?.activeValues?.[col.key]?.includes(
                             opt,
                           ) ?? false;
+                        const draftChecked =
+                          draftServerFilter[col.key]?.has(opt) ?? false;
+                        const checked = isServerCol
+                          ? isMulti
+                            ? draftChecked
+                            : serverChecked
+                          : isActive
+                            ? selected[col.key].has(opt)
+                            : true;
                         return (
                           <label
                             key={opt}
@@ -553,15 +604,24 @@ export function ExcelFilterTable({
                           >
                             <input
                               type="checkbox"
-                              checked={
-                                isServerCol
-                                  ? serverChecked
-                                  : isActive
-                                    ? selected[col.key].has(opt)
-                                    : true
-                              }
+                              checked={checked}
                               onChange={() => {
                                 if (isServerCol && serverColumnFilter) {
+                                  if (isMulti) {
+                                    setDraftServerFilter((prev) => {
+                                      const cur = new Set(
+                                        prev[col.key] ??
+                                          serverColumnFilter.activeValues?.[
+                                            col.key
+                                          ] ??
+                                          [],
+                                      );
+                                      if (cur.has(opt)) cur.delete(opt);
+                                      else cur.add(opt);
+                                      return { ...prev, [col.key]: cur };
+                                    });
+                                    return;
+                                  }
                                   if (serverChecked) {
                                     serverColumnFilter.onFilter(col.key, []);
                                   } else {
@@ -584,6 +644,43 @@ export function ExcelFilterTable({
                           </label>
                         );
                       })}
+                      {serverFilterKeys.has(col.key) &&
+                      multiSelectServerKeys.has(col.key) &&
+                      serverColumnFilter ? (
+                        <div className="sticky bottom-0 mt-2 flex gap-2 border-t border-slate-100 bg-white pt-2">
+                          <button
+                            type="button"
+                            className="flex-1 rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                            onClick={() => {
+                              const vals = [
+                                ...(draftServerFilter[col.key] ?? new Set()),
+                              ];
+                              const allOpts = optionsByColumn[col.key] ?? [];
+                              // Tutte le opzioni spuntate = nessun filtro (come «Tutti»)
+                              const apply =
+                                vals.length === 0 ||
+                                (allOpts.length > 0 &&
+                                  vals.length === allOpts.length)
+                                  ? []
+                                  : vals;
+                              serverColumnFilter.onFilter(col.key, apply);
+                              setOpenFilter(null);
+                            }}
+                          >
+                            Applica
+                            {(draftServerFilter[col.key]?.size ?? 0) > 0
+                              ? ` (${draftServerFilter[col.key]!.size})`
+                              : ""}
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+                            onClick={() => setOpenFilter(null)}
+                          >
+                            Chiudi
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </th>
