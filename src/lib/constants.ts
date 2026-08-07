@@ -13,6 +13,7 @@ export type AppContractStatus =
   | "DOCUMENTAZIONE_COMPLETA"
   | "INVIATO_AL_FORNITORE"
   | "DA_LAVORARE"
+  | "DA_CONTROLLARE"
   | "INVIATO_AL_MASTER"
   | "ERRORE_INVIO"
   | "IN_LAVORAZIONE"
@@ -50,6 +51,7 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   DOCUMENTAZIONE_COMPLETA: "Documentazione completa",
   INVIATO_AL_FORNITORE: "Inviato al fornitore",
   DA_LAVORARE: "Da lavorare",
+  DA_CONTROLLARE: "Da controllare",
   INVIATO_AL_MASTER: "Inviato al Master",
   ERRORE_INVIO: "Errore invio",
   IN_LAVORAZIONE: "In lavorazione",
@@ -141,6 +143,7 @@ export const STATUS_COLORS: Record<AppContractStatus, string> = {
   DOCUMENTAZIONE_COMPLETA: "bg-teal-100 text-teal-800",
   INVIATO_AL_FORNITORE: "bg-indigo-100 text-indigo-800",
   DA_LAVORARE: "bg-amber-100 text-amber-900",
+  DA_CONTROLLARE: "bg-fuchsia-100 text-fuchsia-900",
   INVIATO_AL_MASTER: "bg-sky-100 text-sky-900",
   ERRORE_INVIO: "bg-red-100 text-red-800",
   IN_LAVORAZIONE: "bg-purple-100 text-purple-800",

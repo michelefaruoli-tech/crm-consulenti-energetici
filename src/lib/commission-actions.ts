@@ -341,6 +341,15 @@ async function applyCommissionField(
       // Helios paga solo in fornitura: lo storno gettone si mette solo a mano
       // (colonna Storno Sì/No) o se altrove cambia il periodo di storno.
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
+    } else if (/controll/.test(raw)) {
+      // Inserito ma non ancora contrattualizzato: da visionare e aggiornare
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+          status: "DA_CONTROLLARE",
+          paymentStatus: "Da controllare",
+        },
+      });
     } else if (/pagat/.test(raw)) {
       // Pagato collaboratore: liquidazione provvigione
       const received = Number(commission.received ?? 0) || 0;

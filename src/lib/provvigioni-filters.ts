@@ -71,6 +71,7 @@ const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 /**
  * Filtro Prisma per stato semplificato (stessa logica Report + Provvigioni).
  *
+ * - Da controllare = inserito ma non ancora contrattualizzato (da visionare)
  * - Da incassare = contratto inserito, fornitore non ha ancora pagato a te
  * - Incassato = fornitore ha pagato a te, tu non hai ancora liquidato il collab.
  * - Pagato = tu hai già pagato il collaboratore (PROVVIGIONE_LIQUIDATA)
@@ -84,17 +85,20 @@ export function provvigioneStatoWhere(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  if (s === "Da controllare") {
+    return { status: { equals: "DA_CONTROLLARE" } };
+  }
   if (s === "Incassato") {
     return {
       collectionDate: { not: null },
-      status: { notIn: ["PROVVIGIONE_LIQUIDATA", ...KO_STATUSES] },
+      status: { notIn: ["PROVVIGIONE_LIQUIDATA", "DA_CONTROLLARE", ...KO_STATUSES] },
       // Solo già in fornitura (altrimenti la data è attivazione, non incasso)
       supplyStartDate: { lte: today },
     };
   }
   if (s === "Da incassare") {
     return {
-      status: { notIn: [...KO_STATUSES] },
+      status: { notIn: ["DA_CONTROLLARE", ...KO_STATUSES] },
       OR: [
         { collectionDate: null },
         // Incasso/Pagato prematuro: non ancora in fornitura

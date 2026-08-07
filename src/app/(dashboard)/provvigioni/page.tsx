@@ -409,10 +409,11 @@ export default async function ProvvigioniPage({
     const inFornitura = isInFornitura(supply, now);
 
     // Incasso/Pagato prematuro: data futura = attivazione prevista, non pagamento
+    // Non toccare «Da controllare»: devono restare visibili così
     if (
       c.collectionDate &&
       !inFornitura &&
-      !["KO", "ANNULLATO", "CHIUSO"].includes(c.status)
+      !["KO", "ANNULLATO", "CHIUSO", "DA_CONTROLLARE"].includes(c.status)
     ) {
       const prevStatus = c.status;
       (c as { collectionDate: Date | null }).collectionDate = null;
@@ -581,8 +582,14 @@ export default async function ProvvigioniPage({
       stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
       stornoAmount: item?.stornoAmount != null ? String(Number(item.stornoAmount)) : "",
       notes: contract.notes || "",
-      stornoLabel: storno.label,
-      stornoRowClass: storno.rowClassName,
+      stornoLabel:
+        stato === "Da controllare"
+          ? "Da controllare (non ancora contrattualizzato)"
+          : storno.label,
+      stornoRowClass:
+        stato === "Da controllare"
+          ? "bg-fuchsia-100 hover:bg-fuchsia-200/80"
+          : storno.rowClassName,
       warnOnEdit: storno.warnOnEdit,
       missingSupplyStart: storno.missingSupplyStart === true,
       gettoneBorderClass: contract.commissionConfirmed

@@ -23,6 +23,8 @@ enum ContractStatus {
   DOCUMENTAZIONE_COMPLETA
   INVIATO_AL_FORNITORE
   DA_LAVORARE
+  /// Inserito ma non ancora contrattualizzato: da visionare e aggiornare appena possibile
+  DA_CONTROLLARE
   INVIATO_AL_MASTER
   ERRORE_INVIO
   IN_LAVORAZIONE

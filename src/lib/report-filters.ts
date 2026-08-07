@@ -110,6 +110,8 @@ export function buildReportContractWhere(
 
 export function reportStatoHint(stato: string): string {
   switch (stato) {
+    case "Da controllare":
+      return "Periodo = data inserimento. Contratti inseriti ma non ancora contrattualizzati.";
     case "Da incassare":
       return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":

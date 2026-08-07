@@ -665,7 +665,7 @@ export function ProvvigioniFilterTable({
                 ? current
                 : "Da incassare"
             }
-            title="Bozza: cambia e poi Salva tutte"
+            title="Bozza: Da controllare = inserito ma non ancora contrattualizzato"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => queueDraft(r, "stato", e.target.value)}
           >
@@ -1093,10 +1093,10 @@ export function ProvvigioniFilterTable({
               (giallo) finché non salvi.{" "}
             </>
           ) : (
-            <>
               Vista <strong>semplificata</strong>: tutte le colonne essenziali in una
               schermata (Cliente · Collab. · Fornitore · Gettone · Stato · Data
-              incasso · Note · Tipo)
+              incasso · Note · Tipo). Stato <strong>Da controllare</strong> = inserito
+              ma non ancora contrattualizzato
               {canDelete ? " · ×" : ""}.{" "}
             </>
           )}

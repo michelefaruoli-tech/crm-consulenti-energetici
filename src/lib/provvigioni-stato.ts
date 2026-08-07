@@ -51,6 +51,9 @@ export type ProvvigioneRow = {
  * 1. Rendiconto fornitore (import Helios, ecc.) → Incassato (collectionDate)
  * 2. Liquidazione collaboratore (Segna pagato) → Pagato (PROVVIGIONE_LIQUIDATA)
  *
+ * «Da controllare» = contratto inserito ma non ancora contrattualizzato:
+ * va tenuto d’occhio e aggiornato appena possibile.
+ *
  * Se non è ancora in fornitura → sempre «Da incassare»
  * (la data futura è attivazione prevista, non pagamento).
  */
@@ -61,6 +64,8 @@ export function simplifiedProvvigioneStato(
 ): string {
   // KO / cessato: ha priorità anche se c’è già una data di incasso (Helios).
   if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
+  // Inserito ma non contrattualizzato: priorità su fornitura/incasso
+  if (status === "DA_CONTROLLARE") return "Da controllare";
   if (opts?.inFornitura === false) return "Da incassare";
   // Liquidazione collaboratore: deve avere priorità su "Incassato"
   if (status === "PROVVIGIONE_LIQUIDATA") return "Pagato";
@@ -70,6 +75,7 @@ export function simplifiedProvvigioneStato(
 
 export const PROVVIGIONE_STATO_OPTIONS = [
   "KO / Cessato",
+  "Da controllare",
   "Da incassare",
   "Incassato",
   "Pagato",
