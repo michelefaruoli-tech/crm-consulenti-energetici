@@ -17,6 +17,10 @@ import {
   sumReportRecurring,
 } from "@/lib/report-recurring";
 import {
+  loadReportStornos,
+  sumReportStornos,
+} from "@/lib/report-stornos";
+import {
   REPORT_MONTH_LABELS,
   REPORT_STATO_OPTIONS,
   buildReportContractWhere,
@@ -135,17 +139,39 @@ export default async function ReportPage({
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 
+  const includeStornos =
+    stato === "Incassato" ||
+    stato === "Pagato" ||
+    stato === "Tutti" ||
+    stato === "Stornato";
+  const stornoRows = includeStornos
+    ? await loadReportStornos({
+        from,
+        to,
+        month,
+        collaboratorId,
+        supplierId,
+        visibility,
+      })
+    : [];
+  const stornoTotals = sumReportStornos(stornoRows);
+
   // Una tantum: evita di contare due volte i contratti R (già in RecurringMonth)
+  // Con «Stornato» i contratti arrivano già filtrati per data storno: non sommare received,
+  // solo gli importi storno (negativi).
   const oneShot = contracts.filter((c) => !isRecurring(c.recurrence));
-  const totalContracts = contracts.length;
+  const totalContracts = contracts.length + (stato === "Stornato" ? 0 : 0);
   const totalExpected = oneShot.reduce(
     (s, c) => s + Number(c.commission?.expected ?? 0),
     0,
   );
-  const totalReceivedOneShot = oneShot.reduce(
-    (s, c) => s + Number(c.commission?.received ?? 0),
-    0,
-  );
+  const totalReceivedOneShot =
+    stato === "Stornato"
+      ? 0
+      : oneShot.reduce(
+          (s, c) => s + Number(c.commission?.received ?? 0),
+          0,
+        );
   const totalPaid = oneShot.reduce(
     (s, c) => s + Number(c.commission?.paid ?? 0),
     0,
@@ -154,21 +180,24 @@ export default async function ReportPage({
     totalReceivedOneShot +
     (stato === "Incassato" || stato === "Pagato" || stato === "Tutti"
       ? recurringTotals.amount
-      : 0);
+      : 0) +
+    (includeStornos ? stornoTotals.amount : 0);
 
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
   const groupByCollection = reportPeriodUsesCollectionDate(stato);
-  for (const c of oneShot) {
-    const baseDate = groupByCollection
-      ? c.collectionDate ?? c.insertionDate
-      : c.insertionDate;
-    const d = new Date(baseDate);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
-    cur.count += 1;
-    cur.received += Number(c.commission?.received ?? 0);
-    cur.expected += Number(c.commission?.expected ?? 0);
-    monthMap.set(key, cur);
+  if (stato !== "Stornato") {
+    for (const c of oneShot) {
+      const baseDate = groupByCollection
+        ? c.collectionDate ?? c.insertionDate
+        : c.insertionDate;
+      const d = new Date(baseDate);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
+      cur.count += 1;
+      cur.received += Number(c.commission?.received ?? 0);
+      cur.expected += Number(c.commission?.expected ?? 0);
+      monthMap.set(key, cur);
+    }
   }
   for (const r of recurringRows) {
     if (!(stato === "Incassato" || stato === "Pagato" || stato === "Tutti")) break;
@@ -176,6 +205,13 @@ export default async function ReportPage({
     const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
     cur.count += 1;
     cur.received += r.amount;
+    monthMap.set(key, cur);
+  }
+  for (const sRow of stornoRows) {
+    const key = sRow.period;
+    const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
+    cur.count += 1;
+    cur.received += sRow.amount;
     monthMap.set(key, cur);
   }
   const monthly = [...monthMap.entries()]
@@ -191,23 +227,26 @@ export default async function ReportPage({
 
   const byCollab = new Map<
     string,
-    { name: string; count: number; expected: number; received: number; paid: number; recurring: number }
+    { name: string; count: number; expected: number; received: number; paid: number; recurring: number; storno: number }
   >();
-  for (const c of oneShot) {
-    const id = c.collaboratorId;
-    const cur = byCollab.get(id) ?? {
-      name: c.collaborator.name,
-      count: 0,
-      expected: 0,
-      received: 0,
-      paid: 0,
-      recurring: 0,
-    };
-    cur.count += 1;
-    cur.expected += Number(c.commission?.expected ?? 0);
-    cur.received += Number(c.commission?.received ?? 0);
-    cur.paid += Number(c.commission?.paid ?? 0);
-    byCollab.set(id, cur);
+  if (stato !== "Stornato") {
+    for (const c of oneShot) {
+      const id = c.collaboratorId;
+      const cur = byCollab.get(id) ?? {
+        name: c.collaborator.name,
+        count: 0,
+        expected: 0,
+        received: 0,
+        paid: 0,
+        recurring: 0,
+        storno: 0,
+      };
+      cur.count += 1;
+      cur.expected += Number(c.commission?.expected ?? 0);
+      cur.received += Number(c.commission?.received ?? 0);
+      cur.paid += Number(c.commission?.paid ?? 0);
+      byCollab.set(id, cur);
+    }
   }
   if (stato === "Incassato" || stato === "Pagato" || stato === "Tutti") {
     for (const r of recurringRows) {
@@ -218,10 +257,28 @@ export default async function ReportPage({
         received: 0,
         paid: 0,
         recurring: 0,
+        storno: 0,
       };
       cur.recurring += r.amount;
       cur.received += r.amount;
       byCollab.set(r.collaboratorId, cur);
+    }
+  }
+  if (includeStornos) {
+    for (const sRow of stornoRows) {
+      const cur = byCollab.get(sRow.collaboratorId) ?? {
+        name: sRow.collaboratorName,
+        count: 0,
+        expected: 0,
+        received: 0,
+        paid: 0,
+        recurring: 0,
+        storno: 0,
+      };
+      cur.storno += sRow.amount;
+      cur.received += sRow.amount;
+      cur.count += 1;
+      byCollab.set(sRow.collaboratorId, cur);
     }
   }
   const collaboratorTotals = [...byCollab.values()].sort((a, b) =>
@@ -247,7 +304,8 @@ export default async function ReportPage({
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
           Il mese segue la colonna <strong>Incasso</strong> di Provvigioni (es. 06/2026 →
-          Giugno), per tutti i fornitori. Rate ricorrenti incluse.
+          Giugno). Gli <strong>storni</strong> del mese (importo negativo) si sommano al
+          totale Incassato e detraggono le provvigioni.
         </p>
       </div>
 
@@ -322,10 +380,14 @@ export default async function ReportPage({
           <li>
             <strong>Pagato</strong> = tu hai già liquidato i collaboratori
           </li>
+          <li>
+            <strong>Stornato</strong> = storno gettone applicato (clawback): in Report
+            Incassato l’importo negativo detrae dal totale del mese
+          </li>
         </ul>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Contratti ({stato})</p>
           <p className="mt-2 text-3xl font-bold">{totalContracts}</p>
@@ -343,8 +405,17 @@ export default async function ReportPage({
             {formatCurrency(recurringTotals.amount)}
           </p>
         </div>
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
+          <p className="text-sm text-rose-700">Storni (detrazioni)</p>
+          <p className="mt-2 text-3xl font-bold text-rose-900">
+            {stornoTotals.count}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-rose-800">
+            {formatCurrency(stornoTotals.amount)}
+          </p>
+        </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-          <p className="text-sm text-emerald-700">Totale ricevuto</p>
+          <p className="text-sm text-emerald-700">Totale ricevuto (netto)</p>
           <p className="mt-2 text-3xl font-bold text-emerald-900">
             {formatCurrency(totalReceived)}
           </p>
@@ -354,7 +425,8 @@ export default async function ReportPage({
               stato === "Incassato" || stato === "Pagato" || stato === "Tutti"
                 ? recurringTotals.amount
                 : 0,
-            )}
+            )}{" "}
+            + storni {formatCurrency(includeStornos ? stornoTotals.amount : 0)}
           </p>
         </div>
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
@@ -384,6 +456,7 @@ export default async function ReportPage({
                   <th className="px-3 py-2">N° contratti</th>
                   <th className="px-3 py-2">Previsto</th>
                   <th className="px-3 py-2">Ricorrenti</th>
+                  <th className="px-3 py-2">Storni</th>
                   <th className="px-3 py-2">Ricevuto tot.</th>
                   <th className="px-3 py-2">Liquidato</th>
                 </tr>
@@ -396,6 +469,9 @@ export default async function ReportPage({
                     <td className="px-3 py-2">{formatCurrency(row.expected)}</td>
                     <td className="px-3 py-2 text-violet-700">
                       {formatCurrency(row.recurring)}
+                    </td>
+                    <td className="px-3 py-2 text-rose-700">
+                      {formatCurrency(row.storno)}
                     </td>
                     <td className="px-3 py-2 text-emerald-700">
                       {formatCurrency(row.received)}
@@ -443,6 +519,58 @@ export default async function ReportPage({
         )}
       </section>
 
+      <section className="rounded-xl border border-rose-200 bg-white p-5 shadow-sm">
+        <h2 className="mb-1 font-semibold text-slate-900">
+          Storni nel periodo ({stornoTotals.count})
+        </h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Importi negativi: in Report <strong>Incassato</strong> detraggono il totale del
+          mese (es. FRUIT TRANI storno 08/2026).
+        </p>
+        {stornoRows.length === 0 ? (
+          <p className="text-sm text-slate-500">Nessuno storno nel periodo selezionato.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-rose-50 text-left text-rose-800">
+                <tr>
+                  <th className="px-3 py-2">Cliente</th>
+                  <th className="px-3 py-2">Fornitore</th>
+                  <th className="px-3 py-2">Collaboratore</th>
+                  <th className="px-3 py-2">Mese storno</th>
+                  <th className="px-3 py-2">Importo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stornoRows.map((s) => (
+                  <tr key={s.commissionId} className="border-t border-rose-100">
+                    <td className="px-3 py-2 font-medium">{s.clientName}</td>
+                    <td className="px-3 py-2">{s.supplierName}</td>
+                    <td className="px-3 py-2">{s.collaboratorName}</td>
+                    <td className="px-3 py-2">
+                      {`${s.period.slice(5)}/${s.period.slice(0, 4)}`}
+                    </td>
+                    <td className="px-3 py-2 font-semibold text-rose-700">
+                      {formatCurrency(s.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-rose-200 bg-rose-50 font-semibold">
+                  <td className="px-3 py-2" colSpan={4}>
+                    Totale storni
+                  </td>
+                  <td className="px-3 py-2 text-rose-800">
+                    {formatCurrency(stornoTotals.amount)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </section>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-2 font-semibold text-slate-900">Esporta (filtri attuali)</h2>
@@ -459,8 +587,8 @@ export default async function ReportPage({
             </Link>
           </div>
           <p className="mt-4 text-sm text-slate-600">
-            L&apos;Excel include anche il foglio <strong>Rate ricorrenti</strong>{" "}
-            (competenza / bonifico nel periodo, es. giugno €4/€6).
+            L&apos;Excel include i fogli <strong>Rate ricorrenti</strong> e{" "}
+            <strong>Storni</strong> (importi negativi del periodo).
           </p>
         </section>
 

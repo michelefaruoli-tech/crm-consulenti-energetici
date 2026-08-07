@@ -665,7 +665,7 @@ export function ProvvigioniFilterTable({
                 ? current
                 : "Da incassare"
             }
-            title="Bozza: Da controllare = inserito ma non ancora contrattualizzato"
+            title="Bozza: Da controllare = non contrattualizzato · Stornato = clawback applicato"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => queueDraft(r, "stato", e.target.value)}
           >

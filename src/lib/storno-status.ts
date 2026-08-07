@@ -440,6 +440,7 @@ export const STORNO_LEGEND = [
   { label: "5 Fine storno vicina", className: "bg-violet-200 ring-violet-600" },
   { label: "6 Scadenza contratto 12 mesi", className: "bg-orange-200 ring-orange-600" },
   { label: "Da controllare (non contrattualizzato)", className: "bg-fuchsia-200 ring-fuchsia-600" },
+  { label: "Stornato (clawback)", className: "bg-rose-200 ring-rose-600" },
   { label: "Manca ingresso → POD rosso", className: "bg-white ring-red-600" },
   { label: "KO / Cessato", className: "bg-slate-300 ring-slate-500" },
 ] as const;

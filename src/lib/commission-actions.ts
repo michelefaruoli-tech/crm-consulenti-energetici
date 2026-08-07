@@ -245,8 +245,21 @@ async function applyCommissionField(
         where: { id: commission.id },
         data: { stornoDate: null, stornoAmount: null },
       });
+      if (commission.contract.status === "STORNATO") {
+        await prisma.contract.update({
+          where: { id: commission.contractId },
+          data: {
+            status: commission.contract.collectionDate
+              ? "PAGATO_DAL_FORNITORE"
+              : "IN_ATTESA_PAGAMENTO",
+            paymentStatus: commission.contract.collectionDate
+              ? "Incassato"
+              : "Da incassare",
+          },
+        });
+      }
     } else {
-      // Compensazione: gettone storno in negativo
+      // Compensazione: gettone storno in negativo + stato Stornato
       const amount = Math.abs(
         effectiveGettone({
           expected: Number(commission.expected ?? 0),
@@ -259,6 +272,13 @@ async function applyCommissionField(
         data: {
           stornoDate: commission.stornoDate ?? new Date(),
           stornoAmount: amount > 0 ? -amount : 0,
+        },
+      });
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: {
+          status: "STORNATO",
+          paymentStatus: "Stornato",
         },
       });
     }
@@ -276,6 +296,19 @@ async function applyCommissionField(
         where: { id: commission.id },
         data: { stornoDate: null, stornoAmount: null },
       });
+      if (commission.contract.status === "STORNATO") {
+        await prisma.contract.update({
+          where: { id: commission.contractId },
+          data: {
+            status: commission.contract.collectionDate
+              ? "PAGATO_DAL_FORNITORE"
+              : "IN_ATTESA_PAGAMENTO",
+            paymentStatus: commission.contract.collectionDate
+              ? "Incassato"
+              : "Da incassare",
+          },
+        });
+      }
     } else {
       const d = parseFlexibleDate(raw);
       if (!d) throw new Error("Data storno non valida (usa MM/AAAA o GG/MM/AAAA)");
@@ -292,6 +325,10 @@ async function applyCommissionField(
         where: { id: commission.id },
         data: { stornoDate: d, stornoAmount: base > 0 ? -base : 0 },
       });
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: { status: "STORNATO", paymentStatus: "Stornato" },
+      });
     }
   } else if (field === "stornoAmount") {
     const amount = Number(value.replace(",", ".")) || 0;
@@ -305,6 +342,12 @@ async function applyCommissionField(
           signed !== 0 ? (commission.stornoDate ?? new Date()) : null,
       },
     });
+    if (signed !== 0) {
+      await prisma.contract.update({
+        where: { id: commission.contractId },
+        data: { status: "STORNATO", paymentStatus: "Stornato" },
+      });
+    }
   } else if (field === "podPdr") {
     await prisma.contract.update({
       where: { id: commission.contractId },
@@ -348,6 +391,30 @@ async function applyCommissionField(
         data: {
           status: "DA_CONTROLLARE",
           paymentStatus: "Da controllare",
+        },
+      });
+    } else if (/^storn/.test(raw)) {
+      // Storno applicato e conteggiato in Report Incassato (importo negativo)
+      const amount = Math.abs(
+        Number(commission.stornoAmount ?? 0) ||
+          effectiveGettone({
+            expected: Number(commission.expected ?? 0),
+            clientType: commission.contract.client.type,
+            supplierName: commission.contract.supplier.name,
+          }),
+      );
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: {
+          stornoDate: commission.stornoDate ?? new Date(),
+          stornoAmount: amount > 0 ? -amount : 0,
+        },
+      });
+      await prisma.contract.update({
+        where: { id: contractId },
+        data: {
+          status: "STORNATO",
+          paymentStatus: "Stornato",
         },
       });
     } else if (/pagat/.test(raw)) {

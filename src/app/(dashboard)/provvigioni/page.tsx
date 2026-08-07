@@ -413,7 +413,7 @@ export default async function ProvvigioniPage({
     if (
       c.collectionDate &&
       !inFornitura &&
-      !["KO", "ANNULLATO", "CHIUSO", "DA_CONTROLLARE"].includes(c.status)
+      !["KO", "ANNULLATO", "CHIUSO", "DA_CONTROLLARE", "STORNATO"].includes(c.status)
     ) {
       const prevStatus = c.status;
       (c as { collectionDate: Date | null }).collectionDate = null;
@@ -545,6 +545,7 @@ export default async function ProvvigioniPage({
 
     const stato = simplifiedProvvigioneStato(contract.status, hasDate, {
       inFornitura,
+      hasStorno: Boolean(item?.stornoDate),
     });
 
     const lastPaidNote = isRecurring(contract.recurrence)
@@ -585,11 +586,15 @@ export default async function ProvvigioniPage({
       stornoLabel:
         stato === "Da controllare"
           ? "Da controllare (non ancora contrattualizzato)"
-          : storno.label,
+          : stato === "Stornato"
+            ? "Stornato (clawback applicato)"
+            : storno.label,
       stornoRowClass:
         stato === "Da controllare"
           ? "bg-fuchsia-100 hover:bg-fuchsia-200/80"
-          : storno.rowClassName,
+          : stato === "Stornato"
+            ? "bg-rose-100 hover:bg-rose-200/80"
+            : storno.rowClassName,
       warnOnEdit: storno.warnOnEdit,
       missingSupplyStart: storno.missingSupplyStart === true,
       gettoneBorderClass: contract.commissionConfirmed

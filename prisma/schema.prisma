@@ -32,6 +32,8 @@ enum ContractStatus {
   IN_ATTESA_PAGAMENTO
   PAGATO_DAL_FORNITORE
   PROVVIGIONE_LIQUIDATA
+  /// Storno gettone applicato (clawback) e conteggiato in Incassato
+  STORNATO
   COMPLETATO
   CHIUSO
   ANNULLATO

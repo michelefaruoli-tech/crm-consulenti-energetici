@@ -77,6 +77,7 @@ export async function GET(req: NextRequest) {
       simplifiedProvvigioneStato(
         contract.status,
         Boolean(contract.collectionDate),
+        { hasStorno: Boolean(contract.commission?.stornoDate) },
       ),
       `€ ${Number(contract.commission?.expected ?? 0).toFixed(2)}`,
       `€ ${Number(contract.commission?.received ?? 0).toFixed(2)}`,

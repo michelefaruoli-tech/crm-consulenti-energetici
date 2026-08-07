@@ -21,6 +21,7 @@ export type AppContractStatus =
   | "IN_ATTESA_PAGAMENTO"
   | "PAGATO_DAL_FORNITORE"
   | "PROVVIGIONE_LIQUIDATA"
+  | "STORNATO"
   | "COMPLETATO"
   | "CHIUSO"
   | "ANNULLATO"
@@ -59,6 +60,7 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   IN_ATTESA_PAGAMENTO: "In pagamento",
   PAGATO_DAL_FORNITORE: "Pagato dal fornitore",
   PROVVIGIONE_LIQUIDATA: "Provvigione liquidata",
+  STORNATO: "Stornato",
   COMPLETATO: "Completato",
   CHIUSO: "Chiuso",
   ANNULLATO: "Annullato",
@@ -151,6 +153,7 @@ export const STATUS_COLORS: Record<AppContractStatus, string> = {
   IN_ATTESA_PAGAMENTO: "bg-orange-100 text-orange-800",
   PAGATO_DAL_FORNITORE: "bg-emerald-100 text-emerald-800",
   PROVVIGIONE_LIQUIDATA: "bg-cyan-100 text-cyan-800",
+  STORNATO: "bg-rose-100 text-rose-900",
   COMPLETATO: "bg-emerald-100 text-emerald-900",
   CHIUSO: "bg-gray-100 text-gray-700",
   ANNULLATO: "bg-red-100 text-red-800",

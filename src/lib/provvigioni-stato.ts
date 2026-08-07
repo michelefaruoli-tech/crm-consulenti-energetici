@@ -50,6 +50,7 @@ export type ProvvigioneRow = {
  * Flusso atteso:
  * 1. Rendiconto fornitore (import Helios, ecc.) → Incassato (collectionDate)
  * 2. Liquidazione collaboratore (Segna pagato) → Pagato (PROVVIGIONE_LIQUIDATA)
+ * 3. Storno gettone applicato → Stornato (importo negativo nel Report Incassato)
  *
  * «Da controllare» = contratto inserito ma non ancora contrattualizzato:
  * va tenuto d’occhio e aggiornato appena possibile.
@@ -60,10 +61,12 @@ export type ProvvigioneRow = {
 export function simplifiedProvvigioneStato(
   status: string,
   hasCollectionDate: boolean,
-  opts?: { inFornitura?: boolean },
+  opts?: { inFornitura?: boolean; hasStorno?: boolean },
 ): string {
   // KO / cessato: ha priorità anche se c’è già una data di incasso (Helios).
   if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
+  // Storno applicato e conteggiato (clawback)
+  if (status === "STORNATO" || opts?.hasStorno) return "Stornato";
   // Inserito ma non contrattualizzato: priorità su fornitura/incasso
   if (status === "DA_CONTROLLARE") return "Da controllare";
   if (opts?.inFornitura === false) return "Da incassare";
@@ -79,6 +82,7 @@ export const PROVVIGIONE_STATO_OPTIONS = [
   "Da incassare",
   "Incassato",
   "Pagato",
+  "Stornato",
 ] as const;
 
 /** Opzioni modificabili in tabella Provvigioni (etichette UI). */

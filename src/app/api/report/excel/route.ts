@@ -12,10 +12,16 @@ import {
   sumReportRecurring,
 } from "@/lib/report-recurring";
 import {
+  loadReportStornos,
+  sumReportStornos,
+} from "@/lib/report-stornos";
+import {
   buildReportContractWhere,
   reportPeriodUsesCollectionDate,
+  reportPeriodUsesStornoDate,
   resolveReportStato,
 } from "@/lib/report-filters";
+import { isInFornitura } from "@/lib/supply-dates";
 
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -60,6 +66,23 @@ export async function GET(req: NextRequest) {
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 
+  const includeStornos =
+    stato === "Incassato" ||
+    stato === "Pagato" ||
+    stato === "Tutti" ||
+    stato === "Stornato";
+  const stornoRows = includeStornos
+    ? await loadReportStornos({
+        from,
+        to,
+        month,
+        collaboratorId,
+        supplierId,
+        visibility,
+      })
+    : [];
+  const stornoTotals = sumReportStornos(stornoRows);
+
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Contratti");
 
@@ -75,9 +98,15 @@ export async function GET(req: NextRequest) {
     { header: "Provv. prevista", key: "expected", width: 16 },
     { header: "Provv. ricevuta", key: "received", width: 16 },
     { header: "Provv. liquidata", key: "paid", width: 16 },
+    { header: "Storno €", key: "storno", width: 12 },
+    { header: "Data storno", key: "stornoDate", width: 14 },
   ];
 
   for (const contract of contracts) {
+    const stornoAmt =
+      contract.commission?.stornoAmount != null
+        ? Number(contract.commission.stornoAmount)
+        : 0;
     sheet.addRow({
       number: contract.contractNumber,
       insertion: contract.insertionDate
@@ -93,10 +122,18 @@ export async function GET(req: NextRequest) {
       statoProv: simplifiedProvvigioneStato(
         contract.status,
         Boolean(contract.collectionDate),
+        {
+          inFornitura: isInFornitura(contract.supplyStartDate),
+          hasStorno: Boolean(contract.commission?.stornoDate),
+        },
       ),
       expected: Number(contract.commission?.expected ?? 0),
       received: Number(contract.commission?.received ?? 0),
       paid: Number(contract.commission?.paid ?? 0),
+      storno: stornoAmt,
+      stornoDate: contract.commission?.stornoDate
+        ? contract.commission.stornoDate.toISOString().slice(0, 10)
+        : "",
     });
   }
 
@@ -127,6 +164,28 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const sheet3 = workbook.addWorksheet("Storni");
+  sheet3.columns = [
+    { header: "Cliente", key: "client", width: 28 },
+    { header: "Fornitore", key: "supplier", width: 18 },
+    { header: "Collaboratore", key: "collaborator", width: 18 },
+    { header: "Mese storno", key: "period", width: 12 },
+    { header: "Data storno", key: "date", width: 14 },
+    { header: "Importo (negativo)", key: "amount", width: 16 },
+    { header: "N. contratto", key: "number", width: 16 },
+  ];
+  for (const s of stornoRows) {
+    sheet3.addRow({
+      client: s.clientName,
+      supplier: s.supplierName,
+      collaborator: s.collaboratorName,
+      period: s.period,
+      date: s.stornoDate.toISOString().slice(0, 10),
+      amount: s.amount,
+      number: s.contractNumber,
+    });
+  }
+
   const meta = workbook.addWorksheet("Filtri");
   meta.addRow(["Mese", month ?? ""]);
   meta.addRow(["Dal", from ?? ""]);
@@ -136,11 +195,17 @@ export async function GET(req: NextRequest) {
   meta.addRow(["Stato provvigione", stato]);
   meta.addRow([
     "Data periodo contratti",
-    reportPeriodUsesCollectionDate(stato) ? "collectionDate (incasso)" : "insertionDate",
+    reportPeriodUsesStornoDate(stato)
+      ? "stornoDate"
+      : reportPeriodUsesCollectionDate(stato)
+        ? "collectionDate (incasso)"
+        : "insertionDate",
   ]);
   meta.addRow(["N° contratti", contracts.length]);
   meta.addRow(["N° rate ricorrenti", recurringTotals.count]);
   meta.addRow(["Totale ricorrenti €", recurringTotals.amount]);
+  meta.addRow(["N° storni", stornoTotals.count]);
+  meta.addRow(["Totale storni €", stornoTotals.amount]);
 
   const buffer = await workbook.xlsx.writeBuffer();
 

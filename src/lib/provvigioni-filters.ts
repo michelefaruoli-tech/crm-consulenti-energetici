@@ -75,6 +75,7 @@ const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
  * - Da incassare = contratto inserito, fornitore non ha ancora pagato a te
  * - Incassato = fornitore ha pagato a te, tu non hai ancora liquidato il collab.
  * - Pagato = tu hai già pagato il collaboratore (PROVVIGIONE_LIQUIDATA)
+ * - Stornato = storno gettone applicato (clawback, importo negativo in Report)
  * - KO / Cessato = pratica chiusa (anche se aveva già un incasso storico)
  */
 export function provvigioneStatoWhere(
@@ -88,17 +89,27 @@ export function provvigioneStatoWhere(
   if (s === "Da controllare") {
     return { status: { equals: "DA_CONTROLLARE" } };
   }
+  if (s === "Stornato") {
+    return {
+      OR: [
+        { status: { equals: "STORNATO" } },
+        { commission: { stornoDate: { not: null } } },
+      ],
+    };
+  }
   if (s === "Incassato") {
     return {
       collectionDate: { not: null },
-      status: { notIn: ["PROVVIGIONE_LIQUIDATA", "DA_CONTROLLARE", ...KO_STATUSES] },
+      status: {
+        notIn: ["PROVVIGIONE_LIQUIDATA", "DA_CONTROLLARE", "STORNATO", ...KO_STATUSES],
+      },
       // Solo già in fornitura (altrimenti la data è attivazione, non incasso)
       supplyStartDate: { lte: today },
     };
   }
   if (s === "Da incassare") {
     return {
-      status: { notIn: ["DA_CONTROLLARE", ...KO_STATUSES] },
+      status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
       OR: [
         { collectionDate: null },
         // Incasso/Pagato prematuro: non ancora in fornitura

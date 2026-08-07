@@ -72,10 +72,15 @@ export function reportDateRange(from?: string | null, to?: string | null) {
 
 /**
  * Incassato / Pagato / Tutti → periodo = data incasso (colonna Provvigioni).
+ * Stornato → periodo = data storno (mese del clawback).
  * Da incassare / KO → data inserimento (non hanno incasso).
  */
 export function reportPeriodUsesCollectionDate(stato: string): boolean {
   return stato === "Incassato" || stato === "Pagato" || stato === "Tutti";
+}
+
+export function reportPeriodUsesStornoDate(stato: string): boolean {
+  return stato === "Stornato";
 }
 
 export function buildReportContractWhere(
@@ -87,14 +92,17 @@ export function buildReportContractWhere(
   const stato = resolveReportStato(params.stato);
   const statoWhere = provvigioneStatoWhere(stato === "Tutti" ? undefined : stato);
   const useCollection = reportPeriodUsesCollectionDate(stato);
+  const useStorno = reportPeriodUsesStornoDate(stato);
 
   const and: Prisma.ContractWhereInput[] = [
     visibility,
     { deletedAt: null },
     { isHistorical: false },
-    useCollection
-      ? { collectionDate: { gte: dateFrom, lte: dateTo } }
-      : { insertionDate: { gte: dateFrom, lte: dateTo } },
+    useStorno
+      ? { commission: { stornoDate: { gte: dateFrom, lte: dateTo } } }
+      : useCollection
+        ? { collectionDate: { gte: dateFrom, lte: dateTo } }
+        : { insertionDate: { gte: dateFrom, lte: dateTo } },
   ];
 
   if (params.collaboratorId) {
@@ -115,9 +123,11 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":
-      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni, tutti i fornitori. Es. Giugno = Incasso 06/2026.";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Include anche gli storni del mese (importi negativi).";
     case "Pagato":
       return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori.";
+    case "Stornato":
+      return "Periodo = data storno (MM/AAAA). Storni applicati: importo negativo che detrae dalle provvigioni.";
     case "KO / Cessato":
       return "Periodo = data inserimento. Pratiche KO / annullate / chiuse.";
     default:
