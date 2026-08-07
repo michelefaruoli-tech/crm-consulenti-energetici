@@ -31,6 +31,7 @@ export default async function ContrattiPage({
     session.role,
     "contracts.change_collaborator_dashboard",
   );
+  const canChangeStatus = hasPermission(session.role, "contracts.change_status");
   const mode =
     vista === "storico"
       ? "storico"
@@ -253,6 +254,7 @@ export default async function ContrattiPage({
           editable={mode !== "storico"}
           canDelete
           canChangeCollaborator={canChangeCollaborator && mode !== "storico"}
+          canChangeStatus={canChangeStatus && mode !== "storico"}
           collaborators={collaborators}
         />
 

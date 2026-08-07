@@ -10,6 +10,7 @@ import { StornoLegend } from "@/components/ui/storno-legend";
 import type { CollaboratorOption, ContractTableRow } from "@/lib/contract-row";
 import { updateContractFieldAction } from "@/lib/contract-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
+import { InlineContractStatusSelect } from "@/components/contracts/inline-contract-status-select";
 
 type Pending = { contractId: string; field: string; value: string; rowKey: string };
 
@@ -18,6 +19,7 @@ export function ContractsFilterTable({
   editable = true,
   canDelete = false,
   canChangeCollaborator = false,
+  canChangeStatus = false,
   collaborators = [],
 }: {
   rows: ContractTableRow[];
@@ -25,6 +27,8 @@ export function ContractsFilterTable({
   canDelete?: boolean;
   /** Admin + Segreteria: tendina collaboratore in elenco/Dashboard */
   canChangeCollaborator?: boolean;
+  /** Chi ha contracts.change_status: tendina stato senza aprire scheda */
+  canChangeStatus?: boolean;
   collaborators?: CollaboratorOption[];
 }) {
   const router = useRouter();
@@ -185,8 +189,18 @@ export function ContractsFilterTable({
       key: "statusLabel",
       label: "Stato",
       getValue: (r) => String(r.statusLabel ?? ""),
-      editable,
-      render: editable ? undefined : (r) => <StatusBadge status={String(r.status)} />,
+      // Non editabile come testo libero: usiamo la tendina dedicata
+      editable: false,
+      render: (r) =>
+        canChangeStatus ? (
+          <InlineContractStatusSelect
+            contractId={String(r.id)}
+            status={String(r.status)}
+            mode="dashboard"
+          />
+        ) : (
+          <StatusBadge status={String(r.status)} />
+        ),
     },
     {
       key: "insertionDate",
@@ -261,6 +275,9 @@ export function ContractsFilterTable({
         <p className="text-xs text-slate-500">
           {editable
             ? "Modifica le celle, poi clicca «Salva cambiamenti». Sotto POD/PDR vedi il tipo di servizio."
+            : null}{" "}
+          {canChangeStatus
+            ? "Puoi cambiare lo stato dalla tendina nella colonna Stato (senza aprire la scheda)."
             : null}{" "}
           {canChangeCollaborator
             ? "Puoi cambiare il collaboratore dalla tendina (Admin/Segreteria)."

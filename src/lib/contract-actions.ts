@@ -35,7 +35,19 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
   if (!contract) throw new Error("Contratto non trovato");
 
   const canAll = hasPermission(session.role, "contracts.edit_all");
-  if (!canAll && contract.collaboratorId !== session.id) {
+  const isOwner = contract.collaboratorId === session.id;
+
+  // Cambio stato: chi ha contracts.change_status e può vedere il contratto
+  // (Admin/Segreteria, Backoffice/Area Manager nello scope, o proprietario).
+  if (field === "status") {
+    if (!hasPermission(session.role, "contracts.change_status")) {
+      throw new Error("Non puoi cambiare lo stato");
+    }
+    const { userCanAccessContract } = await import("@/lib/user-scope");
+    if (!(await userCanAccessContract(session, contract))) {
+      throw new Error("Permesso negato");
+    }
+  } else if (!canAll && !isOwner) {
     throw new Error("Permesso negato");
   }
 
@@ -95,9 +107,7 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       });
     }
   } else if (field === "status") {
-    if (!hasPermission(session.role, "contracts.change_status")) {
-      throw new Error("Non puoi cambiare lo stato");
-    }
+    // Permesso già verificato sopra
     const status = statusFromLabel(value);
     if (!status) throw new Error("Stato non riconosciuto");
     const fromStatus = contract.status;
@@ -121,6 +131,11 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       changedByName: session.name,
       note: "Modifica da elenco",
     });
+    revalidatePath("/");
+    revalidatePath("/contratti");
+    revalidatePath("/lavorazione");
+    revalidatePath(`/contratti/${contractId}`);
+    revalidatePath(`/lavorazione/${contractId}`);
   } else if (field === "notes") {
     await prisma.contract.update({
       where: { id: contractId },

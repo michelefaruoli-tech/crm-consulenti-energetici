@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
+import { InlineContractStatusSelect } from "@/components/contracts/inline-contract-status-select";
 import { clientDisplayName, formatDate } from "@/lib/utils";
 import { daysSince } from "@/lib/master-workflow";
 import { formatRomeDateTime } from "@/lib/timezone";
@@ -31,6 +32,7 @@ export default async function LavorazionePage({
   const session = await requireSession();
   const canSeeAll = hasPermission(session.role, "contracts.edit_all");
   const canWorkScoped = hasPermission(session.role, "contracts.work_scoped");
+  const canChangeStatus = hasPermission(session.role, "contracts.change_status");
   if (!canSeeAll && !canWorkScoped && !hasPermission(session.role, "contracts.create")) {
     redirect("/");
   }
@@ -328,7 +330,15 @@ export default async function LavorazionePage({
                       {c.podPdr || c.pod || c.pdr || "—"}
                     </td>
                     <td className="px-3 py-2">
-                      <StatusBadge status={c.status} />
+                      {canChangeStatus ? (
+                        <InlineContractStatusSelect
+                          contractId={c.id}
+                          status={c.status}
+                          mode="master"
+                        />
+                      ) : (
+                        <StatusBadge status={c.status} />
+                      )}
                       {c.emailStatus === "ERROR" || c.emailStatus === "SKIPPED_NO_SMTP" ? (
                         <p className="mt-1 text-[10px] text-red-600">Email: {c.emailStatus}</p>
                       ) : null}

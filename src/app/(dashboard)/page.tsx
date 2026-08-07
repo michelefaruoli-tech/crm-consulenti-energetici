@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
+import { InlineContractStatusSelect } from "@/components/contracts/inline-contract-status-select";
 import { PaginationNav } from "@/components/ui/pagination-nav";
 import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
@@ -29,6 +30,7 @@ export default async function DashboardPage({
     session.role,
     "contracts.change_collaborator_dashboard",
   );
+  const canChangeStatus = hasPermission(session.role, "contracts.change_status");
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
   const textSearch = contractTextSearchWhere(q);
@@ -306,7 +308,16 @@ export default async function DashboardPage({
                           {contract.collaborator.name}
                         </p>
                       </div>
-                      <StatusBadge status={contract.status} />
+                      {canChangeStatus ? (
+                        <InlineContractStatusSelect
+                          contractId={contract.id}
+                          status={contract.status}
+                          mode="master"
+                          className="shrink-0"
+                        />
+                      ) : (
+                        <StatusBadge status={contract.status} />
+                      )}
                     </li>
                   );
                 })}
@@ -371,6 +382,7 @@ export default async function DashboardPage({
             editable
             canDelete={canViewAll}
             canChangeCollaborator={canChangeCollaborator}
+            canChangeStatus={canChangeStatus}
             collaborators={collaborators}
           />
           <PaginationNav
