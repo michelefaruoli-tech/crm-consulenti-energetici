@@ -816,13 +816,38 @@ export function ProvvigioniFilterTable({
   const columns = useMemo(() => {
     if (advancedView) return allColumns;
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
+    /** Larghezze per stare tutte in una schermata (vista semplificata) */
+    const widths: Record<string, string> = {
+      clientName: "w-[22%]",
+      collaboratorName: "w-[10%]",
+      supplierName: "w-[11%]",
+      amount: "w-[7%]",
+      stato: "w-[12%]",
+      collectionMonth: "w-[9%]",
+      notes: "w-[17%]",
+      recurrence: "w-[7%]",
+      _del: "w-[4%]",
+    };
+    const inputs: Record<string, string> = {
+      clientName:
+        "min-w-0 w-full truncate text-[12px] font-semibold tracking-tight text-slate-900",
+      amount: "max-w-full w-full text-right tabular-nums",
+      collectionMonth: "max-w-full w-full tabular-nums",
+      notes: "min-w-0 w-full truncate",
+      supplierName: "min-w-0 w-full truncate",
+    };
     return SIMPLE_COLUMN_ORDER.map((k) => {
       const col = byKey.get(k);
       if (!col) return undefined;
+      const next: FilterColumn = {
+        ...col,
+        colClassName: widths[k],
+        ...(inputs[k] ? { inputClassName: inputs[k] } : {}),
+      };
       if (k === "collectionMonth") {
-        return { ...col, label: "Data incasso" };
+        next.label = "Data incasso";
       }
-      return col;
+      return next;
     }).filter((c): c is FilterColumn => Boolean(c));
   }, [advancedView, allColumns]);
 
@@ -1068,8 +1093,9 @@ export function ProvvigioniFilterTable({
             </>
           ) : (
             <>
-              Vista <strong>semplificata</strong>: Cliente · Collab. · Fornitore ·
-              Gettone · Stato · Data incasso · Note · Tipo (UT/M/R)
+              Vista <strong>semplificata</strong>: tutte le colonne essenziali in una
+              schermata (Cliente · Collab. · Fornitore · Gettone · Stato · Data
+              incasso · Note · Tipo)
               {canDelete ? " · ×" : ""}.{" "}
             </>
           )}
@@ -1111,6 +1137,7 @@ export function ProvvigioniFilterTable({
       </div>
       <ExcelFilterTable
         dense
+        fitWidth={!advancedView}
         rows={rows as unknown as Record<string, unknown>[]}
         columns={columns}
         rowKey={(r) => rowId(r)}

@@ -16,6 +16,8 @@ export type FilterColumn = {
   sortKind?: "text" | "date" | "number";
   /** Classi extra sull’input editabile (es. nome cliente in evidenza) */
   inputClassName?: string;
+  /** Classi sulla colonna (th/td), es. larghezza in vista fitWidth */
+  colClassName?: string;
   /** Testo secondario sotto la cella editabile (es. competenza mensile) */
   cellExtra?: (row: Record<string, unknown>) => React.ReactNode;
 };
@@ -74,6 +76,11 @@ type Props = {
   getDraftValue?: (row: Record<string, unknown>, key: string) => string;
   isDraftDirty?: (row: Record<string, unknown>, key: string) => boolean;
   onCellDraft?: (row: Record<string, unknown>, key: string, value: string) => void;
+  /**
+   * Tabella a tutta larghezza senza min-width forzata (vista semplificata).
+   * Se false (default), resta scroll orizzontale con barra sticky in basso.
+   */
+  fitWidth?: boolean;
 };
 
 export function ExcelFilterTable({
@@ -94,11 +101,14 @@ export function ExcelFilterTable({
   getDraftValue,
   isDraftDirty,
   onCellDraft,
+  fitWidth = false,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [scrollWidth, setScrollWidth] = useState(0);
+  const [needsHScroll, setNeedsHScroll] = useState(false);
   const serverSortKeys = useMemo(
     () => new Set(serverSort?.keys ?? []),
     [serverSort?.keys],
@@ -268,12 +278,59 @@ export function ExcelFilterTable({
 
   const colSpan = columns.length + (selection ? 1 : 0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stickyScrollRef = useRef<HTMLDivElement>(null);
+  const syncingScroll = useRef(false);
+
+  function measureScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setScrollWidth(el.scrollWidth);
+    setNeedsHScroll(el.scrollWidth > el.clientWidth + 2);
+  }
+
+  useEffect(() => {
+    measureScroll();
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => measureScroll());
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    window.addEventListener("resize", measureScroll);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measureScroll);
+    };
+  }, [columns, rows, fitWidth, dense]);
+
+  function syncFromMain() {
+    const main = scrollRef.current;
+    const sticky = stickyScrollRef.current;
+    if (!main || !sticky || syncingScroll.current) return;
+    syncingScroll.current = true;
+    sticky.scrollLeft = main.scrollLeft;
+    requestAnimationFrame(() => {
+      syncingScroll.current = false;
+    });
+  }
+
+  function syncFromSticky() {
+    const main = scrollRef.current;
+    const sticky = stickyScrollRef.current;
+    if (!main || !sticky || syncingScroll.current) return;
+    syncingScroll.current = true;
+    main.scrollLeft = sticky.scrollLeft;
+    requestAnimationFrame(() => {
+      syncingScroll.current = false;
+    });
+  }
 
   function scrollTable(dir: "left" | "right") {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollBy({ left: dir === "left" ? -280 : 280, behavior: "smooth" });
   }
+
+  const showHScrollChrome = !fitWidth || needsHScroll;
 
   return (
     <div className="-mx-3 rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:rounded-xl sm:border">
@@ -294,45 +351,60 @@ export function ExcelFilterTable({
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
-        <p className="text-[11px] leading-snug text-slate-600 sm:text-xs">
-          Su telefono: scorri la tabella in orizzontale per vedere tutte le colonne
-        </p>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
-            title="Scorri a sinistra"
-            onClick={() => scrollTable("left")}
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
-            title="Scorri a destra"
-            onClick={() => scrollTable("right")}
-          >
-            →
-          </button>
+      {showHScrollChrome ? (
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+          <p className="text-[11px] leading-snug text-slate-600 sm:text-xs">
+            {fitWidth
+              ? "Scorri in orizzontale se serve (barra fissa in basso)"
+              : "Scorri a destra/sinistra: usa la barra fissa in basso oppure ← →"}
+          </p>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+              title="Scorri a sinistra"
+              onClick={() => scrollTable("left")}
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+              title="Scorri a destra"
+              onClick={() => scrollTable("right")}
+            >
+              →
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div
         ref={scrollRef}
         className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
-        style={{ scrollbarGutter: "stable" }}
+        style={{ scrollbarGutter: fitWidth ? undefined : "stable" }}
+        onScroll={syncFromMain}
       >
       <table
         className={cn(
           "text-left",
-          dense ? "min-w-[1200px] text-xs" : "min-w-[1200px] text-sm",
+          fitWidth
+            ? "w-full min-w-0 table-fixed text-xs"
+            : dense
+              ? "min-w-[1200px] text-xs"
+              : "min-w-[1200px] text-sm",
         )}
       >
         <thead className="bg-slate-100 text-slate-800">
           <tr>
             {selection ? (
-              <th className={cn("align-middle", dense ? "px-1.5 py-1.5" : "px-3 py-2")}>
+              <th
+                className={cn(
+                  "align-middle",
+                  dense ? "px-1.5 py-1.5" : "px-3 py-2",
+                  fitWidth && "w-8",
+                )}
+              >
                 <input
                   type="checkbox"
                   checked={allFilteredSelected}
@@ -359,6 +431,7 @@ export function ExcelFilterTable({
                   className={cn(
                     "relative align-bottom whitespace-nowrap",
                     dense ? "px-1.5 py-1.5" : "px-3 py-2",
+                    col.colClassName,
                   )}
                 >
                   <div className="flex items-center gap-1">
@@ -518,7 +591,10 @@ export function ExcelFilterTable({
               >
                 {selection ? (
                   <td
-                    className={cn(dense ? "px-1.5 py-1" : "px-3 py-2")}
+                    className={cn(
+                      dense ? "px-1.5 py-1" : "px-3 py-2",
+                      fitWidth && "w-8",
+                    )}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <input
@@ -544,6 +620,8 @@ export function ExcelFilterTable({
                     className={cn(
                       dense ? "px-1.5 py-1" : "px-3 py-2",
                       dirty && "bg-amber-50",
+                      col.colClassName,
+                      fitWidth && "overflow-hidden",
                     )}
                     onClick={(e) => {
                       // Solo le celle editabili bloccano il click sulla riga
@@ -609,6 +687,41 @@ export function ExcelFilterTable({
       </table>
       </div>
 
+      {needsHScroll ? (
+        <div className="sticky bottom-0 z-20 border-t-2 border-emerald-600 bg-white px-2 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]">
+          <div className="mb-1 flex items-center justify-between gap-2 px-1">
+            <p className="text-[11px] font-semibold text-slate-700">
+              Barra scorrimento ← destra / sinistra →
+            </p>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                className="rounded bg-slate-800 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-slate-700"
+                onClick={() => scrollTable("left")}
+              >
+                ←
+              </button>
+              <button
+                type="button"
+                className="rounded bg-slate-800 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-slate-700"
+                onClick={() => scrollTable("right")}
+              >
+                →
+              </button>
+            </div>
+          </div>
+          <div
+            ref={stickyScrollRef}
+            className="overflow-x-auto rounded border border-slate-300 bg-slate-50"
+            onScroll={syncFromSticky}
+            style={{ height: 18 }}
+            aria-label="Barra di scorrimento orizzontale"
+          >
+            <div style={{ width: Math.max(scrollWidth, 1), height: 1 }} />
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
         <p className="text-xs text-slate-500">
           {hasAnyFilter
@@ -618,24 +731,26 @@ export function ExcelFilterTable({
             ? ` · ${selection.selectedKeys.size} selezionate`
             : ""}
         </p>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
-            title="Scorri a sinistra"
-            onClick={() => scrollTable("left")}
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
-            title="Scorri a destra"
-            onClick={() => scrollTable("right")}
-          >
-            →
-          </button>
-        </div>
+        {showHScrollChrome ? (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+              title="Scorri a sinistra"
+              onClick={() => scrollTable("left")}
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+              title="Scorri a destra"
+              onClick={() => scrollTable("right")}
+            >
+              →
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
