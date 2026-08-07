@@ -1093,6 +1093,7 @@ export function ProvvigioniFilterTable({
               (giallo) finché non salvi.{" "}
             </>
           ) : (
+            <>
               Vista <strong>semplificata</strong>: tutte le colonne essenziali in una
               schermata (Cliente · Collab. · Fornitore · Gettone · Stato · Data
               incasso · Note · Tipo). Stato <strong>Da controllare</strong> = inserito

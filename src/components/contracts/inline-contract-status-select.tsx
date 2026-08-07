@@ -50,7 +50,7 @@ export function InlineContractStatusSelect({
     setValue(status);
   }, [status]);
 
-  const options =
+  const options: { value: string; label: string }[] =
     mode === "master"
       ? MASTER_WORKFLOW_STATUSES.map((s) => ({
           value: s,
