@@ -5,15 +5,13 @@ import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
-import { InlineContractStatusSelect } from "@/components/contracts/inline-contract-status-select";
+import { DashboardLavorazioneList } from "@/components/contracts/dashboard-lavorazione-list";
 import { PaginationNav } from "@/components/ui/pagination-nav";
 import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
-import { StatusBadge } from "@/components/ui/badge";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
 import { sumProvvigioniTotals } from "@/lib/provvigioni-filters";
 import { contractTextSearchWhere } from "@/lib/list-search";
-import { clientDisplayName } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -288,40 +286,22 @@ export default async function DashboardPage({
             {inLavorazioneList.length === 0 ? (
               <p className="text-sm text-slate-500">Nessun contratto inviato al Master.</p>
             ) : (
-              <ul className="space-y-3">
-                {inLavorazioneList.map((contract) => {
-                  const name = clientDisplayName(contract.client);
-                  return (
-                    <li
-                      key={contract.id}
-                      className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 last:border-0"
-                    >
-                      <div className="min-w-0">
-                        <Link
-                          href={`/lavorazione/${contract.id}`}
-                          className="font-medium text-emerald-700 hover:underline"
-                        >
-                          {name}
-                        </Link>
-                        <p className="truncate text-sm text-slate-500">
-                          {contract.contractNumber} · {contract.supplier.name} ·{" "}
-                          {contract.collaborator.name}
-                        </p>
-                      </div>
-                      {canChangeStatus ? (
-                        <InlineContractStatusSelect
-                          contractId={contract.id}
-                          status={contract.status}
-                          mode="master"
-                          className="shrink-0"
-                        />
-                      ) : (
-                        <StatusBadge status={contract.status} />
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+              <DashboardLavorazioneList
+                canChangeStatus={canChangeStatus}
+                items={inLavorazioneList.map((c) => ({
+                  id: c.id,
+                  status: c.status,
+                  contractNumber: c.contractNumber,
+                  client: {
+                    type: c.client.type,
+                    firstName: c.client.firstName,
+                    lastName: c.client.lastName,
+                    companyName: c.client.companyName,
+                  },
+                  supplier: { name: c.supplier.name },
+                  collaborator: { name: c.collaborator.name },
+                }))}
+              />
             )}
           </section>
 
