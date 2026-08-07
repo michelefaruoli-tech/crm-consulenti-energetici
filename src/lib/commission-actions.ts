@@ -17,6 +17,7 @@ import {
 } from "@/lib/provvigioni-stato";
 import {
   computeSupplyStartDate,
+  fixFutureDatesForPayment,
   fixSwitchEqualInsertionSupply,
   normalizeOperationType,
 } from "@/lib/supply-dates";
@@ -157,12 +158,25 @@ async function applyCommissionField(
     } else {
       const d = parseFlexibleDate(raw);
       if (!d) throw new Error("Data non valida (usa MM/AAAA o GG/MM/AAAA)");
+      // Se inserimento/fornitura sono future (errore), anticipa inserimento di 1 mese
+      // altrimenti la pagina Provvigioni cancellerebbe subito l’incasso.
+      const dates = fixFutureDatesForPayment({
+        insertionDate: commission.contract.insertionDate,
+        supplyStartDate: commission.contract.supplyStartDate,
+        operationType: commission.contract.operationType,
+      });
       await prisma.contract.update({
         where: { id: commission.contractId },
         data: {
           collectionDate: d,
           paymentStatus: "Incassato",
           ...(terminal ? {} : { status: "PAGATO_DAL_FORNITORE" }),
+          ...(dates.adjusted
+            ? {
+                insertionDate: dates.insertionDate,
+                supplyStartDate: dates.supplyStartDate,
+              }
+            : {}),
         },
       });
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
@@ -349,17 +363,44 @@ async function applyCommissionField(
         });
       }
 
+      const dates = fixFutureDatesForPayment({
+        insertionDate: commission.contract.insertionDate,
+        supplyStartDate: commission.contract.supplyStartDate,
+        operationType: commission.contract.operationType,
+      });
       await prisma.contract.update({
         where: { id: contractId },
-        data: { status: "PROVVIGIONE_LIQUIDATA" },
+        data: {
+          status: "PROVVIGIONE_LIQUIDATA",
+          paymentStatus: "Incassato",
+          collectionDate: commission.contract.collectionDate ?? new Date(),
+          ...(dates.adjusted
+            ? {
+                insertionDate: dates.insertionDate,
+                supplyStartDate: dates.supplyStartDate,
+              }
+            : {}),
+        },
       });
+      await syncRecurringMonthsForContract(contractId).catch(() => undefined);
     } else if (/incass/.test(raw) && !/da\s*incass/.test(raw) && !/^no$/.test(raw)) {
+      const dates = fixFutureDatesForPayment({
+        insertionDate: commission.contract.insertionDate,
+        supplyStartDate: commission.contract.supplyStartDate,
+        operationType: commission.contract.operationType,
+      });
       await prisma.contract.update({
         where: { id: contractId },
         data: {
           status: "PAGATO_DAL_FORNITORE",
           paymentStatus: "Incassato",
           collectionDate: commission.contract.collectionDate ?? new Date(),
+          ...(dates.adjusted
+            ? {
+                insertionDate: dates.insertionDate,
+                supplyStartDate: dates.supplyStartDate,
+              }
+            : {}),
         },
       });
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
@@ -693,12 +734,33 @@ export async function bulkMarkPaidAction(formData: FormData): Promise<{ ok: true
   }
 
   for (const r of rows) {
+    const full = await prisma.contract.findUnique({
+      where: { id: r.contractId },
+      select: {
+        insertionDate: true,
+        supplyStartDate: true,
+        operationType: true,
+      },
+    });
+    const dates = full
+      ? fixFutureDatesForPayment({
+          insertionDate: full.insertionDate,
+          supplyStartDate: full.supplyStartDate,
+          operationType: full.operationType,
+        })
+      : null;
     await prisma.contract.update({
       where: { id: r.contractId },
       data: {
         paymentStatus: "Incassato",
         collectionDate,
         status: "PAGATO_DAL_FORNITORE",
+        ...(dates?.adjusted
+          ? {
+              insertionDate: dates.insertionDate,
+              supplyStartDate: dates.supplyStartDate,
+            }
+          : {}),
       },
     });
     await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);

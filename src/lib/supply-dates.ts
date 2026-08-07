@@ -126,3 +126,64 @@ export function isInFornitura(
   if (Number.isNaN(s.getTime())) return false;
   return startOfDayLocal(s).getTime() <= startOfDayLocal(now).getTime();
 }
+
+/** Sposta una data di N mesi (stesso giorno, clamp fine mese). */
+export function addMonthsLocal(date: Date, months: number): Date {
+  const day = date.getDate();
+  const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+  const lastDay = new Date(
+    target.getFullYear(),
+    target.getMonth() + 1,
+    0,
+  ).getDate();
+  target.setDate(Math.min(day, lastDay));
+  target.setHours(0, 0, 0, 0);
+  return target;
+}
+
+/**
+ * Se le date sono ancora future (inserimento errato), anticipa l’inserimento
+ * di 1 mese e ricalcola/sposta la fornitura, così Incassato/Pagato resta salvato.
+ */
+export function fixFutureDatesForPayment(opts: {
+  insertionDate: Date;
+  supplyStartDate?: Date | null;
+  operationType?: string | null;
+  now?: Date;
+}): { insertionDate: Date; supplyStartDate: Date; adjusted: boolean } {
+  const now = opts.now ?? new Date();
+  const op = normalizeOperationType(opts.operationType);
+  let insertion = new Date(opts.insertionDate);
+  insertion.setHours(0, 0, 0, 0);
+  let supply =
+    opts.supplyStartDate != null
+      ? new Date(opts.supplyStartDate)
+      : computeSupplyStartDate(insertion, op);
+  supply.setHours(0, 0, 0, 0);
+
+  if (isInFornitura(supply, now)) {
+    return { insertionDate: insertion, supplyStartDate: supply, adjusted: false };
+  }
+
+  // Regola CRM: data pagamento → anticipa inserimento di 1 mese
+  insertion = addMonthsLocal(insertion, -1);
+  if (opts.supplyStartDate != null) {
+    supply = addMonthsLocal(new Date(opts.supplyStartDate), -1);
+  } else {
+    supply = computeSupplyStartDate(insertion, op);
+  }
+
+  // Se ancora futura (es. errore di più mesi), allinea fornitura a oggi
+  // e tiene l’inserimento almeno 1 mese prima per Switch.
+  if (!isInFornitura(supply, now)) {
+    supply = startOfDayLocal(now);
+    const fixed = fixSwitchEqualInsertionSupply(insertion, supply, op);
+    insertion = fixed.insertionDate;
+    supply = fixed.supplyStartDate;
+    if (!isInFornitura(supply, now)) {
+      supply = startOfDayLocal(now);
+    }
+  }
+
+  return { insertionDate: insertion, supplyStartDate: supply, adjusted: true };
+}

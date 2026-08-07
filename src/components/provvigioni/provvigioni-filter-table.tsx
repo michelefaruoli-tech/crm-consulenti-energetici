@@ -1088,7 +1088,8 @@ export function ProvvigioniFilterTable({
           {advancedView ? (
             <>
               Vista <strong>avanzata</strong>: tutte le colonne (POD, collab., tip.,
-              inizio fornitura, tipo op., storno…). Celle modificabili = bozza
+              inizio fornitura, tipo op., storno…). Usa i pulsanti fissi ← → a
+              destra dello schermo per scorrere. Celle modificabili = bozza
               (giallo) finché non salvi.{" "}
             </>
           ) : (
