@@ -21,6 +21,7 @@ import {
   loadReportStornos,
   sumReportStornos,
 } from "@/lib/report-stornos";
+import { reportIncassatoAmount } from "@/lib/report-rendiconto";
 import {
   REPORT_MONTH_LABELS,
   REPORT_STATO_OPTIONS,
@@ -179,7 +180,7 @@ export default async function ReportPage({
   const totalReceivedOneShot = onlyStornato
     ? 0
     : oneShot.reduce(
-        (s, c) => s + Number(c.commission?.received ?? 0),
+        (s, c) => s + reportIncassatoAmount(c.commission),
         0,
       );
   const totalPaid = oneShot.reduce(
@@ -208,7 +209,7 @@ export default async function ReportPage({
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
       cur.count += 1;
-      cur.received += Number(c.commission?.received ?? 0);
+      cur.received += reportIncassatoAmount(c.commission);
       cur.expected += Number(c.commission?.expected ?? 0);
       monthMap.set(key, cur);
     }
@@ -257,7 +258,7 @@ export default async function ReportPage({
       };
       cur.count += 1;
       cur.expected += Number(c.commission?.expected ?? 0);
-      cur.received += Number(c.commission?.received ?? 0);
+      cur.received += reportIncassatoAmount(c.commission);
       cur.paid += Number(c.commission?.paid ?? 0);
       byCollab.set(id, cur);
     }

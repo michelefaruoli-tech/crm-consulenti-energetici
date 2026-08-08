@@ -20,6 +20,20 @@ export type RendicontoIncassatoSource = {
   recurrence: string | null;
 };
 
+/**
+ * Importo da mostrare in Report «Incassato».
+ * Preferisce `received` se valorizzato; altrimenti il gettone (`expected`),
+ * perché molti contratti hanno data incasso ma received ancora a 0.
+ */
+export function reportIncassatoAmount(
+  commission: { received?: unknown; expected?: unknown } | null | undefined,
+): number {
+  const received = Number(commission?.received ?? 0);
+  if (Number.isFinite(received) && received !== 0) return received;
+  const gettone = Number(commission?.expected ?? 0);
+  return Number.isFinite(gettone) ? gettone : 0;
+}
+
 export type RendicontoLine = {
   kind: "incassato" | "storno" | "ricorrente";
   month: string;
@@ -92,7 +106,7 @@ export function buildRendiconto(params: {
         clientName: clientDisplayName(c.client),
         supplierName: c.supplier.name,
         collaboratorName: c.collaborator.name,
-        amount: Number(c.commission?.received ?? 0),
+        amount: reportIncassatoAmount(c.commission),
         dateLabel: isoDate(c.collectionDate) || isoDate(c.insertionDate),
       });
     }
