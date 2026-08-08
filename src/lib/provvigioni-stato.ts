@@ -203,14 +203,132 @@ export function lastRecurringIncassoNote(
 
 /**
  * Collaboratore: cognome per esteso + iniziale del nome (es. «Faruoli M.»).
- * Assume ordine «Cognome Nome» (come negli elenchi italiani).
+ * Gestisce sia «Cognome Nome» sia «Nome Cognome» (molti utenti misti in anagrafe).
  */
+const ITALIAN_FIRST_NAMES = new Set(
+  [
+    "alessandra",
+    "alessandro",
+    "andrea",
+    "angela",
+    "anna",
+    "annarita",
+    "antonella",
+    "antonello",
+    "antonio",
+    "chiara",
+    "claudia",
+    "cristina",
+    "daniela",
+    "daniele",
+    "davide",
+    "elena",
+    "elisa",
+    "emanuele",
+    "enrico",
+    "erika",
+    "fabiana",
+    "fabio",
+    "federica",
+    "federico",
+    "francesca",
+    "francesco",
+    "gabriel",
+    "gabriele",
+    "giada",
+    "giorgia",
+    "giorgio",
+    "giovanna",
+    "giovanni",
+    "giulia",
+    "giuseppe",
+    "ilaria",
+    "laura",
+    "leonardo",
+    "luca",
+    "lucia",
+    "lucius",
+    "luigi",
+    "marco",
+    "maria",
+    "marina",
+    "mario",
+    "marta",
+    "martina",
+    "massimo",
+    "matteo",
+    "mattia",
+    "mauro",
+    "michele",
+    "nicola",
+    "paolo",
+    "pasquale",
+    "patrizia",
+    "pietro",
+    "roberta",
+    "roberto",
+    "rosa",
+    "salvatore",
+    "sara",
+    "serena",
+    "silvia",
+    "simona",
+    "stefania",
+    "stefano",
+    "valentina",
+    "valeria",
+    "vincenzo",
+    "vito",
+  ].map((s) => s.toLowerCase()),
+);
+
+function normalizeNameToken(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function capitalizeWord(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export function formatCollaboratorShort(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "";
-  if (parts.length === 1) return parts[0];
-  const cognome = parts[0];
-  const nome = parts.slice(1).join(" ");
+  const raw = fullName.trim().replace(/\s+/g, " ");
+  if (!raw) return "";
+
+  // Già abbreviato tipo «Giuseppe.m» / «Giuseppe.M.»
+  const dotted = raw.match(/^([A-Za-zÀ-ÿ'’-]+)\.([A-Za-zÀ-ÿ])\.?$/u);
+  if (dotted) {
+    return `${capitalizeWord(dotted[1]!)} ${dotted[2]!.toUpperCase()}.`;
+  }
+
+  const parts = raw.split(" ").filter(Boolean);
+  if (parts.length === 1) return parts[0]!;
+
+  const first = parts[0]!;
+  const last = parts[parts.length - 1]!;
+  const firstIsNome = ITALIAN_FIRST_NAMES.has(normalizeNameToken(first));
+  const lastIsNome = ITALIAN_FIRST_NAMES.has(normalizeNameToken(last));
+
+  let cognome: string;
+  let nome: string;
+
+  if (firstIsNome && !lastIsNome) {
+    // «Francesco Giudice» → cognome Giudice, nome Francesco
+    nome = first;
+    cognome = parts.slice(1).join(" ");
+  } else if (!firstIsNome && lastIsNome) {
+    // «Fagiano Marco» / «Laforgia Vito»
+    cognome = parts.slice(0, -1).join(" ");
+    nome = last;
+  } else {
+    // Ambiguo o entrambi sconosciuti: convenzione CRM «Cognome Nome»
+    cognome = first;
+    nome = parts.slice(1).join(" ");
+  }
+
   const iniziale = nome.charAt(0).toUpperCase();
   return iniziale ? `${cognome} ${iniziale}.` : cognome;
 }

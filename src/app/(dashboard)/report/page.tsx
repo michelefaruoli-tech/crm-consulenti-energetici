@@ -37,6 +37,7 @@ import {
   resolveReportStati,
   resolveReportStato,
 } from "@/lib/report-filters";
+import { formatCollaboratorShort } from "@/lib/provvigioni-stato";
 
 export default async function ReportPage({
   searchParams,
@@ -340,10 +341,12 @@ export default async function ReportPage({
             name="collaboratorId"
             emptyLabel="Tutti i collaboratori"
             initialValues={collabIds}
-            options={collaborators.map((u) => ({
-              value: u.id,
-              label: u.name,
-            }))}
+            options={[...collaborators]
+              .map((u) => ({
+                value: u.id,
+                label: formatCollaboratorShort(u.name),
+              }))
+              .sort((a, b) => a.label.localeCompare(b.label, "it"))}
           />
         </Field>
         <Field label="Fornitore">

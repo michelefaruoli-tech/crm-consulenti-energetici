@@ -119,7 +119,9 @@ export function MultiSelectFilter({
                 checked={selected.has(o.value)}
                 onChange={() => toggle(o.value)}
               />
-              <span className="truncate text-sm">{o.label}</span>
+              <span className="text-sm" title={o.label}>
+                {o.label}
+              </span>
             </label>
           ))}
         </div>
