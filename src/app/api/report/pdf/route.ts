@@ -8,7 +8,9 @@ import { clientDisplayName } from "@/lib/utils";
 import { simplifiedProvvigioneStato } from "@/lib/provvigioni-stato";
 import {
   buildReportContractWhere,
+  formatMonthsLabel,
   reportPeriodUsesCollectionDate,
+  resolveReportPeriod,
   resolveReportStato,
 } from "@/lib/report-filters";
 
@@ -45,13 +47,19 @@ export async function GET(req: NextRequest) {
       : { insertionDate: "desc" },
   });
 
+  const period = resolveReportPeriod({ from, to, month });
+  const periodLabel =
+    period.months.length > 0
+      ? formatMonthsLabel(period.months)
+      : `${period.from} – ${period.to}`;
+
   const doc = new jsPDF();
   doc.setFontSize(16);
   doc.text("Report Contratti - CRM Energia", 14, 18);
   doc.setFontSize(10);
   doc.text(`Generato il ${new Date().toLocaleString("it-IT")}`, 14, 26);
   doc.text(
-    `Filtri: ${stato}${month ? ` · ${month}` : ""}${from ? ` · dal ${from}` : ""}${to ? ` · al ${to}` : ""} · ${contracts.length} contratti`,
+    `Filtri: ${stato} · ${periodLabel} · ${contracts.length} contratti`,
     14,
     32,
   );

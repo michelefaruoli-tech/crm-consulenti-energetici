@@ -8,6 +8,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import {
+  monthToDateRange,
   parseFilterList,
   reportDateRange,
   resolveReportPeriod,
@@ -41,13 +42,26 @@ export async function loadReportStornos(params: {
 }): Promise<ReportStornoRow[]> {
   const period = resolveReportPeriod(params);
   const { dateFrom, dateTo } = reportDateRange(period.from, period.to);
+  const months = period.months;
+
+  // Unione mesi (anche non contigui), altrimenti intervallo Dal/Al
+  const stornoDateWhere =
+    months.length > 1
+      ? {
+          OR: months.map((m) => {
+            const r = monthToDateRange(m)!;
+            const range = reportDateRange(r.from, r.to);
+            return { stornoDate: { gte: range.dateFrom, lte: range.dateTo } };
+          }),
+        }
+      : { stornoDate: { gte: dateFrom, lte: dateTo } };
 
   const collabIds = parseFilterList(params.collaboratorId);
   const supplierIds = parseFilterList(params.supplierId);
 
   const rows = await prisma.commission.findMany({
     where: {
-      stornoDate: { gte: dateFrom, lte: dateTo },
+      ...stornoDateWhere,
       stornoAmount: { not: null },
       contract: {
         AND: [

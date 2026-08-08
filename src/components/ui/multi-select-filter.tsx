@@ -19,6 +19,7 @@ export function MultiSelectFilter({
   initialValues = [],
   emptyLabel = "Tutti",
   className,
+  onChange,
 }: {
   name: string;
   options: MultiSelectOption[];
@@ -26,6 +27,8 @@ export function MultiSelectFilter({
   initialValues?: string[];
   emptyLabel?: string;
   className?: string;
+  /** Notifica ogni volta che cambia la selezione (prima di «Applica filtri»). */
+  onChange?: (values: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(
@@ -57,13 +60,16 @@ export function MultiSelectFilter({
 
   const hiddenValue = [...selected].join("|");
 
+  function commit(next: Set<string>) {
+    setSelected(next);
+    onChange?.([...next]);
+  }
+
   function toggle(value: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(value)) next.delete(value);
-      else next.add(value);
-      return next;
-    });
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    commit(next);
   }
 
   return (
@@ -91,16 +97,14 @@ export function MultiSelectFilter({
             <button
               type="button"
               className="text-emerald-700"
-              onClick={() =>
-                setSelected(new Set(options.map((o) => o.value)))
-              }
+              onClick={() => commit(new Set(options.map((o) => o.value)))}
             >
               Tutti
             </button>
             <button
               type="button"
               className="text-slate-500"
-              onClick={() => setSelected(new Set())}
+              onClick={() => commit(new Set())}
             >
               Nessuno
             </button>

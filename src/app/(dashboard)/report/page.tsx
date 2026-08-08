@@ -25,7 +25,7 @@ import {
   REPORT_MONTH_LABELS,
   REPORT_STATO_OPTIONS,
   buildReportContractWhere,
-  formatMonthLabel,
+  formatMonthsLabel,
   parseFilterList,
   recentMonthOptions,
   reportDateRange,
@@ -72,6 +72,7 @@ export default async function ReportPage({
   const from = period.from;
   const to = period.to;
   const month = period.month;
+  const months = period.months;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
 
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
@@ -307,9 +308,10 @@ export default async function ReportPage({
   qs.set("stato", stato);
   const exportQs = `?${qs.toString()}`;
 
-  const periodLabelText = month
-    ? formatMonthLabel(month)
-    : `${dateFrom.toLocaleDateString("it-IT")} – ${dateTo.toLocaleDateString("it-IT")}`;
+  const periodLabelText =
+    months.length > 0
+      ? formatMonthsLabel(months)
+      : `${dateFrom.toLocaleDateString("it-IT")} – ${dateTo.toLocaleDateString("it-IT")}`;
 
   return (
     <div className="space-y-8">

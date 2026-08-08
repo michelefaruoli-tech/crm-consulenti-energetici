@@ -16,13 +16,16 @@ import {
   formatFilterList,
   provvigioneStatoWhere,
 } from "@/lib/provvigioni-filters";
-import { resolveReportPeriod } from "@/lib/report-month";
+import {
+  resolveReportPeriod,
+  monthToDateRange,
+} from "@/lib/report-month";
 import { APP_TZ } from "@/lib/timezone";
 
 export type ReportFilterParams = {
   from?: string | null;
   to?: string | null;
-  /** Mese intero YYYY-MM (ha priorità su from/to se valorizzato) */
+  /** Uno o più mesi YYYY-MM separati da `|` (ha priorità su from/to) */
   month?: string | null;
   /** Uno o più ID collaboratore (separati da |) */
   collaboratorId?: string | null;
@@ -44,6 +47,8 @@ export {
   REPORT_MONTH_LABELS,
   monthToDateRange,
   formatMonthLabel,
+  formatMonthsLabel,
+  parseMonthList,
   recentMonthOptions,
   currentMonthValue,
   resolveReportPeriod,
@@ -138,6 +143,32 @@ function dateWhereForStato(
   return { insertionDate: { gte: dateFrom, lte: dateTo } };
 }
 
+/** Unione di mesi (anche non contigui: Maggio + Agosto senza Giugno). */
+function dateWhereForStatoPeriod(
+  stato: string,
+  months: string[],
+  fallbackFrom: Date,
+  fallbackTo: Date,
+): Prisma.ContractWhereInput {
+  if (months.length <= 1) {
+    if (months.length === 1) {
+      const r = monthToDateRange(months[0]!);
+      if (r) {
+        const { dateFrom, dateTo } = reportDateRange(r.from, r.to);
+        return dateWhereForStato(stato, dateFrom, dateTo);
+      }
+    }
+    return dateWhereForStato(stato, fallbackFrom, fallbackTo);
+  }
+  return {
+    OR: months.map((m) => {
+      const r = monthToDateRange(m)!;
+      const { dateFrom, dateTo } = reportDateRange(r.from, r.to);
+      return dateWhereForStato(stato, dateFrom, dateTo);
+    }),
+  };
+}
+
 export function buildReportContractWhere(
   params: ReportFilterParams,
   visibility: Prisma.ContractWhereInput,
@@ -145,6 +176,7 @@ export function buildReportContractWhere(
   const period = resolveReportPeriod(params);
   const { dateFrom, dateTo } = reportDateRange(period.from, period.to);
   const stati = resolveReportStati(params.stato);
+  const months = period.months;
 
   const and: Prisma.ContractWhereInput[] = [
     visibility,
@@ -153,10 +185,10 @@ export function buildReportContractWhere(
   ];
 
   if (stati.includes("Tutti")) {
-    and.push({ collectionDate: { gte: dateFrom, lte: dateTo } });
+    and.push(dateWhereForStatoPeriod("Tutti", months, dateFrom, dateTo));
   } else if (stati.length === 1) {
     const s = stati[0]!;
-    and.push(dateWhereForStato(s, dateFrom, dateTo));
+    and.push(dateWhereForStatoPeriod(s, months, dateFrom, dateTo));
     const statoWhere = provvigioneStatoWhere(s);
     if (statoWhere) and.push(statoWhere);
   } else {
@@ -166,7 +198,7 @@ export function buildReportContractWhere(
       const statoWhere = provvigioneStatoWhere(s);
       ors.push({
         AND: [
-          dateWhereForStato(s, dateFrom, dateTo),
+          dateWhereForStatoPeriod(s, months, dateFrom, dateTo),
           ...(statoWhere ? [statoWhere] : []),
         ],
       });

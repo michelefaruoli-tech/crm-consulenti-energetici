@@ -23,8 +23,13 @@ export type ReportRecurringRow = {
 };
 
 function periodsInRange(from: string, to: string, month?: string | null): string[] {
-  if (month && /^\d{4}-\d{2}$/.test(month.trim())) {
-    return [month.trim()];
+  // Mesi espliciti (anche multi: 2026-05|2026-06)
+  if (month?.trim()) {
+    const parts = month
+      .split("|")
+      .map((s) => s.trim())
+      .filter((s) => /^\d{4}-\d{2}$/.test(s));
+    if (parts.length > 0) return [...new Set(parts)].sort();
   }
   // from/to sono YYYY-MM-DD (già risolti come mese o periodo)
   const start = from.slice(0, 7);

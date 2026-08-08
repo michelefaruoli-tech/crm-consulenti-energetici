@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Field, Input, Select } from "@/components/ui/form";
-import { monthToDateRange } from "@/lib/report-month";
+import { Field, Input } from "@/components/ui/form";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
+import { monthToDateRange, parseMonthList } from "@/lib/report-month";
 
 type MonthOpt = { value: string; label: string };
 
 /**
- * Tendina "Mese intero" + Dal/Al.
- * Se scegli un mese (es. Luglio 2026), Dal/Al si impostano automaticamente
- * al 1° e all'ultimo giorno. Puoi ancora cambiare le date a mano (periodo libero).
+ * Tendina multi-mese + Dal/Al.
+ * Spunta uno o più mesi (es. Maggio + Giugno): Dal/Al si impostano
+ * al 1° del mese più vecchio e all'ultimo del più recente.
+ * Se cambi Dal/Al a mano, la tendina mesi si svuota (periodo libero).
  */
 export function ReportPeriodFields({
   monthOptions,
@@ -18,45 +20,45 @@ export function ReportPeriodFields({
   initialTo,
 }: {
   monthOptions: MonthOpt[];
+  /** Uno o più mesi YYYY-MM uniti con `|` */
   initialMonth: string;
   initialFrom: string;
   initialTo: string;
 }) {
-  const [month, setMonth] = useState(initialMonth || "");
+  const [months, setMonths] = useState<string[]>(() =>
+    parseMonthList(initialMonth),
+  );
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(initialTo);
 
   useEffect(() => {
-    setMonth(initialMonth || "");
+    setMonths(parseMonthList(initialMonth));
     setFrom(initialFrom);
     setTo(initialTo);
   }, [initialMonth, initialFrom, initialTo]);
 
-  function applyMonth(value: string) {
-    setMonth(value);
-    if (!value) return;
-    const range = monthToDateRange(value);
-    if (range) {
-      setFrom(range.from);
-      setTo(range.to);
+  function applyMonths(values: string[]) {
+    const sorted = [...values].sort();
+    setMonths(sorted);
+    if (sorted.length === 0) return;
+    const first = monthToDateRange(sorted[0]!);
+    const last = monthToDateRange(sorted[sorted.length - 1]!);
+    if (first && last) {
+      setFrom(first.from);
+      setTo(last.to);
     }
   }
 
   return (
     <>
       <Field label="Mese di incasso">
-        <Select
+        <MultiSelectFilter
           name="month"
-          value={month}
-          onChange={(e) => applyMonth(e.target.value)}
-        >
-          <option value="">Periodo personalizzato (usa Dal / Al)</option>
-          {monthOptions.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+          emptyLabel="Periodo personalizzato (usa Dal / Al)"
+          initialValues={months}
+          options={monthOptions}
+          onChange={applyMonths}
+        />
       </Field>
       <Field label="Dal">
         <Input
@@ -65,7 +67,7 @@ export function ReportPeriodFields({
           value={from}
           onChange={(e) => {
             setFrom(e.target.value);
-            setMonth("");
+            setMonths([]);
           }}
         />
       </Field>
@@ -76,7 +78,7 @@ export function ReportPeriodFields({
           value={to}
           onChange={(e) => {
             setTo(e.target.value);
-            setMonth("");
+            setMonths([]);
           }}
         />
       </Field>

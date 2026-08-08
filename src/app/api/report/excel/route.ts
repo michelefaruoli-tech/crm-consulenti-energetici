@@ -17,9 +17,11 @@ import {
 } from "@/lib/report-stornos";
 import {
   buildReportContractWhere,
+  formatMonthsLabel,
   reportHasStato,
   reportPeriodUsesCollectionDate,
   reportPeriodUsesStornoDate,
+  resolveReportPeriod,
   resolveReportStati,
   resolveReportStato,
 } from "@/lib/report-filters";
@@ -189,10 +191,16 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const period = resolveReportPeriod({ from, to, month });
   const meta = workbook.addWorksheet("Filtri");
-  meta.addRow(["Mese", month ?? ""]);
-  meta.addRow(["Dal", from ?? ""]);
-  meta.addRow(["Al", to ?? ""]);
+  meta.addRow([
+    "Mese",
+    period.months.length > 0
+      ? formatMonthsLabel(period.months)
+      : (month ?? ""),
+  ]);
+  meta.addRow(["Dal", period.from]);
+  meta.addRow(["Al", period.to]);
   meta.addRow(["Collaboratore ID", collaboratorId ?? "Tutti"]);
   meta.addRow(["Fornitore ID", supplierId ?? "Tutti"]);
   meta.addRow(["Stato provvigione", stato]);

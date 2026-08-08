@@ -60,21 +60,56 @@ function guessMonthFromRange(from: string, to: string): string | null {
   return null;
 }
 
+/** Mesi multipli da URL: `2026-05|2026-06` (separatore `|`). */
+export function parseMonthList(raw: string | null | undefined): string[] {
+  if (!raw?.trim() || raw.trim() === "custom") return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split("|")) {
+    const m = part.trim();
+    if (!/^\d{4}-\d{2}$/.test(m) || seen.has(m)) continue;
+    seen.add(m);
+    out.push(m);
+  }
+  return out.sort();
+}
+
+/** Etichetta leggibile per uno o più mesi. */
+export function formatMonthsLabel(months: string[]): string {
+  if (months.length === 0) return "";
+  if (months.length === 1) return formatMonthLabel(months[0]!);
+  if (months.length === 2) {
+    return `${formatMonthLabel(months[0]!)} + ${formatMonthLabel(months[1]!)}`;
+  }
+  return `${months.length} mesi (${formatMonthLabel(months[0]!)} … ${formatMonthLabel(months[months.length - 1]!)})`;
+}
+
 /**
  * Risolve from/to:
- * 1) se c'è `month` valido → intero mese
- * 2) altrimenti from/to passati
- * 3) altrimenti mese corrente (report mensili sono il caso tipico)
+ * 1) se c'è `month` (anche più mesi con `|`) → unione di quei mesi
+ * 2) altrimenti from/to passati (periodo personalizzato)
+ * 3) altrimenti mese corrente
+ *
+ * Con più mesi: `from`/`to` = inizio del più vecchio → fine del più recente
+ * (per Dal/Al); il filtro contratti usa l'unione dei mesi (anche non contigui).
  */
 export function resolveReportPeriod(params: {
   from?: string | null;
   to?: string | null;
   month?: string | null;
-}): { from: string; to: string; month: string | null } {
-  const monthRaw = params.month?.trim() || "";
-  if (monthRaw && monthRaw !== "custom") {
-    const range = monthToDateRange(monthRaw);
-    if (range) return { ...range, month: monthRaw };
+}): { from: string; to: string; month: string | null; months: string[] } {
+  const months = parseMonthList(params.month);
+  if (months.length > 0) {
+    const first = monthToDateRange(months[0]!);
+    const last = monthToDateRange(months[months.length - 1]!);
+    if (first && last) {
+      return {
+        from: first.from,
+        to: last.to,
+        month: months.join("|"),
+        months,
+      };
+    }
   }
 
   if (params.from?.trim() && params.to?.trim()) {
@@ -83,10 +118,11 @@ export function resolveReportPeriod(params: {
       from: params.from.trim(),
       to: params.to.trim(),
       month: guessed,
+      months: guessed ? [guessed] : [],
     };
   }
 
   const cur = currentMonthValue();
   const range = monthToDateRange(cur)!;
-  return { ...range, month: cur };
+  return { ...range, month: cur, months: [cur] };
 }
