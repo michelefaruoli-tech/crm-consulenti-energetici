@@ -88,10 +88,11 @@ export default async function ClienteDetailPage({
     canChangeCollaborator || hasPermission(session.role, "contracts.change_collaborator_dashboard")
       ? prisma.user.findMany({
           where: {
+            active: true,
             role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
           },
           select: { id: true, name: true, active: true, role: true },
-          orderBy: [{ active: "desc" }, { name: "asc" }],
+          orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
   ]);

@@ -1024,6 +1024,85 @@ export async function restoreAllDeletedUsersAction(): Promise<void> {
   revalidatePath("/utenti");
 }
 
+/**
+ * Cancella dal DB gli utenti già soft-deleted (active=false) che non hanno
+ * contratti come collaboratore. Riassegna clienti/audit all’admin corrente.
+ * Così spariscono del tutto dalle tendine Collab.
+ */
+export async function purgeDeletedUsersPermanentlyAction(): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "users.manage")) {
+    throw new Error("Permesso negato");
+  }
+
+  const deleted = await prisma.user.findMany({
+    where: { active: false, id: { not: session.id } },
+    select: {
+      id: true,
+      name: true,
+      _count: { select: { contracts: true } },
+    },
+  });
+
+  for (const user of deleted) {
+    if (user._count.contracts > 0) continue;
+
+    // Neon HTTP: niente $transaction / cascade Prisma → SQL grezzo
+    const id = user.id;
+    const adminId = session.id;
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Client" SET "createdById" = $1 WHERE "createdById" = $2`,
+      adminId,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Contract" SET "createdById" = $1 WHERE "createdById" = $2`,
+      adminId,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ContractStatusHistory" SET "changedById" = $1 WHERE "changedById" = $2`,
+      adminId,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `UPDATE "AuditLog" SET "userId" = $1 WHERE "userId" = $2`,
+      adminId,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `UPDATE "CommissionEntry" SET "paidById" = NULL WHERE "paidById" = $1`,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ContractEmailLog" SET "sentById" = NULL WHERE "sentById" = $1`,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "UserSupplierScope" WHERE "userId" = $1`,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "UserCollaboratorScope" WHERE "userId" = $1 OR "collaboratorId" = $1`,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "PasswordResetToken" WHERE "userId" = $1`,
+      id,
+    );
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "UserSecurityEvent" WHERE "userId" = $1`,
+      id,
+    );
+    await prisma.$executeRawUnsafe(`DELETE FROM "User" WHERE id = $1`, id);
+  }
+
+  revalidatePath("/utenti");
+  revalidatePath("/provvigioni");
+  revalidatePath("/contratti");
+  revalidatePath("/report");
+}
+
 /** Backup manuale Excel (+ email opzionale). Restituisce base64 per il download. */
 export async function runBackupAction(opts?: {
   sendEmail?: boolean;

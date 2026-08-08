@@ -109,10 +109,11 @@ export default async function ContrattiPage({
       canChangeCollaborator || canViewAll
         ? prisma.user.findMany({
             where: {
+              active: true,
               role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
             },
             select: { id: true, name: true, active: true, role: true },
-            orderBy: [{ active: "desc" }, { name: "asc" }],
+            orderBy: { name: "asc" },
           })
         : Promise.resolve([]),
       canViewAll

@@ -14,6 +14,7 @@ import {
   deleteUserAction,
   restoreUserAction,
   restoreAllDeletedUsersAction,
+  purgeDeletedUsersPermanentlyAction,
 } from "@/lib/actions";
 import { roleSupportsSupplierScope } from "@/lib/user-scope";
 
@@ -276,12 +277,23 @@ export default async function UtentiPage() {
                 collegati a loro.
               </p>
             </div>
-            <form action={restoreAllDeletedUsersAction}>
-              <Button type="submit" variant="secondary">
-                Ripristina tutti
-              </Button>
-            </form>
+            <div className="flex flex-wrap gap-2">
+              <form action={restoreAllDeletedUsersAction}>
+                <Button type="submit" variant="secondary">
+                  Ripristina tutti
+                </Button>
+              </form>
+              <form action={purgeDeletedUsersPermanentlyAction}>
+                <Button type="submit" variant="danger">
+                  Elimina definitivamente
+                </Button>
+              </form>
+            </div>
           </div>
+          <p className="text-xs text-slate-500">
+            «Elimina definitivamente» cancella dal database gli account senza
+            contratti collegati (non si possono più ripristinare).
+          </p>
 
           <div className="overflow-hidden rounded-xl border border-rose-200 bg-white shadow-sm">
             <table className="min-w-full text-sm">
