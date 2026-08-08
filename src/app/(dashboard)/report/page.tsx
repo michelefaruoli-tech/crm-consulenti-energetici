@@ -611,8 +611,10 @@ export default async function ReportPage({
             </Link>
           </div>
           <p className="mt-4 text-sm text-slate-600">
-            L&apos;Excel include i fogli <strong>Rate ricorrenti</strong> e{" "}
-            <strong>Storni</strong> (importi negativi del periodo).
+            Excel e PDF aprono con un foglio/sezione <strong>Rendiconto</strong>:
+            Incassato + Storni (con i contratti) + eventuali rate ricorrenti, con
+            subtotali. Se selezioni più mesi, trovi un blocco per ciascun mese e il
+            totale netto di tutto.
           </p>
         </section>
 
