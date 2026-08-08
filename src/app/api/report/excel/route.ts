@@ -17,8 +17,10 @@ import {
 } from "@/lib/report-stornos";
 import {
   buildReportContractWhere,
+  reportHasStato,
   reportPeriodUsesCollectionDate,
   reportPeriodUsesStornoDate,
+  resolveReportStati,
   resolveReportStato,
 } from "@/lib/report-filters";
 import { isInFornitura } from "@/lib/supply-dates";
@@ -36,6 +38,7 @@ export async function GET(req: NextRequest) {
   const collaboratorId = sp.get("collaboratorId");
   const supplierId = sp.get("supplierId");
   const stato = resolveReportStato(sp.get("stato"));
+  const stati = resolveReportStati(sp.get("stato"));
 
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
@@ -67,10 +70,10 @@ export async function GET(req: NextRequest) {
   const recurringTotals = sumReportRecurring(recurringRows);
 
   const includeStornos =
-    stato === "Incassato" ||
-    stato === "Pagato" ||
-    stato === "Tutti" ||
-    stato === "Stornato";
+    reportHasStato(stati, "Incassato") ||
+    reportHasStato(stati, "Pagato") ||
+    reportHasStato(stati, "Tutti") ||
+    reportHasStato(stati, "Stornato");
   const stornoRows = includeStornos
     ? await loadReportStornos({
         from,

@@ -3,7 +3,8 @@ import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, Textarea } from "@/components/ui/form";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 import { sendReportEmailAction } from "@/lib/actions";
 import { BackupButton } from "@/components/report/backup-button";
 import { ReportPeriodFields } from "@/components/report/report-period-fields";
@@ -25,11 +26,14 @@ import {
   REPORT_STATO_OPTIONS,
   buildReportContractWhere,
   formatMonthLabel,
+  parseFilterList,
   recentMonthOptions,
   reportDateRange,
+  reportHasStato,
   reportPeriodUsesCollectionDate,
   reportStatoHint,
   resolveReportPeriod,
+  resolveReportStati,
   resolveReportStato,
 } from "@/lib/report-filters";
 
@@ -57,6 +61,9 @@ export default async function ReportPage({
     stato: statoRaw,
   } = await searchParams;
   const stato = resolveReportStato(statoRaw);
+  const stati = resolveReportStati(statoRaw);
+  const collabIds = parseFilterList(collaboratorId);
+  const supplierIds = parseFilterList(supplierId);
   const period = resolveReportPeriod({
     from: fromRaw,
     to: toRaw,
@@ -140,10 +147,10 @@ export default async function ReportPage({
   const recurringTotals = sumReportRecurring(recurringRows);
 
   const includeStornos =
-    stato === "Incassato" ||
-    stato === "Pagato" ||
-    stato === "Tutti" ||
-    stato === "Stornato";
+    reportHasStato(stati, "Incassato") ||
+    reportHasStato(stati, "Pagato") ||
+    reportHasStato(stati, "Tutti") ||
+    reportHasStato(stati, "Stornato");
   const stornoRows = includeStornos
     ? await loadReportStornos({
         from,
@@ -156,36 +163,42 @@ export default async function ReportPage({
     : [];
   const stornoTotals = sumReportStornos(stornoRows);
 
+  const onlyStornato =
+    stati.length > 0 && stati.every((s) => s === "Stornato");
+
   // Una tantum: evita di contare due volte i contratti R (già in RecurringMonth)
   // Con «Stornato» i contratti arrivano già filtrati per data storno: non sommare received,
   // solo gli importi storno (negativi).
   const oneShot = contracts.filter((c) => !isRecurring(c.recurrence));
-  const totalContracts = contracts.length + (stato === "Stornato" ? 0 : 0);
+  const totalContracts = contracts.length;
   const totalExpected = oneShot.reduce(
     (s, c) => s + Number(c.commission?.expected ?? 0),
     0,
   );
-  const totalReceivedOneShot =
-    stato === "Stornato"
-      ? 0
-      : oneShot.reduce(
-          (s, c) => s + Number(c.commission?.received ?? 0),
-          0,
-        );
+  const totalReceivedOneShot = onlyStornato
+    ? 0
+    : oneShot.reduce(
+        (s, c) => s + Number(c.commission?.received ?? 0),
+        0,
+      );
   const totalPaid = oneShot.reduce(
     (s, c) => s + Number(c.commission?.paid ?? 0),
     0,
   );
+  const includeRecurring =
+    reportHasStato(stati, "Incassato") ||
+    reportHasStato(stati, "Pagato") ||
+    reportHasStato(stati, "Tutti");
   const totalReceived =
     totalReceivedOneShot +
-    (stato === "Incassato" || stato === "Pagato" || stato === "Tutti"
-      ? recurringTotals.amount
-      : 0) +
+    (includeRecurring ? recurringTotals.amount : 0) +
     (includeStornos ? stornoTotals.amount : 0);
 
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
   const groupByCollection = reportPeriodUsesCollectionDate(stato);
-  if (stato !== "Stornato") {
+  if (onlyStornato) {
+    // solo storni sotto
+  } else {
     for (const c of oneShot) {
       const baseDate = groupByCollection
         ? c.collectionDate ?? c.insertionDate
@@ -200,7 +213,7 @@ export default async function ReportPage({
     }
   }
   for (const r of recurringRows) {
-    if (!(stato === "Incassato" || stato === "Pagato" || stato === "Tutti")) break;
+    if (!includeRecurring) break;
     const key = r.settledPeriod || r.period;
     const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
     cur.count += 1;
@@ -229,7 +242,7 @@ export default async function ReportPage({
     string,
     { name: string; count: number; expected: number; received: number; paid: number; recurring: number; storno: number }
   >();
-  if (stato !== "Stornato") {
+  if (!onlyStornato) {
     for (const c of oneShot) {
       const id = c.collaboratorId;
       const cur = byCollab.get(id) ?? {
@@ -248,7 +261,7 @@ export default async function ReportPage({
       byCollab.set(id, cur);
     }
   }
-  if (stato === "Incassato" || stato === "Pagato" || stato === "Tutti") {
+  if (includeRecurring) {
     for (const r of recurringRows) {
       const cur = byCollab.get(r.collaboratorId) ?? {
         name: r.collaboratorName,
@@ -309,7 +322,10 @@ export default async function ReportPage({
         </p>
       </div>
 
-      <form className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <form
+        method="get"
+        className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7"
+      >
         <ReportPeriodFields
           monthOptions={monthOptions}
           initialMonth={month ?? ""}
@@ -317,33 +333,41 @@ export default async function ReportPage({
           initialTo={to}
         />
         <Field label="Collaboratore">
-          <Select name="collaboratorId" defaultValue={collaboratorId ?? ""}>
-            <option value="">Tutti</option>
-            {collaborators.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
+          <MultiSelectFilter
+            name="collaboratorId"
+            emptyLabel="Tutti i collaboratori"
+            initialValues={collabIds}
+            options={collaborators.map((u) => ({
+              value: u.id,
+              label: u.name,
+            }))}
+          />
         </Field>
         <Field label="Fornitore">
-          <Select name="supplierId" defaultValue={supplierId ?? ""}>
-            <option value="">Tutti</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
+          <MultiSelectFilter
+            name="supplierId"
+            emptyLabel="Tutti i fornitori"
+            initialValues={supplierIds}
+            options={suppliers.map((s) => ({
+              value: s.id,
+              label: s.name,
+            }))}
+          />
         </Field>
         <Field label="Stato provvigione">
-          <Select name="stato" defaultValue={stato}>
-            {REPORT_STATO_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </Select>
+          <MultiSelectFilter
+            name="stato"
+            emptyLabel="Incassato (default se vuoto)"
+            initialValues={
+              stati.includes("Tutti")
+                ? ["Tutti"]
+                : stati
+            }
+            options={REPORT_STATO_OPTIONS.map((o) => ({
+              value: o,
+              label: o,
+            }))}
+          />
         </Field>
         <div className="flex items-end">
           <Button type="submit" className="w-full">
@@ -367,7 +391,9 @@ export default async function ReportPage({
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-        <p className="font-semibold">Filtro attivo: {stato}</p>
+        <p className="font-semibold">
+          Filtro attivo: {stati.join(" + ")}
+        </p>
         <p className="mt-1">{reportStatoHint(stato)}</p>
         <ul className="mt-2 list-inside list-disc text-xs text-amber-900/90">
           <li>
@@ -421,11 +447,7 @@ export default async function ReportPage({
           </p>
           <p className="mt-1 text-[11px] text-emerald-800">
             una tantum {formatCurrency(totalReceivedOneShot)} + ricorrenti{" "}
-            {formatCurrency(
-              stato === "Incassato" || stato === "Pagato" || stato === "Tutti"
-                ? recurringTotals.amount
-                : 0,
-            )}{" "}
+            {formatCurrency(includeRecurring ? recurringTotals.amount : 0)}{" "}
             + storni {formatCurrency(includeStornos ? stornoTotals.amount : 0)}
           </p>
         </div>

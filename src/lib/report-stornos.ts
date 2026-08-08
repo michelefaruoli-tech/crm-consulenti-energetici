@@ -7,7 +7,11 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
-import { reportDateRange, resolveReportPeriod } from "@/lib/report-filters";
+import {
+  parseFilterList,
+  reportDateRange,
+  resolveReportPeriod,
+} from "@/lib/report-filters";
 
 export type ReportStornoRow = {
   commissionId: string;
@@ -38,6 +42,9 @@ export async function loadReportStornos(params: {
   const period = resolveReportPeriod(params);
   const { dateFrom, dateTo } = reportDateRange(period.from, period.to);
 
+  const collabIds = parseFilterList(params.collaboratorId);
+  const supplierIds = parseFilterList(params.supplierId);
+
   const rows = await prisma.commission.findMany({
     where: {
       stornoDate: { gte: dateFrom, lte: dateTo },
@@ -47,10 +54,16 @@ export async function loadReportStornos(params: {
           params.visibility,
           { deletedAt: null },
           { isHistorical: false },
-          ...(params.collaboratorId
-            ? [{ collaboratorId: params.collaboratorId }]
-            : []),
-          ...(params.supplierId ? [{ supplierId: params.supplierId }] : []),
+          ...(collabIds.length === 1
+            ? [{ collaboratorId: collabIds[0]! }]
+            : collabIds.length > 1
+              ? [{ collaboratorId: { in: collabIds } }]
+              : []),
+          ...(supplierIds.length === 1
+            ? [{ supplierId: supplierIds[0]! }]
+            : supplierIds.length > 1
+              ? [{ supplierId: { in: supplierIds } }]
+              : []),
         ],
       },
     },
@@ -83,7 +96,6 @@ export async function loadReportStornos(params: {
     .filter((r) => r.stornoDate != null)
     .map((r) => {
       const amount = Number(r.stornoAmount ?? 0);
-      // Sempre negativo in report (detrazione)
       const signed = amount === 0 ? 0 : amount < 0 ? amount : -Math.abs(amount);
       return {
         commissionId: r.id,

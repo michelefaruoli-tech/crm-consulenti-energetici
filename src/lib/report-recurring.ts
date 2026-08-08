@@ -5,7 +5,7 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { resolveReportPeriod } from "@/lib/report-filters";
+import { parseFilterList, resolveReportPeriod } from "@/lib/report-filters";
 
 export type ReportRecurringRow = {
   id: string;
@@ -64,6 +64,9 @@ export async function loadReportRecurringPaid(params: {
   const periods = periodsInRange(period.from, period.to, period.month);
   if (periods.length === 0) return [];
 
+  const collabIds = parseFilterList(params.collaboratorId);
+  const supplierIds = parseFilterList(params.supplierId);
+
   const rows = await prisma.recurringMonth.findMany({
     where: {
       status: "PAID",
@@ -73,10 +76,16 @@ export async function loadReportRecurringPaid(params: {
           params.visibility,
           { deletedAt: null },
           { isHistorical: false },
-          ...(params.collaboratorId
-            ? [{ collaboratorId: params.collaboratorId }]
-            : []),
-          ...(params.supplierId ? [{ supplierId: params.supplierId }] : []),
+          ...(collabIds.length === 1
+            ? [{ collaboratorId: collabIds[0]! }]
+            : collabIds.length > 1
+              ? [{ collaboratorId: { in: collabIds } }]
+              : []),
+          ...(supplierIds.length === 1
+            ? [{ supplierId: supplierIds[0]! }]
+            : supplierIds.length > 1
+              ? [{ supplierId: { in: supplierIds } }]
+              : []),
         ],
       },
     },
