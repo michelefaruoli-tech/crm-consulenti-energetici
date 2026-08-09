@@ -24,6 +24,7 @@ import {
 } from "@/lib/supply-dates";
 import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
+import { ContractEconomicSummary } from "@/components/contracts/contract-economic-summary";
 
 export default async function ContrattoDetailPage({
   params,
@@ -43,7 +44,14 @@ export default async function ContrattoDetailPage({
       supplier: true,
       service: true,
       collaborator: { select: { id: true, name: true, email: true } },
-      commission: true,
+      commission: {
+        include: {
+          entries: { orderBy: { createdAt: "desc" } },
+        },
+      },
+      recurringMonths: {
+        orderBy: { period: "desc" },
+      },
       statusHistory: {
         include: { changedBy: { select: { name: true } } },
         orderBy: { changedAt: "desc" },
@@ -263,6 +271,32 @@ export default async function ContrattoDetailPage({
           ) : null}
         </section>
       </div>
+
+      <ContractEconomicSummary
+        expected={expected}
+        received={received}
+        paid={paid}
+        stornoAmount={Number(contract.commission?.stornoAmount ?? 0)}
+        stornoDate={contract.commission?.stornoDate ?? null}
+        commissionCreatedAt={contract.commission?.createdAt ?? null}
+        commissionConfirmedAt={contract.commissionConfirmedAt}
+        collectionDate={contract.collectionDate}
+        commissionEntries={(contract.commission?.entries ?? []).map((entry) => ({
+          id: entry.id,
+          type: entry.type,
+          amount: Number(entry.amount),
+          note: entry.note,
+          createdAt: entry.createdAt,
+        }))}
+        recurringEntries={contract.recurringMonths.map((entry) => ({
+          id: entry.id,
+          period: entry.period,
+          status: entry.status,
+          amount: Number(entry.amount ?? 0),
+          paidAt: entry.paidAt,
+          settledPeriod: entry.settledPeriod,
+        }))}
+      />
 
       {canEditContract ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
