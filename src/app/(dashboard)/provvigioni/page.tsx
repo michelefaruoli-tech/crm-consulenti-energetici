@@ -12,6 +12,7 @@ import {
 import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
 import { HeliosAbsentPanel } from "@/components/provvigioni/helios-absent-panel";
+import { RecurringReconciliationPanel } from "@/components/provvigioni/recurring-reconciliation-panel";
 import {
   RecurringRendicontoPanel,
   toSettledRow,
@@ -214,6 +215,15 @@ export default async function ProvvigioniPage({
       : session.id;
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
+  const reconciliationPeriod = addMonths(settledPeriod, -1);
+  const reconciliationContractWhere = buildProvvigioniContractWhere({
+    canViewAll: canViewAll || isScoped,
+    sessionUserId: session.id,
+    collab,
+    supplier,
+    recurrenceMode: "monthly",
+    visibility,
+  });
 
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
@@ -378,6 +388,7 @@ export default async function ProvvigioniPage({
     countGettoni,
     countMensili,
     countAnnuali,
+    reconciliationRowsRaw,
   ] = await Promise.all([
     pageContractIds
       ? pageContractIds.length === 0
@@ -493,6 +504,32 @@ export default async function ProvvigioniPage({
           activeRecurringWhere,
         ],
       },
+    }),
+    prisma.recurringMonth.findMany({
+      where: {
+        period: reconciliationPeriod,
+        status: { not: "CLOSED" },
+        contract: reconciliationContractWhere,
+      },
+      select: {
+        id: true,
+        contractId: true,
+        status: true,
+        amount: true,
+        settledPeriod: true,
+        contract: {
+          select: {
+            podPdr: true,
+            pod: true,
+            pdr: true,
+            client: { select: { type: true, companyName: true, firstName: true, lastName: true } },
+            supplier: { select: { name: true } },
+            commission: { select: { expected: true } },
+          },
+        },
+      },
+      orderBy: { contract: { supplier: { name: "asc" } } },
+      take: 3000,
     }),
   ]);
 
@@ -789,6 +826,16 @@ export default async function ProvvigioniPage({
   }));
 
   const settledRows = settledRowsRaw.map(toSettledRow);
+  const reconciliationRows = reconciliationRowsRaw.map((row) => ({
+    id: row.id,
+    contractId: row.contractId,
+    clientName: clientDisplayName(row.contract.client),
+    podPdr: row.contract.pod || row.contract.pdr || row.contract.podPdr || "",
+    supplierName: row.contract.supplier.name,
+    amount: Number(row.amount?.toString() ?? row.contract.commission?.expected?.toString() ?? 0),
+    status: row.status,
+    settledPeriod: row.settledPeriod,
+  }));
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
   const queryBase = {
     collab: collabFilter,
@@ -1002,6 +1049,15 @@ export default async function ProvvigioniPage({
             summary={monthlySummary}
           />
         </>
+      ) : null}
+
+      {vista === "mensile" ? (
+        <RecurringReconciliationPanel
+          competencePeriod={reconciliationPeriod}
+          settledPeriod={settledPeriod}
+          rows={reconciliationRows}
+          supplierLabel={supplier ? supplier.split("|").join(" + ") : "Tutti i fornitori"}
+        />
       ) : null}
 
       {vista === "mensile" ? <HeliosAbsentPanel alerts={heliosAbsentRows} /> : null}
