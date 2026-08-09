@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AutocompleteSearch } from "@/components/contracts/autocomplete-search";
 import { Button } from "@/components/ui/button";
@@ -119,6 +119,14 @@ export function NuovoContrattoForm({
   const [services, setServices] = useState<ContractServiceLine[]>([
     createEmptyServiceLine({ service: "LUCE" }),
   ]);
+  const [podMatches, setPodMatches] = useState<Array<{
+    id: string;
+    client: string;
+    supplier: string;
+    status: string;
+    supplyStartDate: string | null;
+    archived: boolean;
+  }>>([]);
   const [attachments, setAttachments] = useState<
     {
       id: string;
@@ -155,6 +163,40 @@ export function NuovoContrattoForm({
   const firstRecurringLabel = format(effectiveSupplyStart, "MM/yyyy");
   const supplyStartBeforeRegistration =
     format(effectiveSupplyStart, "yyyy-MM-dd") < format(registrationDate, "yyyy-MM-dd");
+
+  const podValues = useMemo(
+    () => [...new Set(services.flatMap((line) => [line.pod, line.pdr]).map((v) => v?.trim()).filter((v): v is string => Boolean(v && v.length >= 6)))],
+    [services],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      if (podValues.length === 0) {
+        setPodMatches([]);
+        return;
+      }
+      try {
+        const results = await Promise.all(
+          podValues.map(async (value) => {
+            const response = await fetch(`/api/contracts/pod-check?value=${encodeURIComponent(value)}`, {
+              signal: controller.signal,
+            });
+            if (!response.ok) return [];
+            const json = (await response.json()) as { matches?: typeof podMatches };
+            return json.matches ?? [];
+          }),
+        );
+        setPodMatches([...new Map(results.flat().map((row) => [row.id, row])).values()]);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setPodMatches([]);
+      }
+    }, 450);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [podValues]);
 
   const req = sendToMaster;
   /** Evidenza campi minimi anche senza invio al Master. */
@@ -981,6 +1023,38 @@ export function NuovoContrattoForm({
             highlightBase={reqBase}
           />
         ))}
+        {podMatches.length > 0 ? (
+          <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-sm text-amber-950">
+            <p className="font-bold">POD/PDR già presente: possibile ricontrattualizzazione</p>
+            <p className="mt-1 text-xs">
+              Salvando, il nuovo contratto resterà attivo e il precedente verrà spostato automaticamente in Archivio e rimosso dalle Provvigioni.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {podMatches.map((match) => (
+                <li key={match.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-amber-200">
+                  <span>
+                    <strong>{match.client}</strong> · {match.supplier} · {match.status}
+                    {match.archived ? " · già archiviato" : ""}
+                  </span>
+                  <a href={`/contratti/${match.id}`} target="_blank" className="font-semibold text-sky-700 hover:underline">
+                    Apri contratto
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+          <strong>Decorrenza economica:</strong>{" "}
+          {hasMonthlyRecurrence
+            ? `prima ricorrente ${firstRecurringLabel}, a partire dal mese di ingresso in fornitura.`
+            : `ingresso previsto ${formatItDate(effectiveSupplyStart)}.`}
+        </div>
+        {supplyStartBeforeRegistration ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+            Attenzione: l&apos;ingresso in fornitura è precedente alla data di registrazione.
+          </p>
+        ) : null}
         <div className="pt-1">
           <AddServiceButton onClick={addService} />
         </div>
@@ -1000,17 +1074,6 @@ export function NuovoContrattoForm({
             <Textarea rows={3} value={masterNotes} onChange={(e) => setMasterNotes(e.target.value)} />
           </Field>
         </div>
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
-          <strong>Decorrenza economica:</strong>{" "}
-          {hasMonthlyRecurrence
-            ? `prima ricorrente ${firstRecurringLabel}, a partire dal mese di ingresso in fornitura.`
-            : `ingresso previsto ${formatItDate(effectiveSupplyStart)}.`}
-        </div>
-        {supplyStartBeforeRegistration ? (
-          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
-            Attenzione: l'ingresso in fornitura è precedente alla data di registrazione.
-          </p>
-        ) : null}
       </details>
 
       <ContractAttachmentsPanel

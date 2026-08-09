@@ -198,6 +198,7 @@ export function buildProvvigioniContractWhere(
   const and: Prisma.ContractWhereInput[] = [
     { deletedAt: null },
     { isHistorical: false },
+    { status: { notIn: [...KO_STATUSES] } },
   ];
 
   if (f.visibility && Object.keys(f.visibility).length > 0) {

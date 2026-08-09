@@ -135,10 +135,33 @@ export async function archiveOlderForContractPods(
     const k = normalizePodKey(r.podPdr || r.pod || r.pdr);
     if (k && k.length >= 6) keys.add(k);
   }
+  if (keys.size === 0) return 0;
+
+  // In una ricontrattualizzazione prevale sempre il contratto appena creato,
+  // anche se l'utente ha indicato una decorrenza anteriore a quella precedente.
+  const candidates = await prisma.contract.findMany({
+    where: {
+      id: { notIn: contractIds },
+      deletedAt: null,
+      isHistorical: false,
+      OR: [{ podPdr: { not: null } }, { pod: { not: null } }, { pdr: { not: null } }],
+    },
+    select: { id: true, podPdr: true, pod: true, pdr: true },
+    take: 12000,
+  });
   let archived = 0;
-  for (const onlyPodKey of keys) {
-    const r = await archiveSupersededPodContracts({ onlyPodKey });
-    archived += r.archived;
+  for (const candidate of candidates) {
+    const key = normalizePodKey(candidate.podPdr || candidate.pod || candidate.pdr);
+    if (!keys.has(key)) continue;
+    try {
+      await prisma.contract.update({
+        where: { id: candidate.id },
+        data: { isHistorical: true, archiveLabel: POD_ARCHIVE_LABEL },
+      });
+      archived += 1;
+    } catch (e) {
+      console.error("[archiveOlderForContractPods]", candidate.id, e);
+    }
   }
   return archived;
 }
