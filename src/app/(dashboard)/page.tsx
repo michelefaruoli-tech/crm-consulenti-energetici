@@ -63,7 +63,6 @@ export default async function DashboardPage({
       moneyTotals,
       commissioniDaConfermare,
       incassateDaLiquidare,
-      contrattiSenzaIngresso,
       ricorrenzeMancanti,
       storniRegistrati,
       topCollaborators,
@@ -144,26 +143,6 @@ export default async function DashboardPage({
       prisma.contract.count({
         where: {
           AND: [whereActive, provvigioneStatoWhere("Incassato") ?? {}],
-        },
-      }),
-      prisma.contract.count({
-        where: {
-          AND: [
-            whereActive,
-            {
-              supplyStartDate: null,
-              collectionDate: null,
-              status: {
-                notIn: [
-                  "PROVVIGIONE_LIQUIDATA",
-                  "KO",
-                  "ANNULLATO",
-                  "CHIUSO",
-                  "STORNATO",
-                ],
-              },
-            },
-          ],
         },
       }),
       prisma.recurringMonth.count({
@@ -346,7 +325,7 @@ export default async function DashboardPage({
             </span>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
               {
                 label: "Provvigioni da confermare",
@@ -361,13 +340,6 @@ export default async function DashboardPage({
                 href: "/provvigioni?stato=Incassato",
                 hint: "Fornitore pagato, collaboratore no",
                 tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
-              },
-              {
-                label: "Ingresso fornitura mancante",
-                value: contrattiSenzaIngresso,
-                href: "/contratti?vista=tutti",
-                hint: "Esclusi i contratti già pagati",
-                tone: "border-orange-200 bg-orange-50 text-orange-950",
               },
               {
                 label: "Ricorrenze mancanti",
