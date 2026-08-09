@@ -982,7 +982,7 @@ type CommissionByContract = {
   contractId: string;
   received: unknown;
   paid: unknown;
-  contract: { collaboratorId: string };
+  contract: { collaboratorId: string; collectionDate: Date | null };
 };
 
 async function assertCanAccessCommissionsByContractIds(
@@ -1000,7 +1000,7 @@ async function assertCanAccessCommissionsByContractIds(
       contractId: true,
       received: true,
       paid: true,
-      contract: { select: { collaboratorId: true } },
+      contract: { select: { collaboratorId: true, collectionDate: true } },
     },
   });
 
@@ -1050,7 +1050,11 @@ export async function bulkLiquidateSelectedAction(
 
     await prisma.contract.update({
       where: { id: r.contractId },
-      data: { status: "PROVVIGIONE_LIQUIDATA" },
+      data: {
+        status: "PROVVIGIONE_LIQUIDATA",
+        paymentStatus: "Incassato",
+        collectionDate: r.contract.collectionDate ?? new Date(),
+      },
     });
   }
 

@@ -194,6 +194,10 @@ export function ProvvigioniFilterTable({
     const d = new Date();
     return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   });
+  const currentMonth = useMemo(() => {
+    const d = new Date();
+    return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  }, []);
 
   const filterResetKey = [
     listQuery?.collab ?? "tutti",
@@ -318,6 +322,22 @@ export function ProvvigioniFilterTable({
   }
 
   const selectedCount = selectedKeys.size;
+  const selectedRows = useMemo(
+    () => rows.filter((r) => selectedKeys.has(rowId(r))),
+    [rows, selectedKeys],
+  );
+  const selectedAmount = useMemo(
+    () =>
+      selectedRows.reduce(
+        (sum, row) => sum + (Number(String(row.amount ?? "0").replace(",", ".")) || 0),
+        0,
+      ),
+    [selectedRows],
+  );
+  const selectedCollaborators = useMemo(
+    () => [...new Set(selectedRows.map((row) => row.collaboratorName).filter(Boolean))],
+    [selectedRows],
+  );
   /** ID contratto delle righe spuntate (chiave tabella = rowId = contratto). */
   const selectedContractIds = useMemo(
     () =>
@@ -452,12 +472,34 @@ export function ProvvigioniFilterTable({
         }
       | { ok: false; error: string }
     >,
+    options: { collectionMonth?: string } = {},
   ) {
     if (selectedCount === 0) {
       setError("Seleziona almeno una riga (checkbox a sinistra).");
       return;
     }
-    if (!window.confirm(`${label}\n\nRighe selezionate: ${selectedCount}. Continuare?`)) {
+    const collaboratorsLabel =
+      selectedCollaborators.length <= 4
+        ? selectedCollaborators.join(", ") || "—"
+        : `${selectedCollaborators.slice(0, 4).join(", ")} + altri ${selectedCollaborators.length - 4}`;
+    const summary = [
+      label,
+      "",
+      `Contratti selezionati: ${selectedCount}`,
+      `Importo totale: ${selectedAmount.toLocaleString("it-IT", {
+        style: "currency",
+        currency: "EUR",
+      })}`,
+      `Collaboratori: ${collaboratorsLabel}`,
+      options.collectionMonth
+        ? `Data incasso: ${options.collectionMonth}`
+        : null,
+      "",
+      "Confermi l'operazione?",
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n");
+    if (!window.confirm(summary)) {
       return;
     }
     setError(null);
@@ -919,12 +961,16 @@ export function ProvvigioniFilterTable({
             disabled={pending}
             className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
             onClick={() =>
-              runBulk("Segna incassato", async () => {
-                const fd = new FormData();
-                fd.set("commissionIds", selectedCommissionIds.join(","));
-                fd.set("collectionMonth", paidMonth);
-                return bulkMarkPaidAction(fd);
-              })
+              runBulk(
+                "Segna incassato",
+                async () => {
+                  const fd = new FormData();
+                  fd.set("commissionIds", selectedCommissionIds.join(","));
+                  fd.set("collectionMonth", paidMonth);
+                  return bulkMarkPaidAction(fd);
+                },
+                { collectionMonth: paidMonth },
+              )
             }
           >
             Segna incassato
@@ -936,11 +982,15 @@ export function ProvvigioniFilterTable({
               disabled={pending}
               className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
               onClick={() =>
-                runBulk("Segna pagato", async () => {
-                  const fd = new FormData();
-                  fd.set("contractIds", selectedContractIds.join(","));
-                  return bulkLiquidateSelectedAction(fd);
-                })
+                runBulk(
+                  "Segna pagato",
+                  async () => {
+                    const fd = new FormData();
+                    fd.set("contractIds", selectedContractIds.join(","));
+                    return bulkLiquidateSelectedAction(fd);
+                  },
+                  { collectionMonth: currentMonth },
+                )
               }
               title="Liquidazione collaboratore: imposta stato PROVVIGIONE_LIQUIDATA"
             >
