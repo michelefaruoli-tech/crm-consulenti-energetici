@@ -27,6 +27,7 @@ import {
   getPaidToLiquidateAlerts,
   syncAllRecurringMonths,
   syncRecurringMonthsForContract,
+  reconcileAllRecurringBounds,
 } from "@/lib/recurring-sync";
 import {
   effectiveCollectionDate,
@@ -204,6 +205,13 @@ export default async function ProvvigioniPage({
       : session.id;
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
+
+  // Prima di conteggi, avvisi e rendiconti esclude tutte le rate fuori fornitura.
+  if (vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti") {
+    await reconcileAllRecurringBounds().catch((e) =>
+      console.error("reconcile recurring bounds", e),
+    );
+  }
 
   const sortByClient = sortRaw === "client";
   const sortDir: "asc" | "desc" = dirRaw === "desc" ? "desc" : "asc";

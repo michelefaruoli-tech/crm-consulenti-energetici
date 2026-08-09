@@ -25,6 +25,78 @@ const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura"
 const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
 
 /**
+ * Controllo globale dei limiti temporali delle ricorrenze già presenti.
+ * Corregge dati storici senza rigenerare ogni rata di ogni contratto.
+ */
+export async function reconcileAllRecurringBounds(): Promise<{
+  checked: number;
+  excluded: number;
+}> {
+  const contracts = await prisma.contract.findMany({
+    where: {
+      isHistorical: false,
+      deletedAt: null,
+      OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr],
+    },
+    select: {
+      id: true,
+      insertionDate: true,
+      supplyStartDate: true,
+      operationType: true,
+      status: true,
+      statusHistory: {
+        where: { toStatus: "CHIUSO" },
+        select: { changedAt: true },
+        orderBy: { changedAt: "desc" },
+        take: 1,
+      },
+      recurringMonths: {
+        where: { status: { not: "CLOSED" } },
+        select: { id: true, period: true },
+      },
+    },
+  });
+
+  const invalid: Array<{ id: string; note: string }> = [];
+  for (const contract of contracts) {
+    const start = toPeriod(
+      contract.supplyStartDate ??
+        computeSupplyStartDate(contract.insertionDate, contract.operationType),
+    );
+    const end =
+      contract.status === "CHIUSO" && contract.statusHistory[0]
+        ? toPeriod(contract.statusHistory[0].changedAt)
+        : null;
+    for (const installment of contract.recurringMonths) {
+      if (installment.period < start) {
+        invalid.push({ id: installment.id, note: AUTO_CLOSED_BEFORE_START });
+      } else if (end && installment.period > end) {
+        invalid.push({ id: installment.id, note: AUTO_CLOSED_AFTER_END });
+      }
+    }
+  }
+
+  // Aggiornamenti puntuali: affidabili anche tramite il proxy DB di produzione.
+  for (let offset = 0; offset < invalid.length; offset += 25) {
+    await Promise.all(
+      invalid.slice(offset, offset + 25).map((row) =>
+        prisma.recurringMonth.update({
+          where: { id: row.id },
+          data: {
+            status: "CLOSED",
+            paidAt: null,
+            settledPeriod: null,
+            note: row.note,
+          },
+        }),
+      ),
+    );
+  }
+
+  return { checked: contracts.length, excluded: invalid.length };
+}
+
+/**
  * Per contratti ricorrenti mensili (M): genera mesi da inizio fornitura → oggi.
  * Per contratti ricorrenti annuali (R): genera solo le scadenze a +12 mesi
  * dall’ultimo pagamento (o dall’ingresso se mai pagato).
@@ -277,7 +349,7 @@ export async function getMissingRecurringAlerts(
   const periodFilter =
     kind === "annual" ? { lte: now } : { lt: now };
 
-  return prisma.recurringMonth.findMany({
+  const rows = await prisma.recurringMonth.findMany({
     where: {
       status: "MISSING",
       period: periodFilter,
@@ -294,7 +366,16 @@ export async function getMissingRecurringAlerts(
           id: true,
           podPdr: true,
           recurrence: true,
+          insertionDate: true,
+          operationType: true,
           supplyStartDate: true,
+          status: true,
+          statusHistory: {
+            where: { toStatus: "CHIUSO" },
+            select: { changedAt: true },
+            orderBy: { changedAt: "desc" },
+            take: 1,
+          },
           collectionDate: true,
           client: {
             select: {
@@ -311,6 +392,21 @@ export async function getMissingRecurringAlerts(
     },
     orderBy: [{ period: "asc" }],
     take: 120,
+  });
+  return rows.filter((row) => {
+    const start = toPeriod(
+      row.contract.supplyStartDate ??
+        computeSupplyStartDate(
+          row.contract.insertionDate,
+          row.contract.operationType,
+        ),
+    );
+    if (row.period < start) return false;
+    const closedAt =
+      row.contract.status === "CHIUSO"
+        ? row.contract.statusHistory[0]?.changedAt
+        : null;
+    return !closedAt || row.period <= toPeriod(closedAt);
   });
 }
 
