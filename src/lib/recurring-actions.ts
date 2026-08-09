@@ -117,3 +117,57 @@ export async function updateRecurringMonthStatusAction(formData: FormData): Prom
   revalidatePath(`/contratti/${row.contractId}`);
   revalidatePath(`/clienti`);
 }
+
+/** Correzione autorizzata: Santa Rosa, tutte le competenze fino a luglio 2026 pagate. */
+export async function markSantaRosaPaidThroughJulyAction(): Promise<void> {
+  const session = await requireSession();
+  if (!hasPermission(session.role, "commissions.view_all")) throw new Error("Permesso negato");
+  const contracts = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      client: {
+        OR: [
+          { companyName: { contains: "SANTA ROSA", mode: "insensitive" } },
+          { firstName: { contains: "SANTA ROSA", mode: "insensitive" } },
+          { lastName: { contains: "SANTA ROSA", mode: "insensitive" } },
+        ],
+      },
+    },
+    select: {
+      id: true,
+      commission: { select: { id: true, paid: true, received: true } },
+      recurringMonths: {
+        where: { period: { lte: "2026-07" }, status: { notIn: ["CLOSED", "LIQUIDATED"] } },
+        select: { id: true, amount: true, paidAt: true, settledPeriod: true },
+      },
+    },
+  });
+  for (const contract of contracts) {
+    let added = 0;
+    for (const month of contract.recurringMonths) {
+      added += Number(month.amount ?? 0) || 0;
+      await prisma.recurringMonth.update({
+        where: { id: month.id },
+        data: {
+          status: "LIQUIDATED",
+          paidAt: month.paidAt ?? new Date(),
+          settledPeriod: month.settledPeriod ?? "2026-08",
+          note: "Liquidato al collaboratore · correzione Santa Rosa",
+        },
+      });
+    }
+    if (contract.commission && added > 0) {
+      const paid = Number(contract.commission.paid ?? 0) || 0;
+      const received = Number(contract.commission.received ?? 0) || 0;
+      await prisma.commission.update({
+        where: { id: contract.commission.id },
+        data: { paid: paid + added, received: Math.max(received, paid + added) },
+      });
+    }
+    await prisma.contract.update({
+      where: { id: contract.id },
+      data: { paymentStatus: "Pagato", collectionDate: new Date(2026, 6, 1) },
+    });
+  }
+  revalidatePath("/provvigioni");
+}
