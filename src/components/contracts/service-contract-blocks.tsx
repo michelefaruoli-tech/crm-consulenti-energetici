@@ -18,6 +18,8 @@ export type ListinoRuleOption = {
   gettoneTotale: string;
   /** Se > 0 suggerisce pagamento RID */
   hasRid?: boolean;
+  paymentType?: string;
+  gettoneMensile?: number;
 };
 
 type SupplierOption = { id: string; name: string };

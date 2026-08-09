@@ -52,12 +52,14 @@ export default async function NuovoContrattoPage({
         supplierId: true,
         name: true,
         clientSegment: true,
+        paymentType: true,
         fixedAmount: true,
         gettoneBase: true,
         gettoneRid: true,
         gettoneBollettaWeb: true,
         gettoneMail: true,
         gettoneUnaTantumIniziale: true,
+        gettoneMensile: true,
       },
       orderBy: { name: "asc" },
     }),
@@ -86,6 +88,8 @@ export default async function NuovoContrattoPage({
       clientSegment: r.clientSegment || "TUTTI",
       gettoneTotale: totale > 0 ? totale.toFixed(2) : "",
       hasRid: n(r.gettoneRid) > 0,
+      paymentType: r.paymentType,
+      gettoneMensile: n(r.gettoneMensile),
     };
   });
 

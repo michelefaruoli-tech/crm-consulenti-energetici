@@ -64,6 +64,8 @@ type Props = {
     clientSegment: string;
     gettoneTotale: string;
     hasRid?: boolean;
+    paymentType?: string;
+    gettoneMensile?: number;
   }[];
   initialClientId?: string;
 };
@@ -131,16 +133,28 @@ export function NuovoContrattoForm({
   >([]);
 
   const [registrationDate, setRegistrationDate] = useState(() => new Date());
+  const [customSupplyStart, setCustomSupplyStart] = useState("");
   const primary = services[0];
   const primaryOp = primary?.operationType ?? "SWITCH";
   const computedSupplyStart = useMemo(
     () => computeSupplyStartDate(registrationDate, primaryOp),
     [registrationDate, primaryOp],
   );
+  const effectiveSupplyStart = useMemo(() => {
+    if (!customSupplyStart) return computedSupplyStart;
+    const [y, m, d] = customSupplyStart.split("-").map(Number);
+    return y && m && d ? new Date(y, m - 1, d) : computedSupplyStart;
+  }, [customSupplyStart, computedSupplyStart]);
   const expiryPreview = useMemo(
-    () => format(calcExpiryDate(computedSupplyStart, durationMonths), "dd/MM/yyyy"),
-    [computedSupplyStart, durationMonths],
+    () => format(calcExpiryDate(effectiveSupplyStart, durationMonths), "dd/MM/yyyy"),
+    [effectiveSupplyStart, durationMonths],
   );
+  const primaryRule = listinoRules.find((rule) => rule.id === primary?.commissionRuleId);
+  const hasMonthlyRecurrence =
+    primaryRule?.paymentType === "MENSILE" || Number(primaryRule?.gettoneMensile || 0) > 0;
+  const firstRecurringLabel = format(effectiveSupplyStart, "MM/yyyy");
+  const supplyStartBeforeRegistration =
+    format(effectiveSupplyStart, "yyyy-MM-dd") < format(registrationDate, "yyyy-MM-dd");
 
   const req = sendToMaster;
   /** Evidenza campi minimi anche senza invio al Master. */
@@ -218,6 +232,7 @@ export function NuovoContrattoForm({
       operationType: first?.operationType || "SWITCH",
       operationOther: first?.operationOther,
       insertionDate: formatItDate(registrationDate),
+      supplyStartDate: formatItDate(effectiveSupplyStart),
       supplySameAsResidence: first?.supplySameAsResidence !== false,
       supplyStreet: first?.supplyStreet,
       supplyStreetNumber: first?.supplyStreetNumber,
@@ -915,8 +930,20 @@ export function NuovoContrattoForm({
               }}
             />
           </Field>
-          <Field label="Ingresso fornitura (calcolato)">
-            <Input value={formatItDate(computedSupplyStart)} readOnly className="bg-white" />
+          <Field label="Ingresso in fornitura">
+            <Input
+              type="date"
+              value={customSupplyStart || format(computedSupplyStart, "yyyy-MM-dd")}
+              onChange={(e) => setCustomSupplyStart(e.target.value)}
+              className="bg-white"
+            />
+            <button
+              type="button"
+              onClick={() => setCustomSupplyStart("")}
+              className="mt-1 text-xs font-semibold text-sky-700 hover:underline"
+            >
+              Ripristina data calcolata
+            </button>
           </Field>
           <Field label="Durata (mesi)">
             <Input
@@ -973,6 +1000,17 @@ export function NuovoContrattoForm({
             <Textarea rows={3} value={masterNotes} onChange={(e) => setMasterNotes(e.target.value)} />
           </Field>
         </div>
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+          <strong>Decorrenza economica:</strong>{" "}
+          {hasMonthlyRecurrence
+            ? `prima ricorrente ${firstRecurringLabel}, a partire dal mese di ingresso in fornitura.`
+            : `ingresso previsto ${formatItDate(effectiveSupplyStart)}.`}
+        </div>
+        {supplyStartBeforeRegistration ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+            Attenzione: l'ingresso in fornitura è precedente alla data di registrazione.
+          </p>
+        ) : null}
       </details>
 
       <ContractAttachmentsPanel
@@ -1013,7 +1051,7 @@ export function NuovoContrattoForm({
               .join(" · ")}
           </p>
           <p>
-            <strong>Ingresso / scadenza:</strong> {formatItDate(computedSupplyStart)} →{" "}
+            <strong>Ingresso / scadenza:</strong> {formatItDate(effectiveSupplyStart)} →{" "}
             {expiryPreview}
           </p>
           <p>

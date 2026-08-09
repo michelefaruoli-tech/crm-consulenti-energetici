@@ -456,7 +456,9 @@ async function createFullContractActionInner(
       })) || defaultSupplierId;
 
     const operationType = line.operationType || payload.operationType || "SWITCH";
-    const supplyStart = computeSupplyStartDate(insertionDate, operationType);
+    const supplyStart =
+      parseFlexibleDate(payload.supplyStartDate ?? "") ??
+      computeSupplyStartDate(insertionDate, operationType);
     const expiryDate = calcExpiryDate(supplyStart, duration);
     const supplySame =
       line.supplySameAsResidence ?? payload.supplySameAsResidence;
