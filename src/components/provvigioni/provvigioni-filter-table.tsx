@@ -5,8 +5,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
-  bulkConfirmCommissionsAction,
-  bulkLiquidateIncassatiAction,
+  bulkLiquidateRecurringPeriodAction,
   bulkLiquidateSelectedAction,
   bulkMarkPaidAction,
   bulkPayRecurringAction,
@@ -151,6 +150,7 @@ export function ProvvigioniFilterTable({
     q?: string | null;
     vista?: string | null;
     focus?: string | null;
+    competence?: string | null;
   };
   serverSortKey?: string | null;
   serverSortDir?: "asc" | "desc";
@@ -189,16 +189,11 @@ export function ProvvigioniFilterTable({
     }
   }
   const settleOpts = useMemo(() => settledOptions(), []);
-  const [settledPeriod, setSettledPeriod] = useState(settleOpts[0] ?? toPeriod(new Date()));
+  const [settledPeriod, setSettledPeriod] = useState(listQuery?.competence ?? "");
   const [paidMonth, setPaidMonth] = useState(() => {
     const d = new Date();
     return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   });
-  const currentMonth = useMemo(() => {
-    const d = new Date();
-    return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-  }, []);
-
   const filterResetKey = [
     listQuery?.collab ?? "tutti",
     listQuery?.settled ?? "",
@@ -208,6 +203,7 @@ export function ProvvigioniFilterTable({
     listQuery?.q ?? "",
     listQuery?.vista ?? "tutti",
     listQuery?.focus ?? "",
+    listQuery?.competence ?? "",
     String(page),
     serverSortKey ?? "",
     serverSortDir,
@@ -237,6 +233,7 @@ export function ProvvigioniFilterTable({
       q: listQuery?.q,
       vista: listQuery?.vista,
       focus: listQuery?.focus,
+      competence: listQuery?.competence,
       sort: serverSortKey === "client" ? "client" : undefined,
       dir: serverSortKey === "client" ? serverSortDir : undefined,
       ...extra,
@@ -993,31 +990,15 @@ export function ProvvigioniFilterTable({
                   async () => {
                     const fd = new FormData();
                     fd.set("contractIds", selectedContractIds.join(","));
+                    fd.set("collectionMonth", paidMonth);
                     return bulkLiquidateSelectedAction(fd);
                   },
-                  { collectionMonth: currentMonth },
+                  { collectionMonth: paidMonth },
                 )
               }
               title="Liquidazione collaboratore: imposta stato PROVVIGIONE_LIQUIDATA"
             >
               Segna pagato
-            </button>
-          ) : null}
-
-          {canConfirm ? (
-            <button
-              type="button"
-              disabled={pending}
-              className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-800 disabled:opacity-50"
-              onClick={() =>
-                runBulk("Conferma gettone", async () => {
-                  const fd = new FormData();
-                  fd.set("commissionIds", selectedCommissionIds.join(","));
-                  return bulkConfirmCommissionsAction(fd);
-                })
-              }
-            >
-              Conferma gettone
             </button>
           ) : null}
 
@@ -1028,12 +1009,23 @@ export function ProvvigioniFilterTable({
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">Ricorrenze</p>
             <div className="flex flex-wrap items-end gap-2">
           <label className="text-[11px] text-slate-600">
-            Rendiconto ricorrenze
+            Mese di competenza
             <select
               className="mt-0.5 block rounded border border-slate-300 bg-white px-2 py-1 text-xs"
               value={settledPeriod}
-              onChange={(e) => setSettledPeriod(e.target.value)}
+              onChange={(e) => {
+                const period = e.target.value;
+                setSettledPeriod(period);
+                if (!confirmLeaveDrafts()) return;
+                router.push(
+                  buildPageHref("/provvigioni", {
+                    ...baseQuery({ competence: period, vista: "mensile" }),
+                    page: undefined,
+                  }),
+                );
+              }}
             >
+              <option value="">Seleziona mese</option>
               {settleOpts.map((p) => (
                 <option key={p} value={p}>
                   {periodLabel(p)}
@@ -1043,79 +1035,43 @@ export function ProvvigioniFilterTable({
           </label>
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !settledPeriod}
             className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800 disabled:opacity-50"
-            title="Incassa il mese di competenza più vecchio ancora mancante (dopo l’inizio fornitura i mesi si contano da soli)"
             onClick={() =>
               runBulk(
-                `Incassa 1 mese ric. → rendiconto ${periodLabel(settledPeriod)}`,
+                `Segna incassato · competenza ${periodLabel(settledPeriod)}`,
                 async () => {
                   const fd = new FormData();
                   fd.set("commissionIds", selectedCommissionIds.join(","));
                   fd.set("settledPeriod", settledPeriod);
-                  fd.set("mode", "oldest");
+                  fd.set("competencePeriod", settledPeriod);
+                  fd.set("mode", "exact");
                   return bulkPayRecurringAction(fd);
                 },
               )
             }
           >
-            Incassa 1 mese ric.
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            className="rounded-lg bg-amber-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-950 disabled:opacity-50"
-            title="Incassa tutti i mesi di competenza ancora mancanti (contati da inizio fornitura)"
-            onClick={() =>
-              runBulk(
-                `Incassa mesi ric. mancanti → rendiconto ${periodLabel(settledPeriod)}`,
-                async () => {
-                  const fd = new FormData();
-                  fd.set("commissionIds", selectedCommissionIds.join(","));
-                  fd.set("settledPeriod", settledPeriod);
-                  fd.set("mode", "all");
-                  return bulkPayRecurringAction(fd);
-                },
-              )
-            }
-          >
-            Incassa mesi ric. mancanti
+            Segna incassato
           </button>
 
           {canConfirm ? (
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || !settledPeriod}
               className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-900 disabled:opacity-50"
-              onClick={() => {
-                const label = "Tutti gli incassati → pagato";
-                if (
-                  !window.confirm(
-                    `${label}\n\nVerranno liquidati tutti i contratti incassati non ancora PROVVIGIONE_LIQUIDATA, rispettando i filtri della pagina.`,
-                  )
-                )
-                  return;
-                setError(null);
-                setMessage(null);
-                start(async () => {
-                  try {
+              onClick={() =>
+                runBulk(
+                  `Segna pagato · competenza ${periodLabel(settledPeriod)}`,
+                  async () => {
                     const fd = new FormData();
-                    fd.set("collab", listQuery?.collab ?? "");
-                    fd.set("supplier", listQuery?.supplier ?? "");
-                    fd.set("tipologia", listQuery?.tipologia ?? "");
-                    fd.set("q", listQuery?.q ?? "");
-                    fd.set("vista", listQuery?.vista ?? "");
-                    const res = await bulkLiquidateIncassatiAction(fd);
-                    setMessage(`Operazione ok · ${res.count} contratti liquidati`);
-                    router.refresh();
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : "Errore azione multipla");
-                  }
-                });
-              }}
-              title="Liquidazione di tutti gli incassati (filtri correnti)"
+                    fd.set("commissionIds", selectedCommissionIds.join(","));
+                    fd.set("competencePeriod", settledPeriod);
+                    return bulkLiquidateRecurringPeriodAction(fd);
+                  },
+                )
+              }
             >
-              Incassati → pagato
+              Segna pagato
             </button>
           ) : null}
 

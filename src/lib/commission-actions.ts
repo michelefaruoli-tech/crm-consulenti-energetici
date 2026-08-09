@@ -910,6 +910,10 @@ export async function bulkPayRecurringAction(
   const ids = parseIdList(formData, "commissionIds");
   const rows = await assertCanAccessCommissions(session, ids);
   const mode = String(formData.get("mode") ?? "oldest");
+  const competenceRaw = String(formData.get("competencePeriod") ?? "").trim();
+  const competencePeriod = /^\d{4}-\d{2}$/.test(competenceRaw)
+    ? competenceRaw
+    : null;
   const settledRaw = String(formData.get("settledPeriod") ?? "").trim();
   const settledPeriod = /^\d{4}-\d{2}$/.test(settledRaw)
     ? settledRaw
@@ -920,7 +924,11 @@ export async function bulkPayRecurringAction(
 
   for (const r of rows) {
     const missing = await prisma.recurringMonth.findMany({
-      where: { contractId: r.contractId, status: "MISSING" },
+      where: {
+        contractId: r.contractId,
+        status: { in: ["MISSING", "PENDING"] },
+        ...(mode === "exact" && competencePeriod ? { period: competencePeriod } : {}),
+      },
       orderBy: { period: "asc" },
     });
     if (missing.length === 0) continue;
@@ -977,6 +985,43 @@ export async function bulkPayRecurringAction(
   return { ok: true, monthsPaid, contracts: contractsTouched };
 }
 
+/** Liquida soltanto la rata ricorrente della competenza scelta. */
+export async function bulkLiquidateRecurringPeriodAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number }> {
+  const session = await requireSession();
+  const ids = parseIdList(formData, "commissionIds");
+  const commissions = await assertCanAccessCommissions(session, ids);
+  const period = String(formData.get("competencePeriod") ?? "").trim();
+  if (!/^\d{4}-\d{2}$/.test(period)) throw new Error("Mese di competenza non valido");
+
+  const installments = await prisma.recurringMonth.findMany({
+    where: {
+      contractId: { in: commissions.map((row) => row.contractId) },
+      period,
+      status: "PAID",
+    },
+    select: { id: true },
+  });
+  for (const installment of installments) {
+    await prisma.recurringMonth.update({
+      where: { id: installment.id },
+      data: { status: "LIQUIDATED" },
+    });
+  }
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "RecurringMonth",
+    entityId: period,
+    details: { source: "bulk_liquidate_recurring_period", period, count: installments.length },
+  });
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  return { ok: true, count: installments.length };
+}
+
 type CommissionByContract = {
   id: string;
   contractId: string;
@@ -1026,6 +1071,9 @@ export async function bulkLiquidateSelectedAction(
   const session = await requireSession();
   const contractIds = parseIdList(formData, "contractIds");
   const rows = await assertCanAccessCommissionsByContractIds(session, contractIds);
+  const monthRaw = String(formData.get("collectionMonth") ?? "").trim();
+  const requestedCollectionDate = monthRaw ? parseFlexibleDate(monthRaw) : new Date();
+  if (!requestedCollectionDate) throw new Error("Data non valida (usa MM/AAAA)");
 
   for (const r of rows) {
     const received = Number(r.received ?? 0) || 0;
@@ -1053,7 +1101,7 @@ export async function bulkLiquidateSelectedAction(
       data: {
         status: "PROVVIGIONE_LIQUIDATA",
         paymentStatus: "Incassato",
-        collectionDate: r.contract.collectionDate ?? new Date(),
+        collectionDate: requestedCollectionDate,
       },
     });
   }

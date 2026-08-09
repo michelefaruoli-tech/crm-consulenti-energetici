@@ -76,6 +76,8 @@ type SearchParams = {
   vista?: string;
   /** Accesso rapido dalla Dashboard */
   focus?: string;
+  /** Mese di competenza YYYY-MM delle ricorrenze */
+  competence?: string;
 };
 
 export default async function ProvvigioniPage({
@@ -96,6 +98,7 @@ export default async function ProvvigioniPage({
     q: qRaw,
     vista: vistaRaw,
     focus: focusRaw,
+    competence: competenceRaw,
   } = await searchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
@@ -109,6 +112,8 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
+  const competencePeriod =
+    competenceRaw && /^\d{4}-\d{2}$/.test(competenceRaw) ? competenceRaw : undefined;
   const focus =
     focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
       ? focusRaw
@@ -162,7 +167,20 @@ export default async function ProvvigioniPage({
     }
     return where;
   }
-  const contractWhere = applyFocus(baseContractWhere);
+  const contractWhere = applyFocus(
+    competencePeriod
+      ? {
+          AND: [
+            baseContractWhere,
+            {
+              recurringMonths: {
+                some: { period: competencePeriod, status: { not: "CLOSED" } },
+              },
+            },
+          ],
+        }
+      : baseContractWhere,
+  );
   const collaboratorCountsWhere = applyFocus(
     buildProvvigioniContractWhere({
       canViewAll: canViewAll || isScoped,
@@ -727,6 +745,7 @@ export default async function ProvvigioniPage({
     q,
     vista: vista === "tutti" ? undefined : vista,
     focus,
+    competence: competencePeriod,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
@@ -870,6 +889,7 @@ export default async function ProvvigioniPage({
           tipologia: tipologia || undefined,
           vista: vista !== "tutti" ? vista : undefined,
           focus,
+          competence: competencePeriod,
         }}
         clearHref={vistaHref(vista)}
       />
