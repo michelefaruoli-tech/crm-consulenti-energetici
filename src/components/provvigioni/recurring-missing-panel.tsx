@@ -24,10 +24,19 @@ export function RecurringMissingPanel({
   alerts,
   otherRecurringCount = 0,
   kind = "monthly",
+  summary,
 }: {
   alerts: MissingAlert[];
   otherRecurringCount?: number;
   kind?: "monthly" | "annual" | "all";
+  summary?: {
+    periodLabel: string;
+    activeContracts: number;
+    matured: number;
+    paid: number;
+    currentOpen: number;
+    arrears: number;
+  };
 }) {
   const settledPeriod = toPeriod(new Date());
   const [query, setQuery] = useState("");
@@ -100,6 +109,16 @@ export function RecurringMissingPanel({
           ) : null}
         </div>
       </div>
+
+      {summary ? (
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
+          <div className="rounded-lg bg-slate-100 px-3 py-2"><strong>{summary.activeContracts}</strong> contratti attivi</div>
+          <div className="rounded-lg bg-slate-100 px-3 py-2"><strong>{summary.matured}</strong> rate maturate {summary.periodLabel}</div>
+          <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800"><strong>{summary.paid}</strong> già incassate</div>
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-amber-900"><strong>{summary.currentOpen}</strong> del mese da incassare</div>
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-red-800"><strong>{summary.arrears}</strong> arretrate</div>
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-2 md:grid-cols-3">
         <input

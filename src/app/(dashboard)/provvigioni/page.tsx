@@ -41,9 +41,10 @@ import {
 import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import {
   buildProvvigioniContractWhere,
+  recurringMonthlyWhereOr,
   sumProvvigioniTotals,
 } from "@/lib/provvigioni-filters";
-import { addMonths, toPeriod, isRecurring } from "@/lib/recurring";
+import { addMonths, periodLabel, toPeriod, isRecurring } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   defaultGettonePrivato,
@@ -742,6 +743,40 @@ export default async function ProvvigioniPage({
   const tabRecurringCount = vista === "annuale" ? countAnnuali : countMensili;
   const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
   const otherRecurringCount = Math.max(0, tabRecurringCount - missingContractCount);
+  const monthlyStatusRows =
+    vista === "mensile"
+      ? await prisma.recurringMonth.findMany({
+          where: {
+            period: { lte: activeRecurringPeriod },
+            status: { not: "CLOSED" },
+            contract: {
+              AND: [
+                activeRecurringWhere,
+                { OR: recurringMonthlyWhereOr },
+                { isHistorical: false, deletedAt: null },
+              ],
+            },
+          },
+          select: { period: true, status: true },
+        })
+      : [];
+  const monthlySummary =
+    vista === "mensile"
+      ? {
+          periodLabel: periodLabel(activeRecurringPeriod),
+          activeContracts: countMensili,
+          matured: monthlyStatusRows.filter((row) => row.period === activeRecurringPeriod).length,
+          paid: monthlyStatusRows.filter(
+            (row) => row.period === activeRecurringPeriod && ["PAID", "LIQUIDATED"].includes(row.status),
+          ).length,
+          currentOpen: monthlyStatusRows.filter(
+            (row) => row.period === activeRecurringPeriod && ["MISSING", "PENDING"].includes(row.status),
+          ).length,
+          arrears: monthlyStatusRows.filter(
+            (row) => row.period < activeRecurringPeriod && ["MISSING", "PENDING"].includes(row.status),
+          ).length,
+        }
+      : undefined;
 
   const heliosAbsentRows = heliosAbsent.map((m) => ({
     id: m.id,
@@ -964,6 +999,7 @@ export default async function ProvvigioniPage({
             alerts={alertRows}
             otherRecurringCount={otherRecurringCount}
             kind={recurringKind}
+            summary={monthlySummary}
           />
         </>
       ) : null}
