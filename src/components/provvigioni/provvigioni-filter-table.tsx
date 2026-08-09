@@ -935,17 +935,23 @@ export function ProvvigioniFilterTable({
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-        <p className="text-xs font-medium text-slate-800">
-          Azioni multiple {selectedCount > 0 ? `(${selectedCount} selezionate)` : ""}
-        </p>
-        <p className="mt-1 text-[11px] text-slate-500">
-          Modifica le celle liberamente (restano in bozza gialla), poi{" "}
-          <strong>Salva tutte le modifiche</strong>. Oppure spunta le righe per azioni
-          rapide. Max 200 per azioni multiple / 500 celle per salvataggio bozze.
-        </p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Azioni sulle righe</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Seleziona una o più righe, poi scegli l&apos;operazione.
+            </p>
+          </div>
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${selectedCount > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
+            {selectedCount > 0 ? `${selectedCount} selezionate` : "Nessuna selezione"}
+          </span>
+        </div>
 
-        <div className="mt-3 flex flex-wrap items-end gap-2">
+        <div className="mt-4 grid gap-3 xl:grid-cols-[1fr_1.35fr_auto]">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-800">Gettoni</p>
+            <div className="flex flex-wrap items-end gap-2">
           <label className="text-[11px] text-slate-600">
             Data incassato
             <input
@@ -1015,6 +1021,12 @@ export function ProvvigioniFilterTable({
             </button>
           ) : null}
 
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">Ricorrenze</p>
+            <div className="flex flex-wrap items-end gap-2">
           <label className="text-[11px] text-slate-600">
             Rendiconto ricorrenze
             <select
@@ -1107,6 +1119,12 @@ export function ProvvigioniFilterTable({
             </button>
           ) : null}
 
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-700">Gestione</p>
+            <div className="flex flex-col items-stretch gap-2">
           {canDelete ? (
             <button
               type="button"
@@ -1139,6 +1157,8 @@ export function ProvvigioniFilterTable({
               Deseleziona
             </button>
           ) : null}
+            </div>
+          </div>
         </div>
 
         {pending ? <p className="mt-2 text-xs text-slate-500">Elaborazione…</p> : null}
@@ -1146,8 +1166,12 @@ export function ProvvigioniFilterTable({
         {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <details className="order-2 text-xs text-slate-500 md:order-1">
+          <summary className="cursor-pointer select-none font-medium text-slate-600 hover:text-slate-900">
+            Legenda e istruzioni
+          </summary>
+        <p className="mt-2 max-w-4xl leading-relaxed">
           {advancedView ? (
             <>
               Vista <strong>avanzata</strong>: tutte le colonne (POD, collab., tip.,
@@ -1173,7 +1197,8 @@ export function ProvvigioniFilterTable({
           <strong>Tipo</strong>: UT gettone · M mensile · R annuale (12 mesi).
           {canDelete ? " × rossa = elimina." : ""}
         </p>
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white p-0.5">
+        </details>
+        <div className="order-1 flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 p-1 md:order-2">
           <button
             type="button"
             className={`rounded-md px-2.5 py-1 text-xs font-medium ${
