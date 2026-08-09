@@ -86,6 +86,7 @@ export function NuovoContrattoForm({
   const [clientId, setClientId] = useState<string | undefined>(initialClientId);
   const [clientLabel, setClientLabel] = useState<string | undefined>();
   const [creatingClient, setCreatingClient] = useState(!initialClientId);
+  const [showAdvancedClient, setShowAdvancedClient] = useState(false);
 
   const [clientType, setClientType] = useState<"PRIVATO" | "AZIENDA">("PRIVATO");
   const [firstName, setFirstName] = useState("");
@@ -624,7 +625,7 @@ export function NuovoContrattoForm({
           <div className="flex flex-col justify-center gap-3">
             <div>
               <h2 className="text-base font-semibold text-slate-900 sm:text-lg">
-                Opzioni e stato
+                Destinazione pratica
               </h2>
               <p className="text-sm text-slate-500">
                 Salva in gestionale oppure invia al back office per la lavorazione
@@ -792,9 +793,11 @@ export function NuovoContrattoForm({
             >
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
-            <Field label="PEC (facoltativa)">
-              <Input value={pec} onChange={(e) => setPec(e.target.value)} />
-            </Field>
+            {showAdvancedClient ? (
+              <Field label="PEC (facoltativa)">
+                <Input value={pec} onChange={(e) => setPec(e.target.value)} />
+              </Field>
+            ) : null}
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -831,32 +834,35 @@ export function NuovoContrattoForm({
             >
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
-            <Field label="PEC (facoltativa)">
-              <Input value={pec} onChange={(e) => setPec(e.target.value)} />
-            </Field>
-            <Field label="Nome rappresentante">
-              <Input
-                value={legalFirstName}
-                onChange={(e) => setLegalFirstName(e.target.value)}
-              />
-            </Field>
-            <Field label="Cognome rappresentante">
-              <Input
-                value={legalLastName}
-                onChange={(e) => setLegalLastName(e.target.value)}
-              />
-            </Field>
-            <Field label="CF rappresentante">
-              <Input
-                value={legalFiscalCode}
-                onChange={(e) => setLegalFiscalCode(e.target.value)}
-              />
-            </Field>
-            <Field label="Codice SDI (facoltativo)">
-              <Input value={sdiCode} onChange={(e) => setSdiCode(e.target.value)} />
-            </Field>
+            {showAdvancedClient ? (
+              <>
+                <Field label="PEC (facoltativa)">
+                  <Input value={pec} onChange={(e) => setPec(e.target.value)} />
+                </Field>
+                <Field label="Nome rappresentante">
+                  <Input value={legalFirstName} onChange={(e) => setLegalFirstName(e.target.value)} />
+                </Field>
+                <Field label="Cognome rappresentante">
+                  <Input value={legalLastName} onChange={(e) => setLegalLastName(e.target.value)} />
+                </Field>
+                <Field label="CF rappresentante">
+                  <Input value={legalFiscalCode} onChange={(e) => setLegalFiscalCode(e.target.value)} />
+                </Field>
+                <Field label="Codice SDI (facoltativo)">
+                  <Input value={sdiCode} onChange={(e) => setSdiCode(e.target.value)} />
+                </Field>
+              </>
+            ) : null}
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => setShowAdvancedClient((value) => !value)}
+          className="inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          {showAdvancedClient ? "Nascondi dati aggiuntivi" : "+ Mostra dati aggiuntivi"}
+        </button>
 
         <p className="text-sm font-medium text-slate-700">
           {clientType === "AZIENDA" ? "Sede legale" : "Indirizzo di residenza"}
@@ -953,19 +959,21 @@ export function NuovoContrattoForm({
         </div>
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionHeading step={4} title="Note" description="Aggiungi indicazioni interne o informazioni destinate al back office." />
-        <Field label="Note interne">
-          <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-        <Field label="Note da inviare al back office">
-          <Textarea
-            rows={3}
-            value={masterNotes}
-            onChange={(e) => setMasterNotes(e.target.value)}
-          />
-        </Field>
-      </section>
+      <details className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <summary className="cursor-pointer list-none font-bold text-slate-900">
+          <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-sm">4</span>
+          Note facoltative
+          <span className="ml-2 text-sm font-normal text-slate-500 group-open:hidden">— apri solo se servono</span>
+        </summary>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Field label="Note interne">
+            <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+          <Field label="Note da inviare al back office">
+            <Textarea rows={3} value={masterNotes} onChange={(e) => setMasterNotes(e.target.value)} />
+          </Field>
+        </div>
+      </details>
 
       <ContractAttachmentsPanel
         attachments={attachments}
