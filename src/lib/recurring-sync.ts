@@ -381,11 +381,22 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     }
   }
 
-  for (let offset = 0; offset < creates.length; offset += 500) {
-    await prisma.recurringMonth.createMany({
-      data: creates.slice(offset, offset + 500),
-      skipDuplicates: true,
-    });
+  // Upsert in piccoli gruppi: più affidabile del createMany tramite il proxy DB.
+  for (let offset = 0; offset < creates.length; offset += 20) {
+    await Promise.all(
+      creates.slice(offset, offset + 20).map((row) =>
+        prisma.recurringMonth.upsert({
+          where: {
+            contractId_period: {
+              contractId: row.contractId,
+              period: row.period,
+            },
+          },
+          create: row,
+          update: {},
+        }),
+      ),
+    );
   }
   for (let offset = 0; offset < updates.length; offset += 25) {
     await Promise.all(
@@ -412,6 +423,12 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
         .map((id) => syncRecurringMonthsForContract(id)),
     );
   }
+  console.info("[syncAllRecurringMonths]", {
+    contracts: contracts.length,
+    monthlyCreated: creates.length,
+    monthlyUpdated: updates.length,
+    annualChecked: annualIds.length,
+  });
   return contracts.length;
 }
 
