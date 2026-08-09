@@ -110,10 +110,22 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     // Permesso già verificato sopra
     const status = statusFromLabel(value);
     if (!status) throw new Error("Stato non riconosciuto");
+    const terminal = ["CHIUSO", "KO", "ANNULLATO"].includes(status);
+    const closureDateRaw = String(formData.get("closureDate") ?? "").trim();
+    const closureReason = String(formData.get("closureReason") ?? "").trim();
+    const closureNotes = String(formData.get("closureNotes") ?? "").trim();
+    const closureDate = terminal ? parseFlexibleDate(closureDateRaw) : null;
+    if (terminal && !closureDate) throw new Error("Data chiusura obbligatoria");
+    if (terminal && !closureReason) throw new Error("Motivo chiusura obbligatorio");
     const fromStatus = contract.status;
     await prisma.contract.update({
       where: { id: contractId },
-      data: { status },
+      data: {
+        status,
+        ...(status === "KO" || status === "ANNULLATO"
+          ? { koReason: closureReason, koNotes: closureNotes || null }
+          : {}),
+      },
     });
     await prisma.contractStatusHistory.create({
       data: {
@@ -121,15 +133,22 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
         fromStatus,
         toStatus: status,
         changedById: session.id,
-        note: "Modifica da elenco",
+        changedAt: closureDate ?? new Date(),
+        note: closureNotes || "Modifica da elenco",
+        changeReason: closureReason || null,
+        koReason: status === "KO" || status === "ANNULLATO" ? closureReason : null,
       },
     });
+    if (terminal) {
+      const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
+      await syncRecurringMonthsForContract(contractId);
+    }
     await notifyCollaboratorStatusChange({
       contractId,
       fromStatus,
       toStatus: status,
       changedByName: session.name,
-      note: "Modifica da elenco",
+      note: closureNotes || closureReason || "Modifica da elenco",
     });
     revalidatePath("/");
     revalidatePath("/contratti");

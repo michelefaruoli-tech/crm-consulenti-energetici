@@ -326,6 +326,8 @@ export function ClientSheet({
 
   useEffect(() => {
     if (!selected) return;
+    // Il cambio contratto selezionato deve riallineare l'intero form locale.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUtilityType(normalizeUtilityType(selected.utilityType));
     setOperationType(
       selected.operationType === "CAMBIO" ? "SWITCH" : selected.operationType ?? "SWITCH",
@@ -1331,9 +1333,12 @@ export function ClientSheet({
                     ))}
                   </Select>
                 </Field>
-                {(status === "KO" || status === "ANNULLATO") && (
+                {(["KO", "ANNULLATO", "CHIUSO"].includes(status)) && (
                   <>
-                    <Field label={status === "KO" ? "Motivo KO *" : "Motivo annullamento *"}>
+                    <Field label="Data chiusura *">
+                      <Input name="closureDate" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
+                    </Field>
+                    <Field label={status === "KO" ? "Motivo KO *" : status === "CHIUSO" ? "Motivo chiusura *" : "Motivo annullamento *"}>
                       <Input name="koReason" defaultValue={selected.koReason ?? ""} required />
                     </Field>
                     <Field label="Note">

@@ -228,8 +228,11 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
     if (!(status in CONTRACT_STATUS_LABELS)) {
       throw new Error("Stato non valido");
     }
-    if ((status === "KO" || status === "ANNULLATO") && !koReason) {
-      throw new Error(status === "KO" ? "Motivo KO obbligatorio" : "Motivo annullamento obbligatorio");
+    const terminal = status === "KO" || status === "ANNULLATO" || status === "CHIUSO";
+    const closureDate = terminal ? dateOrNull(formData.get("closureDate")) : null;
+    if (terminal && !closureDate) throw new Error("Data chiusura obbligatoria");
+    if (terminal && !koReason) {
+      throw new Error(status === "KO" ? "Motivo KO obbligatorio" : status === "CHIUSO" ? "Motivo chiusura obbligatorio" : "Motivo annullamento obbligatorio");
     }
 
     if (status !== contract.status) {
@@ -237,8 +240,8 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
         where: { id: contractId },
         data: {
           status,
-          koReason: status === "KO" || status === "ANNULLATO" ? koReason : contract.koReason,
-          koNotes: status === "KO" || status === "ANNULLATO" ? koNotes : contract.koNotes,
+          koReason: terminal ? koReason : contract.koReason,
+          koNotes: terminal ? koNotes : contract.koNotes,
           productName: clean(formData.get("productName")),
           offerCode: clean(formData.get("offerCode")),
           commissionRuleId: clean(formData.get("commissionRuleId")),
@@ -262,11 +265,16 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
           fromStatus: contract.status,
           toStatus: status,
           changedById: session.id,
+          changedAt: closureDate ?? new Date(),
           note: clean(formData.get("statusNote")),
           changeReason: koReason,
           koReason,
         },
       });
+      if (terminal) {
+        const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
+        await syncRecurringMonthsForContract(contractId);
+      }
     } else {
       await prisma.contract.update({
         where: { id: contractId },

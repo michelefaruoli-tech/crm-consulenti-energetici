@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateContractFieldAction } from "@/lib/contract-actions";
 import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
@@ -10,6 +10,7 @@ import {
   type MasterWorkflowStatus,
 } from "@/lib/master-workflow";
 import { cn } from "@/lib/cn";
+import { format } from "date-fns";
 
 /** Stati più usati in Dashboard / elenco Contratti (tendina compatta). */
 const DASHBOARD_STATUSES: AppContractStatus[] = [
@@ -45,10 +46,10 @@ export function InlineContractStatusSelect({
   const [value, setValue] = useState(status);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setValue(status);
-  }, [status]);
+  const [terminalStatus, setTerminalStatus] = useState<string | null>(null);
+  const [closureDate, setClosureDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [closureReason, setClosureReason] = useState("");
+  const [closureNotes, setClosureNotes] = useState("");
 
   const options: { value: string; label: string }[] =
     mode === "master"
@@ -74,7 +75,14 @@ export function InlineContractStatusSelect({
   }
 
   function onChange(next: string) {
-    if (next === value) return;
+    if (next === status) return;
+    if (["CHIUSO", "KO", "ANNULLATO"].includes(next)) {
+      setTerminalStatus(next);
+      setClosureDate(format(new Date(), "yyyy-MM-dd"));
+      setClosureReason("");
+      setClosureNotes("");
+      return;
+    }
     const label =
       options.find((o) => o.value === next)?.label ??
       CONTRACT_STATUS_LABELS[next as AppContractStatus] ??
@@ -99,6 +107,33 @@ export function InlineContractStatusSelect({
     });
   }
 
+  function confirmTerminalStatus() {
+    if (!terminalStatus || !closureDate || !closureReason.trim()) {
+      setError("Data e motivo sono obbligatori");
+      return;
+    }
+    const next = terminalStatus;
+    setError(null);
+    setValue(next);
+    setTerminalStatus(null);
+    start(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("contractId", contractId);
+        fd.set("field", "status");
+        fd.set("value", next);
+        fd.set("closureDate", closureDate);
+        fd.set("closureReason", closureReason.trim());
+        fd.set("closureNotes", closureNotes.trim());
+        await updateContractFieldAction(fd);
+        router.refresh();
+      } catch (e) {
+        setValue(status);
+        setError(e instanceof Error ? e.message : "Errore cambio stato");
+      }
+    });
+  }
+
   return (
     <div className={cn("min-w-[9.5rem]", className)} onClick={(e) => e.stopPropagation()}>
       <select
@@ -106,7 +141,7 @@ export function InlineContractStatusSelect({
           "w-full max-w-[12rem] rounded border border-slate-200 bg-white px-1.5 py-1 text-xs font-medium text-slate-900",
           pending && "opacity-60",
         )}
-        value={value}
+        value={pending ? value : status}
         disabled={pending}
         title="Cambia stato senza aprire la scheda"
         onChange={(e) => onChange(e.target.value)}
@@ -118,6 +153,39 @@ export function InlineContractStatusSelect({
         ))}
       </select>
       {error ? <p className="mt-0.5 text-[10px] text-red-600">{error}</p> : null}
+      {terminalStatus ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <h2 className="text-lg font-bold text-slate-950">
+              {terminalStatus === "CHIUSO" ? "Chiudi contratto" : terminalStatus === "KO" ? "Contratto KO" : "Annulla contratto"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Le rate già incassate o pagate resteranno nello storico.
+            </p>
+            <label className="mt-4 block text-sm font-semibold text-slate-800">
+              Data chiusura
+              <input type="date" value={closureDate} onChange={(e) => setClosureDate(e.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+            <label className="mt-3 block text-sm font-semibold text-slate-800">
+              Motivo
+              <input value={closureReason} onChange={(e) => setClosureReason(e.target.value)} placeholder="Es. cessazione, ripensamento, pratica respinta" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+            <label className="mt-3 block text-sm font-semibold text-slate-800">
+              Note facoltative
+              <textarea value={closureNotes} onChange={(e) => setClosureNotes(e.target.value)} rows={3} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+            <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              {terminalStatus === "CHIUSO"
+                ? `Ultima ricorrente spettante: ${closureDate.slice(0, 7).split("-").reverse().join("/")}. Dal mese successivo non verranno generate nuove rate.`
+                : "Le ricorrenti ancora aperte verranno chiuse e non saranno più conteggiate."}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => { setTerminalStatus(null); setValue(status); }} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Annulla</button>
+              <button type="button" onClick={confirmTerminalStatus} disabled={pending} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">Conferma stato</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

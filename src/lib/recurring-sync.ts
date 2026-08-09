@@ -180,7 +180,11 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       : null;
   if (closedPeriod) {
     const afterClosure = await prisma.recurringMonth.findMany({
-      where: { contractId, period: { gt: closedPeriod } },
+      where: {
+        contractId,
+        period: { gt: closedPeriod },
+        status: { in: ["PENDING", "MISSING"] },
+      },
       select: { id: true },
     });
     for (const row of afterClosure) {
