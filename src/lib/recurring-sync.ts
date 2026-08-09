@@ -382,9 +382,9 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   }
 
   // Upsert in piccoli gruppi: più affidabile del createMany tramite il proxy DB.
-  for (let offset = 0; offset < creates.length; offset += 20) {
+  for (let offset = 0; offset < creates.length; offset += 5) {
     await Promise.all(
-      creates.slice(offset, offset + 20).map((row) =>
+      creates.slice(offset, offset + 5).map((row) =>
         prisma.recurringMonth.upsert({
           where: {
             contractId_period: {
@@ -394,6 +394,8 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
           },
           create: row,
           update: {},
+        }).catch((error) => {
+          console.error("sync recurring create", row.contractId, row.period, error);
         }),
       ),
     );
@@ -451,7 +453,7 @@ export async function getMissingRecurringAlerts(
 
   const rows = await prisma.recurringMonth.findMany({
     where: {
-      status: "MISSING",
+      status: { in: ["MISSING", "PENDING"] },
       period: periodFilter,
       contract: {
         isHistorical: false,

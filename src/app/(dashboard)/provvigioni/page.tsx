@@ -156,7 +156,7 @@ export default async function ProvvigioniPage({
           {
             recurringMonths: {
               some: {
-                status: "MISSING",
+                status: { in: ["MISSING", "PENDING"] },
                 period: { lt: toPeriod(new Date()) },
               },
             },
