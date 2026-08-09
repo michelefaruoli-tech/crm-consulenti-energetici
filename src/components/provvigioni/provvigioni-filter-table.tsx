@@ -1273,8 +1273,7 @@ export function ProvvigioniFilterTable({
       />
       <StornoLegend />
       <p className="text-xs text-slate-500">
-        Gettone: bordo ambra = da confermare · bordo verde = confermato
-        {canConfirm ? " · Admin: usa «Conferma gettone» nelle azioni multiple." : ""}
+        Gettone: bordo ambra = da confermare · bordo verde = confermato.
       </p>
     </div>
   );
