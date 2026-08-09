@@ -11,7 +11,6 @@ import {
 } from "@/components/provvigioni/provvigioni-filter-table";
 import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
-import { RecurringToLiquidatePanel } from "@/components/provvigioni/recurring-to-liquidate-panel";
 import { HeliosAbsentPanel } from "@/components/provvigioni/helios-absent-panel";
 import {
   RecurringRendicontoPanel,
@@ -24,7 +23,6 @@ import {
   getMissingRecurringAlerts,
   getHeliosAbsentAlerts,
   getSettledRecurringForPeriod,
-  getPaidToLiquidateAlerts,
   syncAllRecurringMonths,
   syncRecurringMonthsForContract,
   reconcileAllRecurringBounds,
@@ -357,7 +355,6 @@ export default async function ProvvigioniPage({
     collaboratorOptions,
     supplierOptions,
     missing,
-    toLiquidate,
     heliosAbsent,
     collabGroups,
     settledRowsRaw,
@@ -400,7 +397,6 @@ export default async function ProvvigioniPage({
       orderBy: { name: "asc" },
     }),
     getMissingRecurringAlerts(sessionCollabFilter, recurringKind),
-    getPaidToLiquidateAlerts(sessionCollabFilter, recurringKind),
     getHeliosAbsentAlerts(sessionCollabFilter),
     canViewAll
       ? prisma.contract.groupBy({
@@ -718,17 +714,6 @@ export default async function ProvvigioniPage({
     collaboratorName: m.contract.collaborator?.name,
     amount: m.amount != null ? Number(m.amount) : undefined,
   }));
-  const toLiquidateRows = toLiquidate.map((m) => ({
-    id: m.id,
-    period: m.period,
-    settledPeriod: m.settledPeriod,
-    contractId: m.contractId,
-    podPdr: m.contract.podPdr || "",
-    supplierName: m.contract.supplier.name,
-    clientName: clientDisplayName(m.contract.client),
-    collaboratorName: m.contract.collaborator?.name,
-    amount: m.amount != null ? Number(m.amount) : undefined,
-  }));
   const tabRecurringCount = vista === "annuale" ? countAnnuali : countMensili;
   const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
   const otherRecurringCount = Math.max(0, tabRecurringCount - missingContractCount);
@@ -955,7 +940,6 @@ export default async function ProvvigioniPage({
             otherRecurringCount={otherRecurringCount}
             kind={recurringKind}
           />
-          <RecurringToLiquidatePanel alerts={toLiquidateRows} kind={recurringKind} />
         </>
       ) : null}
 
