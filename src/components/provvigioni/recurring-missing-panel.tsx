@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
 import { updateRecurringMonthStatusAction } from "@/lib/recurring-actions";
 import { periodLabel, toPeriod } from "@/lib/recurring";
 
@@ -16,16 +15,6 @@ export type MissingAlert = {
   amount?: number;
 };
 
-function defaultSettledOptions(): string[] {
-  const now = new Date();
-  const out: string[] = [];
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push(toPeriod(d));
-  }
-  return out;
-}
-
 /**
  * Solo mesi già scaduti e non ancora incassati.
  * Incassato → passa alla lista «Pagato» sotto; Pagato → esce del tutto.
@@ -39,10 +28,7 @@ export function RecurringMissingPanel({
   otherRecurringCount?: number;
   kind?: "monthly" | "annual" | "all";
 }) {
-  const settledOptions = useMemo(() => defaultSettledOptions(), []);
-  const [settledPeriod, setSettledPeriod] = useState(
-    settledOptions[0] ?? toPeriod(new Date()),
-  );
+  const settledPeriod = toPeriod(new Date());
   const titleKind =
     kind === "all"
       ? "Ricorrenze mensili e annuali"
@@ -91,21 +77,6 @@ export function RecurringMissingPanel({
           ) : null}
         </div>
       </div>
-
-      <label className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
-        <span className="font-medium">Registra nel rendiconto:</span>
-        <select
-          className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 font-medium text-slate-800"
-          value={settledPeriod}
-          onChange={(e) => setSettledPeriod(e.target.value)}
-        >
-          {settledOptions.map((p) => (
-            <option key={p} value={p}>
-              {periodLabel(p)}
-            </option>
-          ))}
-        </select>
-      </label>
 
       <ul className="mt-3 grid gap-2 text-sm lg:grid-cols-2">
         {[...byContract.entries()].map(([contractId, months]) => {
