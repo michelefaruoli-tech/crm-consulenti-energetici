@@ -403,6 +403,9 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
       },
     });
 
+    const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
+    await syncRecurringMonthsForContract(contractId);
+
     if (toStatus === "PAGATO_DAL_FORNITORE") {
       const commission = await prisma.commission.findUnique({ where: { contractId } });
       if (commission) {

@@ -25,6 +25,8 @@ import {
 import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { ContractEconomicSummary } from "@/components/contracts/contract-economic-summary";
+import { isRecurring } from "@/lib/recurring";
+import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 
 export default async function ContrattoDetailPage({
   params,
@@ -65,6 +67,13 @@ export default async function ContrattoDetailPage({
   if (!(await userCanAccessContract(session, contract))) {
     redirect("/contratti");
   }
+
+  // Mantiene la scheda economica coerente con ingresso e chiusura anche per dati storici.
+  await syncRecurringMonthsForContract(id);
+  const recurringMonths = await prisma.recurringMonth.findMany({
+    where: { contractId: id, status: { not: "CLOSED" } },
+    orderBy: { period: "desc" },
+  });
 
   const canChangeStatus =
     hasPermission(session.role, "contracts.change_status") ||
@@ -289,7 +298,7 @@ export default async function ContrattoDetailPage({
           note: entry.note,
           createdAt: entry.createdAt,
         }))}
-        recurringEntries={contract.recurringMonths.map((entry) => ({
+        recurringEntries={recurringMonths.map((entry) => ({
           id: entry.id,
           period: entry.period,
           status: entry.status,
@@ -371,6 +380,12 @@ export default async function ContrattoDetailPage({
       {canChangeStatus ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold text-slate-900">Aggiorna stato</h2>
+          {isRecurring(contract.recurrence) ? (
+            <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              Con lo stato <strong>Chiuso</strong>, il mese della chiusura resta valido;
+              dal mese successivo non maturano più provvigioni ricorrenti.
+            </p>
+          ) : null}
           <form
             action={updateContractStatusAction}
             className="grid gap-4 md:grid-cols-[1fr_1fr_auto]"

@@ -21,6 +21,9 @@ const PRESERVED_STATUSES = new Set([
   "LIQUIDATED",
 ]);
 
+const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura";
+const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
+
 /**
  * Per contratti ricorrenti mensili (M): genera mesi da inizio fornitura → oggi.
  * Per contratti ricorrenti annuali (R): genera solo le scadenze a +12 mesi
@@ -39,6 +42,12 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       operationType: true,
       collectionDate: true,
       status: true,
+      statusHistory: {
+        where: { toStatus: "CHIUSO" },
+        select: { changedAt: true },
+        orderBy: { changedAt: "desc" },
+        take: 1,
+      },
       commission: { select: { expected: true } },
     },
   });
@@ -55,11 +64,24 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
 
   if (!isRecurring(contract.recurrence)) return;
 
-  if (
-    contract.status === "CHIUSO" ||
-    contract.status === "ANNULLATO" ||
-    contract.status === "KO"
-  ) {
+  const startDate =
+    contract.supplyStartDate ??
+    computeSupplyStartDate(contract.insertionDate, contract.operationType);
+  const start = toPeriod(startDate);
+  const now = toPeriod(new Date());
+
+  // Elimina dai conteggi qualsiasi rata precedente all'effettivo ingresso.
+  await prisma.recurringMonth.updateMany({
+    where: { contractId, period: { lt: start } },
+    data: {
+      status: "CLOSED",
+      paidAt: null,
+      settledPeriod: null,
+      note: AUTO_CLOSED_BEFORE_START,
+    },
+  });
+
+  if (contract.status === "ANNULLATO" || contract.status === "KO") {
     const open = await prisma.recurringMonth.findMany({
       where: { contractId, status: { in: ["PENDING", "MISSING"] } },
       select: { id: true },
@@ -73,21 +95,33 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  const startDate =
-    contract.supplyStartDate ??
-    computeSupplyStartDate(contract.insertionDate, contract.operationType);
-  const start = toPeriod(startDate);
-  const now = toPeriod(new Date());
+  // Per un contratto chiuso, il mese del cambio stato è l'ultima competenza valida.
+  const closedPeriod =
+    contract.status === "CHIUSO"
+      ? toPeriod(contract.statusHistory[0]?.changedAt ?? new Date())
+      : null;
+  if (closedPeriod) {
+    await prisma.recurringMonth.updateMany({
+      where: { contractId, period: { gt: closedPeriod } },
+      data: {
+        status: "CLOSED",
+        paidAt: null,
+        settledPeriod: null,
+        note: AUTO_CLOSED_AFTER_END,
+      },
+    });
+  }
+  const lastPeriod = closedPeriod && closedPeriod < now ? closedPeriod : now;
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
   if (isRecurringAnnual(contract.recurrence)) {
-    await syncAnnualPeriods(contractId, start, now, amount);
+    await syncAnnualPeriods(contractId, start, lastPeriod, amount);
     return;
   }
 
   if (!isRecurringMonthly(contract.recurrence)) return;
 
-  const periods = monthsBetween(start, now);
+  const periods = monthsBetween(start, lastPeriod);
   for (const period of periods) {
     await upsertMonthStatus(contractId, period, now, amount);
   }
@@ -135,7 +169,10 @@ async function upsertMonthStatus(
     where: { contractId_period: { contractId, period } },
   });
 
-  if (existing && PRESERVED_STATUSES.has(existing.status)) {
+  const isAutomaticClosure =
+    existing?.status === "CLOSED" &&
+    (existing.note === AUTO_CLOSED_BEFORE_START || existing.note === AUTO_CLOSED_AFTER_END);
+  if (existing && PRESERVED_STATUSES.has(existing.status) && !isAutomaticClosure) {
     if (amount != null && existing.amount == null) {
       await prisma.recurringMonth.update({
         where: { id: existing.id },
@@ -157,6 +194,8 @@ async function upsertMonthStatus(
         status: finalStatus,
         amount: amount ?? existing.amount,
         paidAt: null,
+        settledPeriod: null,
+        note: isAutomaticClosure ? null : existing.note,
       },
     });
   } else {
