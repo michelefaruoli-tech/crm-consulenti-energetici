@@ -552,7 +552,7 @@ export function ProvvigioniFilterTable({
           return (
             <Link
               href={`/clienti/${row.clientId}?contratto=${row.id}`}
-              className={`text-[11px] ${missing ? "font-bold text-red-700 underline" : "font-medium text-emerald-700 underline"}`}
+              className={`text-xs ${missing ? "font-bold text-red-700 underline" : "font-medium text-emerald-700 underline"}`}
               title={
                 missing
                   ? "Manca data ingresso fornitura — apri e sistema"
@@ -567,7 +567,7 @@ export function ProvvigioniFilterTable({
         return (
           <Link
             href={`/clienti/${row.clientId}?contratto=${row.id}`}
-            className={`font-mono text-[11px] underline-offset-2 hover:opacity-90 ${alertClass}`}
+            className={`font-mono text-xs underline-offset-2 hover:opacity-90 ${alertClass}`}
             title={
               missing
                 ? "Manca data ingresso fornitura — apri e sistema"
@@ -595,7 +595,7 @@ export function ProvvigioniFilterTable({
         const dirty = isDraftDirty(r, "collaboratorName");
         if (!collaboratorByName) {
           return (
-            <span className="whitespace-nowrap text-[11px] text-slate-700">
+            <span className="whitespace-nowrap text-xs text-slate-700">
               {formatCollaboratorShort(full)}
             </span>
           );
@@ -603,7 +603,7 @@ export function ProvvigioniFilterTable({
         const names = Object.keys(collaboratorByName);
         return (
           <select
-            className={`max-w-[7.5rem] rounded border px-0.5 py-0.5 text-[11px] ${
+            className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs ${
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={full}
@@ -649,7 +649,7 @@ export function ProvvigioniFilterTable({
       getValue: (r) => String(r.supplyStartDate ?? ""),
       editable: true,
       sortKind: "date",
-      inputClassName: "max-w-[6.5rem] tabular-nums text-[11px]",
+      inputClassName: "max-w-[6.5rem] tabular-nums text-xs",
       cellExtra: (r) => {
         const row = r as ProvvigioneRow;
         const val = String(row.supplyStartDate ?? "").trim();
@@ -678,7 +678,7 @@ export function ProvvigioniFilterTable({
           : current;
         return (
           <select
-            className={`max-w-[9.5rem] rounded border px-1 py-0.5 text-[11px] ${
+            className={`max-w-[9.5rem] rounded border px-1 py-1 text-xs ${
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={value}
@@ -709,7 +709,7 @@ export function ProvvigioniFilterTable({
         const dirty = isDraftDirty(r, "stato");
         return (
           <select
-            className={`max-w-[9.5rem] rounded border px-1 py-0.5 text-[11px] ${
+            className={`max-w-[9.5rem] rounded border px-1 py-1 text-xs ${
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={
@@ -742,7 +742,7 @@ export function ProvvigioniFilterTable({
           currentCode === "M" ? "M" : currentCode === "R" ? "R" : "Una tantum";
         return (
           <select
-            className={`max-w-[7.5rem] rounded border px-0.5 py-0.5 text-[11px] font-semibold ${
+            className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs font-semibold ${
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={value}
@@ -788,7 +788,7 @@ export function ProvvigioniFilterTable({
         const dirty = isDraftDirty(r, "stornoFlag");
         return (
           <select
-            className={`max-w-[4.5rem] rounded border px-1 py-0.5 text-[11px] ${
+            className={`max-w-[4.5rem] rounded border px-1 py-1 text-xs ${
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={current === "Sì" ? "Sì" : "No"}
@@ -866,7 +866,42 @@ export function ProvvigioniFilterTable({
   }, [canDelete, collaboratorByName, supplierNames, rows]);
 
   const columns = useMemo(() => {
-    if (advancedView) return allColumns;
+    if (advancedView) {
+      const widths: Record<string, string> = {
+        clientName: "w-[15rem] min-w-[15rem] max-w-[15rem]",
+        podPdr: "w-[12rem] min-w-[12rem] max-w-[12rem]",
+        collaboratorName: "w-[8rem] min-w-[8rem] max-w-[8rem]",
+        supplierName: "w-[8rem] min-w-[8rem] max-w-[8rem]",
+        clientType: "w-[4rem] min-w-[4rem] max-w-[4rem]",
+        amount: "w-[5rem] min-w-[5rem] max-w-[5rem] text-right",
+        supplyStartDate: "w-[7rem] min-w-[7rem] max-w-[7rem]",
+        operationType: "w-[8rem] min-w-[8rem] max-w-[8rem]",
+        stato: "w-[10rem] min-w-[10rem] max-w-[10rem]",
+        recurrence: "w-[7rem] min-w-[7rem] max-w-[7rem]",
+        collectionMonth: "w-[8rem] min-w-[8rem] max-w-[8rem]",
+        stornoFlag: "w-[5rem] min-w-[5rem] max-w-[5rem]",
+        stornoMonth: "w-[7rem] min-w-[7rem] max-w-[7rem]",
+        stornoAmount: "w-[7rem] min-w-[7rem] max-w-[7rem]",
+        notes: "w-[15rem] min-w-[15rem] max-w-[15rem]",
+        _del: "w-[3rem] min-w-[3rem] max-w-[3rem]",
+      };
+      const inputs: Record<string, string> = {
+        clientName: "w-full truncate text-[13px] font-semibold text-slate-900",
+        amount: "w-full text-right font-semibold tabular-nums",
+        clientType: "w-full text-center",
+        supplierName: "w-full truncate",
+        supplyStartDate: "w-full tabular-nums",
+        collectionMonth: "w-full tabular-nums",
+        stornoMonth: "w-full tabular-nums",
+        stornoAmount: "w-full text-right tabular-nums",
+        notes: "w-full truncate",
+      };
+      return allColumns.map((col) => ({
+        ...col,
+        colClassName: widths[col.key],
+        inputClassName: [col.inputClassName, inputs[col.key]].filter(Boolean).join(" "),
+      }));
+    }
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
     /** Larghezze per stare tutte in una schermata (vista semplificata) */
     const widths: Record<string, string> = {
