@@ -295,7 +295,7 @@ async function upsertMonthStatus(
   }
 }
 
-/** Normalizza etichette e sync mesi per ricorrenti (o un collaboratore). */
+/** Sincronizzazione globale, ottimizzata, di tutte le ricorrenze. */
 export async function syncAllRecurringMonths(collaboratorId?: string): Promise<number> {
   const contracts = await prisma.contract.findMany({
     where: {
@@ -304,32 +304,115 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       ...(collaboratorId ? { collaboratorId } : {}),
       OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr],
     },
-    select: { id: true, recurrence: true },
-  });
-
-  const maybeR = await prisma.contract.findMany({
-    where: {
-      isHistorical: false,
-      deletedAt: null,
-      ...(collaboratorId ? { collaboratorId } : {}),
-      recurrence: { not: null },
-      id: { notIn: contracts.map((c) => c.id) },
+    select: {
+      id: true,
+      recurrence: true,
+      insertionDate: true,
+      supplyStartDate: true,
+      operationType: true,
+      status: true,
+      commission: { select: { expected: true } },
+      statusHistory: {
+        where: { toStatus: "CHIUSO" },
+        select: { changedAt: true },
+        orderBy: { changedAt: "desc" },
+        take: 1,
+      },
+      recurringMonths: {
+        select: { id: true, period: true, status: true, amount: true, note: true },
+      },
     },
-    select: { id: true, recurrence: true },
-    take: 2000,
   });
-  const extra = maybeR.filter((c) => isRecurring(c.recurrence));
-  const all = [...contracts, ...extra];
-  const seen = new Set<string>();
-  const MAX_PER_RUN = 12;
 
-  for (const c of all) {
-    if (seen.size >= MAX_PER_RUN) break;
-    if (seen.has(c.id)) continue;
-    seen.add(c.id);
-    await syncRecurringMonthsForContract(c.id);
+  const now = toPeriod(new Date());
+  const creates: Array<{
+    contractId: string;
+    period: string;
+    status: string;
+    amount: number | null;
+  }> = [];
+  const updates: Array<{
+    id: string;
+    status: string;
+    amount: number | null;
+    clearAutoClosure: boolean;
+  }> = [];
+  const annualIds: string[] = [];
+
+  for (const contract of contracts) {
+    if (isRecurringAnnual(contract.recurrence)) {
+      annualIds.push(contract.id);
+      continue;
+    }
+    if (!isRecurringMonthly(contract.recurrence)) continue;
+    if (contract.status === "ANNULLATO" || contract.status === "KO") continue;
+
+    const start = toPeriod(
+      contract.supplyStartDate ??
+        computeSupplyStartDate(contract.insertionDate, contract.operationType),
+    );
+    const closedPeriod =
+      contract.status === "CHIUSO" && contract.statusHistory[0]
+        ? toPeriod(contract.statusHistory[0].changedAt)
+        : null;
+    const lastPeriod = closedPeriod && closedPeriod < now ? closedPeriod : now;
+    const amount = Number(contract.commission?.expected ?? 0) || null;
+    const existing = new Map(contract.recurringMonths.map((row) => [row.period, row]));
+
+    for (const period of monthsBetween(start, lastPeriod)) {
+      const finalStatus = period < now ? "MISSING" : "PENDING";
+      const row = existing.get(period);
+      if (!row) {
+        creates.push({ contractId: contract.id, period, status: finalStatus, amount });
+        continue;
+      }
+      const autoClosed =
+        row.status === "CLOSED" &&
+        (row.note === AUTO_CLOSED_BEFORE_START || row.note === AUTO_CLOSED_AFTER_END);
+      if (PRESERVED_STATUSES.has(row.status) && !autoClosed) continue;
+      if (row.status !== finalStatus || (amount != null && row.amount == null) || autoClosed) {
+        updates.push({
+          id: row.id,
+          status: finalStatus,
+          amount: amount ?? (row.amount == null ? null : Number(row.amount)),
+          clearAutoClosure: autoClosed,
+        });
+      }
+    }
   }
-  return seen.size;
+
+  for (let offset = 0; offset < creates.length; offset += 500) {
+    await prisma.recurringMonth.createMany({
+      data: creates.slice(offset, offset + 500),
+      skipDuplicates: true,
+    });
+  }
+  for (let offset = 0; offset < updates.length; offset += 25) {
+    await Promise.all(
+      updates.slice(offset, offset + 25).map((row) =>
+        prisma.recurringMonth.update({
+          where: { id: row.id },
+          data: {
+            status: row.status,
+            amount: row.amount,
+            paidAt: null,
+            settledPeriod: null,
+            ...(row.clearAutoClosure ? { note: null } : {}),
+          },
+        }),
+      ),
+    );
+  }
+
+  // Le annuali sono poche: per ciascuna usa l'ultimo incasso + 12 mesi.
+  for (let offset = 0; offset < annualIds.length; offset += 8) {
+    await Promise.all(
+      annualIds
+        .slice(offset, offset + 8)
+        .map((id) => syncRecurringMonthsForContract(id)),
+    );
+  }
+  return contracts.length;
 }
 
 export async function getMissingRecurringAlerts(
@@ -391,7 +474,7 @@ export async function getMissingRecurringAlerts(
       },
     },
     orderBy: [{ period: "asc" }],
-    take: 120,
+    take: 1000,
   });
   return rows.filter((row) => {
     const start = toPeriod(

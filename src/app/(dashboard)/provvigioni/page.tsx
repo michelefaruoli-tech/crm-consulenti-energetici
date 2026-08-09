@@ -204,8 +204,13 @@ export default async function ProvvigioniPage({
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
 
-  // Prima di conteggi, avvisi e rendiconti esclude tutte le rate fuori fornitura.
-  if (vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti") {
+  const recurringOperationalView =
+    vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
+  // Prima di conteggi e avvisi genera tutte le rate dovute e rimuove quelle fuori periodo.
+  if (recurringOperationalView) {
+    await syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
+      console.error("sync all recurring", e),
+    );
     await reconcileAllRecurringBounds().catch((e) =>
       console.error("reconcile recurring bounds", e),
     );
@@ -234,7 +239,7 @@ export default async function ProvvigioniPage({
         ),
       ),
     );
-  } else {
+  } else if (!recurringOperationalView) {
     void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
       console.error("sync recurring", e),
     );
