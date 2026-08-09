@@ -26,7 +26,6 @@ import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { ContractEconomicSummary } from "@/components/contracts/contract-economic-summary";
 import { isRecurring } from "@/lib/recurring";
-import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 
 export default async function ContrattoDetailPage({
   params,
@@ -67,13 +66,6 @@ export default async function ContrattoDetailPage({
   if (!(await userCanAccessContract(session, contract))) {
     redirect("/contratti");
   }
-
-  // Mantiene la scheda economica coerente con ingresso e chiusura anche per dati storici.
-  await syncRecurringMonthsForContract(id);
-  const recurringMonths = await prisma.recurringMonth.findMany({
-    where: { contractId: id, status: { not: "CLOSED" } },
-    orderBy: { period: "desc" },
-  });
 
   const canChangeStatus =
     hasPermission(session.role, "contracts.change_status") ||
@@ -298,14 +290,16 @@ export default async function ContrattoDetailPage({
           note: entry.note,
           createdAt: entry.createdAt,
         }))}
-        recurringEntries={recurringMonths.map((entry) => ({
+        recurringEntries={contract.recurringMonths
+          .filter((entry) => entry.status !== "CLOSED")
+          .map((entry) => ({
           id: entry.id,
           period: entry.period,
           status: entry.status,
           amount: Number(entry.amount ?? 0),
           paidAt: entry.paidAt,
           settledPeriod: entry.settledPeriod,
-        }))}
+          }))}
       />
 
       {canEditContract ? (

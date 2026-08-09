@@ -26,6 +26,7 @@ import {
   getSettledRecurringForPeriod,
   getPaidToLiquidateAlerts,
   syncAllRecurringMonths,
+  syncRecurringMonthsForContract,
 } from "@/lib/recurring-sync";
 import {
   effectiveCollectionDate,
@@ -195,10 +196,25 @@ export default async function ProvvigioniPage({
     { id: "desc" },
   ];
 
-  // Sync ricorrenze in background: non bloccare il caricamento della pagina
-  void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
-    console.error("sync recurring", e),
-  );
+  // Con una ricerca mirata riconcilia subito i contratti trovati; altrimenti usa il sync leggero.
+  if (q) {
+    const matchingRecurring = await prisma.contract.findMany({
+      where: baseContractWhere,
+      select: { id: true },
+      take: 100,
+    });
+    await Promise.all(
+      matchingRecurring.map((row) =>
+        syncRecurringMonthsForContract(row.id).catch((e) =>
+          console.error("sync recurring searched contract", e),
+        ),
+      ),
+    );
+  } else {
+    void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
+      console.error("sync recurring", e),
+    );
+  }
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
   const total = await prisma.contract.count({ where: contractWhere });
