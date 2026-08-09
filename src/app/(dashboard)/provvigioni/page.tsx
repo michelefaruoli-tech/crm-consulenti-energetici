@@ -708,6 +708,7 @@ export default async function ProvvigioniPage({
     supplierName: m.contract.supplier.name,
     clientName: clientDisplayName(m.contract.client),
     collaboratorName: m.contract.collaborator?.name,
+    amount: m.amount != null ? Number(m.amount) : undefined,
   }));
   const toLiquidateRows = toLiquidate.map((m) => ({
     id: m.id,
