@@ -71,15 +71,21 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   const now = toPeriod(new Date());
 
   // Elimina dai conteggi qualsiasi rata precedente all'effettivo ingresso.
-  await prisma.recurringMonth.updateMany({
+  const beforeSupply = await prisma.recurringMonth.findMany({
     where: { contractId, period: { lt: start } },
-    data: {
-      status: "CLOSED",
-      paidAt: null,
-      settledPeriod: null,
-      note: AUTO_CLOSED_BEFORE_START,
-    },
+    select: { id: true },
   });
+  for (const row of beforeSupply) {
+    await prisma.recurringMonth.update({
+      where: { id: row.id },
+      data: {
+        status: "CLOSED",
+        paidAt: null,
+        settledPeriod: null,
+        note: AUTO_CLOSED_BEFORE_START,
+      },
+    });
+  }
 
   if (contract.status === "ANNULLATO" || contract.status === "KO") {
     const open = await prisma.recurringMonth.findMany({
@@ -101,15 +107,21 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       ? toPeriod(contract.statusHistory[0]?.changedAt ?? new Date())
       : null;
   if (closedPeriod) {
-    await prisma.recurringMonth.updateMany({
+    const afterClosure = await prisma.recurringMonth.findMany({
       where: { contractId, period: { gt: closedPeriod } },
-      data: {
-        status: "CLOSED",
-        paidAt: null,
-        settledPeriod: null,
-        note: AUTO_CLOSED_AFTER_END,
-      },
+      select: { id: true },
     });
+    for (const row of afterClosure) {
+      await prisma.recurringMonth.update({
+        where: { id: row.id },
+        data: {
+          status: "CLOSED",
+          paidAt: null,
+          settledPeriod: null,
+          note: AUTO_CLOSED_AFTER_END,
+        },
+      });
+    }
   }
   const lastPeriod = closedPeriod && closedPeriod < now ? closedPeriod : now;
   const amount = Number(contract.commission?.expected ?? 0) || null;
