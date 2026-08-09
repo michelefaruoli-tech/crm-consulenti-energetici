@@ -140,24 +140,40 @@ export default async function ProvvigioniPage({
     recurrenceMode,
     visibility,
   });
-  const contractWhere: Prisma.ContractWhereInput =
-    focus === "da-confermare"
-      ? { AND: [baseContractWhere, { commissionConfirmed: false }] }
-      : focus === "ricorrenze-mancanti"
-        ? {
-            AND: [
-              baseContractWhere,
-              {
-                recurringMonths: {
-                  some: {
-                    status: "MISSING",
-                    period: { lt: toPeriod(new Date()) },
-                  },
-                },
+  function applyFocus(where: Prisma.ContractWhereInput): Prisma.ContractWhereInput {
+    if (focus === "da-confermare") {
+      return { AND: [where, { commissionConfirmed: false }] };
+    }
+    if (focus === "ricorrenze-mancanti") {
+      return {
+        AND: [
+          where,
+          {
+            recurringMonths: {
+              some: {
+                status: "MISSING",
+                period: { lt: toPeriod(new Date()) },
               },
-            ],
-          }
-        : baseContractWhere;
+            },
+          },
+        ],
+      };
+    }
+    return where;
+  }
+  const contractWhere = applyFocus(baseContractWhere);
+  const collaboratorCountsWhere = applyFocus(
+    buildProvvigioniContractWhere({
+      canViewAll: canViewAll || isScoped,
+      sessionUserId: session.id,
+      supplier,
+      stato,
+      tipologia,
+      q,
+      recurrenceMode,
+      visibility,
+    }),
+  );
   const collabFilter =
     (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
   const sessionCollabFilter = isScoped
@@ -347,16 +363,7 @@ export default async function ProvvigioniPage({
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
-          where: buildProvvigioniContractWhere({
-            canViewAll: canViewAll || isScoped,
-            sessionUserId: session.id,
-            supplier,
-            stato,
-            tipologia,
-            q,
-            recurrenceMode,
-            visibility,
-          }),
+          where: collaboratorCountsWhere,
           _count: { id: true },
         })
       : Promise.resolve([]),
