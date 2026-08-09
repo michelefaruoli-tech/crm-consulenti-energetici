@@ -381,24 +381,14 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     }
   }
 
-  // Upsert in piccoli gruppi: più affidabile del createMany tramite il proxy DB.
-  for (let offset = 0; offset < creates.length; offset += 5) {
-    await Promise.all(
-      creates.slice(offset, offset + 5).map((row) =>
-        prisma.recurringMonth.upsert({
-          where: {
-            contractId_period: {
-              contractId: row.contractId,
-              period: row.period,
-            },
-          },
-          create: row,
-          update: {},
-        }).catch((error) => {
-          console.error("sync recurring create", row.contractId, row.period, error);
-        }),
-      ),
-    );
+  // Creazioni sequenziali: il proxy DB può rifiutare upsert concorrenti in massa.
+  for (const row of creates) {
+    try {
+      await prisma.recurringMonth.create({ data: row });
+    } catch (error) {
+      // Un'altra sincronizzazione può averla appena creata: in quel caso è già a posto.
+      console.error("sync recurring create", row.contractId, row.period, error);
+    }
   }
   for (let offset = 0; offset < updates.length; offset += 25) {
     await Promise.all(
