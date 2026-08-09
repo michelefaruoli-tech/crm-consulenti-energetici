@@ -20,6 +20,8 @@ export type ListinoRuleOption = {
   hasRid?: boolean;
   paymentType?: string;
   gettoneMensile?: number;
+  installments?: number | null;
+  stornoMonths?: number | null;
 };
 
 type SupplierOption = { id: string; name: string };

@@ -53,6 +53,8 @@ export default async function NuovoContrattoPage({
         name: true,
         clientSegment: true,
         paymentType: true,
+        installments: true,
+        stornoMonths: true,
         fixedAmount: true,
         gettoneBase: true,
         gettoneRid: true,
@@ -90,6 +92,8 @@ export default async function NuovoContrattoPage({
       hasRid: n(r.gettoneRid) > 0,
       paymentType: r.paymentType,
       gettoneMensile: n(r.gettoneMensile),
+      installments: r.installments,
+      stornoMonths: r.stornoMonths,
     };
   });
 

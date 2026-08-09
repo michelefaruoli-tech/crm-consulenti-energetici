@@ -66,6 +66,8 @@ type Props = {
     hasRid?: boolean;
     paymentType?: string;
     gettoneMensile?: number;
+    installments?: number | null;
+    stornoMonths?: number | null;
   }[];
   initialClientId?: string;
 };
@@ -163,6 +165,13 @@ export function NuovoContrattoForm({
   const firstRecurringLabel = format(effectiveSupplyStart, "MM/yyyy");
   const supplyStartBeforeRegistration =
     format(effectiveSupplyStart, "yyyy-MM-dd") < format(registrationDate, "yyyy-MM-dd");
+  const selectedCollaboratorName =
+    collaborators.find((collaborator) => collaborator.id === collaboratorId)?.name ?? session.name;
+
+  function euro(value: string | number | null | undefined) {
+    const amount = Number(value || 0);
+    return new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(amount);
+  }
 
   const podValues = useMemo(
     () => [...new Set(services.flatMap((line) => [line.pod, line.pdr]).map((v) => v?.trim()).filter((v): v is string => Boolean(v && v.length >= 6)))],
@@ -1023,6 +1032,47 @@ export function NuovoContrattoForm({
             highlightBase={reqBase}
           />
         ))}
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-indigo-950">Riepilogo provvigionale</h3>
+              <p className="text-xs text-indigo-800">Controllo economico prima del salvataggio</p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-900 ring-1 ring-indigo-200">
+              Collaboratore: {selectedCollaboratorName}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {services.map((line, index) => {
+              const rule = listinoRules.find((item) => item.id === line.commissionRuleId);
+              const supplierName = line.supplierId
+                ? suppliers.find((supplier) => supplier.id === line.supplierId)?.name
+                : line.supplierName;
+              if (!rule) {
+                return (
+                  <div key={line.id} className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                    <strong>Servizio {index + 1} · {line.service}</strong>
+                    <p className="mt-1">{supplierName || "Fornitore non selezionato"}</p>
+                    <p className="mt-2 font-semibold">Nessuna regola provvigionale selezionata.</p>
+                  </div>
+                );
+              }
+              const monthly = rule.paymentType === "MENSILE" || Number(rule.gettoneMensile || 0) > 0;
+              return (
+                <div key={line.id} className="rounded-xl border border-indigo-200 bg-white p-3 text-sm text-slate-700">
+                  <p className="font-bold text-slate-950">Servizio {index + 1} · {line.service} · {supplierName || "—"}</p>
+                  <p className="mt-1 text-xs text-slate-500">{rule.name}</p>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
+                    <dt>Gettone iniziale</dt><dd className="text-right font-bold">{euro(rule.gettoneTotale)}</dd>
+                    <dt>Ricorrenza</dt><dd className="text-right font-bold">{monthly ? `${euro(rule.gettoneMensile)} mensili` : rule.paymentType === "RATEIZZATO" ? `${rule.installments || "—"} rate` : "Una tantum"}</dd>
+                    {monthly ? <><dt>Prima competenza</dt><dd className="text-right font-bold">{firstRecurringLabel}</dd></> : null}
+                    <dt>Periodo di storno</dt><dd className="text-right font-bold">{rule.stornoMonths ? `${rule.stornoMonths} mesi` : "Non indicato"}</dd>
+                  </dl>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         {podMatches.length > 0 ? (
           <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-sm text-amber-950">
             <p className="font-bold">POD/PDR già presente: possibile ricontrattualizzazione</p>
