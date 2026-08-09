@@ -274,6 +274,7 @@ export default async function ContrattoDetailPage({
 
       <ContractEconomicSummary
         expected={expected}
+        recurrence={contract.recurrence}
         received={received}
         paid={paid}
         stornoAmount={Number(contract.commission?.stornoAmount ?? 0)}

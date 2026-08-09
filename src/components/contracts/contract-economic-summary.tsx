@@ -1,6 +1,6 @@
 import { formatCurrency } from "@/lib/commission";
 import { formatDate } from "@/lib/utils";
-import { periodLabel } from "@/lib/recurring";
+import { isRecurring, periodLabel } from "@/lib/recurring";
 
 type CommissionEntry = {
   id: string;
@@ -43,6 +43,7 @@ function entryLabel(type: string): string {
 
 export function ContractEconomicSummary({
   expected,
+  recurrence,
   received,
   paid,
   stornoAmount,
@@ -54,6 +55,7 @@ export function ContractEconomicSummary({
   recurringEntries,
 }: {
   expected: number;
+  recurrence: string | null;
   received: number;
   paid: number;
   stornoAmount: number;
@@ -64,7 +66,14 @@ export function ContractEconomicSummary({
   commissionEntries: CommissionEntry[];
   recurringEntries: RecurringEntry[];
 }) {
-  const effectiveReceived = collectionDate ? received || expected : received;
+  const recurringContract = isRecurring(recurrence);
+  // Nei ricorrenti `expected` è il valore della singola rata: non va sommato
+  // di nuovo alle rate già presenti in RecurringMonth.
+  const effectiveReceived = recurringContract
+    ? received
+    : collectionDate
+      ? received || expected
+      : received;
   const recurringReceived = recurringEntries
     .filter((entry) => entry.status === "PAID" || entry.status === "LIQUIDATED")
     .reduce((sum, entry) => sum + entry.amount, 0);
@@ -93,7 +102,7 @@ export function ContractEconomicSummary({
       tone: "positive",
     });
   }
-  if (collectionDate) {
+  if (collectionDate && (!recurringContract || received > 0)) {
     timeline.push({
       id: "collection",
       date: collectionDate,
