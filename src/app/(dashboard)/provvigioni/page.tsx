@@ -43,7 +43,7 @@ import {
   buildProvvigioniContractWhere,
   sumProvvigioniTotals,
 } from "@/lib/provvigioni-filters";
-import { toPeriod, isRecurring } from "@/lib/recurring";
+import { addMonths, toPeriod, isRecurring } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   defaultGettonePrivato,
@@ -180,17 +180,27 @@ export default async function ProvvigioniPage({
         }
       : baseContractWhere,
   );
+  const activeRecurringPeriod = addMonths(toPeriod(new Date()), -1);
+  const [activeYear, activeMonth] = activeRecurringPeriod.split("-").map(Number);
+  const activeRecurringEnd = new Date(activeYear, activeMonth, 0, 23, 59, 59, 999);
+  const activeRecurringWhere: Prisma.ContractWhereInput = {
+    status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
+    supplyStartDate: { not: null, lte: activeRecurringEnd },
+  };
+  const collaboratorBaseWhere = buildProvvigioniContractWhere({
+    canViewAll: canViewAll || isScoped,
+    sessionUserId: session.id,
+    supplier,
+    stato,
+    tipologia,
+    q,
+    recurrenceMode,
+    visibility,
+  });
   const collaboratorCountsWhere = applyFocus(
-    buildProvvigioniContractWhere({
-      canViewAll: canViewAll || isScoped,
-      sessionUserId: session.id,
-      supplier,
-      stato,
-      tipologia,
-      q,
-      recurrenceMode,
-      visibility,
-    }),
+    vista === "mensile" || vista === "annuale"
+      ? { AND: [collaboratorBaseWhere, activeRecurringWhere] }
+      : collaboratorBaseWhere,
   );
   const collabFilter =
     (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
@@ -448,30 +458,40 @@ export default async function ProvvigioniPage({
       }),
     }),
     prisma.contract.count({
-      where: buildProvvigioniContractWhere({
-        canViewAll: canViewAll || isScoped,
-        sessionUserId: session.id,
-        collab,
-        supplier,
-        stato,
-        tipologia,
-        q,
-        recurrenceMode: "monthly",
-        visibility,
-      }),
+      where: {
+        AND: [
+          buildProvvigioniContractWhere({
+            canViewAll: canViewAll || isScoped,
+            sessionUserId: session.id,
+            collab,
+            supplier,
+            stato,
+            tipologia,
+            q,
+            recurrenceMode: "monthly",
+            visibility,
+          }),
+          activeRecurringWhere,
+        ],
+      },
     }),
     prisma.contract.count({
-      where: buildProvvigioniContractWhere({
-        canViewAll: canViewAll || isScoped,
-        sessionUserId: session.id,
-        collab,
-        supplier,
-        stato,
-        tipologia,
-        q,
-        recurrenceMode: "annual",
-        visibility,
-      }),
+      where: {
+        AND: [
+          buildProvvigioniContractWhere({
+            canViewAll: canViewAll || isScoped,
+            sessionUserId: session.id,
+            collab,
+            supplier,
+            stato,
+            tipologia,
+            q,
+            recurrenceMode: "annual",
+            visibility,
+          }),
+          activeRecurringWhere,
+        ],
+      },
     }),
   ]);
 

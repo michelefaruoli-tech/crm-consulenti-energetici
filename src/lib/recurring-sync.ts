@@ -448,6 +448,7 @@ export async function getMissingRecurringAlerts(
       contract: {
         isHistorical: false,
         deletedAt: null,
+        status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
         ...(collaboratorId ? { collaboratorId } : {}),
         ...recurrenceFilter,
       },
