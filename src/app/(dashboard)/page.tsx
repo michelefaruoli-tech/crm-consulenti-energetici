@@ -10,8 +10,14 @@ import { PaginationNav } from "@/components/ui/pagination-nav";
 import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
-import { sumProvvigioniTotals } from "@/lib/provvigioni-filters";
+import {
+  provvigioneStatoWhere,
+  recurringAnnualWhereOr,
+  recurringMonthlyWhereOr,
+  sumProvvigioniTotals,
+} from "@/lib/provvigioni-filters";
 import { contractTextSearchWhere } from "@/lib/list-search";
+import { toPeriod } from "@/lib/recurring";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +61,11 @@ export default async function DashboardPage({
       expired,
       inLavorazioneList,
       moneyTotals,
+      commissioniDaConfermare,
+      incassateDaLiquidare,
+      contrattiSenzaIngresso,
+      ricorrenzeMancanti,
+      storniRegistrati,
       topCollaborators,
       listTotal,
       recentContracts,
@@ -127,6 +138,57 @@ export default async function DashboardPage({
           ? { deletedAt: null }
           : { deletedAt: null, collaboratorId: session.id },
       ),
+      prisma.contract.count({
+        where: { ...whereActive, commissionConfirmed: false },
+      }),
+      prisma.contract.count({
+        where: {
+          AND: [whereActive, provvigioneStatoWhere("Incassato") ?? {}],
+        },
+      }),
+      prisma.contract.count({
+        where: {
+          AND: [
+            whereActive,
+            {
+              supplyStartDate: null,
+              collectionDate: null,
+              status: {
+                notIn: [
+                  "PROVVIGIONE_LIQUIDATA",
+                  "KO",
+                  "ANNULLATO",
+                  "CHIUSO",
+                  "STORNATO",
+                ],
+              },
+            },
+          ],
+        },
+      }),
+      prisma.recurringMonth.count({
+        where: {
+          status: "MISSING",
+          period: { lt: toPeriod(new Date()) },
+          contract: {
+            ...whereActive,
+            OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr],
+          },
+        },
+      }),
+      prisma.contract.count({
+        where: {
+          AND: [
+            whereActive,
+            {
+              OR: [
+                { status: "STORNATO" },
+                { commission: { stornoDate: { not: null } } },
+              ],
+            },
+          ],
+        },
+      }),
       hasPermission(session.role, "stats.full")
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
@@ -267,6 +329,78 @@ export default async function DashboardPage({
             />
           </Link>
         </div>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                Priorità operative
+              </p>
+              <h2 className="mt-1 text-xl font-bold text-slate-900">Da gestire</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Le verifiche più importanti, ordinate per il lavoro quotidiano.
+              </p>
+            </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+              Aggiornato ora
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {[
+              {
+                label: "Provvigioni da confermare",
+                value: commissioniDaConfermare,
+                href: "/provvigioni",
+                hint: "Controlla il gettone previsto",
+                tone: "border-amber-200 bg-amber-50 text-amber-950",
+              },
+              {
+                label: "Incassate da liquidare",
+                value: incassateDaLiquidare,
+                href: "/provvigioni?stato=Incassato",
+                hint: "Fornitore pagato, collaboratore no",
+                tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
+              },
+              {
+                label: "Ingresso fornitura mancante",
+                value: contrattiSenzaIngresso,
+                href: "/contratti?vista=tutti",
+                hint: "Esclusi i contratti già pagati",
+                tone: "border-orange-200 bg-orange-50 text-orange-950",
+              },
+              {
+                label: "Ricorrenze mancanti",
+                value: ricorrenzeMancanti,
+                href: "/provvigioni?vista=mensile",
+                hint: "Rate attese nei mesi precedenti",
+                tone: "border-sky-200 bg-sky-50 text-sky-950",
+              },
+              {
+                label: "Storni registrati",
+                value: storniRegistrati,
+                href: "/provvigioni?stato=Stornato",
+                hint: "Controlla importi e competenza",
+                tone: "border-rose-200 bg-rose-50 text-rose-950",
+              },
+            ].map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                className={`group rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md ${item.tone}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold leading-tight">{item.label}</p>
+                  <span aria-hidden className="text-lg leading-none opacity-50 transition group-hover:translate-x-0.5">
+                    →
+                  </span>
+                </div>
+                <p className="mt-3 text-3xl font-bold tabular-nums">{item.value}</p>
+                <p className="mt-2 text-xs leading-snug opacity-75">{item.hint}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
