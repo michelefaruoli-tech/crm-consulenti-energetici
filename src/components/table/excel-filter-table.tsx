@@ -444,7 +444,7 @@ export function ExcelFilterTable({
           fitWidth
             ? "w-full min-w-0 table-fixed text-xs"
             : dense
-              ? "min-w-[1200px] text-xs"
+              ? "w-max min-w-[1200px] text-xs"
               : "min-w-[1200px] text-sm",
         )}
       >
