@@ -25,12 +25,16 @@ export function RecurringToLiquidatePanel({
   kind = "monthly",
 }: {
   alerts: ToLiquidateAlert[];
-  kind?: "monthly" | "annual";
+  kind?: "monthly" | "annual" | "all";
 }) {
   if (alerts.length === 0) return null;
 
   const titleKind =
-    kind === "annual" ? "Ricorrenti annuali" : "Ricorrenti mensili";
+    kind === "all"
+      ? "Ricorrenze mensili e annuali"
+      : kind === "annual"
+        ? "Ricorrenti annuali"
+        : "Ricorrenti mensili";
 
   return (
     <section className="rounded-xl border border-sky-300 bg-sky-50 p-4 shadow-sm">

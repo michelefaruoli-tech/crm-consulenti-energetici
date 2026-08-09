@@ -330,7 +330,7 @@ export default async function DashboardPage({
               {
                 label: "Provvigioni da confermare",
                 value: commissioniDaConfermare,
-                href: "/provvigioni",
+                href: "/provvigioni?focus=da-confermare",
                 hint: "Controlla il gettone previsto",
                 tone: "border-amber-200 bg-amber-50 text-amber-950",
               },
@@ -344,7 +344,7 @@ export default async function DashboardPage({
               {
                 label: "Ricorrenze mancanti",
                 value: ricorrenzeMancanti,
-                href: "/provvigioni?vista=mensile",
+                href: "/provvigioni?focus=ricorrenze-mancanti",
                 hint: "Rate attese nei mesi precedenti",
                 tone: "border-sky-200 bg-sky-50 text-sky-950",
               },

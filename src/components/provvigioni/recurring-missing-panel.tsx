@@ -36,14 +36,18 @@ export function RecurringMissingPanel({
 }: {
   alerts: MissingAlert[];
   otherRecurringCount?: number;
-  kind?: "monthly" | "annual";
+  kind?: "monthly" | "annual" | "all";
 }) {
   const settledOptions = useMemo(() => defaultSettledOptions(), []);
   const [settledPeriod, setSettledPeriod] = useState(
     settledOptions[0] ?? toPeriod(new Date()),
   );
   const titleKind =
-    kind === "annual" ? "Ricorrenti annuali" : "Ricorrenti mensili";
+    kind === "all"
+      ? "Ricorrenze mensili e annuali"
+      : kind === "annual"
+        ? "Ricorrenti annuali"
+        : "Ricorrenti mensili";
 
   if (alerts.length === 0) {
     return (

@@ -73,6 +73,8 @@ type SearchParams = {
   q?: string;
   /** tutti | mensile | annuale (ricorrente → mensile per link vecchi) */
   vista?: string;
+  /** Accesso rapido dalla Dashboard */
+  focus?: string;
 };
 
 export default async function ProvvigioniPage({
@@ -92,6 +94,7 @@ export default async function ProvvigioniPage({
     dir: dirRaw,
     q: qRaw,
     vista: vistaRaw,
+    focus: focusRaw,
   } = await searchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
@@ -105,6 +108,10 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
+  const focus =
+    focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
+      ? focusRaw
+      : undefined;
   // Default = tutti. Tab: mensile (M) | annuale (R). Legacy «ricorrente» → mensile.
   const vista =
     vistaRaw === "annuale"
@@ -114,9 +121,14 @@ export default async function ProvvigioniPage({
         : "tutti";
   const recurrenceMode =
     vista === "mensile" ? "monthly" : vista === "annuale" ? "annual" : "all";
-  const recurringKind = vista === "annuale" ? "annual" : "monthly";
+  const recurringKind =
+    focus === "ricorrenze-mancanti"
+      ? "all"
+      : vista === "annuale"
+        ? "annual"
+        : "monthly";
 
-  const contractWhere = buildProvvigioniContractWhere({
+  const baseContractWhere = buildProvvigioniContractWhere({
     // Backoffice: non forzare collaboratorId = sé (usa solo visibility)
     canViewAll: canViewAll || isScoped,
     sessionUserId: session.id,
@@ -128,6 +140,24 @@ export default async function ProvvigioniPage({
     recurrenceMode,
     visibility,
   });
+  const contractWhere: Prisma.ContractWhereInput =
+    focus === "da-confermare"
+      ? { AND: [baseContractWhere, { commissionConfirmed: false }] }
+      : focus === "ricorrenze-mancanti"
+        ? {
+            AND: [
+              baseContractWhere,
+              {
+                recurringMonths: {
+                  some: {
+                    status: "MISSING",
+                    period: { lt: toPeriod(new Date()) },
+                  },
+                },
+              },
+            ],
+          }
+        : baseContractWhere;
   const collabFilter =
     (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
   const sessionCollabFilter = isScoped
@@ -673,6 +703,7 @@ export default async function ProvvigioniPage({
     tipologia,
     q,
     vista: vista === "tutti" ? undefined : vista,
+    focus,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
@@ -682,6 +713,8 @@ export default async function ProvvigioniPage({
     stato ? `stato ${stato.split("|").join(" + ")}` : null,
     tipologia ? `tipologia ${tipologia.split("|").join(" + ")}` : null,
     q ? `cerca «${q}»` : null,
+    focus === "da-confermare" ? "solo provvigioni da confermare" : null,
+    focus === "ricorrenze-mancanti" ? "solo ricorrenze mancanti" : null,
     vista === "mensile"
       ? "scheda Mensile (M)"
       : vista === "annuale"
@@ -695,6 +728,7 @@ export default async function ProvvigioniPage({
     tipologia ? `tipologia=${encodeURIComponent(tipologia)}` : null,
     q ? `q=${encodeURIComponent(q)}` : null,
     vista !== "tutti" ? `vista=${vista}` : null,
+    focus ? `focus=${focus}` : null,
   ]
     .filter(Boolean)
     .map((p) => `&${p}`)
@@ -707,6 +741,7 @@ export default async function ProvvigioniPage({
   if (tipologia) exportParams.set("tipologia", tipologia);
   if (q) exportParams.set("q", q);
   if (vista !== "tutti") exportParams.set("vista", vista);
+  if (focus) exportParams.set("focus", focus);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
   function vistaHref(nextVista: "mensile" | "annuale" | "tutti") {
@@ -717,6 +752,7 @@ export default async function ProvvigioniPage({
       ...(stato ? { stato } : {}),
       ...(tipologia ? { tipologia } : {}),
       ...(q ? { q } : {}),
+      ...(focus ? { focus } : {}),
       ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
   }
@@ -810,6 +846,7 @@ export default async function ProvvigioniPage({
           stato: stato || undefined,
           tipologia: tipologia || undefined,
           vista: vista !== "tutti" ? vista : undefined,
+          focus,
         }}
         clearHref={vistaHref(vista)}
       />
@@ -823,6 +860,7 @@ export default async function ProvvigioniPage({
               ...(stato ? { stato } : {}),
               ...(tipologia ? { tipologia } : {}),
               ...(q ? { q } : {}),
+              ...(focus ? { focus } : {}),
               ...(vista !== "tutti" ? { vista } : {}),
             }).toString()}`}
             className={
@@ -843,6 +881,7 @@ export default async function ProvvigioniPage({
                 ...(stato ? { stato } : {}),
                 ...(tipologia ? { tipologia } : {}),
                 ...(q ? { q } : {}),
+                ...(focus ? { focus } : {}),
                 ...(vista !== "tutti" ? { vista } : {}),
               }).toString()}`}
               className={
@@ -857,7 +896,7 @@ export default async function ProvvigioniPage({
         </div>
       ) : null}
 
-      {vista === "mensile" || vista === "annuale" ? (
+      {vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti" ? (
         <>
           <RecurringMissingPanel
             alerts={alertRows}
@@ -937,6 +976,7 @@ export default async function ProvvigioniPage({
           tipologia,
           q,
           vista: vista === "tutti" ? undefined : vista,
+          focus,
         }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}

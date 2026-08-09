@@ -7,7 +7,8 @@ import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
 import { formatMonthYear } from "@/lib/date-parse";
-import { periodLabel } from "@/lib/recurring";
+import { periodLabel, toPeriod } from "@/lib/recurring";
+import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -23,6 +24,11 @@ export async function GET(request: Request) {
   const tipologia = url.searchParams.get("tipologia");
   const q = url.searchParams.get("q");
   const vistaRaw = url.searchParams.get("vista");
+  const focusRaw = url.searchParams.get("focus");
+  const focus =
+    focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
+      ? focusRaw
+      : undefined;
   const vista =
     vistaRaw === "annuale"
       ? "annuale"
@@ -33,7 +39,7 @@ export async function GET(request: Request) {
     vista === "mensile" ? "monthly" : vista === "annuale" ? "annual" : "all";
   const canViewAll = hasPermission(session.role, "commissions.view_all");
 
-  const contractWhere = buildProvvigioniContractWhere({
+  const baseContractWhere = buildProvvigioniContractWhere({
     canViewAll,
     sessionUserId: session.id,
     collab,
@@ -43,6 +49,24 @@ export async function GET(request: Request) {
     q,
     recurrenceMode,
   });
+  const contractWhere: Prisma.ContractWhereInput =
+    focus === "da-confermare"
+      ? { AND: [baseContractWhere, { commissionConfirmed: false }] }
+      : focus === "ricorrenze-mancanti"
+        ? {
+            AND: [
+              baseContractWhere,
+              {
+                recurringMonths: {
+                  some: {
+                    status: "MISSING",
+                    period: { lt: toPeriod(new Date()) },
+                  },
+                },
+              },
+            ],
+          }
+        : baseContractWhere;
 
   const contracts = await prisma.contract.findMany({
     where: contractWhere,
