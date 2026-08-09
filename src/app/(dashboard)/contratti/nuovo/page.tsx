@@ -90,11 +90,11 @@ export default async function NuovoContrattoPage({
   });
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6">
+    <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
       <div>
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Nuovo contratto</h1>
         <p className="text-sm text-slate-500 sm:text-base">
-          Cerca o crea il cliente, compila i 3 blocchi servizio, poi salva dal pulsante in basso.
+          Inserimento guidato: cliente, fornitura, documenti e conferma finale.
         </p>
       </div>
       <NuovoContrattoForm

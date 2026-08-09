@@ -34,6 +34,24 @@ function fillStatus(active: boolean, filled: boolean): "off" | "empty" | "filled
   return filled ? "filled" : "empty";
 }
 
+function SectionHeading({ step, title, description }: {
+  step: number;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 border-b border-slate-200 pb-3">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">
+        {step}
+      </span>
+      <div>
+        <h2 className="text-base font-bold text-slate-900 sm:text-lg">{title}</h2>
+        <p className="mt-0.5 text-sm text-slate-500">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 type Props = {
   session: { id: string; name: string; role: string };
   collaborators: { id: string; name: string }[];
@@ -568,7 +586,8 @@ export function NuovoContrattoForm({
         }}
       />
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
+      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <SectionHeading step={1} title="Assegnazione e lavorazione" description="Scegli il collaboratore e decidi se inviare subito la pratica al back office." />
         {/* Solo Master/Admin: assegna a chi appartiene il contratto (default = Master) */}
         {canPickCollaborator ? (
           <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 sm:p-4">
@@ -601,7 +620,7 @@ export function NuovoContrattoForm({
           </p>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
+        <div className="grid gap-4 md:grid-cols-2 md:items-center">
           <div className="flex flex-col justify-center gap-3">
             <div>
               <h2 className="text-base font-semibold text-slate-900 sm:text-lg">
@@ -618,21 +637,21 @@ export function NuovoContrattoForm({
             onClick={() => setSendToMaster((v) => !v)}
             aria-pressed={sendToMaster}
             className={[
-              "flex min-h-[7.5rem] w-full flex-col items-start justify-center rounded-2xl border-4 px-5 py-5 text-left shadow-md transition sm:min-h-[9rem] sm:px-6",
+              "flex min-h-24 w-full flex-col items-start justify-center rounded-xl border-2 px-4 py-3 text-left transition",
               sendToMaster
                 ? "border-emerald-700 bg-emerald-600 text-white ring-4 ring-emerald-300"
                 : "border-emerald-500 bg-emerald-50 text-emerald-950 hover:bg-emerald-100",
             ].join(" ")}
           >
-            <span className="text-xl font-black uppercase leading-tight tracking-wide sm:text-2xl md:text-3xl">
+            <span className="text-base font-black uppercase leading-tight tracking-wide sm:text-lg">
               Invia al BACKOFFICE
             </span>
-            <span className="mt-2 text-base font-semibold sm:text-lg">
+            <span className="mt-1 text-sm font-semibold">
               per essere lavorato
             </span>
             <span
               className={[
-                "mt-3 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider",
+                "mt-2 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider",
                 sendToMaster
                   ? "bg-white/20 text-white"
                   : "bg-emerald-200 text-emerald-900",
@@ -644,8 +663,8 @@ export function NuovoContrattoForm({
         </div>
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Dati cliente</h2>
+      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <SectionHeading step={2} title="Cliente" description="Cerca un cliente esistente oppure inserisci i dati necessari per crearne uno nuovo." />
         {!req ? (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
             Obbligatori anche senza invio al back office:{" "}
@@ -871,14 +890,9 @@ export function NuovoContrattoForm({
         ) : null}
       </section>
 
-      <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm sm:p-5">
+      <section className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/40 p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Servizi del contratto</h2>
-            <p className="text-sm text-slate-500">
-              Ogni servizio ha 3 blocchi: Operazione · Fornitura · Fornitore. «Aggiungi servizio» ripete tutto.
-            </p>
-          </div>
+          <SectionHeading step={3} title="Fornitura e condizioni economiche" description="Inserisci servizio, POD/PDR, fornitore, decorrenza e provvigione." />
           <AddServiceButton onClick={addService} />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -939,8 +953,8 @@ export function NuovoContrattoForm({
         </div>
       </section>
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Note</h2>
+      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <SectionHeading step={4} title="Note" description="Aggiungi indicazioni interne o informazioni destinate al back office." />
         <Field label="Note interne">
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
@@ -959,8 +973,8 @@ export function NuovoContrattoForm({
         requireDocs={req}
       />
 
-      <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Conferma</h2>
+      <section className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/30 p-4 shadow-sm sm:p-5">
+        <SectionHeading step={5} title="Controllo e salvataggio" description="Verifica i dati essenziali prima di creare il contratto." />
         <div className="space-y-1 rounded-lg bg-slate-50 p-4 text-sm">
           <p>
             <strong>Cliente:</strong>{" "}
