@@ -19,7 +19,8 @@ function samePersonPart(a: string, b: string): boolean {
 
 /**
  * Da testo libero (Provvigioni / Helios) a campi DB Nome + Cognome.
- * Riconosce sia «Nome Cognome» sia «Cognome Nome» con euristiche IT.
+ * La cella Cliente mostra «Cognome Nome»: in salvataggio si riparte da quel formato.
+ * Riconosce anche «Nome Cognome» se il primo pezzo è un nome tipico italiano.
  */
 export function parsePrivatoDisplayName(raw: string): {
   lastName: string;

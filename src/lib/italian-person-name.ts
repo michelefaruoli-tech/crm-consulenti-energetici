@@ -57,6 +57,7 @@ const ITALIAN_FIRST_NAMES = new Set(
     "fabrizio",
     "federica",
     "federico",
+    "ferruccio",
     "filippo",
     "flavia",
     "francesca",
@@ -451,12 +452,14 @@ export function splitItalianPersonName(raw: string): {
     return { firstName: asCognomeNome.firstName, lastName: asCognomeNome.lastName };
   }
 
-  // Default italiano parlato: Nome Cognome
+  // Nome tipico in prima posizione → «Nome Cognome»
   if (isLikelyItalianFirstName(a) && !isLikelyItalianFirstName(b)) {
     return { firstName: a, lastName: b };
   }
+  // Nome tipico in seconda posizione → «Cognome Nome» (come in Provvigioni)
   if (isLikelyItalianFirstName(b) && !isLikelyItalianFirstName(a)) {
     return { firstName: b, lastName: a };
   }
-  return { firstName: a, lastName: b };
+  // Entrambi sconosciuti: default = Cognome Nome (formato elenchi / cella Cliente)
+  return { firstName: b, lastName: a };
 }
