@@ -50,6 +50,8 @@ export type RendicontoMonthBlock = {
   month: string;
   label: string;
   incassato: RendicontoLine[];
+  /** Incassato già spezzato per fornitore (ordinato A→Z) */
+  incassatoBySupplier: RendicontoSupplierBlock[];
   storni: RendicontoLine[];
   ricorrenti: RendicontoLine[];
   subIncassato: number;
@@ -61,6 +63,34 @@ export type RendicontoMonthBlock = {
   countRicorrenti: number;
 };
 
+export type RendicontoSupplierBlock = {
+  supplierName: string;
+  lines: RendicontoLine[];
+  subtotal: number;
+  count: number;
+};
+
+/** Raggruppa le righe per fornitore (A→Z) con subtotale. */
+export function groupLinesBySupplier(
+  lines: RendicontoLine[],
+): RendicontoSupplierBlock[] {
+  const map = new Map<string, RendicontoLine[]>();
+  for (const l of lines) {
+    const key = (l.supplierName || "").trim() || "(senza fornitore)";
+    const arr = map.get(key) ?? [];
+    arr.push(l);
+    map.set(key, arr);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], "it"))
+    .map(([supplierName, group]) => ({
+      supplierName,
+      lines: group,
+      subtotal: group.reduce((s, row) => s + row.amount, 0),
+      count: group.length,
+    }));
+}
+
 export type RendicontoSummary = {
   months: RendicontoMonthBlock[];
   totIncassato: number;
@@ -70,6 +100,8 @@ export type RendicontoSummary = {
   countIncassato: number;
   countStorni: number;
   countRicorrenti: number;
+  /** Totali Incassato per fornitore su tutto il periodo */
+  incassatoBySupplier: RendicontoSupplierBlock[];
 };
 
 function monthKeyFromDate(d: Date): string {
@@ -154,6 +186,7 @@ export function buildRendiconto(params: {
       month,
       label: formatMonthLabel(month),
       incassato,
+      incassatoBySupplier: groupLinesBySupplier(incassato),
       storni,
       ricorrenti,
       subIncassato,
@@ -169,6 +202,7 @@ export function buildRendiconto(params: {
   const totIncassato = months.reduce((s, m) => s + m.subIncassato, 0);
   const totStorni = months.reduce((s, m) => s + m.subStorni, 0);
   const totRicorrenti = months.reduce((s, m) => s + m.subRicorrenti, 0);
+  const allIncassato = months.flatMap((m) => m.incassato);
 
   return {
     months,
@@ -179,6 +213,7 @@ export function buildRendiconto(params: {
     countIncassato: months.reduce((s, m) => s + m.countIncassato, 0),
     countStorni: months.reduce((s, m) => s + m.countStorni, 0),
     countRicorrenti: months.reduce((s, m) => s + m.countRicorrenti, 0),
+    incassatoBySupplier: groupLinesBySupplier(allIncassato),
   };
 }
 

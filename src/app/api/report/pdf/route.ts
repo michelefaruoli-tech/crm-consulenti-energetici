@@ -126,8 +126,19 @@ export async function GET(req: NextRequest) {
 
   const summaryBody: string[][] = [
     ["Incassato (una tantum)", String(rendiconto.countIncassato), formatEuro(rendiconto.totIncassato)],
-    ["Storni", String(rendiconto.countStorni), formatEuro(rendiconto.totStorni)],
   ];
+  for (const s of rendiconto.incassatoBySupplier) {
+    summaryBody.push([
+      `  └ ${s.supplierName}`,
+      String(s.count),
+      formatEuro(s.subtotal),
+    ]);
+  }
+  summaryBody.push([
+    "Storni",
+    String(rendiconto.countStorni),
+    formatEuro(rendiconto.totStorni),
+  ]);
   if (includeRecurring) {
     summaryBody.push([
       "Rate ricorrenti",
@@ -166,7 +177,13 @@ export async function GET(req: NextRequest) {
         data.cell.styles.fontStyle = "bold";
         data.cell.styles.fillColor = [209, 250, 229];
       }
-      if (data.section === "body" && data.row.index === 1 && data.column.index === 2) {
+      // Riga Storni = dopo Incassato + fornitori
+      const storniIndex = 1 + rendiconto.incassatoBySupplier.length;
+      if (
+        data.section === "body" &&
+        data.row.index === storniIndex &&
+        data.column.index === 2
+      ) {
         data.cell.styles.textColor = [185, 28, 28];
       }
     },
@@ -192,27 +209,61 @@ export async function GET(req: NextRequest) {
     doc.setTextColor(17, 94, 89);
     doc.text(`Incassato (${block.countIncassato}) — ${formatEuro(block.subIncassato)}`, 14, y);
     doc.setTextColor(0, 0, 0);
-    y += 2;
+    y += 4;
 
-    autoTable(doc, {
-      startY: y,
-      head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
-      body:
-        block.incassato.length === 0
-          ? [["—", "Nessuna riga", "", "", "", ""]]
-          : block.incassato.map((l) => [
-              l.contractNumber,
-              l.clientName,
-              l.supplierName,
-              l.collaboratorName,
-              l.dateLabel,
-              formatEuro(l.amount),
-            ]),
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [20, 184, 166] },
-      margin: { left: 14, right: 14 },
-    });
-    y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
+    if (block.incassatoBySupplier.length === 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
+        body: [["—", "Nessuna riga", "", "", "", ""]],
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [20, 184, 166] },
+        margin: { left: 14, right: 14 },
+      });
+      y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
+    } else {
+      for (const supplier of block.incassatoBySupplier) {
+        if (y > 250) {
+          doc.addPage();
+          y = 16;
+        }
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(15, 118, 110);
+        doc.text(
+          `${supplier.supplierName} (${supplier.count}) — ${formatEuro(supplier.subtotal)}`,
+          14,
+          y,
+        );
+        doc.setTextColor(0, 0, 0);
+        y += 2;
+        autoTable(doc, {
+          startY: y,
+          head: [["N. contratto", "Cliente", "Collab.", "Data", "Importo"]],
+          body: supplier.lines.map((l) => [
+            l.contractNumber,
+            l.clientName,
+            l.collaboratorName,
+            l.dateLabel,
+            formatEuro(l.amount),
+          ]),
+          styles: { fontSize: 7 },
+          headStyles: { fillColor: [20, 184, 166] },
+          margin: { left: 14, right: 14 },
+          foot: [
+            [
+              "Subtotale",
+              supplier.supplierName,
+              "",
+              "",
+              formatEuro(supplier.subtotal),
+            ],
+          ],
+          footStyles: { fillColor: [204, 251, 241], fontStyle: "bold", fontSize: 7 },
+        });
+        y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
+      }
+    }
 
     if (y > 250) {
       doc.addPage();

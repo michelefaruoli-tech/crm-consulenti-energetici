@@ -193,6 +193,9 @@ export async function GET(req: NextRequest) {
   ]);
   styleHeader(summaryHeader, "FF0F766E");
   rend.addRow(["Incassato (una tantum)", rendiconto.countIncassato, rendiconto.totIncassato]);
+  for (const s of rendiconto.incassatoBySupplier) {
+    rend.addRow([`  └ ${s.supplierName}`, s.count, s.subtotal]);
+  }
   rend.addRow(["Storni", rendiconto.countStorni, rendiconto.totStorni]).getCell(3).font = {
     color: { argb: "FFB91C1C" },
     bold: true,
@@ -251,9 +254,9 @@ export async function GET(req: NextRequest) {
       rend.mergeCells(monthTitle.number, 1, monthTitle.number, 7);
     }
 
-    // Incassato
+    // Incassato — un blocco per fornitore
     const incTitle = rend.addRow([
-      "INCASSATO",
+      "INCASSATO (per fornitore)",
       "",
       "",
       "",
@@ -262,23 +265,45 @@ export async function GET(req: NextRequest) {
       "",
     ]);
     styleSection(incTitle, "FFCCFBF1", "FF115E59");
-    if (block.incassato.length === 0) {
+    if (block.incassatoBySupplier.length === 0) {
       rend.addRow(["", "(nessuna riga)", "", "", "", "", ""]);
     } else {
-      for (const line of block.incassato) {
-        rend.addRow([
-          "Incassato",
-          line.contractNumber,
-          line.clientName,
-          line.supplierName,
-          line.collaboratorName,
-          line.dateLabel,
-          line.amount,
+      for (const supplier of block.incassatoBySupplier) {
+        const supTitle = rend.addRow([
+          `Fornitore: ${supplier.supplierName}`,
+          `${supplier.count} contratti`,
+          "",
+          "",
+          "",
+          "",
+          supplier.subtotal,
         ]);
+        styleSection(supTitle, "FFE6FFFA", "FF0F766E");
+        for (const line of supplier.lines) {
+          rend.addRow([
+            "Incassato",
+            line.contractNumber,
+            line.clientName,
+            line.supplierName,
+            line.collaboratorName,
+            line.dateLabel,
+            line.amount,
+          ]);
+        }
+        const subSup = rend.addRow([
+          `Subtotale ${supplier.supplierName}`,
+          `${supplier.count} righe`,
+          "",
+          "",
+          "",
+          "",
+          supplier.subtotal,
+        ]);
+        styleSubtotal(subSup, "FFF0FDFA");
       }
     }
     const subInc = rend.addRow([
-      "Subtotale Incassato",
+      "Subtotale Incassato (tutti i fornitori)",
       `${block.countIncassato} righe`,
       "",
       "",
@@ -287,6 +312,7 @@ export async function GET(req: NextRequest) {
       block.subIncassato,
     ]);
     styleSubtotal(subInc, "FFECFDF5");
+    subInc.font = { bold: true };
 
     // Storni
     const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", ""]);
