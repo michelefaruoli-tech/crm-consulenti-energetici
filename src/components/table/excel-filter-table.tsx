@@ -434,8 +434,11 @@ export function ExcelFilterTable({
 
       <div
         ref={scrollRef}
-        className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
-        style={{ scrollbarGutter: fitWidth ? undefined : "stable" }}
+        className={cn(
+          "overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]",
+          // Nasconde la scrollbar nativa: resta solo la barra sticky sotto l’ultima riga
+          "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
+        )}
         onScroll={syncFromMain}
       >
       <table
@@ -819,7 +822,7 @@ export function ExcelFilterTable({
         <div className="sticky bottom-0 z-20 border-t-2 border-emerald-600 bg-white px-2 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]">
           <div className="mb-1 flex items-center justify-between gap-2 px-1">
             <p className="text-[11px] font-semibold text-slate-700">
-              Barra scorrimento ← destra / sinistra →
+              Scorri tabella ← →
             </p>
             <div className="flex gap-1">
               <button
@@ -840,9 +843,9 @@ export function ExcelFilterTable({
           </div>
           <div
             ref={stickyScrollRef}
-            className="overflow-x-auto rounded border border-slate-300 bg-slate-50"
+            className="overflow-x-auto rounded border border-slate-300 bg-slate-100"
             onScroll={syncFromSticky}
-            style={{ height: 18 }}
+            style={{ height: 16 }}
             aria-label="Barra di scorrimento orizzontale"
           >
             <div style={{ width: Math.max(scrollWidth, 1), height: 1 }} />
@@ -859,26 +862,6 @@ export function ExcelFilterTable({
             ? ` · ${selection.selectedKeys.size} selezionate`
             : ""}
         </p>
-        {showHScrollChrome ? (
-          <div className="flex gap-1">
-            <button
-              type="button"
-              className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
-              title="Scorri a sinistra"
-              onClick={() => scrollTable("left")}
-            >
-              ←
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-200"
-              title="Scorri a destra"
-              onClick={() => scrollTable("right")}
-            >
-              →
-            </button>
-          </div>
-        ) : null}
       </div>
     </div>
   );
