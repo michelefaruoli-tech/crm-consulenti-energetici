@@ -129,7 +129,7 @@ export async function GET(req: NextRequest) {
   ];
   for (const s of rendiconto.incassatoBySupplier) {
     summaryBody.push([
-      `  └ ${s.supplierName}`,
+      `  - ${s.supplierName}`,
       String(s.count),
       formatEuro(s.subtotal),
     ]);

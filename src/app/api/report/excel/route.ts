@@ -219,7 +219,7 @@ export async function GET(req: NextRequest) {
   styleHeader(summaryHeader, "FF0F766E");
   rend.addRow(["Incassato (una tantum)", rendiconto.countIncassato, rendiconto.totIncassato]);
   for (const s of rendiconto.incassatoBySupplier) {
-    rend.addRow([`  └ ${s.supplierName}`, s.count, s.subtotal]);
+    rend.addRow([`  - ${s.supplierName}`, s.count, s.subtotal]);
   }
   rend.addRow(["Storni", rendiconto.countStorni, rendiconto.totStorni]).getCell(3).font = {
     color: { argb: "FFB91C1C" },
