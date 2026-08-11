@@ -433,63 +433,10 @@ export async function GET(req: NextRequest) {
     rend.addRow([]);
   }
 
-  if (extras.length > 0) {
-    const extraTitle = rend.addRow([
-      "VOCI AGGIUNTIVE",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-    ]);
-    styleSection(extraTitle, "FFFEF3C7", "FF92400E");
-    rend.mergeCells(extraTitle.number, 1, extraTitle.number, 7);
-    const extraHead = rend.addRow([
-      "Tipologia",
-      "Note",
-      "",
-      "",
-      "",
-      "",
-      "Importo €",
-    ]);
-    styleHeader(extraHead, "FFB45309");
-    for (const e of extras) {
-      const r = rend.addRow([
-        e.tipologia,
-        e.note || "",
-        "",
-        "",
-        "",
-        "",
-        e.amount,
-      ]);
-      if (e.amount < 0) {
-        r.getCell(7).font = { color: { argb: "FFB91C1C" } };
-      }
-    }
-    const subEx = rend.addRow([
-      "Subtotale voci aggiuntive",
-      "",
-      "",
-      "",
-      "",
-      "",
-      extrasSum,
-    ]);
-    styleSubtotal(subEx, "FFB45309");
-    subEx.getCell(7).font = {
-      bold: true,
-      color: { argb: extrasSum < 0 ? "FFFECACA" : "FFFEF3C7" },
-    };
-    rend.addRow([]);
-  }
-
   const finalTot = rend.addRow([
     extras.length > 0
-      ? "TOTALE NETTO (Incassato + Storni + Ricorrenti + voci aggiuntive)"
-      : "TOTALE NETTO (Incassato + Storni + Ricorrenti)",
+      ? "TOTALE NETTO (fornitori + storni + ricorrenti + voci aggiuntive)"
+      : "TOTALE NETTO (fornitori + storni + ricorrenti)",
     "",
     "",
     "",

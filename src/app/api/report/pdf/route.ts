@@ -425,43 +425,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (extras.length > 0) {
-    if (y > 240) {
-      doc.addPage();
-      y = 16;
-    }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(146, 64, 14);
-    doc.text("Voci aggiuntive", 14, y);
-    doc.setTextColor(0, 0, 0);
-    y += 2;
-    autoTable(doc, {
-      startY: y,
-      head: [["Tipologia", "Note", "Importo"]],
-      body: extras.map((e) => [
-        e.tipologia,
-        e.note || "-",
-        formatEuro(e.amount),
-      ]),
-      styles: { fontSize: 8, textColor: [15, 23, 42] },
-      headStyles: {
-        fillColor: [146, 64, 14],
-        textColor: [255, 255, 255],
-        fontStyle: "bold",
-      },
-      margin: { left: 14, right: 14 },
-      didParseCell: (data) => {
-        if (data.section !== "body" || data.column.index !== 2) return;
-        const amount = extras[data.row.index]?.amount ?? 0;
-        data.cell.styles.textColor =
-          amount < 0 ? [185, 28, 28] : [4, 120, 87];
-        data.cell.styles.fontStyle = "bold";
-      },
-    });
-    y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 8;
-  }
-
   if (y > 270) {
     doc.addPage();
     y = 16;
