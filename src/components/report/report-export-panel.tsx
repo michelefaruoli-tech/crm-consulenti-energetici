@@ -141,10 +141,10 @@ export function ReportExportPanel({
 
       <div className="flex flex-wrap gap-3">
         <Link href={`/api/report/excel${exportQs}`}>
-          <Button variant="secondary">Scarica Excel</Button>
+          <Button variant="primary">Scarica Excel</Button>
         </Link>
         <Link href={`/api/report/pdf${exportQs}`}>
-          <Button variant="secondary">Scarica PDF</Button>
+          <Button variant="primary">Scarica PDF</Button>
         </Link>
       </div>
       <p className="mt-4 text-sm text-slate-600">
