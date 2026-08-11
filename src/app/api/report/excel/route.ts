@@ -17,6 +17,10 @@ import {
 } from "@/lib/report-stornos";
 import { buildRendiconto } from "@/lib/report-rendiconto";
 import {
+  parseReportExtras,
+  sumReportExtras,
+} from "@/lib/report-extras";
+import {
   buildReportContractWhere,
   formatMonthsLabel,
   reportHasStato,
@@ -139,6 +143,10 @@ export async function GET(req: NextRequest) {
     onlyStornato,
   });
 
+  const extras = parseReportExtras((k) => sp.get(k));
+  const extrasSum = sumReportExtras(extras);
+  const grandNetto = rendiconto.totNetto + extrasSum;
+
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "CRM Energia";
   workbook.created = new Date();
@@ -196,12 +204,22 @@ export async function GET(req: NextRequest) {
       rendiconto.totRicorrenti,
     ]);
   }
+  for (const e of extras) {
+    const r = rend.addRow([e.tipologia, e.note || "—", e.amount]);
+    if (e.amount < 0) {
+      r.getCell(3).font = { color: { argb: "FFB91C1C" } };
+    }
+  }
   const nettoRow = rend.addRow([
     "TOTALE NETTO",
-    rendiconto.countIncassato +
-      rendiconto.countStorni +
-      rendiconto.countRicorrenti,
-    rendiconto.totNetto,
+    extras.length > 0
+      ? `${rendiconto.countIncassato + rendiconto.countStorni + rendiconto.countRicorrenti} + ${extras.length} voci`
+      : String(
+          rendiconto.countIncassato +
+            rendiconto.countStorni +
+            rendiconto.countRicorrenti,
+        ),
+    grandNetto,
   ]);
   styleSubtotal(nettoRow, "FFD1FAE5");
   nettoRow.font = { bold: true, size: 12 };
@@ -353,14 +371,65 @@ export async function GET(req: NextRequest) {
     rend.addRow([]);
   }
 
+  if (extras.length > 0) {
+    const extraTitle = rend.addRow([
+      "VOCI AGGIUNTIVE",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    styleSection(extraTitle, "FFFEF3C7", "FF92400E");
+    rend.mergeCells(extraTitle.number, 1, extraTitle.number, 7);
+    const extraHead = rend.addRow([
+      "Tipologia",
+      "Note",
+      "",
+      "",
+      "",
+      "",
+      "Importo €",
+    ]);
+    styleHeader(extraHead, "FFB45309");
+    for (const e of extras) {
+      const r = rend.addRow([
+        e.tipologia,
+        e.note || "",
+        "",
+        "",
+        "",
+        "",
+        e.amount,
+      ]);
+      if (e.amount < 0) {
+        r.getCell(7).font = { color: { argb: "FFB91C1C" } };
+      }
+    }
+    const subEx = rend.addRow([
+      "Subtotale voci aggiuntive",
+      "",
+      "",
+      "",
+      "",
+      "",
+      extrasSum,
+    ]);
+    styleSubtotal(subEx, "FFFFFBEB");
+    rend.addRow([]);
+  }
+
   const finalTot = rend.addRow([
-    "TOTALE NETTO (Incassato + Storni + Ricorrenti)",
+    extras.length > 0
+      ? "TOTALE NETTO (Incassato + Storni + Ricorrenti + voci aggiuntive)"
+      : "TOTALE NETTO (Incassato + Storni + Ricorrenti)",
     "",
     "",
     "",
     "",
     "",
-    rendiconto.totNetto,
+    grandNetto,
   ]);
   styleSubtotal(finalTot, "FFA7F3D0");
   finalTot.font = { bold: true, size: 13 };
@@ -507,7 +576,15 @@ export async function GET(req: NextRequest) {
   meta.addRow(["Totale storni €", stornoTotals.amount]);
   meta.addRow(["N° rate ricorrenti", recurringTotals.count]);
   meta.addRow(["Totale ricorrenti €", recurringTotals.amount]);
-  meta.addRow(["TOTALE NETTO €", rendiconto.totNetto]);
+  meta.addRow(["N° voci aggiuntive", extras.length]);
+  meta.addRow(["Totale voci aggiuntive €", extrasSum]);
+  for (const e of extras) {
+    meta.addRow([
+      `Extra: ${e.tipologia}`,
+      `${e.amount}${e.note ? ` — ${e.note}` : ""}`,
+    ]);
+  }
+  meta.addRow(["TOTALE NETTO €", grandNetto]);
 
   const buffer = await workbook.xlsx.writeBuffer();
   const safePeriod = periodLabelText.replace(/[^\wàèéìòù+\-\s]/gi, "").slice(0, 40).trim() || "periodo";

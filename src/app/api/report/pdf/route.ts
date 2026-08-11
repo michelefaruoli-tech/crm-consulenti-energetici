@@ -10,6 +10,10 @@ import {
 import { loadReportStornos } from "@/lib/report-stornos";
 import { buildRendiconto, formatEuro } from "@/lib/report-rendiconto";
 import {
+  parseReportExtras,
+  sumReportExtras,
+} from "@/lib/report-extras";
+import {
   buildReportContractWhere,
   formatMonthsLabel,
   reportHasStato,
@@ -101,6 +105,10 @@ export async function GET(req: NextRequest) {
     onlyStornato,
   });
 
+  const extras = parseReportExtras((k) => sp.get(k));
+  const extrasSum = sumReportExtras(extras);
+  const grandNetto = rendiconto.totNetto + extrasSum;
+
   const doc = new jsPDF();
   let y = 16;
 
@@ -116,33 +124,45 @@ export async function GET(req: NextRequest) {
   doc.text(`Stato: ${stato} · Generato ${new Date().toLocaleString("it-IT")}`, 14, y);
   y += 8;
 
+  const summaryBody: string[][] = [
+    ["Incassato (una tantum)", String(rendiconto.countIncassato), formatEuro(rendiconto.totIncassato)],
+    ["Storni", String(rendiconto.countStorni), formatEuro(rendiconto.totStorni)],
+  ];
+  if (includeRecurring) {
+    summaryBody.push([
+      "Rate ricorrenti",
+      String(rendiconto.countRicorrenti),
+      formatEuro(rendiconto.totRicorrenti),
+    ]);
+  }
+  for (const e of extras) {
+    summaryBody.push([
+      e.tipologia,
+      e.note || "—",
+      formatEuro(e.amount),
+    ]);
+  }
+  const nettoRowIndex = summaryBody.length;
+  summaryBody.push([
+    "TOTALE NETTO",
+    String(
+      rendiconto.countIncassato +
+        rendiconto.countStorni +
+        rendiconto.countRicorrenti +
+        extras.length,
+    ),
+    formatEuro(grandNetto),
+  ]);
+
   // Riepilogo
   autoTable(doc, {
     startY: y,
-    head: [["Voce", "N°", "Importo"]],
-    body: [
-      ["Incassato (una tantum)", String(rendiconto.countIncassato), formatEuro(rendiconto.totIncassato)],
-      ["Storni", String(rendiconto.countStorni), formatEuro(rendiconto.totStorni)],
-      ...(includeRecurring
-        ? [
-            [
-              "Rate ricorrenti",
-              String(rendiconto.countRicorrenti),
-              formatEuro(rendiconto.totRicorrenti),
-            ] as string[],
-          ]
-        : []),
-      ["TOTALE NETTO", String(
-        rendiconto.countIncassato +
-          rendiconto.countStorni +
-          rendiconto.countRicorrenti,
-      ), formatEuro(rendiconto.totNetto)],
-    ],
+    head: [["Voce", "N° / Note", "Importo"]],
+    body: summaryBody,
     styles: { fontSize: 9 },
     headStyles: { fillColor: [15, 118, 110] },
-    foot: undefined,
     didParseCell: (data) => {
-      if (data.section === "body" && data.row.index === (includeRecurring ? 3 : 2)) {
+      if (data.section === "body" && data.row.index === nettoRowIndex) {
         data.cell.styles.fontStyle = "bold";
         data.cell.styles.fillColor = [209, 250, 229];
       }
@@ -274,13 +294,39 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  if (extras.length > 0) {
+    if (y > 240) {
+      doc.addPage();
+      y = 16;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(146, 64, 14);
+    doc.text("Voci aggiuntive", 14, y);
+    doc.setTextColor(0, 0, 0);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      head: [["Tipologia", "Note", "Importo"]],
+      body: extras.map((e) => [
+        e.tipologia,
+        e.note || "—",
+        formatEuro(e.amount),
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [180, 83, 9] },
+      margin: { left: 14, right: 14 },
+    });
+    y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 8;
+  }
+
   if (y > 270) {
     doc.addPage();
     y = 16;
   }
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(`TOTALE NETTO: ${formatEuro(rendiconto.totNetto)}`, 14, y);
+  doc.text(`TOTALE NETTO: ${formatEuro(grandNetto)}`, 14, y);
 
   const pdf = doc.output("arraybuffer");
   const safePeriod =

@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/form";
 import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 import { sendReportEmailAction } from "@/lib/actions";
-import { BackupButton } from "@/components/report/backup-button";
 import { ReportPeriodFields } from "@/components/report/report-period-fields";
+import { ReportExportPanel } from "@/components/report/report-export-panel";
+import { BackupButton } from "@/components/report/backup-button";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
 import { formatRomeDateTime } from "@/lib/timezone";
@@ -308,7 +309,7 @@ export default async function ReportPage({
   if (collaboratorId) qs.set("collaboratorId", collaboratorId);
   if (supplierId) qs.set("supplierId", supplierId);
   qs.set("stato", stato);
-  const exportQs = `?${qs.toString()}`;
+  const exportBaseQuery = qs.toString();
 
   const periodLabelText =
     months.length > 0
@@ -600,27 +601,7 @@ export default async function ReportPage({
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-2 font-semibold text-slate-900">Esporta (filtri attuali)</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            Excel e PDF usano gli stessi filtri sopra (mese/periodo, collaboratore, fornitore,
-            stato).
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link href={`/api/report/excel${exportQs}`}>
-              <Button variant="secondary">Scarica Excel</Button>
-            </Link>
-            <Link href={`/api/report/pdf${exportQs}`}>
-              <Button variant="secondary">Scarica PDF</Button>
-            </Link>
-          </div>
-          <p className="mt-4 text-sm text-slate-600">
-            Excel e PDF aprono con un foglio/sezione <strong>Rendiconto</strong>:
-            Incassato + Storni (con i contratti) + eventuali rate ricorrenti, con
-            subtotali. Se selezioni più mesi, trovi un blocco per ciascun mese e il
-            totale netto di tutto.
-          </p>
-        </section>
+        <ReportExportPanel baseQuery={exportBaseQuery} />
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold text-slate-900">Invio email report</h2>
