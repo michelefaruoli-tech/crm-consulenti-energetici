@@ -194,6 +194,8 @@ export function ProvvigioniFilterTable({
     const d = new Date();
     return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   });
+  /** Contatore per forzare reset filtri colonna locali (ExcelFilterTable) */
+  const [localFilterClearN, setLocalFilterClearN] = useState(0);
   const filterResetKey = [
     listQuery?.collab ?? "tutti",
     listQuery?.settled ?? "",
@@ -208,7 +210,31 @@ export function ProvvigioniFilterTable({
     serverSortKey ?? "",
     serverSortDir,
     advancedView ? "adv" : "simple",
+    String(localFilterClearN),
   ].join("|");
+
+  const hasUrlFilters = Boolean(
+    listQuery?.collab ||
+      listQuery?.supplier ||
+      listQuery?.stato ||
+      listQuery?.tipologia ||
+      listQuery?.q ||
+      listQuery?.focus ||
+      listQuery?.competence,
+  );
+
+  function clearFiltersHref() {
+    return buildPageHref("/provvigioni", {
+      settled: listQuery?.settled,
+      vista: listQuery?.vista,
+    });
+  }
+
+  function azzeraFiltri() {
+    if (!confirmLeaveDrafts()) return;
+    setLocalFilterClearN((n) => n + 1);
+    router.push(clearFiltersHref());
+  }
 
   useEffect(() => {
     setSelectedKeys(new Set());
@@ -1189,30 +1215,44 @@ export function ProvvigioniFilterTable({
           {canDelete ? " × rossa = elimina." : ""}
         </p>
         </details>
-        <div className="order-1 flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 p-1 md:order-2">
+        <div className="order-1 flex shrink-0 flex-wrap items-center gap-2 md:order-2">
+          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+            <button
+              type="button"
+              className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                !advancedView
+                  ? "bg-slate-800 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              onClick={() => toggleAdvancedView(false)}
+              title="Poche colonne essenziali"
+            >
+              Semplificata
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                advancedView
+                  ? "bg-slate-800 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+              onClick={() => toggleAdvancedView(true)}
+              title="Tutte le colonne + data inizio fornitura"
+            >
+              Avanzata
+            </button>
+          </div>
           <button
             type="button"
-            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-              !advancedView
-                ? "bg-slate-800 text-white"
-                : "text-slate-600 hover:bg-slate-50"
+            className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ${
+              hasUrlFilters
+                ? "bg-amber-50 text-amber-950 ring-amber-300 hover:bg-amber-100"
+                : "bg-white text-slate-700 ring-slate-300 hover:bg-slate-50"
             }`}
-            onClick={() => toggleAdvancedView(false)}
-            title="Poche colonne essenziali"
+            onClick={azzeraFiltri}
+            title="Toglie collaboratore, fornitore, stato, tipologia, ricerca e filtri colonna"
           >
-            Semplificata
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-              advancedView
-                ? "bg-slate-800 text-white"
-                : "text-slate-600 hover:bg-slate-50"
-            }`}
-            onClick={() => toggleAdvancedView(true)}
-            title="Tutte le colonne + data inizio fornitura"
-          >
-            Avanzata
+            Azzera filtri
           </button>
         </div>
       </div>
