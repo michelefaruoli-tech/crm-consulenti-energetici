@@ -118,6 +118,12 @@ export function ExcelFilterTable({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [scrollWidth, setScrollWidth] = useState(0);
   const [needsHScroll, setNeedsHScroll] = useState(false);
+  /** Barra orizzontale fissa in basso allo schermo (sempre visibile a metà tabella) */
+  const [fixedBar, setFixedBar] = useState<{
+    left: number;
+    width: number;
+    visible: boolean;
+  }>({ left: 0, width: 0, visible: false });
   const serverSortKeys = useMemo(
     () => new Set(serverSort?.keys ?? []),
     [serverSort?.keys],
@@ -301,6 +307,7 @@ export function ExcelFilterTable({
   }
 
   const colSpan = columns.length + (selection ? 1 : 0);
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const syncingScroll = useRef(false);
@@ -312,19 +319,69 @@ export function ExcelFilterTable({
     setNeedsHScroll(el.scrollWidth > el.clientWidth + 2);
   }
 
+  function updateFixedBarPosition() {
+    const root = rootRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    const vh = window.innerHeight;
+    // Tabella almeno parzialmente in vista → mostra la barra in basso allo schermo
+    const inView = rect.bottom > 48 && rect.top < vh - 24;
+    setFixedBar({
+      left: Math.max(0, Math.round(rect.left)),
+      width: Math.max(0, Math.round(rect.width)),
+      visible: inView,
+    });
+  }
+
+  function getVerticalScrollParent(el: HTMLElement | null): HTMLElement | null {
+    let node = el?.parentElement ?? null;
+    while (node) {
+      const { overflowY } = getComputedStyle(node);
+      if (
+        overflowY === "auto" ||
+        overflowY === "scroll" ||
+        overflowY === "overlay"
+      ) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
   useEffect(() => {
     measureScroll();
+    updateFixedBarPosition();
     const el = scrollRef.current;
+    const root = rootRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => measureScroll());
+    const ro = new ResizeObserver(() => {
+      measureScroll();
+      updateFixedBarPosition();
+    });
     ro.observe(el);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
-    window.addEventListener("resize", measureScroll);
+    if (root) ro.observe(root);
+
+    const scrollParent = getVerticalScrollParent(root);
+    const onScrollOrResize = () => updateFixedBarPosition();
+    window.addEventListener("resize", onScrollOrResize);
+    scrollParent?.addEventListener("scroll", onScrollOrResize, {
+      passive: true,
+    });
+    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+
     return () => {
       ro.disconnect();
-      window.removeEventListener("resize", measureScroll);
+      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScrollOrResize);
+      scrollParent?.removeEventListener("scroll", onScrollOrResize);
     };
   }, [columns, rows, fitWidth, dense]);
+
+  useEffect(() => {
+    updateFixedBarPosition();
+  }, [needsHScroll]);
 
   function syncFromMain() {
     const main = scrollRef.current;
@@ -354,12 +411,30 @@ export function ExcelFilterTable({
     el.scrollBy({ left: dir === "left" ? -280 : 280, behavior: "smooth" });
   }
 
+  const showFixedHScroll =
+    needsHScroll && fixedBar.visible && fixedBar.width > 0;
+
+  // Quando la barra fissa riappare, allinea lo scroll alla tabella
+  useEffect(() => {
+    if (!showFixedHScroll) return;
+    const main = scrollRef.current;
+    const sticky = stickyScrollRef.current;
+    if (!main || !sticky) return;
+    sticky.scrollLeft = main.scrollLeft;
+  }, [showFixedHScroll, scrollWidth]);
+
   const showHScrollChrome = !fitWidth || needsHScroll;
   /** Sidebar fissa a schermo (vista avanzata): sempre in primo piano */
   const showFixedSideNav = !fitWidth;
 
   return (
-    <div className="relative -mx-3 rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:rounded-xl sm:border">
+    <div
+      ref={rootRef}
+      className={cn(
+        "relative -mx-3 rounded-none border-y border-slate-200 bg-white shadow-sm sm:mx-0 sm:rounded-xl sm:border",
+        showFixedHScroll ? "pb-6" : null,
+      )}
+    >
       {showFixedSideNav ? (
         <div
           className="pointer-events-none fixed bottom-24 right-3 z-[60] flex flex-col gap-2 sm:right-5"
@@ -813,9 +888,14 @@ export function ExcelFilterTable({
       </table>
       </div>
 
-      {needsHScroll ? (
+      {showFixedHScroll ? (
         <div
-          className="sticky bottom-0 z-20 border-t border-emerald-600 bg-white px-1 py-1 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]"
+          className="fixed z-[55] border-t-2 border-emerald-600 bg-white px-2 py-1.5 shadow-[0_-4px_14px_rgba(0,0,0,0.12)]"
+          style={{
+            left: fixedBar.left,
+            width: fixedBar.width,
+            bottom: 0,
+          }}
           aria-label="Scorri la tabella in orizzontale"
         >
           <div
