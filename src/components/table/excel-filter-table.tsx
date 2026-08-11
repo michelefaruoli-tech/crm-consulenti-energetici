@@ -705,13 +705,15 @@ export function ExcelFilterTable({
               <tr
                 key={key}
                 className={cn(
-                  "border-t border-slate-100",
+                  "border-t border-slate-100 transition-colors",
                   onRowClick &&
                     (getRowClassName
                       ? "cursor-pointer hover:brightness-[0.97]"
                       : "cursor-pointer hover:bg-slate-50"),
-                  selection?.selectedKeys.has(key) && "bg-emerald-50/60",
                   getRowClassName?.(row),
+                  // Selezione dopo getRowClassName + !important: deve vincere su storno/gettone
+                  selection?.selectedKeys.has(key) &&
+                    "!bg-emerald-200 ring-2 ring-inset ring-emerald-600 shadow-[inset_6px_0_0_0_#059669]",
                 )}
                 onClick={() => onRowClick?.(row)}
               >
