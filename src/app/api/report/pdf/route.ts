@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
   const periodLabelText =
     period.months.length > 0
       ? formatMonthsLabel(period.months)
-      : `${period.from} – ${period.to}`;
+      : `${period.from} - ${period.to}`;
 
   const rendiconto = buildRendiconto({
     contracts,
@@ -124,24 +124,25 @@ export async function GET(req: NextRequest) {
   doc.text(`Stato: ${stato} · Generato ${new Date().toLocaleString("it-IT")}`, 14, y);
   y += 8;
 
-  const summaryBody: string[][] = [
-    ["Incassato (una tantum)", String(rendiconto.countIncassato), formatEuro(rendiconto.totIncassato)],
-  ];
+  // Riepilogo: solo parziali per fornitore + storni/ricorrenti/voci + netto
+  const summaryBody: string[][] = [];
   for (const s of rendiconto.incassatoBySupplier) {
     summaryBody.push([
-      `  - ${s.supplierName}`,
+      s.supplierName,
       String(s.count),
       formatEuro(s.subtotal),
     ]);
   }
-  summaryBody.push([
-    "Storni",
-    String(rendiconto.countStorni),
-    formatEuro(rendiconto.totStorni),
-  ]);
-  if (includeRecurring) {
+  if (rendiconto.countStorni > 0 || rendiconto.totStorni !== 0) {
     summaryBody.push([
-      "Rate ricorrenti",
+      "Storni",
+      String(rendiconto.countStorni),
+      formatEuro(rendiconto.totStorni),
+    ]);
+  }
+  if (includeRecurring && rendiconto.countRicorrenti > 0) {
+    summaryBody.push([
+      "Rate ricorrenti (somma)",
       String(rendiconto.countRicorrenti),
       formatEuro(rendiconto.totRicorrenti),
     ]);
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
   for (const e of extras) {
     summaryBody.push([
       e.tipologia,
-      e.note || "—",
+      e.note || "-",
       formatEuro(e.amount),
     ]);
   }
@@ -202,6 +203,14 @@ export async function GET(req: NextRequest) {
 
   y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 10;
 
+  // Dettaglio sotto il riepilogo
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Dettaglio", 14, y);
+  doc.setTextColor(0, 0, 0);
+  y += 6;
+
   for (const block of rendiconto.months) {
     if (y > 250) {
       doc.addPage();
@@ -218,7 +227,11 @@ export async function GET(req: NextRequest) {
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(17, 94, 89);
-    doc.text(`Incassato (${block.countIncassato}) — ${formatEuro(block.subIncassato)}`, 14, y);
+    doc.text(
+      `Incassato per fornitore (${block.countIncassato}) - ${formatEuro(block.subIncassato)}`,
+      14,
+      y,
+    );
     doc.setTextColor(0, 0, 0);
     y += 4;
 
@@ -226,7 +239,7 @@ export async function GET(req: NextRequest) {
       autoTable(doc, {
         startY: y,
         head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
-        body: [["—", "Nessuna riga", "", "", "", ""]],
+        body: [["-", "Nessuna riga", "", "", "", ""]],
         styles: { fontSize: 7 },
         headStyles: { fillColor: [20, 184, 166] },
         margin: { left: 14, right: 14 },
@@ -242,7 +255,7 @@ export async function GET(req: NextRequest) {
         doc.setFontSize(9);
         doc.setTextColor(15, 118, 110);
         doc.text(
-          `${supplier.supplierName} (${supplier.count}) — ${formatEuro(supplier.subtotal)}`,
+          `${supplier.supplierName} (${supplier.count}) - ${formatEuro(supplier.subtotal)}`,
           14,
           y,
         );
@@ -307,7 +320,7 @@ export async function GET(req: NextRequest) {
 
     doc.setFont("helvetica", "bold");
     doc.setTextColor(159, 18, 57);
-    doc.text(`Storni (${block.countStorni}) — ${formatEuro(block.subStorni)}`, 14, y);
+    doc.text(`Storni (${block.countStorni}) - ${formatEuro(block.subStorni)}`, 14, y);
     doc.setTextColor(0, 0, 0);
     y += 2;
 
@@ -316,7 +329,7 @@ export async function GET(req: NextRequest) {
       head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
       body:
         block.storni.length === 0
-          ? [["—", "Nessuno storno", "", "", "", ""]]
+          ? [["-", "Nessuno storno", "", "", "", ""]]
           : block.storni.map((l) => [
               l.contractNumber,
               l.clientName,
@@ -349,7 +362,7 @@ export async function GET(req: NextRequest) {
       doc.setFont("helvetica", "bold");
       doc.setTextColor(107, 33, 168);
       doc.text(
-        `Rate ricorrenti (${block.countRicorrenti}) — ${formatEuro(block.subRicorrenti)}`,
+        `Rate ricorrenti - somma ${formatEuro(block.subRicorrenti)} (${block.countRicorrenti} rate)`,
         14,
         y,
       );
@@ -373,6 +386,22 @@ export async function GET(req: NextRequest) {
           fontStyle: "bold",
         },
         margin: { left: 14, right: 14 },
+        foot: [
+          [
+            "Somma rate",
+            "",
+            "",
+            "",
+            `${block.countRicorrenti} rate`,
+            formatEuro(block.subRicorrenti),
+          ],
+        ],
+        footStyles: {
+          fillColor: [88, 28, 135],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+          fontSize: 8,
+        },
         didParseCell: (data) => {
           if (data.section !== "body" || data.column.index !== 5) return;
           const amount = block.ricorrenti[data.row.index]?.amount ?? 0;
@@ -412,7 +441,7 @@ export async function GET(req: NextRequest) {
       head: [["Tipologia", "Note", "Importo"]],
       body: extras.map((e) => [
         e.tipologia,
-        e.note || "—",
+        e.note || "-",
         formatEuro(e.amount),
       ]),
       styles: { fontSize: 8, textColor: [15, 23, 42] },

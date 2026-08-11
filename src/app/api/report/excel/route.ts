@@ -217,26 +217,26 @@ export async function GET(req: NextRequest) {
     "",
   ]);
   styleHeader(summaryHeader, "FF0F766E");
-  rend.addRow(["Incassato (una tantum)", rendiconto.countIncassato, rendiconto.totIncassato]);
+  // Solo parziali per fornitore (niente totale "Incassato una tantum")
   for (const s of rendiconto.incassatoBySupplier) {
-    rend.addRow([`  - ${s.supplierName}`, s.count, s.subtotal]);
+    const r = rend.addRow([s.supplierName, s.count, s.subtotal]);
+    styleAmountCell(r.getCell(3), s.subtotal);
   }
-  rend.addRow(["Storni", rendiconto.countStorni, rendiconto.totStorni]).getCell(3).font = {
-    color: { argb: "FFB91C1C" },
-    bold: true,
-  };
-  if (includeRecurring) {
-    rend.addRow([
-      "Rate ricorrenti",
+  if (rendiconto.countStorni > 0 || rendiconto.totStorni !== 0) {
+    const r = rend.addRow(["Storni", rendiconto.countStorni, rendiconto.totStorni]);
+    r.getCell(3).font = { color: { argb: "FFB91C1C" }, bold: true };
+  }
+  if (includeRecurring && rendiconto.countRicorrenti > 0) {
+    const r = rend.addRow([
+      "Rate ricorrenti (somma)",
       rendiconto.countRicorrenti,
       rendiconto.totRicorrenti,
     ]);
+    styleAmountCell(r.getCell(3), rendiconto.totRicorrenti);
   }
   for (const e of extras) {
-    const r = rend.addRow([e.tipologia, e.note || "—", e.amount]);
-    if (e.amount < 0) {
-      r.getCell(3).font = { color: { argb: "FFB91C1C" } };
-    }
+    const r = rend.addRow([e.tipologia, e.note || "-", e.amount]);
+    styleAmountCell(r.getCell(3), e.amount);
   }
   const nettoRow = rend.addRow([
     "TOTALE NETTO",
@@ -257,6 +257,18 @@ export async function GET(req: NextRequest) {
     color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
   };
   rend.addRow([]);
+
+  const detailTitle = rend.addRow([
+    "DETTAGLIO",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ]);
+  styleSection(detailTitle, "FF334155", "FFFFFFFF");
+  rend.mergeCells(detailTitle.number, 1, detailTitle.number, 7);
 
   const detailHeader = rend.addRow([
     "Sezione",
@@ -284,19 +296,9 @@ export async function GET(req: NextRequest) {
       rend.mergeCells(monthTitle.number, 1, monthTitle.number, 7);
     }
 
-    // Incassato — un blocco per fornitore
-    const incTitle = rend.addRow([
-      "INCASSATO (per fornitore)",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-    ]);
-    styleSection(incTitle, "FFCCFBF1", "FF115E59");
+    // Incassato — un blocco per fornitore (senza totale generico)
     if (block.incassatoBySupplier.length === 0) {
-      rend.addRow(["", "(nessuna riga)", "", "", "", "", ""]);
+      rend.addRow(["Incassato", "(nessuna riga)", "", "", "", "", ""]);
     } else {
       for (const supplier of block.incassatoBySupplier) {
         const supTitle = rend.addRow([
@@ -331,8 +333,6 @@ export async function GET(req: NextRequest) {
           supplier.subtotal,
         ]);
         styleSubtotal(subSup);
-        styleAmountCell(subSup.getCell(7), supplier.subtotal);
-        // Su fondo verde scuro: importo in verde chiaro / rosa chiaro
         subSup.getCell(7).font = {
           bold: true,
           color: {
@@ -341,22 +341,6 @@ export async function GET(req: NextRequest) {
         };
       }
     }
-    const subInc = rend.addRow([
-      "Subtotale Incassato (tutti i fornitori)",
-      `${block.countIncassato} righe`,
-      "",
-      "",
-      "",
-      "",
-      block.subIncassato,
-    ]);
-    styleSubtotal(subInc, "FF064E3B");
-    subInc.getCell(7).font = {
-      bold: true,
-      color: {
-        argb: block.subIncassato < 0 ? "FFFECACA" : "FFA7F3D0",
-      },
-    };
 
     // Storni
     const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", ""]);
@@ -389,20 +373,20 @@ export async function GET(req: NextRequest) {
     styleSubtotal(subSto, "FF9F1239");
     subSto.getCell(7).font = { bold: true, color: { argb: "FFFECACA" } };
 
-    // Ricorrenti (se presenti nel mese)
+    // Ricorrenti: somma + elenco
     if (includeRecurring && block.ricorrenti.length > 0) {
       const ricTitle = rend.addRow([
-        "RATE RICORRENTI",
+        `RATE RICORRENTI - somma ${block.subRicorrenti}`,
+        `${block.countRicorrenti} rate`,
         "",
         "",
         "",
         "",
-        "",
-        "",
+        block.subRicorrenti,
       ]);
-      styleSection(ricTitle, "FFF3E8FF", "FF6B21A8");
+      styleSection(ricTitle, "FF6B21A8", "FFFFFFFF");
       for (const line of block.ricorrenti) {
-        rend.addRow([
+        const r = rend.addRow([
           "Ricorrente",
           line.contractNumber,
           line.clientName,
@@ -411,9 +395,10 @@ export async function GET(req: NextRequest) {
           line.dateLabel,
           line.amount,
         ]);
+        styleAmountCell(r.getCell(7), line.amount);
       }
       const subRic = rend.addRow([
-        "Subtotale Ricorrenti",
+        "Somma rate ricorrenti",
         `${block.countRicorrenti} rate`,
         "",
         "",
@@ -422,7 +407,6 @@ export async function GET(req: NextRequest) {
         block.subRicorrenti,
       ]);
       styleSubtotal(subRic, "FF6B21A8");
-      styleAmountCell(subRic.getCell(7), block.subRicorrenti);
       subRic.getCell(7).font = {
         bold: true,
         color: { argb: "FFE9D5FF" },
