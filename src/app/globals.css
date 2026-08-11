@@ -55,3 +55,14 @@ body {
     border-color: rgb(16 185 129);
   }
 }
+
+/* Tabella: nasconde scrollbar nativa (resta solo la barra sticky sotto) */
+.hide-native-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge legacy */
+}
+.hide-native-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge */
+  width: 0;
+  height: 0;
+}
