@@ -52,13 +52,38 @@ function styleSection(row: ExcelJS.Row, fill: string, color = "FF0F172A") {
   };
 }
 
-function styleSubtotal(row: ExcelJS.Row, fill: string) {
-  row.font = { bold: true };
+function isLightFill(argb: string): boolean {
+  const hex = argb.replace(/^FF/i, "");
+  if (hex.length !== 6) return false;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return 0.299 * r + 0.587 * g + 0.114 * b > 160;
+}
+
+function styleSubtotal(
+  row: ExcelJS.Row,
+  fill = "FF065F46",
+  textColor?: string,
+) {
+  const fg =
+    textColor ?? (isLightFill(fill) ? "FF0F172A" : "FFFFFFFF");
+  row.font = { bold: true, color: { argb: fg }, size: 11 };
   row.fill = {
     type: "pattern",
     pattern: "solid",
     fgColor: { argb: fill },
   };
+}
+
+/** Importo: positivo = verde scuro, negativo = rosso. */
+function styleAmountCell(cell: ExcelJS.Cell, amount: number) {
+  cell.font = {
+    ...(typeof cell.font === "object" && cell.font ? cell.font : {}),
+    bold: true,
+    color: { argb: amount < 0 ? "FFB91C1C" : "FF047857" },
+  };
+  cell.numFmt = "#,##0.00";
 }
 
 export async function GET(req: NextRequest) {
@@ -224,8 +249,13 @@ export async function GET(req: NextRequest) {
         ),
     grandNetto,
   ]);
-  styleSubtotal(nettoRow, "FFD1FAE5");
-  nettoRow.font = { bold: true, size: 12 };
+  styleSubtotal(nettoRow, "FF065F46");
+  styleAmountCell(nettoRow.getCell(3), grandNetto);
+  nettoRow.getCell(3).font = {
+    bold: true,
+    size: 12,
+    color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
+  };
   rend.addRow([]);
 
   const detailHeader = rend.addRow([
@@ -278,9 +308,9 @@ export async function GET(req: NextRequest) {
           "",
           supplier.subtotal,
         ]);
-        styleSection(supTitle, "FFE6FFFA", "FF0F766E");
+        styleSection(supTitle, "FF0F766E", "FFFFFFFF");
         for (const line of supplier.lines) {
-          rend.addRow([
+          const r = rend.addRow([
             "Incassato",
             line.contractNumber,
             line.clientName,
@@ -289,6 +319,7 @@ export async function GET(req: NextRequest) {
             line.dateLabel,
             line.amount,
           ]);
+          styleAmountCell(r.getCell(7), line.amount);
         }
         const subSup = rend.addRow([
           `Subtotale ${supplier.supplierName}`,
@@ -299,7 +330,15 @@ export async function GET(req: NextRequest) {
           "",
           supplier.subtotal,
         ]);
-        styleSubtotal(subSup, "FFF0FDFA");
+        styleSubtotal(subSup);
+        styleAmountCell(subSup.getCell(7), supplier.subtotal);
+        // Su fondo verde scuro: importo in verde chiaro / rosa chiaro
+        subSup.getCell(7).font = {
+          bold: true,
+          color: {
+            argb: supplier.subtotal < 0 ? "FFFECACA" : "FFA7F3D0",
+          },
+        };
       }
     }
     const subInc = rend.addRow([
@@ -311,8 +350,13 @@ export async function GET(req: NextRequest) {
       "",
       block.subIncassato,
     ]);
-    styleSubtotal(subInc, "FFECFDF5");
-    subInc.font = { bold: true };
+    styleSubtotal(subInc, "FF064E3B");
+    subInc.getCell(7).font = {
+      bold: true,
+      color: {
+        argb: block.subIncassato < 0 ? "FFFECACA" : "FFA7F3D0",
+      },
+    };
 
     // Storni
     const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", ""]);
@@ -330,7 +374,7 @@ export async function GET(req: NextRequest) {
           line.dateLabel,
           line.amount,
         ]);
-        r.getCell(7).font = { color: { argb: "FFB91C1C" } };
+        r.getCell(7).font = { color: { argb: "FFB91C1C" }, bold: true };
       }
     }
     const subSto = rend.addRow([
@@ -342,8 +386,8 @@ export async function GET(req: NextRequest) {
       "",
       block.subStorni,
     ]);
-    styleSubtotal(subSto, "FFFFF1F2");
-    subSto.getCell(7).font = { bold: true, color: { argb: "FFB91C1C" } };
+    styleSubtotal(subSto, "FF9F1239");
+    subSto.getCell(7).font = { bold: true, color: { argb: "FFFECACA" } };
 
     // Ricorrenti (se presenti nel mese)
     if (includeRecurring && block.ricorrenti.length > 0) {
@@ -377,7 +421,12 @@ export async function GET(req: NextRequest) {
         "",
         block.subRicorrenti,
       ]);
-      styleSubtotal(subRic, "FFFAF5FF");
+      styleSubtotal(subRic, "FF6B21A8");
+      styleAmountCell(subRic.getCell(7), block.subRicorrenti);
+      subRic.getCell(7).font = {
+        bold: true,
+        color: { argb: "FFE9D5FF" },
+      };
     }
 
     if (rendiconto.months.length > 1) {
@@ -390,8 +439,11 @@ export async function GET(req: NextRequest) {
         "",
         block.subNetto,
       ]);
-      styleSubtotal(subNet, "FFFEF3C7");
-      subNet.font = { bold: true };
+      styleSubtotal(subNet, "FFB45309");
+      subNet.getCell(7).font = {
+        bold: true,
+        color: { argb: block.subNetto < 0 ? "FFFECACA" : "FFFEF3C7" },
+      };
     }
 
     rend.addRow([]);
@@ -442,7 +494,11 @@ export async function GET(req: NextRequest) {
       "",
       extrasSum,
     ]);
-    styleSubtotal(subEx, "FFFFFBEB");
+    styleSubtotal(subEx, "FFB45309");
+    subEx.getCell(7).font = {
+      bold: true,
+      color: { argb: extrasSum < 0 ? "FFFECACA" : "FFFEF3C7" },
+    };
     rend.addRow([]);
   }
 
@@ -457,8 +513,12 @@ export async function GET(req: NextRequest) {
     "",
     grandNetto,
   ]);
-  styleSubtotal(finalTot, "FFA7F3D0");
-  finalTot.font = { bold: true, size: 13 };
+  styleSubtotal(finalTot, "FF065F46");
+  finalTot.getCell(7).font = {
+    bold: true,
+    size: 13,
+    color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
+  };
 
   // Formato numeri colonna importo
   rend.getColumn(7).numFmt = '#,##0.00';
@@ -574,8 +634,8 @@ export async function GET(req: NextRequest) {
       client: "TOTALE STORNI",
       amount: stornoTotals.amount,
     });
-    styleSubtotal(tot, "FFFFE4E6");
-    tot.getCell("amount").font = { bold: true, color: { argb: "FFB91C1C" } };
+    styleSubtotal(tot, "FF9F1239");
+    tot.getCell("amount").font = { bold: true, color: { argb: "FFFECACA" } };
   }
 
   // ─── Foglio 5: Filtri / meta ───

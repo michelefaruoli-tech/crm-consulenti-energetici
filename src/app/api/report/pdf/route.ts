@@ -170,21 +170,32 @@ export async function GET(req: NextRequest) {
     startY: y,
     head: [["Voce", "N° / Note", "Importo"]],
     body: summaryBody,
-    styles: { fontSize: 9 },
-    headStyles: { fillColor: [15, 118, 110] },
+    styles: { fontSize: 9, textColor: [15, 23, 42] },
+    headStyles: {
+      fillColor: [6, 95, 70],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+    },
     didParseCell: (data) => {
       if (data.section === "body" && data.row.index === nettoRowIndex) {
         data.cell.styles.fontStyle = "bold";
-        data.cell.styles.fillColor = [209, 250, 229];
+        data.cell.styles.fillColor = [6, 95, 70];
+        data.cell.styles.textColor = [255, 255, 255];
       }
-      // Riga Storni = dopo Incassato + fornitori
-      const storniIndex = 1 + rendiconto.incassatoBySupplier.length;
-      if (
-        data.section === "body" &&
-        data.row.index === storniIndex &&
-        data.column.index === 2
-      ) {
-        data.cell.styles.textColor = [185, 28, 28];
+      // Colonna importi: verde / rosso
+      if (data.section === "body" && data.column.index === 2) {
+        const raw = String(data.cell.raw ?? data.cell.text ?? "");
+        const negative = raw.includes("-");
+        if (data.row.index !== nettoRowIndex) {
+          data.cell.styles.textColor = negative
+            ? [185, 28, 28]
+            : [4, 120, 87];
+          data.cell.styles.fontStyle = "bold";
+        } else {
+          data.cell.styles.textColor = negative
+            ? [254, 202, 202]
+            : [167, 243, 208];
+        }
       }
     },
   });
@@ -247,8 +258,12 @@ export async function GET(req: NextRequest) {
             l.dateLabel,
             formatEuro(l.amount),
           ]),
-          styles: { fontSize: 7 },
-          headStyles: { fillColor: [20, 184, 166] },
+          styles: { fontSize: 7, textColor: [15, 23, 42] },
+          headStyles: {
+            fillColor: [15, 118, 110],
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+          },
           margin: { left: 14, right: 14 },
           foot: [
             [
@@ -259,7 +274,27 @@ export async function GET(req: NextRequest) {
               formatEuro(supplier.subtotal),
             ],
           ],
-          footStyles: { fillColor: [204, 251, 241], fontStyle: "bold", fontSize: 7 },
+          // Fondo verde scuro + testo bianco = leggibile
+          footStyles: {
+            fillColor: [6, 95, 70],
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+            fontSize: 8,
+          },
+          didParseCell: (data) => {
+            // Colonna Importo: positivi verde, negativi rosso
+            if (data.column.index !== 4) return;
+            if (data.section === "body") {
+              const amount = supplier.lines[data.row.index]?.amount ?? 0;
+              data.cell.styles.textColor =
+                amount < 0 ? [185, 28, 28] : [4, 120, 87];
+              data.cell.styles.fontStyle = "bold";
+            }
+            if (data.section === "foot") {
+              data.cell.styles.textColor =
+                supplier.subtotal < 0 ? [254, 202, 202] : [167, 243, 208];
+            }
+          },
         });
         y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
       }
@@ -290,12 +325,17 @@ export async function GET(req: NextRequest) {
               l.dateLabel,
               formatEuro(l.amount),
             ]),
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [190, 18, 60] },
+      styles: { fontSize: 7, textColor: [15, 23, 42] },
+      headStyles: {
+        fillColor: [153, 27, 27],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
       margin: { left: 14, right: 14 },
       didParseCell: (data) => {
         if (data.section === "body" && data.column.index === 5) {
           data.cell.styles.textColor = [185, 28, 28];
+          data.cell.styles.fontStyle = "bold";
         }
       },
     });
@@ -326,9 +366,20 @@ export async function GET(req: NextRequest) {
           l.dateLabel,
           formatEuro(l.amount),
         ]),
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [126, 34, 206] },
+        styles: { fontSize: 7, textColor: [15, 23, 42] },
+        headStyles: {
+          fillColor: [88, 28, 135],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+        },
         margin: { left: 14, right: 14 },
+        didParseCell: (data) => {
+          if (data.section !== "body" || data.column.index !== 5) return;
+          const amount = block.ricorrenti[data.row.index]?.amount ?? 0;
+          data.cell.styles.textColor =
+            amount < 0 ? [185, 28, 28] : [4, 120, 87];
+          data.cell.styles.fontStyle = "bold";
+        },
       });
       y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
     }
@@ -364,9 +415,20 @@ export async function GET(req: NextRequest) {
         e.note || "—",
         formatEuro(e.amount),
       ]),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [180, 83, 9] },
+      styles: { fontSize: 8, textColor: [15, 23, 42] },
+      headStyles: {
+        fillColor: [146, 64, 14],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
       margin: { left: 14, right: 14 },
+      didParseCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 2) return;
+        const amount = extras[data.row.index]?.amount ?? 0;
+        data.cell.styles.textColor =
+          amount < 0 ? [185, 28, 28] : [4, 120, 87];
+        data.cell.styles.fontStyle = "bold";
+      },
     });
     y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 8;
   }
