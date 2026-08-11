@@ -3,6 +3,7 @@
  * con subtotali per mese e totale netto.
  */
 import { formatCurrency } from "@/lib/commission";
+import { effectiveGettone } from "@/lib/provvigioni-stato";
 import { formatMonthLabel } from "@/lib/report-month";
 import type { ReportRecurringRow } from "@/lib/report-recurring";
 import type { ReportStornoRow } from "@/lib/report-stornos";
@@ -15,23 +16,25 @@ export type RendicontoIncassatoSource = {
   insertionDate: Date;
   collaborator: { name: string };
   supplier: { name: string };
-  client: Parameters<typeof clientDisplayName>[0];
+  client: Parameters<typeof clientDisplayName>[0] & { type?: string };
   commission: { received: unknown; expected: unknown } | null;
   recurrence: string | null;
 };
 
 /**
- * Importo da mostrare in Report «Incassato».
- * Preferisce `received` se valorizzato; altrimenti il gettone (`expected`),
- * perché molti contratti hanno data incasso ma received ancora a 0.
+ * Importo «Incassato» nel Report = stesso gettone della colonna Gettone in Provvigioni
+ * (`expected`, o default fornitore se expected è 0).
+ * Non usare `received`: resta spesso al valore pre-modifica e sballa i totali.
  */
 export function reportIncassatoAmount(
   commission: { received?: unknown; expected?: unknown } | null | undefined,
+  context?: { clientType?: string; supplierName?: string },
 ): number {
-  const received = Number(commission?.received ?? 0);
-  if (Number.isFinite(received) && received !== 0) return received;
-  const gettone = Number(commission?.expected ?? 0);
-  return Number.isFinite(gettone) ? gettone : 0;
+  return effectiveGettone({
+    expected: Number(commission?.expected ?? 0),
+    clientType: context?.clientType ?? "",
+    supplierName: context?.supplierName ?? "",
+  });
 }
 
 export type RendicontoLine = {
@@ -138,7 +141,10 @@ export function buildRendiconto(params: {
         clientName: clientDisplayName(c.client),
         supplierName: c.supplier.name,
         collaboratorName: c.collaborator.name,
-        amount: reportIncassatoAmount(c.commission),
+        amount: reportIncassatoAmount(c.commission, {
+          clientType: c.client.type ?? "",
+          supplierName: c.supplier.name,
+        }),
         dateLabel: isoDate(c.collectionDate) || isoDate(c.insertionDate),
       });
     }

@@ -102,7 +102,14 @@ async function applyCommissionField(
     }
     await prisma.commission.update({
       where: { id: commission.id },
-      data: { [field]: amount },
+      data:
+        field === "expected"
+          ? {
+              expected: amount,
+              // Allinea received al gettone modificato (evita Report/liquidazione con importo vecchio)
+              received: amount,
+            }
+          : { [field]: amount },
     });
     if (field === "expected") {
       const isAdminGettone = hasPermission(session.role, "commissions.edit_gettone");
@@ -139,6 +146,11 @@ async function applyCommissionField(
       },
     });
     if (paid) {
+      const amount = Number(commission.expected ?? 0) || 0;
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: { received: amount, accrued: amount },
+      });
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     }
   } else if (field === "collectionDate") {
@@ -177,6 +189,14 @@ async function applyCommissionField(
                 supplyStartDate: dates.supplyStartDate,
               }
             : {}),
+        },
+      });
+      // Allinea received al gettone attuale
+      await prisma.commission.update({
+        where: { id: commission.id },
+        data: {
+          received: Number(commission.expected ?? 0) || 0,
+          accrued: Number(commission.expected ?? 0) || 0,
         },
       });
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
@@ -782,6 +802,7 @@ async function assertCanAccessCommissions(
     select: {
       id: true,
       contractId: true,
+      expected: true,
       contract: { select: { collaboratorId: true, recurrence: true } },
     },
   });
@@ -838,6 +859,13 @@ export async function bulkMarkPaidAction(formData: FormData): Promise<{ ok: true
               supplyStartDate: dates.supplyStartDate,
             }
           : {}),
+      },
+    });
+    await prisma.commission.update({
+      where: { id: r.id },
+      data: {
+        received: Number(r.expected ?? 0) || 0,
+        accrued: Number(r.expected ?? 0) || 0,
       },
     });
     await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);

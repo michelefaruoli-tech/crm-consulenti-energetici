@@ -137,7 +137,12 @@ export default async function ReportPage({
 
   const contracts = await prisma.contract.findMany({
     where: contractWhere,
-    include: { commission: true, supplier: true, collaborator: true },
+    include: {
+      commission: true,
+      supplier: true,
+      collaborator: true,
+      client: true,
+    },
   });
 
   const recurringRows = await loadReportRecurringPaid({
@@ -182,7 +187,12 @@ export default async function ReportPage({
   const totalReceivedOneShot = onlyStornato
     ? 0
     : oneShot.reduce(
-        (s, c) => s + reportIncassatoAmount(c.commission),
+        (s, c) =>
+          s +
+          reportIncassatoAmount(c.commission, {
+            clientType: c.client.type,
+            supplierName: c.supplier.name,
+          }),
         0,
       );
   const totalPaid = oneShot.reduce(
@@ -211,7 +221,10 @@ export default async function ReportPage({
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const cur = monthMap.get(key) ?? { count: 0, received: 0, expected: 0 };
       cur.count += 1;
-      cur.received += reportIncassatoAmount(c.commission);
+      cur.received += reportIncassatoAmount(c.commission, {
+        clientType: c.client.type,
+        supplierName: c.supplier.name,
+      });
       cur.expected += Number(c.commission?.expected ?? 0);
       monthMap.set(key, cur);
     }
@@ -260,7 +273,10 @@ export default async function ReportPage({
       };
       cur.count += 1;
       cur.expected += Number(c.commission?.expected ?? 0);
-      cur.received += reportIncassatoAmount(c.commission);
+      cur.received += reportIncassatoAmount(c.commission, {
+        clientType: c.client.type,
+        supplierName: c.supplier.name,
+      });
       cur.paid += Number(c.commission?.paid ?? 0);
       byCollab.set(id, cur);
     }
