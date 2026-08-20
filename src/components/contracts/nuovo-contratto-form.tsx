@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AutocompleteSearch } from "@/components/contracts/autocomplete-search";
+import {
+  AutocompleteSearch,
+  type AutocompleteItem,
+} from "@/components/contracts/autocomplete-search";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { createFullContractAction } from "@/lib/contract-create-action";
@@ -14,6 +17,7 @@ import {
 } from "@/lib/contract-form-types";
 import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
+import { ExistingClientHints } from "@/components/contracts/existing-client-hints";
 import { PersistentAlert } from "@/components/ui/persistent-alert";
 import { DocumentAutoFillPanel } from "@/components/contracts/ocr/document-auto-fill-panel";
 import {
@@ -207,6 +211,18 @@ export function NuovoContrattoForm({
     };
   }, [podValues]);
 
+  // Se arrivi da scheda cliente con id già noto, carica tutto in automatico
+  useEffect(() => {
+    if (!initialClientId) return;
+    void fetch(`/api/clients/search?id=${encodeURIComponent(initialClientId)}`)
+      .then((r) => r.json())
+      .then((data: { item?: AutocompleteItem | null }) => {
+        if (data.item) applyClientFromAnagrafica(data.item);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al mount / cambio id iniziale
+  }, [initialClientId]);
+
   const req = sendToMaster;
   /** Evidenza campi minimi anche senza invio al Master. */
   const reqBase = true;
@@ -221,6 +237,55 @@ export function NuovoContrattoForm({
       ? Boolean(firstName.trim() && lastName.trim())
       : Boolean(companyName.trim());
   const clientOk = Boolean(clientId) || (creatingClient && clientNameOk);
+
+  /** Compila tutta la sezione “Dati cliente” da un record anagrafica. */
+  function applyClientFromAnagrafica(item: AutocompleteItem) {
+    setClientId(item.id);
+    setClientLabel(String(item.label));
+    setCreatingClient(false);
+    setClientType(item.type === "AZIENDA" ? "AZIENDA" : "PRIVATO");
+    setFirstName(String(item.firstName ?? ""));
+    setLastName(String(item.lastName ?? ""));
+    setCompanyName(String(item.companyName ?? ""));
+    setFiscalCode(String(item.fiscalCode ?? ""));
+    setVatNumber(String(item.vatNumber ?? ""));
+    setPhone(String(item.phone ?? ""));
+    setEmail(String(item.email ?? ""));
+    setPec(String(item.pec ?? ""));
+    setIban(String(item.iban ?? ""));
+    setStreet(String(item.street ?? ""));
+    setStreetNumber(String(item.streetNumber ?? ""));
+    setZipCode(String(item.zipCode ?? ""));
+    setCity(String(item.city ?? ""));
+    setProvince(String(item.province ?? ""));
+    setRegion(String(item.region ?? ""));
+    setLegalFirstName(String(item.legalFirstName ?? ""));
+    setLegalLastName(String(item.legalLastName ?? ""));
+    setLegalFiscalCode(String(item.legalFiscalCode ?? ""));
+    setSdiCode(String(item.sdiCode ?? ""));
+    setClassification(String(item.classification ?? ""));
+  }
+
+  /** Seleziona cliente: usa i dati della ricerca e ricarica per id (sicurezza). */
+  async function selectExistingClient(item: AutocompleteItem) {
+    applyClientFromAnagrafica(item);
+    try {
+      const res = await fetch(
+        `/api/clients/search?id=${encodeURIComponent(item.id)}`,
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { item?: AutocompleteItem | null };
+      if (data.item) applyClientFromAnagrafica(data.item);
+    } catch {
+      // i dati della ricerca restano comunque applicati
+    }
+  }
+
+  function clearSelectedClient() {
+    setClientId(undefined);
+    setClientLabel(undefined);
+    setCreatingClient(true);
+  }
 
   function patchService(id: string, patch: Partial<ContractServiceLine>) {
     setServices((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
@@ -577,6 +642,7 @@ export function NuovoContrattoForm({
   function applyOcrPayload(payload: OcrApplyPayload) {
     setCreatingClient(true);
     setClientId(undefined);
+    setClientLabel(undefined);
     if (payload.clientType) setClientType(payload.clientType);
     if (payload.firstName != null) setFirstName(payload.firstName);
     if (payload.lastName != null) setLastName(payload.lastName);
@@ -741,52 +807,54 @@ export function NuovoContrattoForm({
           </p>
         ) : null}
         <AutocompleteSearch
-          label="Cliente"
+          label="Cliente (cerca in anagrafica)"
           required
-          placeholder="Cerca nome, cognome, ragione sociale, CF, P.IVA..."
+          placeholder="Scrivi cognome, nome o CF… es. Rossi Mario oppure RSSMRA…"
           endpoint="/api/clients/search"
           selectedLabel={clientLabel}
           createLabel="+ Crea nuovo cliente"
+          helpText="Digita almeno 2 lettere: compare l’elenco Cognome Nome · CF. Seleziona una riga e i dati sotto si compilano da soli."
           onClear={() => {
-            setClientId(undefined);
-            setClientLabel(undefined);
-            setCreatingClient(true);
+            clearSelectedClient();
+            setFirstName("");
+            setLastName("");
+            setCompanyName("");
+            setFiscalCode("");
+            setVatNumber("");
+            setPhone("");
+            setEmail("");
+            setPec("");
+            setIban("");
+            setStreet("");
+            setStreetNumber("");
+            setZipCode("");
+            setCity("");
+            setProvince("");
+            setRegion("");
+            setLegalFirstName("");
+            setLegalLastName("");
+            setLegalFiscalCode("");
+            setSdiCode("");
+            setClassification("");
           }}
           onSelect={(item) => {
-            setClientId(item.id);
-            setClientLabel(String(item.label));
-            setCreatingClient(false);
-            setClientType(item.type === "AZIENDA" ? "AZIENDA" : "PRIVATO");
-            setFirstName(String(item.firstName ?? ""));
-            setLastName(String(item.lastName ?? ""));
-            setCompanyName(String(item.companyName ?? ""));
-            setFiscalCode(String(item.fiscalCode ?? ""));
-            setVatNumber(String(item.vatNumber ?? ""));
-            setPhone(String(item.phone ?? ""));
-            setEmail(String(item.email ?? ""));
-            setPec(String(item.pec ?? ""));
-            setIban(String(item.iban ?? ""));
-            setStreet(String(item.street ?? ""));
-            setStreetNumber(String(item.streetNumber ?? ""));
-            setZipCode(String(item.zipCode ?? ""));
-            setCity(String(item.city ?? ""));
-            setProvince(String(item.province ?? ""));
-            setRegion(String(item.region ?? ""));
-            setLegalFirstName(String(item.legalFirstName ?? ""));
-            setLegalLastName(String(item.legalLastName ?? ""));
-            setLegalFiscalCode(String(item.legalFiscalCode ?? ""));
-            setSdiCode(String(item.sdiCode ?? ""));
-            setClassification(String(item.classification ?? ""));
+            void selectExistingClient(item);
           }}
           onCreate={(q) => {
-            setClientId(undefined);
-            setClientLabel(undefined);
-            setCreatingClient(true);
+            clearSelectedClient();
             const parsed = splitItalianPersonName(q);
             setFirstName(parsed.firstName);
             setLastName(parsed.lastName);
           }}
         />
+        {clientId && !creatingClient ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900 ring-1 ring-emerald-200">
+            Cliente già in anagrafica selezionato:{" "}
+            <strong>nome, cognome, CF, telefono, email, indirizzo e IBAN</strong>{" "}
+            sono stati caricati automaticamente. Controlla e completa solo ciò che
+            manca (poi i servizi del contratto sotto).
+          </p>
+        ) : null}
 
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="Tipologia cliente" fillStatus={fillStatus(req, true)}>
@@ -853,6 +921,19 @@ export function NuovoContrattoForm({
             <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
+            <div className="md:col-span-2">
+              <ExistingClientHints
+                enabled={creatingClient && !clientId}
+                query={
+                  fiscalCode.trim().length >= 6
+                    ? fiscalCode.trim()
+                    : [lastName.trim(), firstName.trim()].filter(Boolean).join(" ")
+                }
+                onPick={(item) => {
+                  void selectExistingClient(item);
+                }}
+              />
+            </div>
             <Field
               label="Email"
               fillStatus={fillStatus(req, Boolean(email.trim()))}
@@ -900,6 +981,21 @@ export function NuovoContrattoForm({
             >
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </Field>
+            <div className="md:col-span-2">
+              <ExistingClientHints
+                enabled={creatingClient && !clientId}
+                query={
+                  (vatNumber.trim().length >= 5
+                    ? vatNumber.trim()
+                    : fiscalCode.trim().length >= 5
+                      ? fiscalCode.trim()
+                      : companyName.trim()) || ""
+                }
+                onPick={(item) => {
+                  void selectExistingClient(item);
+                }}
+              />
+            </div>
             {showAdvancedClient ? (
               <>
                 <Field label="PEC (facoltativa)">
