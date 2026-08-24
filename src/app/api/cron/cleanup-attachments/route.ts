@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { attachmentConfig } from "@/lib/attachment-config";
+import { archiveSupersededPodContracts } from "@/lib/contract-pod-archive";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -16,9 +17,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const closed = await archiveSupersededPodContracts();
+
   const days = attachmentConfig.retentionDays;
   if (!days || days <= 0) {
-    return NextResponse.json({ ok: true, cleared: 0, message: "Retention disabilitata" });
+    return NextResponse.json({
+      ok: true,
+      cleared: 0,
+      closedSuperseded: closed.archived,
+      keptMonthly: closed.keptMonthly,
+      message: "Retention disabilitata",
+    });
   }
 
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -56,6 +65,8 @@ export async function GET(request: Request) {
     ok: true,
     cleared,
     days,
+    closedSuperseded: closed.archived,
+    keptMonthly: closed.keptMonthly,
     message: `Puliti ${cleared} contenuti allegati (metadati conservati)`,
   });
 }

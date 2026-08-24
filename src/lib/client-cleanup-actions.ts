@@ -51,6 +51,11 @@ export async function cleanupClientDuplicatesAction(): Promise<{
     if (archived.archived > 0) {
       parts.push(`archiviati ${archived.archived} POD precedenti`);
     }
+    if (archived.keptMonthly > 0) {
+      parts.push(
+        `${archived.keptMonthly} ricorrenti mensili tenuti attivi fino alla nuova fornitura`,
+      );
+    }
     return {
       ok: true,
       message: parts.length ? parts.join(" · ") : "Nessuna modifica necessaria",

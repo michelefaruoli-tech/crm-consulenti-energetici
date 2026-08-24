@@ -658,14 +658,21 @@ async function createFullContractActionInner(
   // Email Master inviata dal client via API dopo upload allegati (evita body/timeout Server Action)
 
   // POD ricontrattualizzato → archivia i precedenti (CRM snello)
+  // Bozze: non toccare i precedenti. Ricorrenti mensili (Helios): restano
+  // attivi fino all’ingresso fornitura del nuovo contratto.
   let archivedOlder = 0;
-  try {
-    const { archiveOlderForContractPods } = await import(
-      "@/lib/contract-pod-archive"
-    );
-    archivedOlder = await archiveOlderForContractPods(createdIds);
-  } catch (e) {
-    console.error("[archiveOlderForContractPods]", e);
+  let keptMonthly = 0;
+  if (!payload.draft) {
+    try {
+      const { archiveOlderForContractPods } = await import(
+        "@/lib/contract-pod-archive"
+      );
+      const arch = await archiveOlderForContractPods(createdIds);
+      archivedOlder = arch.archived;
+      keptMonthly = arch.keptMonthly;
+    } catch (e) {
+      console.error("[archiveOlderForContractPods]", e);
+    }
   }
 
   await prisma.auditLog.create({
@@ -679,6 +686,7 @@ async function createFullContractActionInner(
         draft: payload.draft,
         sendToMaster,
         archivedOlderPods: archivedOlder,
+        keptMonthlyRecurring: keptMonthly,
       }),
     },
   });
@@ -713,11 +721,15 @@ async function createFullContractActionInner(
     archivedOlder > 0
       ? ` · Archiviati ${archivedOlder} contratto/i precedenti sullo stesso POD`
       : "";
+  const keepMsg =
+    keptMonthly > 0
+      ? ` · ${keptMonthly} ricorrente/i mensili restano attivi fino all’ingresso del nuovo contratto`
+      : "";
 
   return {
     ok: true,
     contractIds: createdIds,
-    message: `${baseMsg}${archiveMsg}`,
+    message: `${baseMsg}${archiveMsg}${keepMsg}`,
     code: sendToMaster ? "CREATED_PENDING_EMAIL" : "CREATED",
     emailSent: false,
   };

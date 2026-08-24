@@ -24,6 +24,27 @@ const PRESERVED_STATUSES = new Set([
 const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura";
 const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
 
+/** Giorno prima della chiusura (es. fornitura nuova 1/10 → ultimo giorno Helios 30/09). */
+function dayBefore(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() - 1);
+  return d;
+}
+
+/** Ultimo mese di competenza: oggi, oppure il mese prima della data di chiusura. */
+function lastBillablePeriod(now: Date, expiryDate: Date | null | undefined): string {
+  const nowPeriod = toPeriod(now);
+  if (!expiryDate) return nowPeriod;
+  const last = toPeriod(dayBefore(expiryDate));
+  return last < nowPeriod ? last : nowPeriod;
+}
+
+function earlierPeriod(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a < b ? a : b;
+}
+
 /**
  * Controllo globale dei limiti temporali delle ricorrenze già presenti.
  * Corregge dati storici senza rigenerare ogni rata di ogni contratto.
@@ -44,6 +65,7 @@ export async function reconcileAllRecurringBounds(): Promise<{
       supplyStartDate: true,
       operationType: true,
       status: true,
+      expiryDate: true,
       statusHistory: {
         where: { toStatus: "CHIUSO" },
         select: { changedAt: true },
@@ -63,10 +85,14 @@ export async function reconcileAllRecurringBounds(): Promise<{
       contract.supplyStartDate ??
         computeSupplyStartDate(contract.insertionDate, contract.operationType),
     );
-    const end =
+    const endFromClosed =
       contract.status === "CHIUSO" && contract.statusHistory[0]
         ? toPeriod(contract.statusHistory[0].changedAt)
         : null;
+    const endFromExpiry = contract.expiryDate
+      ? toPeriod(dayBefore(contract.expiryDate))
+      : null;
+    const end = earlierPeriod(endFromClosed, endFromExpiry);
     for (const installment of contract.recurringMonths) {
       if (installment.period < start) {
         invalid.push({ id: installment.id, note: AUTO_CLOSED_BEFORE_START });
@@ -97,7 +123,8 @@ export async function reconcileAllRecurringBounds(): Promise<{
 }
 
 /**
- * Per contratti ricorrenti mensili (M): genera mesi da inizio fornitura → oggi.
+ * Per contratti ricorrenti mensili (M): genera mesi da inizio fornitura → oggi
+ * (o fino al giorno prima della chiusura, se c’è expiryDate).
  * Per contratti ricorrenti annuali (R): genera solo le scadenze a +12 mesi
  * dall’ultimo pagamento (o dall’ingresso se mai pagato).
  *
@@ -114,6 +141,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       operationType: true,
       collectionDate: true,
       status: true,
+      expiryDate: true,
       statusHistory: {
         where: { toStatus: "CHIUSO" },
         select: { changedAt: true },
@@ -140,7 +168,8 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     contract.supplyStartDate ??
     computeSupplyStartDate(contract.insertionDate, contract.operationType);
   const start = toPeriod(startDate);
-  const now = toPeriod(new Date());
+  const nowDate = new Date();
+  const now = toPeriod(nowDate);
 
   // Elimina dai conteggi qualsiasi rata precedente all'effettivo ingresso.
   const beforeSupply = await prisma.recurringMonth.findMany({
@@ -159,6 +188,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     });
   }
 
+  // Pratica fallita: chiudi mesi aperti e non generarne di nuovi.
   if (contract.status === "ANNULLATO" || contract.status === "KO") {
     const open = await prisma.recurringMonth.findMany({
       where: { contractId, status: { in: ["PENDING", "MISSING"] } },
@@ -173,16 +203,22 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  // Per un contratto chiuso, il mese del cambio stato è l'ultima competenza valida.
   const closedPeriod =
     contract.status === "CHIUSO"
-      ? toPeriod(contract.statusHistory[0]?.changedAt ?? new Date())
+      ? toPeriod(contract.statusHistory[0]?.changedAt ?? nowDate)
       : null;
-  if (closedPeriod) {
+  const expiryPeriod = contract.expiryDate
+    ? toPeriod(dayBefore(contract.expiryDate))
+    : null;
+  const lastAllowed = earlierPeriod(closedPeriod, expiryPeriod);
+  const lastPeriod =
+    lastAllowed && lastAllowed < now ? lastAllowed : lastBillablePeriod(nowDate, contract.expiryDate);
+
+  if (lastAllowed) {
     const afterClosure = await prisma.recurringMonth.findMany({
       where: {
         contractId,
-        period: { gt: closedPeriod },
+        period: { gt: lastAllowed },
         status: { in: ["PENDING", "MISSING"] },
       },
       select: { id: true },
@@ -199,19 +235,23 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       });
     }
   }
-  const lastPeriod = closedPeriod && closedPeriod < now ? closedPeriod : now;
+
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
   if (isRecurringAnnual(contract.recurrence)) {
-    await syncAnnualPeriods(contractId, start, lastPeriod, amount);
+    if (contract.status !== "CHIUSO") {
+      await syncAnnualPeriods(contractId, start, lastPeriod, amount);
+    }
     return;
   }
 
   if (!isRecurringMonthly(contract.recurrence)) return;
 
-  const periods = monthsBetween(start, lastPeriod);
-  for (const period of periods) {
-    await upsertMonthStatus(contractId, period, now, amount);
+  if (start <= lastPeriod) {
+    const periods = monthsBetween(start, lastPeriod);
+    for (const period of periods) {
+      await upsertMonthStatus(contractId, period, now, amount);
+    }
   }
 }
 
@@ -315,6 +355,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       supplyStartDate: true,
       operationType: true,
       status: true,
+      expiryDate: true,
       commission: { select: { expected: true } },
       statusHistory: {
         where: { toStatus: "CHIUSO" },
@@ -359,7 +400,14 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       contract.status === "CHIUSO" && contract.statusHistory[0]
         ? toPeriod(contract.statusHistory[0].changedAt)
         : null;
-    const lastPeriod = closedPeriod && closedPeriod < now ? closedPeriod : now;
+    const expiryPeriod = contract.expiryDate
+      ? toPeriod(dayBefore(contract.expiryDate))
+      : null;
+    const lastAllowed = earlierPeriod(closedPeriod, expiryPeriod);
+    const lastPeriod =
+      lastAllowed && lastAllowed < now
+        ? lastAllowed
+        : lastBillablePeriod(new Date(), contract.expiryDate);
     const amount = Number(contract.commission?.expected ?? 0) || null;
     const existing = new Map(contract.recurringMonths.map((row) => [row.period, row]));
 
