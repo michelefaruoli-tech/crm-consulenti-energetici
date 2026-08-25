@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { recurringMonthlyWhereOr } from "@/lib/provvigioni-filters";
 import { isRecurringMonthly } from "@/lib/recurring";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 import { normalizePodKey } from "@/lib/storno-status";
@@ -9,6 +10,61 @@ import {
 } from "@/lib/supply-dates";
 
 const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
+
+/** Ultimo giorno utile del contratto precedente (es. nuovo 1/10 → 30/09). */
+function dayBeforeSupplyStart(supplyStart: Date): Date {
+  const d = new Date(
+    supplyStart.getFullYear(),
+    supplyStart.getMonth(),
+    supplyStart.getDate(),
+  );
+  d.setDate(d.getDate() - 1);
+  return d;
+}
+
+/**
+ * Ricorrenti mensili Helios archiviati per errore come storici:
+ * devono restare in Provvigioni/Report finché pagano (clone switch).
+ */
+export async function repairMonthlySwitchArchives(): Promise<{ repaired: number }> {
+  const rows = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      isHistorical: true,
+      archiveLabel: { startsWith: POD_ARCHIVE_LABEL },
+      OR: [...recurringMonthlyWhereOr],
+    },
+    select: { id: true },
+    take: 5000,
+  });
+
+  let repaired = 0;
+  for (const row of rows) {
+    try {
+      await prisma.contract.update({
+        where: { id: row.id },
+        data: { isHistorical: false },
+      });
+      await syncRecurringMonthsForContract(row.id).catch(() => undefined);
+      repaired += 1;
+    } catch (e) {
+      console.error("[repairMonthlySwitchArchives]", row.id, e);
+    }
+  }
+  return { repaired };
+}
+
+/** Chiusura soft ricorrente mensile: resta visibile, non va in Archivio. */
+function monthlySwitchCloseData(latestSupply: Date) {
+  const expiryDate = dayBeforeSupplyStart(latestSupply);
+  return {
+    isHistorical: false as const,
+    archiveLabel: null as string | null,
+    status: "CHIUSO" as const,
+    expiryDate,
+    koNotes: closeNote(latestSupply),
+  };
+}
 
 /**
  * Gli import Excel «Archivio» avevano messo TUTTO come isHistorical=true,
@@ -156,15 +212,16 @@ export async function archiveSupersededPodContracts(options?: {
   let keptMonthly = 0;
   for (const { older, until } of toKeep) {
     try {
+      const expiryDate = dayBeforeSupplyStart(until);
       const sameExpiry =
         older.expiryDate &&
-        older.expiryDate.getFullYear() === until.getFullYear() &&
-        older.expiryDate.getMonth() === until.getMonth() &&
-        older.expiryDate.getDate() === until.getDate();
+        older.expiryDate.getFullYear() === expiryDate.getFullYear() &&
+        older.expiryDate.getMonth() === expiryDate.getMonth() &&
+        older.expiryDate.getDate() === expiryDate.getDate();
       if (!sameExpiry) {
         await prisma.contract.update({
           where: { id: older.id },
-          data: { expiryDate: until },
+          data: { expiryDate },
         });
       }
       keptMonthly += 1;
@@ -181,23 +238,22 @@ export async function archiveSupersededPodContracts(options?: {
     try {
       const monthly = isRecurringMonthly(older.recurrence);
       const alreadyClosed = ["KO", "ANNULLATO", "CHIUSO"].includes(older.status);
+      if (monthly && !alreadyClosed) {
+        await prisma.contract.update({
+          where: { id: older.id },
+          data: monthlySwitchCloseData(latestSupply),
+        });
+        await syncRecurringMonthsForContract(older.id).catch(() => undefined);
+        archived += 1;
+        continue;
+      }
       await prisma.contract.update({
         where: { id: older.id },
         data: {
           isHistorical: true,
           archiveLabel: POD_ARCHIVE_LABEL,
-          ...(monthly && !alreadyClosed
-            ? {
-                status: "CHIUSO" as const,
-                expiryDate: latestSupply,
-                koNotes: closeNote(latestSupply),
-              }
-            : {}),
         },
       });
-      if (monthly) {
-        await syncRecurringMonthsForContract(older.id).catch(() => undefined);
-      }
       archived += 1;
     } catch (e) {
       console.error("[archiveSupersededPodContracts] update", older.id, e);
@@ -284,15 +340,16 @@ export async function archiveOlderForContractPods(
         })
       ) {
         const until = latestSupply ?? now;
+        const expiryDate = dayBeforeSupplyStart(until);
         const sameExpiry =
           candidate.expiryDate &&
-          candidate.expiryDate.getFullYear() === until.getFullYear() &&
-          candidate.expiryDate.getMonth() === until.getMonth() &&
-          candidate.expiryDate.getDate() === until.getDate();
+          candidate.expiryDate.getFullYear() === expiryDate.getFullYear() &&
+          candidate.expiryDate.getMonth() === expiryDate.getMonth() &&
+          candidate.expiryDate.getDate() === expiryDate.getDate();
         if (!sameExpiry) {
           await prisma.contract.update({
             where: { id: candidate.id },
-            data: { expiryDate: until },
+            data: { expiryDate },
           });
         }
         keptMonthly += 1;
@@ -303,22 +360,29 @@ export async function archiveOlderForContractPods(
       const alreadyClosed = ["KO", "ANNULLATO", "CHIUSO"].includes(
         candidate.status,
       );
+      if (monthly && !alreadyClosed && latestSupply) {
+        await prisma.contract.update({
+          where: { id: candidate.id },
+          data: monthlySwitchCloseData(latestSupply),
+        });
+        await syncRecurringMonthsForContract(candidate.id).catch(
+          () => undefined,
+        );
+        archived += 1;
+        continue;
+      }
+
       await prisma.contract.update({
         where: { id: candidate.id },
         data: {
           isHistorical: true,
           archiveLabel: POD_ARCHIVE_LABEL,
-          ...(monthly && !alreadyClosed && latestSupply
-            ? {
-                status: "CHIUSO" as const,
-                expiryDate: latestSupply,
-                koNotes: closeNote(latestSupply),
-              }
-            : {}),
         },
       });
       if (monthly) {
-        await syncRecurringMonthsForContract(candidate.id).catch(() => undefined);
+        await syncRecurringMonthsForContract(candidate.id).catch(
+          () => undefined,
+        );
       }
       archived += 1;
     } catch (e) {

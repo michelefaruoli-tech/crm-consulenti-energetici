@@ -16,9 +16,11 @@ import {
   guessCompetenceFromFilename,
   isYearMonthPeriod,
   normalizePersonKey,
+  pickHeliosContractForPeriod,
   type HeliosImportPreviewRow,
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
+import { repairMonthlySwitchArchives } from "@/lib/contract-pod-archive";
 
 export type {
   HeliosImportPreviewRow,
@@ -62,6 +64,10 @@ async function loadHeliosContractList(supplierId: string) {
       podPdr: true,
       pod: true,
       pdr: true,
+      supplyStartDate: true,
+      insertionDate: true,
+      operationType: true,
+      expiryDate: true,
       client: {
         select: {
           type: true,
@@ -121,19 +127,32 @@ function resolveHeliosMatch(
   byPod: Map<string, HeliosContractRow[]>,
   byName: Map<string, HeliosContractRow[]>,
 ): {
-  matches: HeliosContractRow[];
+  contract: HeliosContractRow | null;
   matchedByName: boolean;
+  ambiguous: boolean;
 } {
   const podMatches = byPod.get(line.pod) ?? [];
   if (podMatches.length > 0) {
-    return { matches: podMatches, matchedByName: false };
+    const picked = pickHeliosContractForPeriod(podMatches, line.competencePeriod);
+    return {
+      contract: picked,
+      matchedByName: false,
+      ambiguous: podMatches.length > 1 && !picked,
+    };
   }
 
   const nameKey = normalizePersonKey(line.intestatario);
-  if (!nameKey) return { matches: [], matchedByName: false };
+  if (!nameKey) {
+    return { contract: null, matchedByName: false, ambiguous: false };
+  }
 
   const nameMatches = byName.get(nameKey) ?? [];
-  return { matches: nameMatches, matchedByName: true };
+  const picked = pickHeliosContractForPeriod(nameMatches, line.competencePeriod);
+  return {
+    contract: picked,
+    matchedByName: nameMatches.length > 0,
+    ambiguous: nameMatches.length > 1 && !picked,
+  };
 }
 
 function buildPreviewRows(
@@ -166,13 +185,13 @@ function buildPreviewRows(
   >,
 ): HeliosImportPreviewRow[] {
   return lines.map((line) => {
-    const { matches, matchedByName } = resolveHeliosMatch(
+    const { contract, matchedByName, ambiguous } = resolveHeliosMatch(
       line,
       byPod as Map<string, HeliosContractRow[]>,
       byName as Map<string, HeliosContractRow[]>,
     );
 
-    if (matches.length === 0) {
+    if (!contract) {
       return {
         excelRow: line.excelRow,
         pod: line.pod,
@@ -182,8 +201,7 @@ function buildPreviewRows(
         status: "not_found" as const,
       };
     }
-    if (matches.length > 1) {
-      const first = matches[0]!;
+    if (ambiguous) {
       return {
         excelRow: line.excelRow,
         pod: line.pod,
@@ -191,11 +209,11 @@ function buildPreviewRows(
         baseAmount: line.baseAmount,
         competencePeriod: line.competencePeriod,
         status: "ambiguous" as const,
-        contractId: first.id,
-        clientName: clientDisplayName(first.client),
+        contractId: contract.id,
+        clientName: clientDisplayName(contract.client),
       };
     }
-    const c = matches[0]!;
+    const c = contract;
     const month = c.recurringMonths.find(
       (m) => m.period === line.competencePeriod,
     );
@@ -258,6 +276,10 @@ export async function previewHeliosProvvigioniAction(
     if (!map.ok) {
       return { ok: false, error: map.error };
     }
+
+    await repairMonthlySwitchArchives().catch((e) =>
+      console.error("[previewHelios] repairMonthlySwitchArchives", e),
+    );
 
     const rows = buildPreviewRows(parsed.lines, map.byPod, map.byName);
     const competencePeriods = [
@@ -331,6 +353,11 @@ export async function applyHeliosProvvigioniAction(
 
     const map = await loadHeliosContractsByPod();
     if (!map.ok) return { ok: false, error: map.error };
+
+    const repaired = await repairMonthlySwitchArchives().catch((e) => {
+      console.error("[applyHelios] repairMonthlySwitchArchives", e);
+      return { repaired: 0 };
+    });
 
     const preview = buildPreviewRows(parsed.lines, map.byPod, map.byName);
     const amountByKey = new Map(
@@ -445,6 +472,7 @@ export async function applyHeliosProvvigioniAction(
         notFound,
         ambiguous,
         podsUpdated,
+        repairedArchives: repaired.repaired,
       },
     });
 

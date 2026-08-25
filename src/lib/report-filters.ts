@@ -118,6 +118,15 @@ export function reportPeriodUsesCollectionDate(stato: string): boolean {
   );
 }
 
+/**
+ * Rate ricorrenti nel Report «Incassato» / «Pagato»: filtra solo per mese competenza,
+ * non per mese bonifico (`settledPeriod`), così luglio non include rate 2025-05/06.
+ */
+export function reportRecurringCompetenceOnly(stato: string): boolean {
+  const stati = resolveReportStati(stato);
+  return stati.some((s) => s === "Incassato" || s === "Pagato");
+}
+
 export function reportPeriodUsesStornoDate(stato: string): boolean {
   const stati = resolveReportStati(stato);
   // Solo se TUTTI gli stati selezionati sono Stornato (altrimenti mix con OR)

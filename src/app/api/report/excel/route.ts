@@ -26,6 +26,7 @@ import {
   reportHasStato,
   reportPeriodUsesCollectionDate,
   reportPeriodUsesStornoDate,
+  reportRecurringCompetenceOnly,
   resolveReportPeriod,
   resolveReportStati,
   resolveReportStato,
@@ -127,6 +128,7 @@ export async function GET(req: NextRequest) {
     collaboratorId,
     supplierId,
     visibility,
+    competenceOnly: reportRecurringCompetenceOnly(stato),
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 

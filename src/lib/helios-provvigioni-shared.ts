@@ -1,5 +1,95 @@
 /** Utility condivise (client + server) per import Excel Helios. */
 
+import { computeSupplyStartDate } from "@/lib/supply-dates";
+import { toPeriod } from "@/lib/recurring";
+
+export type HeliosContractPeriodMatch = {
+  id: string;
+  supplyStartDate: Date | null;
+  insertionDate: Date;
+  operationType: string | null;
+  expiryDate: Date | null;
+};
+
+function dayBefore(date: Date): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  d.setDate(d.getDate() - 1);
+  return d;
+}
+
+/** Ultimo mese YYYY-MM fatturabile per un contratto (incluso). */
+export function lastBillablePeriodForHeliosContract(
+  c: HeliosContractPeriodMatch,
+): string | null {
+  if (!c.expiryDate) return null;
+  return toPeriod(dayBefore(c.expiryDate));
+}
+
+/** Primo mese YYYY-MM fatturabile per un contratto (incluso). */
+export function firstBillablePeriodForHeliosContract(
+  c: HeliosContractPeriodMatch,
+): string {
+  const start =
+    c.supplyStartDate ??
+    computeSupplyStartDate(c.insertionDate, c.operationType);
+  return toPeriod(start);
+}
+
+/** Il contratto copre la competenza mensile indicata? */
+export function heliosContractCoversPeriod(
+  c: HeliosContractPeriodMatch,
+  period: string,
+): boolean {
+  if (!/^\d{4}-\d{2}$/.test(period)) return false;
+  const start = firstBillablePeriodForHeliosContract(c);
+  if (period < start) return false;
+  const end = lastBillablePeriodForHeliosContract(c);
+  if (end && period > end) return false;
+  return true;
+}
+
+/**
+ * Switch Helios: stesso POD può avere vecchio + nuovo contratto.
+ * Sceglie quello la cui finestra [ingresso, chiusura] contiene il mese competenza.
+ */
+export function pickHeliosContractForPeriod<T extends HeliosContractPeriodMatch>(
+  matches: T[],
+  period: string,
+): T | null {
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0]!;
+
+  const covering = matches.filter((c) => heliosContractCoversPeriod(c, period));
+  if (covering.length === 1) return covering[0]!;
+  if (covering.length > 1) {
+    return [...covering].sort(
+      (a, b) =>
+        firstBillablePeriodForHeliosContract(b).localeCompare(
+          firstBillablePeriodForHeliosContract(a),
+        ),
+    )[0]!;
+  }
+
+  // Competenza prima dell’ingresso del nuovo: preferisci il contratto più vecchio
+  const beforeStart = matches.filter(
+    (c) => period < firstBillablePeriodForHeliosContract(c),
+  );
+  if (beforeStart.length > 0) {
+    return [...beforeStart].sort((a, b) =>
+      firstBillablePeriodForHeliosContract(a).localeCompare(
+        firstBillablePeriodForHeliosContract(b),
+      ),
+    )[0]!;
+  }
+
+  // Nuovo non ancora in fornitura: preferisci quello con ingresso futuro più vicino
+  return [...matches].sort((a, b) =>
+    firstBillablePeriodForHeliosContract(a).localeCompare(
+      firstBillablePeriodForHeliosContract(b),
+    ),
+  )[0]!;
+}
+
 export type HeliosImportRowStatus =
   | "will_pay" /** da segnare incassato (fornitore) */
   | "already_paid" /** già incassato */

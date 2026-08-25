@@ -165,7 +165,7 @@ export function buildRendiconto(params: {
 
   if (!params.skipRecurring) {
     for (const r of params.recurringRows) {
-      const month = r.settledPeriod || r.period;
+      const month = r.period;
       lines.push({
         kind: "ricorrente",
         month,

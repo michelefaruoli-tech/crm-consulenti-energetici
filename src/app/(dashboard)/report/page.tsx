@@ -33,6 +33,7 @@ import {
   reportDateRange,
   reportHasStato,
   reportPeriodUsesCollectionDate,
+  reportRecurringCompetenceOnly,
   reportStatoHint,
   resolveReportPeriod,
   resolveReportStati,
@@ -152,6 +153,7 @@ export default async function ReportPage({
     collaboratorId,
     supplierId,
     visibility,
+    competenceOnly: reportRecurringCompetenceOnly(stato),
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 

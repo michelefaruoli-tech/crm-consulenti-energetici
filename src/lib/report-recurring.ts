@@ -64,6 +64,11 @@ export async function loadReportRecurringPaid(params: {
   collaboratorId?: string | null;
   supplierId?: string | null;
   visibility: Prisma.ContractWhereInput;
+  /**
+   * Report «Incassato»: usa solo il mese competenza (`period`).
+   * Evita rate vecchie (es. 2025-05) incluse solo perché il bonifico è a luglio.
+   */
+  competenceOnly?: boolean;
 }): Promise<ReportRecurringRow[]> {
   const period = resolveReportPeriod(params);
   const periods = periodsInRange(period.from, period.to, period.month);
@@ -72,10 +77,16 @@ export async function loadReportRecurringPaid(params: {
   const collabIds = parseFilterList(params.collaboratorId);
   const supplierIds = parseFilterList(params.supplierId);
 
+  const periodWhere: Prisma.RecurringMonthWhereInput = params.competenceOnly
+    ? { period: { in: periods } }
+    : {
+        OR: [{ period: { in: periods } }, { settledPeriod: { in: periods } }],
+      };
+
   const rows = await prisma.recurringMonth.findMany({
     where: {
       status: "PAID",
-      OR: [{ period: { in: periods } }, { settledPeriod: { in: periods } }],
+      ...periodWhere,
       contract: {
         AND: [
           params.visibility,
