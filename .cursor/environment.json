@@ -1,6 +1,6 @@
 {
   "name": "CRM Consulenti Energetici",
-  "install": "npm ci && if [ -n \"$GITHUB_TOKEN\" ]; then gh auth setup-git 2>/dev/null || true; fi",
+  "install": "npm install && if [ -n \"$GITHUB_TOKEN\" ]; then gh auth setup-git 2>/dev/null || git config --global url.\"https://x-access-token:${GITHUB_TOKEN}@github.com/\".insteadOf \"https://github.com/\"; fi",
   "start": "npm run db:generate",
   "repositoryDependencies": [
     "github.com/michelefaruoli-tech/crm-consulenti-energetici"
