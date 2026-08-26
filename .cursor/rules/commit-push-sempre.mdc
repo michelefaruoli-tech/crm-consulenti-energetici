@@ -1,18 +1,24 @@
 ---
-description: Dopo ogni modifica al codice, fare sempre commit e push su main
+description: Dopo ogni modifica al codice, commit e push su GitHub (Vercel si aggiorna da solo)
 alwaysApply: true
 ---
 
-# Commit e push automatici
+# Commit e push automatici (GitHub → Vercel)
 
 Dopo ogni modifica al codice (feature, fix, UX, bug), **senza chiedere conferma**:
 
-1. Esegui `git add` solo dei file rilevanti (niente backup, `.env`, segreti, script debug temporanei).
-2. Crea un commit con messaggio chiaro in italiano (stile del repo: cosa/perché in 1 riga).
-3. Esegui `git push -u origin HEAD` (o push sul branch corrente).
-4. Nella risposta all’utente indica breve messaggio di commit + hash.
+1. `git add` solo dei file rilevanti (niente backup, `.env`, segreti, script debug temporanei).
+2. Commit con messaggio chiaro in italiano (cosa/perché in 1 riga).
+3. Push su **GitHub** (`origin`), di solito su `main`:
+   ```bash
+   unset GITHUB_TOKEN GH_TOKEN   # usa gh auth (permesso scrittura), non il secret read-only
+   gh auth setup-git
+   git push origin main
+   ```
+   Se lavori su un branch feature: `git push -u origin HEAD`, poi merge su `main` e push di `main`.
+4. **Vercel** si aggiorna da solo quando `main` su GitHub cambia — non serve deploy manuale.
+5. Nella risposta all’utente: messaggio di commit + hash + conferma push GitHub (e che Vercel sta deployando).
 
 Non serve che l’utente scriva «commit e push»: è già richiesto di default.
-Non fare push force su main/master.
-Non aggiornare git config.
----
+Non fare `git push --force` su `main`/`master`.
+Non modificare `git config` globale oltre a quanto già previsto da `gh auth setup-git`.
