@@ -1,0 +1,21 @@
+{
+  "name": "CRM Consulenti Energetici",
+  "install": "npm ci && if [ -n \"$GITHUB_TOKEN\" ]; then gh auth setup-git 2>/dev/null || true; fi",
+  "start": "npm run db:generate",
+  "repositoryDependencies": [
+    "github.com/michelefaruoli-tech/crm-consulenti-energetici"
+  ],
+  "terminals": [
+    {
+      "name": "Next.js dev",
+      "command": "npm run dev -- --port 43123",
+      "description": "Dev server CRM su porta 43123"
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 43123
+    }
+  ]
+}
