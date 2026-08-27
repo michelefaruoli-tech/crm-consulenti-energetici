@@ -7,6 +7,7 @@ import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   calcExpiryDate,
+  expandDualServiceLines,
   isValidIban,
   type NewContractPayload,
 } from "@/lib/contract-form-types";
@@ -143,9 +144,7 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   const classification =
     payload.client.classification || payload.supplyClassification;
   if (!classification?.trim()) {
-    errors.push(
-      "Classificazione obbligatoria (Business, Condominio, Altri usi, Pubblica amministrazione)",
-    );
+    errors.push("Classificazione obbligatoria");
   }
   // Gli allegati spesso arrivano dopo via API: non bloccare se il payload è vuoto.
   // Se presenti nel payload, qualsiasi documento è sufficiente (non più CI+fattura obbligatori).
@@ -426,10 +425,11 @@ async function createFullContractActionInner(
       ? "IN_LAVORAZIONE"
       : "INSERITO";
   const masterEmail = sendToMaster ? getMasterEmail() : null;
-  const services =
+  const services = expandDualServiceLines(
     payload.services.length > 0
       ? payload.services
-      : [{ id: "default", service: "LUCE" as const }];
+      : [{ id: "default", service: "LUCE" as const }],
+  );
   const idempotencyKey = sendToMaster
     ? createHash("sha256")
         .update(

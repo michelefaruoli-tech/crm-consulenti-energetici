@@ -88,6 +88,22 @@ export function createEmptyServiceLine(
   };
 }
 
+/** Dual luce+gas → due righe distinte (LUCE e GAS) per creare due contratti. */
+export function expandDualServiceLines(
+  services: ContractServiceLine[],
+): ContractServiceLine[] {
+  const expanded: ContractServiceLine[] = [];
+  for (const line of services) {
+    if (line.service === "DUAL") {
+      expanded.push({ ...line, id: `${line.id}-luce`, service: "LUCE" });
+      expanded.push({ ...line, id: `${line.id}-gas`, service: "GAS" });
+    } else {
+      expanded.push(line);
+    }
+  }
+  return expanded;
+}
+
 export type NewContractPayload = {
   draft: boolean;
   sendToMaster: boolean;

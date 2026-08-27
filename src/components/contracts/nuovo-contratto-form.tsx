@@ -47,6 +47,20 @@ function SectionTitle({ title, description }: { title: string; description: stri
   );
 }
 
+const CLASSIFICATION_BY_CLIENT_TYPE = {
+  PRIVATO: [
+    { value: "Residente", label: "Residente" },
+    { value: "Non residente", label: "Non residente" },
+    { value: "Altri usi", label: "Altri usi" },
+  ],
+  AZIENDA: [
+    { value: "Business", label: "Business" },
+    { value: "Condominio", label: "Condominio" },
+    { value: "Altri usi", label: "Altri usi" },
+    { value: "PA", label: "Pubblica amministrazione" },
+  ],
+} as const;
+
 type Props = {
   session: { id: string; name: string; role: string };
   collaborators: { id: string; name: string }[];
@@ -718,6 +732,7 @@ export function NuovoContrattoForm({
       ? companyName.trim() || "Nuova azienda"
       : [lastName, firstName].filter((x) => x.trim()).join(" ") || "Nuovo cliente";
   const clientCf = (fiscalCode || vatNumber).trim();
+  const classificationOptions = CLASSIFICATION_BY_CLIENT_TYPE[clientType];
 
   return (
     <div className="space-y-4 pb-24 sm:space-y-5 sm:pb-0">
@@ -911,10 +926,11 @@ export function NuovoContrattoForm({
             >
               <Select value={classification} onChange={(e) => setClassification(e.target.value)}>
                 <option value="">Seleziona</option>
-                <option value="Business">Business</option>
-                <option value="Condominio">Condominio</option>
-                <option value="Altri usi">Altri usi</option>
-                <option value="PA">Pubblica amministrazione</option>
+                {classificationOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </Select>
             </Field>
           </div>
@@ -972,10 +988,11 @@ export function NuovoContrattoForm({
             >
               <Select value={classification} onChange={(e) => setClassification(e.target.value)}>
                 <option value="">Seleziona</option>
-                <option value="Business">Business</option>
-                <option value="Condominio">Condominio</option>
-                <option value="Altri usi">Altri usi</option>
-                <option value="PA">Pubblica amministrazione</option>
+                {classificationOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </Select>
             </Field>
             <Field label="Codice SDI">
