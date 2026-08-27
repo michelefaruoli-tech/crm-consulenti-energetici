@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -15,7 +15,7 @@ import {
   type ContractServiceLine,
   type NewContractPayload,
 } from "@/lib/contract-form-types";
-import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
+import { computeSupplyStartDate, describeSupplyStartRule, formatItDate } from "@/lib/supply-dates";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
 import { ExistingClientHints } from "@/components/contracts/existing-client-hints";
 import { PersistentAlert } from "@/components/ui/persistent-alert";
@@ -38,20 +38,11 @@ function fillStatus(active: boolean, filled: boolean): "off" | "empty" | "filled
   return filled ? "filled" : "empty";
 }
 
-function SectionHeading({ step, title, description }: {
-  step: number;
-  title: string;
-  description: string;
-}) {
+function SectionTitle({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex items-start gap-3 border-b border-slate-200 pb-3">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">
-        {step}
-      </span>
-      <div>
-        <h2 className="text-base font-bold text-slate-900 sm:text-lg">{title}</h2>
-        <p className="mt-0.5 text-sm text-slate-500">{description}</p>
-      </div>
+    <div className="mb-4">
+      <h2 className="text-lg font-bold text-slate-900">{title}</h2>
+      <p className="mt-0.5 text-sm text-slate-500">{description}</p>
     </div>
   );
 }
@@ -92,9 +83,7 @@ export function NuovoContrattoForm({
   const [sendToMaster, setSendToMaster] = useState(false);
   const [collaboratorId, setCollaboratorId] = useState(session.id);
   const [clientId, setClientId] = useState<string | undefined>(initialClientId);
-  const [clientLabel, setClientLabel] = useState<string | undefined>();
   const [creatingClient, setCreatingClient] = useState(!initialClientId);
-  const [showAdvancedClient, setShowAdvancedClient] = useState(false);
 
   const [clientType, setClientType] = useState<"PRIVATO" | "AZIENDA">("PRIVATO");
   const [firstName, setFirstName] = useState("");
@@ -117,6 +106,8 @@ export function NuovoContrattoForm({
   const [legalFiscalCode, setLegalFiscalCode] = useState("");
   const [sdiCode, setSdiCode] = useState("");
   const [classification, setClassification] = useState("");
+  const [invoiceMode, setInvoiceMode] = useState<"MAIL" | "POSTA">("MAIL");
+  const [invoiceEmail, setInvoiceEmail] = useState("");
 
   const [durationMonths, setDurationMonths] = useState(12);
   const [notes, setNotes] = useState("");
@@ -148,6 +139,7 @@ export function NuovoContrattoForm({
 
   const [registrationDate, setRegistrationDate] = useState(() => new Date());
   const [customSupplyStart, setCustomSupplyStart] = useState("");
+  const [showContractDates, setShowContractDates] = useState(false);
   const primary = services[0];
   const primaryOp = primary?.operationType ?? "SWITCH";
   const computedSupplyStart = useMemo(
@@ -348,7 +340,9 @@ export function NuovoContrattoForm({
       operationType: first?.operationType || "SWITCH",
       operationOther: first?.operationOther,
       insertionDate: formatItDate(registrationDate),
-      supplyStartDate: formatItDate(effectiveSupplyStart),
+      supplyStartDate: customSupplyStart
+        ? formatItDate(effectiveSupplyStart)
+        : undefined,
       supplySameAsResidence: first?.supplySameAsResidence !== false,
       supplyStreet: first?.supplyStreet,
       supplyStreetNumber: first?.supplyStreetNumber,
@@ -372,6 +366,11 @@ export function NuovoContrattoForm({
       pcv: first?.pcv,
       spread: first?.spread,
       monthlyFee: first?.monthlyFee,
+      invoiceMode: first?.invoiceMode || invoiceMode,
+      invoiceEmail:
+        (first?.invoiceMode || invoiceMode) === "MAIL"
+          ? email
+          : first?.invoiceEmail || invoiceEmail,
       notes,
       masterNotes,
       services,
@@ -521,7 +520,7 @@ export function NuovoContrattoForm({
           }
         }
 
-        // Carica gli stessi allegati su TUTTI i contratti (Luce, Gas, …)
+        // Carica gli stessi allegati su TUTTI i contratti (Luce, Gas, â€¦)
         if (prepared.length > 0) {
           let savedTotal = 0;
           const failReasons: string[] = [];
@@ -568,7 +567,7 @@ export function NuovoContrattoForm({
 
         if (sendToMaster && !draft) {
           await new Promise((r) => setTimeout(r, 400));
-          // UNA sola email con anagrafica + tutti i blocchi servizio (Luce, Gas, …)
+          // UNA sola email con anagrafica + tutti i blocchi servizio (Luce, Gas, â€¦)
           const mailRes = await fetch(`/api/contracts/notify-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -650,7 +649,10 @@ export function NuovoContrattoForm({
     if (payload.fiscalCode != null) setFiscalCode(payload.fiscalCode);
     if (payload.vatNumber != null) setVatNumber(payload.vatNumber);
     if (payload.phone != null) setPhone(payload.phone);
-    if (payload.email != null) setEmail(payload.email);
+    if (payload.email != null) {
+      setEmail(payload.email);
+      setInvoiceEmail((prev) => prev || payload.email || "");
+    }
     if (payload.pec != null) setPec(payload.pec);
     if (payload.iban != null) setIban(payload.iban);
     if (payload.street != null) setStreet(payload.street);
@@ -709,8 +711,14 @@ export function NuovoContrattoForm({
     setErrors([]);
   }
 
+  const clientIdentity =
+    clientType === "AZIENDA"
+      ? companyName.trim() || "Nuova azienda"
+      : [lastName, firstName].filter((x) => x.trim()).join(" ") || "Nuovo cliente";
+  const clientCf = (fiscalCode || vatNumber).trim();
+
   return (
-    <div className="space-y-4 pb-24 sm:space-y-6 sm:pb-0">
+    <div className="space-y-4 pb-24 sm:space-y-5 sm:pb-0">
       <DocumentAutoFillPanel
         canUseMistralOcr
         onApply={applyOcrPayload}
@@ -719,20 +727,15 @@ export function NuovoContrattoForm({
         }}
       />
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionHeading step={1} title="Assegnazione e lavorazione" description="Scegli il collaboratore e decidi se inviare subito la pratica al back office." />
-        {/* Solo Master/Admin: assegna a chi appartiene il contratto (default = Master) */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-end sm:p-4">
         {canPickCollaborator ? (
-          <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 sm:p-4">
-            <Field label="Assegna contratto a (solo Master)">
+          <div className="min-w-0 flex-1">
+            <Field label="Assegna a">
               <Select
                 value={collaboratorId}
                 onChange={(e) => setCollaboratorId(e.target.value)}
               >
-                {/* Master sempre in cima e selezionato di default */}
-                <option value={session.id}>
-                  {session.name} — Master (predefinito)
-                </option>
+                <option value={session.id}>{session.name} (tu)</option>
                 {collaborators
                   .filter((u) => u.id !== session.id)
                   .map((u) => (
@@ -742,70 +745,65 @@ export function NuovoContrattoForm({
                   ))}
               </Select>
             </Field>
-            <p className="mt-1.5 text-xs text-sky-900/80">
-              Di default il contratto resta assegnato a te (Master). Cambia solo se vuoi
-              attribuirlo a un collaboratore.
-            </p>
           </div>
         ) : (
-          <p className="text-sm text-slate-600">
-            Collaboratore: <strong>{session.name}</strong> (assegnato automaticamente)
+          <p className="flex-1 text-sm text-slate-600">
+            Consulente: <strong>{session.name}</strong>
           </p>
         )}
-
-        <div className="grid gap-4 md:grid-cols-2 md:items-center">
-          <div className="flex flex-col justify-center gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-slate-900 sm:text-lg">
-                Destinazione pratica
-              </h2>
-              <p className="text-sm text-slate-500">
-                Salva in gestionale oppure invia al back office per la lavorazione
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setSendToMaster((v) => !v)}
-            aria-pressed={sendToMaster}
-            className={[
-              "flex min-h-24 w-full flex-col items-start justify-center rounded-xl border-2 px-4 py-3 text-left transition",
-              sendToMaster
-                ? "border-emerald-700 bg-emerald-600 text-white ring-4 ring-emerald-300"
-                : "border-emerald-500 bg-emerald-50 text-emerald-950 hover:bg-emerald-100",
-            ].join(" ")}
-          >
-            <span className="text-base font-black uppercase leading-tight tracking-wide sm:text-lg">
-              Invia al BACKOFFICE
-            </span>
-            <span className="mt-1 text-sm font-semibold">
-              per essere lavorato
-            </span>
-            <span
-              className={[
-                "mt-2 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider",
-                sendToMaster
-                  ? "bg-white/20 text-white"
-                  : "bg-emerald-200 text-emerald-900",
-              ].join(" ")}
-            >
-              {sendToMaster ? "Attivo — verrà inviato" : "Clicca per attivare"}
-            </span>
-          </button>
-        </div>
-      </section>
+        <button
+          type="button"
+          onClick={() => setSendToMaster((v) => !v)}
+          aria-pressed={sendToMaster}
+          className={[
+            "flex min-h-14 w-full shrink-0 flex-col justify-center rounded-xl border-2 px-4 py-2 text-left transition sm:w-72",
+            sendToMaster
+              ? "border-emerald-700 bg-emerald-600 text-white"
+              : "border-amber-400 bg-amber-300 text-amber-950 hover:bg-amber-200",
+          ].join(" ")}
+        >
+          <span className="text-sm font-black uppercase tracking-wide">
+            Invia al back office
+          </span>
+          <span className="text-xs font-semibold">
+            {sendToMaster ? "Attivato" : "Clicca per attivare"}
+          </span>
+        </button>
+      </div>
 
       <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionHeading step={2} title="Cliente" description="Cerca un cliente esistente oppure inserisci i dati necessari per crearne uno nuovo." />
-        {!req ? (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
-            Obbligatori anche senza invio al back office:{" "}
-            <strong>cognome e nome</strong> (o ragione sociale), <strong>codice fiscale</strong>,{" "}
-            <strong>tipo operazione</strong>, <strong>POD/PDR</strong>, <strong>fornitore</strong> e{" "}
-            <strong>metodo di pagamento</strong>. Giallo = manca · Verde = ok.
-          </p>
-        ) : null}
+        <SectionTitle
+          title="Anagrafica"
+          description="Cerca un cliente già in archivio oppure compilane uno nuovo: resta salvato per le prossime ricontrattualizzazioni."
+        />
+
+        <div className="flex gap-2">
+          {(["PRIVATO", "AZIENDA"] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => {
+                setClientType(type);
+                setClassification("");
+                setServices((all) =>
+                  all.map((s) => ({
+                    ...s,
+                    contractKind: type === "PRIVATO" ? "Domestico" : "Non domestico",
+                  })),
+                );
+              }}
+              className={[
+                "min-h-11 flex-1 rounded-xl border-2 px-3 text-sm font-bold",
+                clientType === type
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+              ].join(" ")}
+            >
+              {type === "PRIVATO" ? "Privato" : "Business"}
+            </button>
+          ))}
+        </div>
+
         <AutocompleteSearch
           label="Cliente (cerca in anagrafica)"
           required
@@ -856,70 +854,41 @@ export function NuovoContrattoForm({
           </p>
         ) : null}
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Tipologia cliente" fillStatus={fillStatus(req, true)}>
-            <Select
-              value={clientType}
-              onChange={(e) => {
-                const t = e.target.value as "PRIVATO" | "AZIENDA";
-                setClientType(t);
-                setClassification("");
-                setServices((all) =>
-                  all.map((s) => ({
-                    ...s,
-                    contractKind: t === "PRIVATO" ? "Domestico" : "Non domestico",
-                  })),
-                );
-              }}
-            >
-              <option value="PRIVATO">Privato (domestico)</option>
-              <option value="AZIENDA">Business</option>
-            </Select>
-          </Field>
-          <Field
-            label="Classificazione"
-            fillStatus={fillStatus(req, Boolean(classification.trim()))}
-          >
-            <Select
-              value={classification}
-              onChange={(e) => setClassification(e.target.value)}
-            >
-              <option value="">Seleziona</option>
-              {clientType === "PRIVATO" ? (
-                <>
-                  <option value="Residente">Residente</option>
-                  <option value="Non residente">Non residente</option>
-                  <option value="Altri usi">Altri usi</option>
-                </>
-              ) : (
-                <>
-                  <option value="Business">Business</option>
-                  <option value="Altri usi">Altri usi</option>
-                  <option value="Condominio">Condominio</option>
-                  <option value="PA">Pubblica amministrazione</option>
-                  <option value="Altro">Altro</option>
-                </>
-              )}
-            </Select>
-          </Field>
-        </div>
+        {clientId ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+            Anagrafica esistente caricata
+            {clientCf ? <> · <span className="font-mono">{clientCf}</span></> : " · CF assente"}.
+            Puoi usarla così com&apos;è o aggiornare i campi.
+          </p>
+        ) : creatingClient ? (
+          <p className="text-xs text-slate-500">
+            Verrà salvata in anagrafica al salvataggio del contratto.
+          </p>
+        ) : null}
 
         {clientType === "PRIVATO" ? (
           <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Cognome" fillStatus={fillStatus(reqBase, Boolean(lastName.trim()))}>
-              <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
-            </Field>
             <Field label="Nome" fillStatus={fillStatus(reqBase, Boolean(firstName.trim()))}>
               <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
             </Field>
-            <Field
-              label="Codice fiscale"
-              fillStatus={fillStatus(reqBase, Boolean(fiscalCode.trim()))}
-            >
+            <Field label="Cognome" fillStatus={fillStatus(reqBase, Boolean(lastName.trim()))}>
+              <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </Field>
+            <Field label="Codice fiscale" fillStatus={fillStatus(reqBase, Boolean(fiscalCode.trim()))}>
               <Input value={fiscalCode} onChange={(e) => setFiscalCode(e.target.value)} />
             </Field>
-            <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
+            <Field label="Cellulare" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </Field>
+            <Field label="Email" fillStatus={fillStatus(req, Boolean(email.trim()))}>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (!invoiceEmail || invoiceEmail === email) setInvoiceEmail(e.target.value);
+                }}
+              />
             </Field>
             <div className="md:col-span-2">
               <ExistingClientHints
@@ -935,51 +904,80 @@ export function NuovoContrattoForm({
               />
             </div>
             <Field
-              label="Email"
-              fillStatus={fillStatus(req, Boolean(email.trim()))}
+              label="Classificazione"
+              fillStatus={fillStatus(req, Boolean(classification.trim()))}
             >
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Select value={classification} onChange={(e) => setClassification(e.target.value)}>
+                <option value="">Seleziona</option>
+                <option value="Business">Business</option>
+                <option value="Condominio">Condominio</option>
+                <option value="Altri usi">Altri usi</option>
+                <option value="PA">Pubblica amministrazione</option>
+              </Select>
             </Field>
-            {showAdvancedClient ? (
-              <Field label="PEC (facoltativa)">
-                <Input value={pec} onChange={(e) => setPec(e.target.value)} />
-              </Field>
-            ) : null}
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
-            <Field
-              label="Ragione sociale"
-              fillStatus={fillStatus(reqBase, Boolean(companyName.trim()))}
-            >
+            <Field label="Ragione sociale" fillStatus={fillStatus(reqBase, Boolean(companyName.trim()))}>
               <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
             </Field>
             <Field
               label="Partita IVA"
-              fillStatus={fillStatus(
-                reqBase,
-                Boolean(vatNumber.trim() || fiscalCode.trim()),
-              )}
+              fillStatus={fillStatus(reqBase, Boolean(vatNumber.trim() || fiscalCode.trim()))}
             >
               <Input value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} />
             </Field>
             <Field
               label="CF aziendale"
-              fillStatus={fillStatus(
-                reqBase,
-                Boolean(vatNumber.trim() || fiscalCode.trim()),
-              )}
+              fillStatus={fillStatus(reqBase, Boolean(vatNumber.trim() || fiscalCode.trim()))}
             >
               <Input value={fiscalCode} onChange={(e) => setFiscalCode(e.target.value)} />
             </Field>
             <Field label="Telefono" fillStatus={fillStatus(req, Boolean(phone.trim()))}>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
             </Field>
+            <Field label="Email" fillStatus={fillStatus(req, Boolean(email.trim()))}>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (!invoiceEmail || invoiceEmail === email) setInvoiceEmail(e.target.value);
+                }}
+              />
+            </Field>
+            <Field label="PEC">
+              <Input value={pec} onChange={(e) => setPec(e.target.value)} />
+            </Field>
             <Field
-              label="Email"
-              fillStatus={fillStatus(req, Boolean(email.trim()))}
+              label="Nome rappresentante"
+              fillStatus={fillStatus(req, Boolean(legalFirstName.trim()))}
             >
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input value={legalFirstName} onChange={(e) => setLegalFirstName(e.target.value)} />
+            </Field>
+            <Field
+              label="Cognome rappresentante"
+              fillStatus={fillStatus(req, Boolean(legalLastName.trim()))}
+            >
+              <Input value={legalLastName} onChange={(e) => setLegalLastName(e.target.value)} />
+            </Field>
+            <Field label="CF rappresentante">
+              <Input value={legalFiscalCode} onChange={(e) => setLegalFiscalCode(e.target.value)} />
+            </Field>
+            <Field
+              label="Classificazione"
+              fillStatus={fillStatus(req, Boolean(classification.trim()))}
+            >
+              <Select value={classification} onChange={(e) => setClassification(e.target.value)}>
+                <option value="">Seleziona</option>
+                <option value="Business">Business</option>
+                <option value="Condominio">Condominio</option>
+                <option value="Altri usi">Altri usi</option>
+                <option value="PA">Pubblica amministrazione</option>
+              </Select>
+            </Field>
+            <Field label="Codice SDI">
+              <Input value={sdiCode} onChange={(e) => setSdiCode(e.target.value)} />
             </Field>
             <div className="md:col-span-2">
               <ExistingClientHints
@@ -996,40 +994,14 @@ export function NuovoContrattoForm({
                 }}
               />
             </div>
-            {showAdvancedClient ? (
-              <>
-                <Field label="PEC (facoltativa)">
-                  <Input value={pec} onChange={(e) => setPec(e.target.value)} />
-                </Field>
-                <Field label="Nome rappresentante">
-                  <Input value={legalFirstName} onChange={(e) => setLegalFirstName(e.target.value)} />
-                </Field>
-                <Field label="Cognome rappresentante">
-                  <Input value={legalLastName} onChange={(e) => setLegalLastName(e.target.value)} />
-                </Field>
-                <Field label="CF rappresentante">
-                  <Input value={legalFiscalCode} onChange={(e) => setLegalFiscalCode(e.target.value)} />
-                </Field>
-                <Field label="Codice SDI (facoltativo)">
-                  <Input value={sdiCode} onChange={(e) => setSdiCode(e.target.value)} />
-                </Field>
-              </>
-            ) : null}
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => setShowAdvancedClient((value) => !value)}
-          className="inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          {showAdvancedClient ? "Nascondi dati aggiuntivi" : "+ Mostra dati aggiuntivi"}
-        </button>
-
-        <p className="text-sm font-medium text-slate-700">
-          {clientType === "AZIENDA" ? "Sede legale" : "Indirizzo di residenza"}
-        </p>
         <CapAddressFields
+          compact
+          compactLabel={
+            clientType === "AZIENDA" ? "Indirizzo sede legale" : "Indirizzo di residenza"
+          }
           zipCode={zipCode}
           city={city}
           province={province}
@@ -1044,66 +1016,101 @@ export function NuovoContrattoForm({
           onStreetNumberChange={setStreetNumber}
           highlightRequired={req}
         />
-        <Field label="IBAN" fillStatus={fillStatus(req && services.some((s) => s.paymentMethod === "RID"), Boolean(iban.trim()))}>
-          <Input
-            value={iban}
-            onChange={(e) => setIban(e.target.value)}
-            placeholder="IT60X..."
-          />
-        </Field>
-        {creatingClient ? (
-          <p className="text-xs text-emerald-700">
-            Il nuovo cliente sarà salvato in anagrafica al salvataggio del contratto.
-          </p>
-        ) : null}
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field
+            label="IBAN"
+            fillStatus={fillStatus(
+              req && services.some((s) => s.paymentMethod === "RID"),
+              Boolean(iban.trim()),
+            )}
+          >
+            <Input
+              value={iban}
+              onChange={(e) => setIban(e.target.value)}
+              placeholder="IT60X..."
+            />
+          </Field>
+          <Field label="Invio bolletta">
+            <Select
+              value={invoiceMode}
+              onChange={(e) => setInvoiceMode(e.target.value as "MAIL" | "POSTA")}
+            >
+              <option value="MAIL">Mail</option>
+              <option value="POSTA">Posta</option>
+            </Select>
+          </Field>
+        </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/40 p-4 shadow-sm sm:p-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <SectionHeading step={3} title="Fornitura e condizioni economiche" description="Inserisci servizio, POD/PDR, fornitore, decorrenza e provvigione." />
-          <AddServiceButton onClick={addService} />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Data registrazione">
-            <Input
-              type="date"
-              value={format(registrationDate, "yyyy-MM-dd")}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v) return;
-                const [y, m, d] = v.split("-").map(Number);
-                if (!y || !m || !d) return;
-                setRegistrationDate(new Date(y, m - 1, d));
-              }}
-            />
-          </Field>
-          <Field label="Ingresso in fornitura">
-            <Input
-              type="date"
-              value={customSupplyStart || format(computedSupplyStart, "yyyy-MM-dd")}
-              onChange={(e) => setCustomSupplyStart(e.target.value)}
-              className="bg-white"
-            />
+      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <SectionTitle
+          title="Contratto"
+          description="Solo i dati della pratica. Per un secondo servizio si ripetono questi campi, non l'anagrafica."
+        />
+        <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-700">
+              Inserimento <strong>{formatItDate(registrationDate)}</strong>
+              {" · "}
+              ingresso <strong>{formatItDate(effectiveSupplyStart)}</strong>
+              {" "}
+              <span className="text-xs font-normal text-slate-500">(calcolato)</span>
+            </p>
             <button
               type="button"
-              onClick={() => setCustomSupplyStart("")}
-              className="mt-1 text-xs font-semibold text-sky-700 hover:underline"
+              className="text-xs font-semibold text-sky-800 hover:underline"
+              onClick={() => setShowContractDates((v) => !v)}
             >
-              Ripristina data calcolata
+              {showContractDates ? "Nascondi date" : "Modifica date (opzionale)"}
             </button>
-          </Field>
-          <Field label="Durata (mesi)">
-            <Input
-              type="number"
-              min={1}
-              value={durationMonths}
-              onChange={(e) => setDurationMonths(Number(e.target.value) || 12)}
-            />
-          </Field>
-          <Field label="Scadenza (auto)">
-            <Input value={expiryPreview} readOnly className="bg-white" />
-          </Field>
+          </div>
+          {showContractDates ? (
+            <div className="mt-3 space-y-2">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Data inserimento">
+                  <Input
+                    type="date"
+                    value={format(registrationDate, "yyyy-MM-dd")}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      const [y, m, d] = v.split("-").map(Number);
+                      if (!y || !m || !d) return;
+                      setRegistrationDate(new Date(y, m - 1, d));
+                    }}
+                  />
+                </Field>
+                <Field label="Ingresso (calcolato)">
+                  <Input
+                    type="date"
+                    value={customSupplyStart || format(computedSupplyStart, "yyyy-MM-dd")}
+                    onChange={(e) => setCustomSupplyStart(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCustomSupplyStart("")}
+                    className="mt-1 text-xs font-semibold text-slate-600 hover:underline"
+                  >
+                    Ripristina calcolo automatico
+                  </button>
+                </Field>
+                <Field label="Durata (mesi)">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={durationMonths}
+                    onChange={(e) => setDurationMonths(Number(e.target.value) || 12)}
+                  />
+                </Field>
+                <Field label="Scadenza">
+                  <Input value={expiryPreview} readOnly className="bg-slate-50" />
+                </Field>
+              </div>
+              <p className="text-xs text-slate-500">{describeSupplyStartRule(primaryOp)}</p>
+            </div>
+          ) : null}
         </div>
+
         {services.map((line, idx) => (
           <ServiceContractBlocks
             key={line.id}
@@ -1116,6 +1123,7 @@ export function NuovoContrattoForm({
             listinoRules={listinoRules}
             clientType={clientType}
             clientIban={iban}
+            clientEmail={email}
             residence={{
               street,
               streetNumber,
@@ -1124,152 +1132,61 @@ export function NuovoContrattoForm({
               province,
               region,
             }}
+            insertionDate={registrationDate}
             highlightRequired={req}
             highlightBase={reqBase}
           />
         ))}
-        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="font-bold text-indigo-950">Riepilogo provvigionale</h3>
-              <p className="text-xs text-indigo-800">Controllo economico prima del salvataggio</p>
-            </div>
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-900 ring-1 ring-indigo-200">
-              Collaboratore: {selectedCollaboratorName}
-            </span>
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            {services.map((line, index) => {
-              const rule = listinoRules.find((item) => item.id === line.commissionRuleId);
-              const supplierName = line.supplierId
-                ? suppliers.find((supplier) => supplier.id === line.supplierId)?.name
-                : line.supplierName;
-              if (!rule) {
-                return (
-                  <div key={line.id} className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                    <strong>Servizio {index + 1} · {line.service}</strong>
-                    <p className="mt-1">{supplierName || "Fornitore non selezionato"}</p>
-                    <p className="mt-2 font-semibold">Nessuna regola provvigionale selezionata.</p>
-                  </div>
-                );
-              }
-              const monthly = rule.paymentType === "MENSILE" || Number(rule.gettoneMensile || 0) > 0;
-              return (
-                <div key={line.id} className="rounded-xl border border-indigo-200 bg-white p-3 text-sm text-slate-700">
-                  <p className="font-bold text-slate-950">Servizio {index + 1} · {line.service} · {supplierName || "—"}</p>
-                  <p className="mt-1 text-xs text-slate-500">{rule.name}</p>
-                  <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
-                    <dt>Gettone iniziale</dt><dd className="text-right font-bold">{euro(rule.gettoneTotale)}</dd>
-                    <dt>Ricorrenza</dt><dd className="text-right font-bold">{monthly ? `${euro(rule.gettoneMensile)} mensili` : rule.paymentType === "RATEIZZATO" ? `${rule.installments || "—"} rate` : "Una tantum"}</dd>
-                    {monthly ? <><dt>Prima competenza</dt><dd className="text-right font-bold">{firstRecurringLabel}</dd></> : null}
-                    <dt>Periodo di storno</dt><dd className="text-right font-bold">{rule.stornoMonths ? `${rule.stornoMonths} mesi` : "Non indicato"}</dd>
-                  </dl>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <AddServiceButton onClick={addService} />
+
+        {primaryRule ? (
+          <p className="text-sm text-slate-600">
+            Offerta listino: <strong>{primaryRule.name}</strong>
+            {primaryRule.gettoneTotale ? ` · gettone ${euro(primaryRule.gettoneTotale)}` : ""}
+            {hasMonthlyRecurrence ? ` · prima competenza ${firstRecurringLabel}` : ""}
+            {" · "}
+            {selectedCollaboratorName}
+          </p>
+        ) : null}
+
         {podMatches.length > 0 ? (
-          <div className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-sm text-amber-950">
-            <p className="font-bold">POD/PDR già presente: possibile ricontrattualizzazione</p>
-            <p className="mt-1 text-xs">
-              Salvando, il nuovo contratto resterà attivo e il precedente verrà spostato automaticamente in Archivio e rimosso dalle Provvigioni.
-            </p>
-            <ul className="mt-3 space-y-2">
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+            <p className="font-semibold">POD/PDR già in archivio: ricontrattualizzazione</p>
+            <ul className="mt-2 space-y-1">
               {podMatches.map((match) => (
-                <li key={match.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-amber-200">
+                <li key={match.id} className="flex flex-wrap justify-between gap-2">
                   <span>
-                    <strong>{match.client}</strong> · {match.supplier} · {match.status}
-                    {match.archived ? " · già archiviato" : ""}
+                    {match.client} · {match.supplier} · {match.status}
                   </span>
                   <a href={`/contratti/${match.id}`} target="_blank" className="font-semibold text-sky-700 hover:underline">
-                    Apri contratto
+                    Apri
                   </a>
                 </li>
               ))}
             </ul>
           </div>
         ) : null}
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
-          <strong>Decorrenza economica:</strong>{" "}
-          {hasMonthlyRecurrence
-            ? `prima ricorrente ${firstRecurringLabel}, a partire dal mese di ingresso in fornitura.`
-            : `ingresso previsto ${formatItDate(effectiveSupplyStart)}.`}
-        </div>
         {supplyStartBeforeRegistration ? (
-          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
-            Attenzione: l&apos;ingresso in fornitura è precedente alla data di registrazione.
+          <p className="text-sm font-medium text-amber-800">
+            Attenzione: l&apos;ingresso è precedente alla data di inserimento.
           </p>
         ) : null}
-        <div className="pt-1">
-          <AddServiceButton onClick={addService} />
-        </div>
-      </section>
 
-      <details className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <summary className="cursor-pointer list-none font-bold text-slate-900">
-          <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-sm">4</span>
-          Note facoltative
-          <span className="ml-2 text-sm font-normal text-slate-500 group-open:hidden">— apri solo se servono</span>
-        </summary>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Field label="Note interne">
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Note">
             <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
-          <Field label="Note da inviare al back office">
+          <Field label="Note per il back office">
             <Textarea rows={3} value={masterNotes} onChange={(e) => setMasterNotes(e.target.value)} />
           </Field>
         </div>
-      </details>
 
-      <ContractAttachmentsPanel
-        attachments={attachments}
-        onChange={setAttachments}
-        requireDocs={req}
-      />
-
-      <section className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/30 p-4 shadow-sm sm:p-5">
-        <SectionHeading step={5} title="Controllo e salvataggio" description="Verifica i dati essenziali prima di creare il contratto." />
-        <div className="space-y-1 rounded-lg bg-slate-50 p-4 text-sm">
-          <p>
-            <strong>Cliente:</strong>{" "}
-            {clientLabel ||
-              [lastName, firstName, companyName].filter((x) => x.trim()).join(" ") ||
-              "—"}
-          </p>
-          <p>
-            <strong>Tipologia:</strong> {clientType === "AZIENDA" ? "Business" : "Privato"}
-            {classification ? ` · ${classification}` : ""}
-          </p>
-          <p>
-            <strong>Collaboratore:</strong>{" "}
-            {collaborators.find((c) => c.id === collaboratorId)?.name ?? session.name}
-          </p>
-          <p>
-            <strong>Servizi:</strong> {services.map((s) => s.service).join(", ")}
-          </p>
-          <p>
-            <strong>Fornitore:</strong>{" "}
-            {services
-              .map((s) => {
-                if (s.supplierId) {
-                  return suppliers.find((x) => x.id === s.supplierId)?.name ?? s.supplierId;
-                }
-                return s.supplierName || "—";
-              })
-              .join(" · ")}
-          </p>
-          <p>
-            <strong>Ingresso / scadenza:</strong> {formatItDate(effectiveSupplyStart)} →{" "}
-            {expiryPreview}
-          </p>
-          <p>
-            <strong>Invia al BACKOFFICE:</strong> {sendToMaster ? "Sì" : "No"}
-          </p>
-          <p>
-            <strong>Allegati:</strong> {attachments.length}
-          </p>
-        </div>
+        <ContractAttachmentsPanel
+          attachments={attachments}
+          onChange={setAttachments}
+          requireDocs={req}
+          clientType={clientType}
+        />
 
         {errors.length > 0 ? (
           <PersistentAlert
@@ -1300,11 +1217,11 @@ export function NuovoContrattoForm({
           </Button>
           <Button
             type="button"
-            className="min-h-12 flex-[1.4] sm:min-h-14 sm:flex-none sm:px-8 sm:text-base sm:font-bold"
+            className="min-h-12 flex-[1.4] sm:min-h-12 sm:flex-none sm:px-8 sm:font-bold"
             disabled={pending}
             onClick={() => submit(false)}
           >
-            {sendToMaster ? "Crea e invia al BACKOFFICE" : "Crea contratto"}
+            {sendToMaster ? "Crea e invia al back office" : "Crea contratto"}
           </Button>
         </div>
       </section>

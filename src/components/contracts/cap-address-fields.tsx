@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { Field, Input, Select } from "@/components/ui/form";
 import { normalizeProvinceSigla } from "@/lib/italy-cap-province";
+import {
+  formatItalianAddressLine,
+  parseItalianAddressLine,
+} from "@/lib/parse-italian-address";
 
 type Place = {
   city: string;
@@ -36,6 +40,8 @@ export function CapAddressFields({
   zipLabel = "CAP",
   provinceReadOnly = true,
   highlightRequired = false,
+  compact = false,
+  compactLabel = "Indirizzo",
 }: {
   zipCode: string;
   city: string;
@@ -54,6 +60,9 @@ export function CapAddressFields({
   provinceReadOnly?: boolean;
   /** Evidenza giallo/verde campi obbligatori (invio back office). */
   highlightRequired?: boolean;
+  /** Una sola riga visibile; CAP/città restano nei campi strutturati. */
+  compact?: boolean;
+  compactLabel?: string;
 }) {
   const [places, setPlaces] = useState<Place[]>([]);
   const [multi, setMulti] = useState(false);
@@ -140,6 +149,28 @@ export function CapAddressFields({
   const fs = (filled: boolean): "off" | "empty" | "filled" =>
     highlightRequired ? (filled ? "filled" : "empty") : "off";
   const addressLine = [street, streetNumber].filter(Boolean).join(" ").trim();
+  const structuredLine = formatItalianAddressLine({
+    street,
+    streetNumber,
+    zipCode,
+    city,
+    province,
+  });
+  const [compactDraft, setCompactDraft] = useState(structuredLine);
+  const [compactFocused, setCompactFocused] = useState(false);
+
+  useEffect(() => {
+    if (!compactFocused) setCompactDraft(structuredLine);
+  }, [structuredLine, compactFocused]);
+
+  function applyParsedLine(raw: string) {
+    const parsed = parseItalianAddressLine(raw);
+    onStreetChange(parsed.street);
+    onStreetNumberChange(parsed.streetNumber);
+    onZipChange(parsed.zipCode);
+    if (parsed.city) onCityChange(parsed.city);
+    if (parsed.province) onProvinceChange(parsed.province);
+  }
 
   return (
     <div className="space-y-3">
@@ -148,6 +179,30 @@ export function CapAddressFields({
       <input type="hidden" name="region" value={region} readOnly />
       <input type="hidden" name="zipCode" value={zipCode} readOnly />
 
+      {compact ? (
+        <Field
+          label={compactLabel}
+          fillStatus={fs(
+            Boolean(street.trim() || zipCode.replace(/\D/g, "").length === 5),
+          )}
+        >
+          <Input
+            value={compactDraft}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCompactDraft(v);
+              applyParsedLine(v);
+            }}
+            onFocus={() => setCompactFocused(true)}
+            onBlur={() => {
+              setCompactFocused(false);
+              applyParsedLine(compactDraft);
+            }}
+            placeholder="Via Roma 12, 85025 Melfi PZ"
+            autoComplete="street-address"
+          />
+        </Field>
+      ) : (
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-6">
         <Field label={`${zipLabel}`} fillStatus={fs(zipCode.replace(/\D/g, "").length === 5)}>
           <Input
@@ -228,6 +283,22 @@ export function CapAddressFields({
           </Field>
         </div>
       </div>
+      )}
+      {compact && multi ? (
+        <Field label="Comune (scegli dalla lista)" fillStatus={fs(Boolean(city))}>
+          <Select
+            value={selectedLabel}
+            onChange={(e) => pickPlace(e.target.value)}
+          >
+            <option value="">Seleziona comune / località</option>
+            {places.map((p) => (
+              <option key={p.label} value={p.label}>
+                {p.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : null}
       {multi ? (
         <p className="text-xs text-amber-800">
           Questo CAP corrisponde a più località: scegli il comune (es. Melfi —

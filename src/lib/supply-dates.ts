@@ -20,17 +20,31 @@ export function normalizeOperationType(
   ) {
     return "ATTIVAZIONE";
   }
-  // SWITCH e CAMBIO (legacy) → stesso comportamento "Switch"
-  if (v === "SWITCH" || v === "CAMBIO" || v === "CAMBIO_FORNITORE") return "CAMBIO";
+  // SWITCH, CESSAZIONE e CAMBIO (legacy) → allineamento mensile
+  if (
+    v === "SWITCH" ||
+    v === "CAMBIO" ||
+    v === "CAMBIO_FORNITORE" ||
+    v === "CESSAZIONE" ||
+    v === "CESSATO" ||
+    v === "DISDETTA"
+  ) {
+    return "CAMBIO";
+  }
   // Default: Switch (mai etichettare come "Cambio" in UI)
   return "CAMBIO";
 }
 
+/** Switch: entro il 9 del mese → 1° del mese successivo, altrimenti +2 mesi. */
+export const SWITCH_CUTOFF_DAY = 9;
+/** Attivazione / Voltura: circa 10 giorni dall'inserimento. */
+export const ACTIVATION_LEAD_DAYS = 10;
+
 /**
  * Data inizio fornitura:
- * - Switch: se inserito prima del giorno 8 → 1° del mese successivo;
- *   dal 8 in poi → 1° di due mesi dopo.
- * - Voltura / Attivazione: circa 7 giorni dall'inserimento.
+ * - Switch / Cessazione: se inserito entro il giorno 9 → 1° del mese successivo;
+ *   dal 10 in poi → 1° di due mesi dopo.
+ * - Voltura / Attivazione: circa 10 giorni dall'inserimento.
  *
  * Regola CRM: per Switch, data inserimento e data fornitura NON possono
  * essere lo stesso giorno (sì invece per Voltura/Attivazione).
@@ -46,17 +60,25 @@ export function computeSupplyStartDate(
   if (type === "VOLTURA" || type === "ATTIVAZIONE") {
     const d = new Date(insertion);
     d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() + 7);
+    d.setDate(d.getDate() + ACTIVATION_LEAD_DAYS);
     return d;
   }
 
   const day = insertion.getDate();
   const year = insertion.getFullYear();
   const month = insertion.getMonth();
-  if (day < 8) {
+  if (day <= SWITCH_CUTOFF_DAY) {
     return new Date(year, month + 1, 1);
   }
   return new Date(year, month + 2, 1);
+}
+
+export function describeSupplyStartRule(operationType?: string | null): string {
+  const type = normalizeOperationType(operationType);
+  if (type === "VOLTURA" || type === "ATTIVAZIONE") {
+    return `Ingresso calcolato: +${ACTIVATION_LEAD_DAYS} giorni dalla data di inserimento.`;
+  }
+  return `Ingresso calcolato: entro il ${SWITCH_CUTOFF_DAY} → 1° del mese successivo, altrimenti 1° di due mesi dopo.`;
 }
 
 function ymdLocal(d: Date): string {

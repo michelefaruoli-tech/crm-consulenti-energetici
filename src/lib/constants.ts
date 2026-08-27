@@ -95,12 +95,19 @@ export const LEGACY_SERVICE_VALUES = [
 
 export const OPERATION_OPTIONS = [
   { value: "SWITCH", label: "Switch" },
-  { value: "VOLTURA", label: "Voltura" },
   { value: "ATTIVAZIONE", label: "Attivazione" },
+  { value: "VOLTURA", label: "Voltura" },
+  { value: "CESSAZIONE", label: "Cessazione" },
   { value: "SUBENTRO", label: "Subentro" },
-  { value: "NUOVA_ATTIVAZIONE", label: "Nuova attivazione" },
   { value: "RINNOVO", label: "Rinnovo" },
+  { value: "NUOVA_ATTIVAZIONE", label: "Nuova attivazione" },
   { value: "ALTRO", label: "Altro" },
+] as const;
+
+export const PROPERTY_HOLDER_OPTIONS = [
+  { value: "PROPRIETARIO", label: "Proprietario" },
+  { value: "AFFITTUARIO", label: "Affittuario" },
+  { value: "DETENTORE", label: "Detentore ad altro titolo" },
 ] as const;
 
 export const PAYMENT_METHOD_OPTIONS = [

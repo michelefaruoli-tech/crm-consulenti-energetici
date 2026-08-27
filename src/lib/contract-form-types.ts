@@ -23,8 +23,7 @@ export type ContractFormAttachment = {
 };
 
 /**
- * Un «servizio» = 3 blocchi ripetibili:
- * 1 Fornitura · 2 Operazione (+ servizio + pagamento) · 3 Fornitore (+ condizioni)
+ * Un servizio = dati pratica ripetibili (operazione, utenza, fornitore, offerta).
  */
 export type ContractServiceLine = {
   id: string;
@@ -51,6 +50,9 @@ export type ContractServiceLine = {
   operationOther?: string;
   paymentMethod?: string;
   ibanHolder?: string;
+  propertyHolder?: string;
+  invoiceMode?: string;
+  invoiceEmail?: string;
   // --- 3 Fornitore + condizioni ---
   supplierId?: string;
   /** Nome se si registra un fornitore nuovo su questa riga */
@@ -141,6 +143,7 @@ export type NewContractPayload = {
   ibanHolder?: string;
   ibanHolderCf?: string;
   invoiceEmail?: string;
+  invoiceMode?: string;
   pricePerKwh?: string;
   pricePerSmc?: string;
   pcv?: string;

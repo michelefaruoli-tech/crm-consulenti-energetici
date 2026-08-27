@@ -23,10 +23,14 @@ const nextConfig: NextConfig = {
     },
   },
   async headers() {
+    const headers =
+      process.env.NODE_ENV === "development"
+        ? securityHeaders.filter((h) => h.key !== "X-Frame-Options")
+        : securityHeaders;
     return [
       {
         source: "/:path*",
-        headers: securityHeaders,
+        headers,
       },
     ];
   },

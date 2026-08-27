@@ -143,7 +143,9 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
   const classification =
     payload.client.classification || payload.supplyClassification;
   if (!classification?.trim()) {
-    errors.push("Classificazione (Residente / Non residente / Altri usi) obbligatoria");
+    errors.push(
+      "Classificazione obbligatoria (Business, Condominio, Altri usi, Pubblica amministrazione)",
+    );
   }
   // Gli allegati spesso arrivano dopo via API: non bloccare se il payload è vuoto.
   // Se presenti nel payload, qualsiasi documento è sufficiente (non più CI+fattura obbligatori).
@@ -538,7 +540,10 @@ async function createFullContractActionInner(
             contractIban: payload.client.iban || null,
             ibanHolder: line.ibanHolder || payload.ibanHolder || null,
             ibanHolderCf: payload.ibanHolderCf || null,
-            invoiceEmail: payload.invoiceEmail || null,
+            invoiceEmail:
+              line.invoiceEmail || payload.invoiceEmail || null,
+            invoiceMode:
+              line.invoiceMode || payload.invoiceMode || null,
             supplyClassification: classification,
             durationMonths: duration,
             supplyStartDate: supplyStart,
@@ -567,6 +572,7 @@ async function createFullContractActionInner(
               migrationCode: line.migrationCode,
               techNotes: line.techNotes,
               priceIndex: line.priceIndex,
+              propertyHolder: line.propertyHolder,
             }),
             parentContractId: firstId || null,
           },

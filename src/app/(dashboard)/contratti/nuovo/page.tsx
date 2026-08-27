@@ -102,7 +102,7 @@ export default async function NuovoContrattoPage({
       <div>
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Nuovo contratto</h1>
         <p className="text-sm text-slate-500 sm:text-base">
-          Inserimento guidato: cliente, fornitura, documenti e conferma finale.
+          Anagrafica del cliente e dati del contratto, in due sezioni.
         </p>
       </div>
       <NuovoContrattoForm

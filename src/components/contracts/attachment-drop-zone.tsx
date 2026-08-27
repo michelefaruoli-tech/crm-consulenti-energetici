@@ -81,7 +81,7 @@ export function AttachmentDropZone({
             {fillStatus === "empty" ? " *" : null}
             {fillStatus === "filled" ? " ✓" : null}
           </p>
-          <p className="text-xs text-slate-500">{hint}</p>
+          {hint ? <p className="text-xs text-slate-500">{hint}</p> : null}
         </div>
       </div>
 
@@ -114,8 +114,7 @@ export function AttachmentDropZone({
 
       <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500">
         <Upload className="h-3.5 w-3.5" />
-        Trascina qui uno o più PDF/immagini
-        {dragOver ? " — rilascia ora" : ""}
+        {dragOver ? "Rilascia ora" : "PDF o immagini"}
       </p>
 
       <input

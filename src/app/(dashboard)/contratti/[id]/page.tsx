@@ -306,8 +306,8 @@ export default async function ContrattoDetailPage({
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-2 font-semibold text-slate-900">Tipo operazione e inizio fornitura</h2>
           <p className="mb-4 text-xs text-slate-500">
-            Cambio: se inserito prima del giorno 8 → 1° del mese successivo, altrimenti 1° di due
-            mesi dopo. Voltura/Attivazione: circa +7 giorni dall&apos;inserimento.
+            Switch: se inserito entro il giorno 9 → 1° del mese successivo, altrimenti 1° di due
+            mesi dopo. Voltura/Attivazione: circa +10 giorni dall&apos;inserimento.
           </p>
           <form
             action={updateContractOperationAction}
