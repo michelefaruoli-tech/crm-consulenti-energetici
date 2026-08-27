@@ -83,6 +83,7 @@ export function NuovoContrattoForm({
   const [sendToMaster, setSendToMaster] = useState(false);
   const [collaboratorId, setCollaboratorId] = useState(session.id);
   const [clientId, setClientId] = useState<string | undefined>(initialClientId);
+  const [clientLabel, setClientLabel] = useState<string | undefined>();
   const [creatingClient, setCreatingClient] = useState(!initialClientId);
 
   const [clientType, setClientType] = useState<"PRIVATO" | "AZIENDA">("PRIVATO");
@@ -256,6 +257,7 @@ export function NuovoContrattoForm({
     setLegalFiscalCode(String(item.legalFiscalCode ?? ""));
     setSdiCode(String(item.sdiCode ?? ""));
     setClassification(String(item.classification ?? ""));
+    setInvoiceEmail(String(item.email ?? ""));
   }
 
   /** Seleziona cliente: usa i dati della ricerca e ricarica per id (sicurezza). */
