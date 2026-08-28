@@ -42,6 +42,18 @@ export function canonicalSupplierName(raw: string): string {
     return "Edison";
   }
 
+  if (key.includes("etrurialucegas") || key.includes("etruria luce gas")) {
+    return "Etrurialucegas";
+  }
+
+  if (key.includes("duferco")) {
+    return "Duferco Energia";
+  }
+
+  if (key.includes("eni") && (key.includes("plenitude") || key.includes("pleni"))) {
+    return "Eni Plenitude";
+  }
+
   return n;
 }
 

@@ -18,6 +18,16 @@ import {
 } from "@/lib/provvigioni-filters";
 import { contractTextSearchWhere } from "@/lib/list-search";
 import { toPeriod } from "@/lib/recurring";
+import { fetchMarketPrices } from "@/lib/market-prices";
+import {
+  aggregateCollaboratorRanking,
+  aggregateSupplierRanking,
+  aggregateUtilityRanking,
+  startOfMonth,
+  startOfWeekMonday,
+} from "@/lib/dashboard-aggregates";
+import { DashboardRankingPanel } from "@/components/dashboard/dashboard-ranking-panel";
+import { MarketPricesPanel } from "@/components/dashboard/market-prices-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +45,7 @@ export default async function DashboardPage({
     "contracts.change_collaborator_dashboard",
   );
   const canChangeStatus = hasPermission(session.role, "contracts.change_status");
+  const isAdminStats = hasPermission(session.role, "stats.full");
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
   const textSearch = contractTextSearchWhere(q);
@@ -49,66 +60,43 @@ export default async function DashboardPage({
     ...(textSearch ? { AND: [textSearch] } : {}),
   };
 
+  const now = new Date();
+  const weekStart = startOfWeekMonday(now);
+  const monthStart = startOfMonth(now);
+
   try {
     const [
-      totalContracts,
-      totalAllContracts,
-      totalArchiveContracts,
+      insertedThisWeek,
+      insertedThisMonth,
+      insertedTotal,
       inLavorazioneCount,
-      completatoCount,
-      koCount,
-      emailFailedCount,
-      expired,
       inLavorazioneList,
       moneyTotals,
       commissioniDaConfermare,
       incassateDaLiquidare,
       ricorrenzeMancanti,
       storniRegistrati,
-      topCollaborators,
+      topCollaboratorsAllTime,
+      topCollaboratorsMonth,
+      rankingRows,
       listTotal,
       recentContracts,
       collaboratorOptions,
+      marketPrices,
     ] = await Promise.all([
-      prisma.contract.count({ where: whereActive }),
-      prisma.contract.count({ where: whereAll }),
       prisma.contract.count({
-        where: canViewAll
-          ? { isHistorical: true, deletedAt: null }
-          : { collaboratorId: session.id, isHistorical: true, deletedAt: null },
+        where: { ...whereAll, insertionDate: { gte: weekStart } },
       }),
+      prisma.contract.count({
+        where: { ...whereAll, insertionDate: { gte: monthStart } },
+      }),
+      prisma.contract.count({ where: whereAll }),
       prisma.contract.count({
         where: {
           ...whereActive,
           sendToMaster: true,
           assignedToMaster: true,
           status: "IN_LAVORAZIONE",
-        },
-      }),
-      prisma.contract.count({
-        where: {
-          ...whereActive,
-          status: { in: ["COMPLETATO", "ATTIVATO"] },
-        },
-      }),
-      prisma.contract.count({
-        where: {
-          ...whereActive,
-          status: "KO",
-        },
-      }),
-      prisma.contract.count({
-        where: {
-          ...whereActive,
-          sendToMaster: true,
-          emailStatus: { in: ["FAILED", "ERROR", "ATTACHMENT_ERROR", "SKIPPED_NO_SMTP"] },
-        },
-      }),
-      prisma.contract.count({
-        where: {
-          ...whereActive,
-          expiryDate: { lt: new Date() },
-          status: { notIn: ["CHIUSO", "ANNULLATO", "KO", "COMPLETATO"] },
         },
       }),
       prisma.contract.findMany({
@@ -168,15 +156,31 @@ export default async function DashboardPage({
           ],
         },
       }),
-      hasPermission(session.role, "stats.full")
+      isAdminStats
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
             where: { deletedAt: null },
             _count: { id: true },
             orderBy: { _count: { id: "desc" } },
-            take: 20,
+            take: 30,
           })
         : Promise.resolve([]),
+      isAdminStats
+        ? prisma.contract.groupBy({
+            by: ["collaboratorId"],
+            where: { deletedAt: null, insertionDate: { gte: monthStart } },
+            _count: { id: true },
+            orderBy: { _count: { id: "desc" } },
+            take: 30,
+          })
+        : Promise.resolve([]),
+      prisma.contract.findMany({
+        where: whereAll,
+        select: {
+          utilityType: true,
+          supplier: { select: { name: true } },
+        },
+      }),
       prisma.contract.count({ where: listTotalWhere }),
       prisma.contract.findMany({
         where: listTotalWhere,
@@ -219,15 +223,47 @@ export default async function DashboardPage({
             orderBy: { name: "asc" },
           })
         : Promise.resolve([]),
+      fetchMarketPrices(),
     ]);
 
+    const collaboratorIds = [
+      ...new Set([
+        ...topCollaboratorsAllTime.map((c) => c.collaboratorId),
+        ...topCollaboratorsMonth.map((c) => c.collaboratorId),
+      ]),
+    ];
     const collaboratorNames =
-      topCollaborators.length > 0
+      collaboratorIds.length > 0
         ? await prisma.user.findMany({
-            where: { id: { in: topCollaborators.map((c) => c.collaboratorId) } },
+            where: { id: { in: collaboratorIds } },
             select: { id: true, name: true },
           })
         : [];
+
+    const nameById = new Map(collaboratorNames.map((u) => [u.id, u.name]));
+
+    const topAllTime = aggregateCollaboratorRanking(
+      topCollaboratorsAllTime.map((row) => ({
+        collaboratorId: row.collaboratorId,
+        collaboratorName: nameById.get(row.collaboratorId) ?? "—",
+        count: row._count.id,
+      })),
+    );
+
+    const topMonth = aggregateCollaboratorRanking(
+      topCollaboratorsMonth.map((row) => ({
+        collaboratorId: row.collaboratorId,
+        collaboratorName: nameById.get(row.collaboratorId) ?? "—",
+        count: row._count.id,
+      })),
+    );
+
+    const supplierRanking = aggregateSupplierRanking(
+      rankingRows.map((r) => ({ supplierName: r.supplier.name })),
+    );
+    const utilityRanking = aggregateUtilityRanking(
+      rankingRows.map((r) => ({ utilityType: r.utilityType })),
+    );
 
     const tableRows = toContractRows(recentContracts);
     const collaborators = collaboratorOptions.map(toCollaboratorOption);
@@ -237,12 +273,11 @@ export default async function DashboardPage({
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-slate-500">
-            Panoramica attività e produzione · contratti ordinati per data inserimento (più
-            recenti prima) · {PAGE_SIZE} per pagina
+            Panoramica produzione, mercati e provvigioni
             {canViewAll ? (
               <>
                 {" "}
-                · elenco completo anche in{" "}
+                · elenco completo in{" "}
                 <Link href="/contratti?vista=tutti" className="underline">
                   Contratti
                 </Link>{" "}
@@ -255,41 +290,41 @@ export default async function DashboardPage({
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Contratti totali" value={totalAllContracts} />
-          <StatCard label="Attivi (operativi)" value={totalContracts} />
-          <Link href="/archivio">
-            <StatCard label="In archivio" value={totalArchiveContracts} />
-          </Link>
-          <Link href="/lavorazione">
-            <StatCard label="In lavorazione" value={inLavorazioneCount} tone="warning" />
-          </Link>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard label="Inseriti questa settimana" value={insertedThisWeek} />
+          <StatCard label="Inseriti questo mese" value={insertedThisMonth} />
+          <StatCard label="Totale di sempre" value={insertedTotal} />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Link href="/contratti">
-            <StatCard label="Completati" value={completatoCount} tone="success" />
-          </Link>
-          <StatCard label="KO" value={koCount} tone="danger" />
-          <Link href="/lavorazione">
-            <StatCard label="Email da reinviare" value={emailFailedCount} tone="danger" />
-          </Link>
-          <StatCard label="Scaduti / da rinnovare" value={expired} tone="danger" />
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <DashboardRankingPanel
+            title="Classifica fornitori utilizzati"
+            subtitle="Fornitori più usati nei contratti (nomi unificati)"
+            items={supplierRanking}
+          />
+          <DashboardRankingPanel
+            title="Classifica per tipo"
+            subtitle="Distribuzione per tipologia utenza"
+            items={utilityRanking}
+          />
         </div>
+
+        <MarketPricesPanel prices={marketPrices} />
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Link href="/provvigioni">
             <StatCard
-              label="Provvigioni complessive"
+              label="Totale complessivo"
               value={formatCurrency(moneyTotals.complessivo)}
               hint="Ricevute + da incassare"
             />
           </Link>
           <Link href="/provvigioni?stato=Incassato">
             <StatCard
-              label="Ricevute (incassate)"
+              label="Totale ricevute"
               value={formatCurrency(moneyTotals.incassato)}
               tone="success"
-              hint="Con data di incasso"
+              hint="Provvigioni incassate"
             />
           </Link>
           <Link href="/provvigioni?stato=Da%20incassare">
@@ -297,14 +332,13 @@ export default async function DashboardPage({
               label="Da incassare"
               value={formatCurrency(moneyTotals.daIncassare)}
               tone="warning"
-              hint="Senza data di incasso"
             />
           </Link>
           <Link href="/provvigioni?vista=ricorrente">
             <StatCard
               label="Ricorrenti mensili"
               value={formatCurrency(moneyTotals.ricorrenti)}
-              hint="Somma gettoni contratti R"
+              hint="Gettoni contratti ricorrenti"
             />
           </Link>
         </div>
@@ -316,13 +350,7 @@ export default async function DashboardPage({
                 Priorità operative
               </p>
               <h2 className="mt-1 text-xl font-bold text-slate-900">Da gestire</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Le verifiche più importanti, ordinate per il lavoro quotidiano.
-              </p>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-              Aggiornato ora
-            </span>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -363,7 +391,10 @@ export default async function DashboardPage({
               >
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-sm font-semibold leading-tight">{item.label}</p>
-                  <span aria-hidden className="text-lg leading-none opacity-50 transition group-hover:translate-x-0.5">
+                  <span
+                    aria-hidden
+                    className="text-lg leading-none opacity-50 transition group-hover:translate-x-0.5"
+                  >
                     →
                   </span>
                 </div>
@@ -376,10 +407,18 @@ export default async function DashboardPage({
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Contratti in lavorazione
-              </h2>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <Link href="/lavorazione" className="block flex-1">
+                <StatCard
+                  label="Contratti in lavorazione"
+                  value={inLavorazioneCount}
+                  tone="warning"
+                  hint="Clicca per aprire la pagina lavorazioni"
+                />
+              </Link>
+            </div>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-base font-semibold text-slate-900">Elenco pratiche</h2>
               <Link
                 href="/lavorazione"
                 className="text-sm font-medium text-emerald-700 hover:underline"
@@ -387,9 +426,6 @@ export default async function DashboardPage({
                 Vedi tutti
               </Link>
             </div>
-            <p className="mb-3 text-xs text-slate-500">
-              Solo pratiche inviate al Master (non bozze / registrazioni interne).
-            </p>
             {inLavorazioneList.length === 0 ? (
               <p className="text-sm text-slate-500">Nessun contratto inviato al Master.</p>
             ) : (
@@ -412,29 +448,59 @@ export default async function DashboardPage({
             )}
           </section>
 
-          {hasPermission(session.role, "stats.full") ? (
+          {isAdminStats ? (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-lg font-semibold text-slate-900">
+              <h2 className="mb-1 text-lg font-semibold text-slate-900">
                 Collaboratori più produttivi
               </h2>
-              <ul className="space-y-3">
-                {topCollaborators.map((row) => {
-                  const user = collaboratorNames.find((u) => u.id === row.collaboratorId);
-                  return (
-                    <li
-                      key={row.collaboratorId}
-                      className="flex items-center justify-between"
-                    >
-                      <span className="text-sm font-medium text-slate-700">
-                        {user?.name ?? "—"}
-                      </span>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-sm">
-                        {row._count.id} contratti
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
+              <p className="mb-4 text-sm text-slate-500">Solo admin · nomi unificati</p>
+
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    Di sempre
+                  </h3>
+                  <ul className="space-y-2">
+                    {topAllTime.map((row, i) => (
+                      <li
+                        key={`all-${row.label}`}
+                        className="flex items-center justify-between gap-2 text-sm"
+                      >
+                        <span className="font-medium text-slate-700">
+                          {i + 1}. {row.label}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 tabular-nums font-semibold">
+                          {row.count}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    Mese in corso
+                  </h3>
+                  <ul className="space-y-2">
+                    {topMonth.length === 0 ? (
+                      <li className="text-sm text-slate-500">Nessun inserimento questo mese.</li>
+                    ) : (
+                      topMonth.map((row, i) => (
+                        <li
+                          key={`month-${row.label}`}
+                          className="flex items-center justify-between gap-2 text-sm"
+                        >
+                          <span className="font-medium text-slate-700">
+                            {i + 1}. {row.label}
+                          </span>
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 tabular-nums font-semibold text-emerald-800">
+                            {row.count}
+                          </span>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+              </div>
             </section>
           ) : null}
         </div>
@@ -442,7 +508,7 @@ export default async function DashboardPage({
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">
-              {q?.trim() ? `Risultati ricerca` : "Contratti recenti"}
+              {q?.trim() ? "Risultati ricerca" : "Contratti recenti"}
             </h2>
             <Link
               href="/contratti?vista=tutti"
@@ -456,7 +522,7 @@ export default async function DashboardPage({
             {q?.trim()
               ? `${listTotal} contratti trovati per «${q.trim()}».`
               : "Ordinati per data inserimento (più recenti prima)."}{" "}
-            Usa ▾ sulle colonne per filtrare; usa le pagine sotto per scorrere.
+            {PAGE_SIZE} per pagina.
           </p>
           <PaginationNav
             path="/"
