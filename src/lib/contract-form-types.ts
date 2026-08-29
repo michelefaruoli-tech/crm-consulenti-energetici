@@ -158,6 +158,8 @@ export type NewContractPayload = {
   paymentMethod?: string;
   ibanHolder?: string;
   ibanHolderCf?: string;
+  /** IBAN addebito su questo contratto (default da anagrafica, modificabile). */
+  contractIban?: string;
   invoiceEmail?: string;
   invoiceMode?: string;
   pricePerKwh?: string;

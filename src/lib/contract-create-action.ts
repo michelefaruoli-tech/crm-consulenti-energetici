@@ -154,8 +154,9 @@ function validatePayload(payload: NewContractPayload, sendToMaster: boolean): st
     payload.paymentMethod === "RID" ||
     payload.services.some((s) => s.paymentMethod === "RID");
   if (usesRid) {
-    if (!c.iban?.trim()) errors.push("IBAN obbligatorio per RID");
-    else if (!isValidIban(c.iban)) errors.push("IBAN non valido");
+    const contractIban = payload.contractIban?.trim() || c.iban?.trim() || "";
+    if (!contractIban) errors.push("IBAN contratto obbligatorio per RID");
+    else if (!isValidIban(contractIban)) errors.push("IBAN contratto non valido");
   }
 
   return errors;
@@ -537,7 +538,8 @@ async function createFullContractActionInner(
             economicNotes: payload.economicNotes || null,
             paymentMethod:
               line.paymentMethod || payload.paymentMethod || null,
-            contractIban: payload.client.iban || null,
+            contractIban:
+              payload.contractIban?.trim() || payload.client.iban?.trim() || null,
             ibanHolder: line.ibanHolder || payload.ibanHolder || null,
             ibanHolderCf: payload.ibanHolderCf || null,
             invoiceEmail:

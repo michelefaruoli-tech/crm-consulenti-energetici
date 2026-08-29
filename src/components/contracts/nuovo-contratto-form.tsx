@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AutocompleteSearch,
@@ -12,6 +12,7 @@ import { createFullContractAction } from "@/lib/contract-create-action";
 import {
   calcExpiryDate,
   createEmptyServiceLine,
+  isValidIban,
   type ContractServiceLine,
   type NewContractPayload,
 } from "@/lib/contract-form-types";
@@ -110,6 +111,8 @@ export function NuovoContrattoForm({
   const [email, setEmail] = useState("");
   const [pec, setPec] = useState("");
   const [iban, setIban] = useState("");
+  const [contractIban, setContractIban] = useState("");
+  const contractIbanCustomized = useRef(false);
   const [street, setStreet] = useState("");
   const [streetNumber, setStreetNumber] = useState("");
   const [zipCode, setZipCode] = useState("");
@@ -247,6 +250,7 @@ export function NuovoContrattoForm({
 
   /** Compila tutta la sezione “Dati cliente” da un record anagrafica. */
   function applyClientFromAnagrafica(item: AutocompleteItem) {
+    const nextIban = String(item.iban ?? "");
     setClientId(item.id);
     setClientLabel(String(item.label));
     setCreatingClient(false);
@@ -259,7 +263,9 @@ export function NuovoContrattoForm({
     setPhone(String(item.phone ?? ""));
     setEmail(String(item.email ?? ""));
     setPec(String(item.pec ?? ""));
-    setIban(String(item.iban ?? ""));
+    setIban(nextIban);
+    contractIbanCustomized.current = false;
+    setContractIban(nextIban);
     setStreet(String(item.street ?? ""));
     setStreetNumber(String(item.streetNumber ?? ""));
     setZipCode(String(item.zipCode ?? ""));
@@ -293,6 +299,24 @@ export function NuovoContrattoForm({
     setClientId(undefined);
     setClientLabel(undefined);
     setCreatingClient(true);
+    contractIbanCustomized.current = false;
+    setContractIban("");
+  }
+
+  function updateAnagraficaIban(value: string) {
+    setIban(value);
+    if (!contractIbanCustomized.current) {
+      setContractIban(value);
+    }
+  }
+
+  function updateContractIban(value: string, fromAnagrafica = false) {
+    if (fromAnagrafica) {
+      contractIbanCustomized.current = false;
+    } else {
+      contractIbanCustomized.current = true;
+    }
+    setContractIban(value);
   }
 
   function patchService(id: string, patch: Partial<ContractServiceLine>) {
@@ -377,6 +401,7 @@ export function NuovoContrattoForm({
       priceType: first?.priceType,
       paymentMethod: first?.paymentMethod,
       ibanHolder: first?.ibanHolder,
+      contractIban: contractIban.trim() || undefined,
       pricePerKwh: first?.pricePerKwh,
       pricePerSmc: first?.pricePerSmc,
       pcv: first?.pcv,
@@ -416,6 +441,10 @@ export function NuovoContrattoForm({
         }
         if (!s.supplierId && !s.supplierName?.trim()) missing.push(`Servizio ${n}: fornitore`);
         if (!s.paymentMethod) missing.push(`Servizio ${n}: metodo pagamento`);
+        if (s.paymentMethod === "RID") {
+          if (!contractIban.trim()) missing.push("IBAN contratto (RID)");
+          else if (!isValidIban(contractIban)) missing.push("IBAN contratto non valido");
+        }
         if ((s.service === "LUCE" || s.service === "DUAL") && !s.pod?.trim()) {
           missing.push(`Servizio ${n}: POD`);
         }
@@ -460,6 +489,10 @@ export function NuovoContrattoForm({
         }
         if (!s.supplierId && !s.supplierName?.trim()) missing.push(`Servizio ${n}: fornitore`);
         if (!s.paymentMethod) missing.push(`Servizio ${n}: metodo pagamento`);
+        if (s.paymentMethod === "RID") {
+          if (!contractIban.trim()) missing.push("IBAN contratto (RID)");
+          else if (!isValidIban(contractIban)) missing.push("IBAN contratto non valido");
+        }
         if ((s.service === "LUCE" || s.service === "DUAL") && !s.pod?.trim()) {
           missing.push(`Servizio ${n}: POD`);
         }
@@ -670,7 +703,11 @@ export function NuovoContrattoForm({
       setInvoiceEmail((prev) => prev || payload.email || "");
     }
     if (payload.pec != null) setPec(payload.pec);
-    if (payload.iban != null) setIban(payload.iban);
+    if (payload.iban != null) {
+      setIban(payload.iban);
+      contractIbanCustomized.current = false;
+      setContractIban(payload.iban);
+    }
     if (payload.street != null) setStreet(payload.street);
     if (payload.streetNumber != null) setStreetNumber(payload.streetNumber);
     if (payload.zipCode != null) setZipCode(payload.zipCode);
@@ -1036,18 +1073,16 @@ export function NuovoContrattoForm({
           highlightRequired={req}
         />
         <div className="grid gap-3 md:grid-cols-2">
-          <Field
-            label="IBAN"
-            fillStatus={fillStatus(
-              req && services.some((s) => s.paymentMethod === "RID"),
-              Boolean(iban.trim()),
-            )}
-          >
+          <Field label="IBAN (anagrafica)">
             <Input
               value={iban}
-              onChange={(e) => setIban(e.target.value)}
+              onChange={(e) => updateAnagraficaIban(e.target.value)}
               placeholder="IT60X..."
             />
+            <p className="mt-1 text-xs text-slate-500">
+              Salvato in anagrafica cliente. Con RID, il contratto lo copia di default (modificabile
+              sotto).
+            </p>
           </Field>
           <Field label="Invio bolletta">
             <Select
@@ -1141,7 +1176,9 @@ export function NuovoContrattoForm({
             suppliers={suppliers}
             listinoRules={listinoRules}
             clientType={clientType}
-            clientIban={iban}
+            anagraficaIban={iban}
+            contractIban={contractIban}
+            onContractIbanChange={updateContractIban}
             clientEmail={email}
             residence={{
               street,

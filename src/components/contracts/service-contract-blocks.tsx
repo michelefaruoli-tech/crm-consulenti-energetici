@@ -49,7 +49,9 @@ export function ServiceContractBlocks({
   suppliers,
   listinoRules,
   clientType,
-  clientIban,
+  anagraficaIban,
+  contractIban,
+  onContractIbanChange,
   clientEmail,
   residence,
   insertionDate,
@@ -64,7 +66,9 @@ export function ServiceContractBlocks({
   suppliers: SupplierOption[];
   listinoRules: ListinoRuleOption[];
   clientType: "PRIVATO" | "AZIENDA";
-  clientIban: string;
+  anagraficaIban: string;
+  contractIban: string;
+  onContractIbanChange: (value: string, fromAnagrafica?: boolean) => void;
   clientEmail: string;
   residence: {
     street: string;
@@ -105,13 +109,17 @@ export function ServiceContractBlocks({
       onChange({ commissionRuleId: ruleId });
       return;
     }
+    const nextPayment = rule.hasRid ? "RID" : line.paymentMethod || "BOLLETTINO";
     onChange({
       commissionRuleId: ruleId,
       productName: rule.name,
       offerCode: rule.name,
-      paymentMethod: rule.hasRid ? "RID" : line.paymentMethod || "BOLLETTINO",
+      paymentMethod: nextPayment,
       priceType: line.priceType || "FISSO",
     });
+    if (nextPayment === "RID" && !contractIban.trim() && anagraficaIban.trim()) {
+      onContractIbanChange(anagraficaIban, true);
+    }
   }
 
   return (
@@ -315,7 +323,13 @@ export function ServiceContractBlocks({
         <Field label="Metodo di pagamento" fillStatus={fsBase(hasPayment)}>
           <Select
             value={line.paymentMethod ?? ""}
-            onChange={(e) => onChange({ paymentMethod: e.target.value })}
+            onChange={(e) => {
+              const value = e.target.value;
+              onChange({ paymentMethod: value });
+              if (value === "RID" && !contractIban.trim() && anagraficaIban.trim()) {
+                onContractIbanChange(anagraficaIban, true);
+              }
+            }}
           >
             <option value="">Seleziona</option>
             {PAYMENT_METHOD_OPTIONS.map((o) => (
@@ -340,13 +354,30 @@ export function ServiceContractBlocks({
         </Field>
       </div>
       {needsIban ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="IBAN (da anagrafica)" fillStatus={fs(Boolean(clientIban.trim()))}>
+        <div className="space-y-3 rounded-lg border border-sky-100 bg-sky-50/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-800">IBAN contratto (addebito RID)</p>
+            {anagraficaIban.trim() ? (
+              <button
+                type="button"
+                className="text-xs font-medium text-emerald-700 underline"
+                onClick={() => onContractIbanChange(anagraficaIban, true)}
+              >
+                Copia da anagrafica
+              </button>
+            ) : (
+              <span className="text-xs text-amber-700">Nessun IBAN in anagrafica</span>
+            )}
+          </div>
+          <Field
+            label="IBAN contratto"
+            fillStatus={fs(Boolean(contractIban.trim()))}
+          >
             <Input
-              value={clientIban}
-              readOnly
-              className="bg-slate-50 font-mono"
-              placeholder="Inserisci IBAN in anagrafica"
+              value={contractIban}
+              onChange={(e) => onContractIbanChange(e.target.value)}
+              className="bg-white font-mono"
+              placeholder="IT60X..."
             />
           </Field>
           <Field label="Intestatario IBAN (se diverso)">
