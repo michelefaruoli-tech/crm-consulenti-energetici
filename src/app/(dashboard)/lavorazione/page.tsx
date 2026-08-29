@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { InlineContractStatusSelect } from "@/components/contracts/inline-contract-status-select";
-import { clientDisplayName, formatDate } from "@/lib/utils";
+import { clientDisplayName } from "@/lib/utils";
 import { daysSince } from "@/lib/master-workflow";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { redirect } from "next/navigation";
@@ -273,28 +273,26 @@ export default async function LavorazionePage({
         </div>
       </form>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full text-sm">
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full table-fixed text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>
-              <th className="px-3 py-2">Pratica</th>
-              <th className="px-3 py-2">Invio</th>
-              <th className="px-3 py-2">Cliente</th>
-              <th className="px-3 py-2">Collaboratore</th>
-              <th className="px-3 py-2">Servizio</th>
-              <th className="px-3 py-2">Operazione</th>
-              <th className="px-3 py-2">Fornitore</th>
-              <th className="px-3 py-2">POD / PDR</th>
-              <th className="px-3 py-2">Stato</th>
-              <th className="px-3 py-2">Giorni</th>
-              <th className="px-3 py-2">Aggiornato</th>
-              <th className="px-3 py-2" />
+              <th className="w-[7rem] px-2 py-2">Azioni</th>
+              <th className="px-2 py-2">Cliente</th>
+              <th className="w-[6.5rem] px-2 py-2">Collab.</th>
+              <th className="w-[4rem] px-2 py-2">Serv.</th>
+              <th className="w-[5.5rem] px-2 py-2">Operaz.</th>
+              <th className="px-2 py-2">Fornitore</th>
+              <th className="w-[6.5rem] px-2 py-2">POD/PDR</th>
+              <th className="w-[9rem] px-2 py-2">Stato</th>
+              <th className="w-[3rem] px-2 py-2">Giorni</th>
+              <th className="w-[7.5rem] px-2 py-2">Aggiornato</th>
             </tr>
           </thead>
           <tbody>
             {contracts.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-2 py-8 text-center text-slate-500">
                   {vistaKo
                     ? "Nessun contratto KO con questi filtri."
                     : "Nessun contratto in lavorazione con questi filtri."}
@@ -315,21 +313,33 @@ export default async function LavorazionePage({
                           : "border-t border-slate-100"
                     }
                   >
-                    <td className="px-3 py-2 font-mono text-xs">{c.contractNumber}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {c.sentToMasterAt
-                        ? formatRomeDateTime(c.sentToMasterAt)
-                        : formatDate(c.insertionDate)}
+                    <td className="px-2 py-2">
+                      <div className="flex flex-col gap-1">
+                        <Link href={`/lavorazione/${c.id}`}>
+                          <Button type="button" size="sm" variant="secondary" className="w-full">
+                            Apri scheda
+                          </Button>
+                        </Link>
+                        <DeleteRowButton kind="contract" id={c.id} />
+                      </div>
                     </td>
-                    <td className="px-3 py-2">{clientDisplayName(c.client)}</td>
-                    <td className="px-3 py-2">{c.collaborator.name}</td>
-                    <td className="px-3 py-2">{c.utilityType || "—"}</td>
-                    <td className="px-3 py-2">{c.operationType || "—"}</td>
-                    <td className="px-3 py-2">{c.supplier.name}</td>
-                    <td className="px-3 py-2 text-sm">
+                    <td className="truncate px-2 py-2" title={clientDisplayName(c.client)}>
+                      {clientDisplayName(c.client)}
+                    </td>
+                    <td className="truncate px-2 py-2" title={c.collaborator.name}>
+                      {c.collaborator.name}
+                    </td>
+                    <td className="px-2 py-2">{c.utilityType || "—"}</td>
+                    <td className="truncate px-2 py-2" title={c.operationType ?? undefined}>
+                      {c.operationType || "—"}
+                    </td>
+                    <td className="truncate px-2 py-2" title={c.supplier.name}>
+                      {c.supplier.name}
+                    </td>
+                    <td className="truncate px-2 py-2 font-mono text-xs" title={c.podPdr || c.pod || c.pdr || undefined}>
                       {c.podPdr || c.pod || c.pdr || "—"}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-2">
                       {canChangeStatus ? (
                         <InlineContractStatusSelect
                           contractId={c.id}
@@ -343,7 +353,7 @@ export default async function LavorazionePage({
                         <p className="mt-1 text-[10px] text-red-600">Email: {c.emailStatus}</p>
                       ) : null}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-2">
                       {days != null ? (
                         <span className={stale ? "font-semibold text-amber-800" : ""}>
                           {days}g
@@ -352,18 +362,8 @@ export default async function LavorazionePage({
                         "—"
                       )}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
+                    <td className="truncate px-2 py-2 text-xs" title={formatRomeDateTime(c.updatedAt)}>
                       {formatRomeDateTime(c.updatedAt)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col items-end gap-1">
-                        <Link href={`/lavorazione/${c.id}`}>
-                          <Button type="button" size="sm" variant="secondary">
-                            Apri scheda
-                          </Button>
-                        </Link>
-                        <DeleteRowButton kind="contract" id={c.id} />
-                      </div>
                     </td>
                   </tr>
                 );
