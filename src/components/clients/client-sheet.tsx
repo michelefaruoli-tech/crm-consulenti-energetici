@@ -494,22 +494,20 @@ export function ClientSheet({
               </>
             )}
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Codice fiscale">
-                <Input name="fiscalCode" defaultValue={client.fiscalCode ?? ""} />
-              </Field>
+            <Field label="Codice fiscale">
+              <Input name="fiscalCode" defaultValue={client.fiscalCode ?? ""} />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Telefono">
                 <Input name="phone" defaultValue={client.phone ?? ""} />
               </Field>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
               <Field label="Email">
                 <Input name="email" type="email" defaultValue={client.email ?? ""} />
               </Field>
-              <Field label="PEC (facoltativa)">
-                <Input name="pec" defaultValue={client.pec ?? ""} />
-              </Field>
             </div>
+            <Field label="PEC (facoltativa)">
+              <Input name="pec" defaultValue={client.pec ?? ""} />
+            </Field>
             <Field label="IBAN (facoltativo)">
               <Input name="iban" defaultValue={client.iban ?? ""} />
             </Field>

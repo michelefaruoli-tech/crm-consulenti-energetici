@@ -194,7 +194,7 @@ export default async function ClientiPage({
             <p className="text-slate-500">
               {onlyRecurring
                 ? "Clienti con almeno un contratto R (ricorrente) attivo"
-                : "Clicca sul nome (verde) o sulla riga per aprire anagrafica e contratti attivi"}
+                : "Clicca sul cliente o sulla riga per aprire anagrafica e contratti attivi"}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

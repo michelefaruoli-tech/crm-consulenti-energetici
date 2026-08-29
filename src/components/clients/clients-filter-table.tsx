@@ -39,23 +39,21 @@ export function ClientsFilterTable({
 
   const columns: FilterColumn[] = [
     {
-      key: "lastName",
-      label: "Cognome",
-      getValue: (r) => String(r.lastName ?? ""),
+      key: "name",
+      label: "Cliente",
+      colClassName: "max-w-[14rem]",
+      getValue: (r) => String(r.name ?? ""),
       render: (r) => {
         const alert = Boolean(r.nameAlert);
-        const isCompany = String(r.type) === "Business";
-        const label = isCompany
-          ? String(r.name)
-          : String(r.lastName || "—");
+        const label = String(r.name || "—");
         return (
           <Link
             href={`/clienti/${String(r.id)}`}
-            title={String(r.stornoLabel ?? "") || undefined}
+            title={String(r.stornoLabel ?? "") || "Apri scheda cliente"}
             className={
               alert
-                ? "font-bold text-red-800 underline-offset-2 hover:underline"
-                : "font-semibold text-slate-900 underline-offset-2 hover:underline"
+                ? "block truncate font-bold text-red-800 underline-offset-2 hover:underline"
+                : "block truncate font-semibold text-emerald-800 underline-offset-2 hover:underline"
             }
             onClick={(e) => e.stopPropagation()}
           >
@@ -64,18 +62,7 @@ export function ClientsFilterTable({
         );
       },
     },
-    {
-      key: "firstName",
-      label: "Nome",
-      getValue: (r) => String(r.firstName ?? ""),
-      render: (r) => {
-        if (String(r.type) === "Business") {
-          return <span className="text-slate-400">—</span>;
-        }
-        return <span>{String(r.firstName || "—")}</span>;
-      },
-    },
-    { key: "type", label: "Tipo", getValue: (r) => String(r.type ?? "") },
+    { key: "type", label: "Tipo", getValue: (r) => String(r.type ?? ""), colClassName: "w-[4.5rem]" },
   ];
 
   if (showRicorrenza) {
@@ -101,10 +88,54 @@ export function ClientsFilterTable({
   }
 
   columns.push(
-    { key: "fiscalCode", label: "CF / P.IVA", getValue: (r) => String(r.fiscalCode ?? "") },
-    { key: "phone", label: "Telefono", getValue: (r) => String(r.phone ?? "") },
-    { key: "email", label: "Email", getValue: (r) => String(r.email ?? "") },
-    { key: "city", label: "Città", getValue: (r) => String(r.city ?? "") },
+    {
+      key: "fiscalCode",
+      label: "CF / P.IVA",
+      getValue: (r) => String(r.fiscalCode ?? ""),
+      colClassName: "max-w-[9rem]",
+    },
+    {
+      key: "contacts",
+      label: "Contatti",
+      colClassName: "max-w-[11rem] whitespace-normal",
+      getValue: (r) => {
+        const phone = String(r.phone ?? "").trim();
+        const email = String(r.email ?? "").trim();
+        return [phone, email].filter((v) => v && v !== "—").join(" ");
+      },
+      render: (r) => {
+        const phone = String(r.phone ?? "").trim();
+        const email = String(r.email ?? "").trim();
+        const hasPhone = phone && phone !== "—";
+        const hasEmail = email && email !== "—";
+        if (!hasPhone && !hasEmail) {
+          return <span className="text-slate-400">—</span>;
+        }
+        return (
+          <div className="min-w-0 space-y-0.5 text-xs leading-tight">
+            {hasPhone ? (
+              <a
+                href={`tel:${phone.replace(/\s/g, "")}`}
+                className="block truncate text-slate-800 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {phone}
+              </a>
+            ) : null}
+            {hasEmail ? (
+              <a
+                href={`mailto:${email}`}
+                className="block truncate text-slate-600 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {email}
+              </a>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    { key: "city", label: "Città", getValue: (r) => String(r.city ?? ""), colClassName: "max-w-[8rem]" },
     { key: "contracts", label: "Contratti", getValue: (r) => String(r.contracts ?? "") },
     { key: "createdBy", label: "Inserito da", getValue: (r) => String(r.createdBy ?? "") },
   );
@@ -125,6 +156,8 @@ export function ClientsFilterTable({
       rowKey={(r) => String(r.id)}
       onRowClick={(r) => router.push(`/clienti/${r.id}`)}
       getRowClassName={(r) => String(r.rowClassName ?? "") || undefined}
+      dense
+      fitWidth
     />
   );
 }
