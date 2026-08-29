@@ -37,7 +37,11 @@ export async function middleware(request: NextRequest) {
 
   try {
     await jwtVerify(token, secret);
-    return NextResponse.next();
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-pathname", pathname);
+    return NextResponse.next({
+      request: { headers: requestHeaders },
+    });
   } catch {
     return NextResponse.redirect(new URL("/login", request.url));
   }

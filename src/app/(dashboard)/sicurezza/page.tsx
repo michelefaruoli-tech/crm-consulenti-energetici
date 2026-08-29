@@ -11,6 +11,7 @@ const EVENT_LABELS: Record<string, string> = {
   LOGIN: "Login riuscito",
   LOGIN_FAILED: "Login fallito",
   LOGIN_BLOCKED: "Login bloccato (rate limit)",
+  ACCESS: "Accesso pagina",
   HONEYPOT: "Bot / honeypot",
   PASSWORD_CHANGED: "Password cambiata",
   PASSWORD_RESET_REQUESTED: "Reset password richiesto",
@@ -31,7 +32,7 @@ export default async function SicurezzaPage() {
   });
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [fails24h, blocks24h, logins24h] = await Promise.all([
+  const [fails24h, blocks24h, logins24h, accesses24h] = await Promise.all([
     prisma.userSecurityEvent.count({
       where: { eventType: "LOGIN_FAILED", createdAt: { gte: since } },
     }),
@@ -44,6 +45,9 @@ export default async function SicurezzaPage() {
     prisma.userSecurityEvent.count({
       where: { eventType: "LOGIN", createdAt: { gte: since } },
     }),
+    prisma.userSecurityEvent.count({
+      where: { eventType: "ACCESS", createdAt: { gte: since } },
+    }),
   ]);
 
   const lastFail = events.find((e) => e.eventType === "LOGIN_FAILED");
@@ -53,8 +57,9 @@ export default async function SicurezzaPage() {
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Eventi sicurezza</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Qui vedi i login sbagliati (password errata), i login ok, i reset
-          password. Solo Admin. Aggiorna la pagina (F5) dopo un tentativo.
+          Login, accessi alle pagine del CRM, reset password e tentativi
+          sospetti. Solo Admin. Aggiorna la pagina (F5) per vedere gli eventi
+          più recenti.
         </p>
       </div>
 
@@ -72,7 +77,11 @@ export default async function SicurezzaPage() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 text-center shadow-sm">
+          <p className="text-2xl font-semibold text-sky-700">{accesses24h}</p>
+          <p className="text-xs text-slate-500">Accessi pagine (24h)</p>
+        </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-center shadow-sm">
           <p className="text-2xl font-semibold text-emerald-700">{logins24h}</p>
           <p className="text-xs text-slate-500">Login ok (24h)</p>
@@ -111,11 +120,12 @@ export default async function SicurezzaPage() {
                   e.eventType.includes("FAIL") ||
                   e.eventType.includes("BLOCK") ||
                   e.eventType === "HONEYPOT";
+                const isAccess = e.eventType === "ACCESS";
                 return (
                   <tr
                     key={e.id}
                     className={`border-t border-slate-100 align-top ${
-                      isFail ? "bg-rose-50/40" : ""
+                      isFail ? "bg-rose-50/40" : isAccess ? "bg-sky-50/30" : ""
                     }`}
                   >
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-500">
@@ -128,7 +138,9 @@ export default async function SicurezzaPage() {
                             ? "font-medium text-rose-700"
                             : e.eventType === "LOGIN"
                               ? "font-medium text-emerald-700"
-                              : "text-slate-800"
+                              : isAccess
+                                ? "font-medium text-sky-700"
+                                : "text-slate-800"
                         }
                       >
                         {EVENT_LABELS[e.eventType] ?? e.eventType}

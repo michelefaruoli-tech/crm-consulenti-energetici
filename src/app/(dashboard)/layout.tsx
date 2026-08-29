@@ -1,5 +1,8 @@
+import { headers } from "next/headers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { requireSession } from "@/lib/auth";
+import { getRequestMeta } from "@/lib/request-meta";
+import { logAccessEvent } from "@/lib/security-log";
 
 export default async function DashboardLayout({
   children,
@@ -7,6 +10,16 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await requireSession();
+
+  const h = await headers();
+  const path = h.get("x-pathname") ?? "/";
+  const meta = await getRequestMeta();
+  await logAccessEvent({
+    userId: session.id,
+    email: session.email,
+    path,
+    meta,
+  });
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 md:flex-row">

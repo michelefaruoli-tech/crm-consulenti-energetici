@@ -10,11 +10,14 @@ export type SecurityEventType =
   | "LOGIN"
   | "LOGIN_FAILED"
   | "LOGIN_BLOCKED"
+  | "ACCESS"
   | "HONEYPOT"
   | "PASSWORD_CHANGED"
   | "PASSWORD_RESET_REQUESTED"
   | "PASSWORD_RESET_COMPLETED"
   | "PASSWORD_RESET_BLOCKED";
+
+const ACCESS_DEDUP_MS = 15 * 60 * 1000; // stessa pagina, stesso utente: max 1 evento / 15 min
 
 /** Scrive evento (senza transaction: Neon HTTP). */
 export async function logSecurityEvent(opts: {
@@ -37,6 +40,40 @@ export async function logSecurityEvent(opts: {
     });
   } catch (e) {
     console.error("[logSecurityEvent]", e);
+  }
+}
+
+/** Registra accesso a una pagina del CRM (con dedup per evitare flood da RSC/prefetch). */
+export async function logAccessEvent(opts: {
+  userId: string;
+  email: string;
+  path: string;
+  meta?: RequestMeta;
+}): Promise<void> {
+  const path = opts.path.slice(0, 200) || "/";
+  const since = new Date(Date.now() - ACCESS_DEDUP_MS);
+
+  try {
+    const recent = await prisma.userSecurityEvent.findFirst({
+      where: {
+        userId: opts.userId,
+        eventType: "ACCESS",
+        details: path,
+        createdAt: { gte: since },
+      },
+      select: { id: true },
+    });
+    if (recent) return;
+
+    await logSecurityEvent({
+      eventType: "ACCESS",
+      userId: opts.userId,
+      email: opts.email,
+      details: path,
+      meta: opts.meta,
+    });
+  } catch (e) {
+    console.error("[logAccessEvent]", e);
   }
 }
 
