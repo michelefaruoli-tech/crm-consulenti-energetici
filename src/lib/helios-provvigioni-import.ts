@@ -17,9 +17,11 @@ import {
   isYearMonthPeriod,
   normalizePersonKey,
   pickHeliosContractForPeriod,
+  canMarkIncassatoForCompetencePeriod,
   type HeliosImportPreviewRow,
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
+import { computeSupplyStartDate } from "@/lib/supply-dates";
 import { repairMonthlySwitchArchives } from "@/lib/contract-pod-archive";
 
 export type {
@@ -396,6 +398,31 @@ export async function applyHeliosProvvigioniAction(
       const rowPeriod = row.competencePeriod;
       const amount =
         amountByKey.get(`${row.pod}|${rowPeriod}`) || null;
+
+      const contract = await prisma.contract.findUnique({
+        where: { id: row.contractId },
+        select: {
+          status: true,
+          supplyStartDate: true,
+          insertionDate: true,
+          operationType: true,
+        },
+      });
+      const supply =
+        contract?.supplyStartDate ??
+        computeSupplyStartDate(
+          contract?.insertionDate ?? new Date(),
+          contract?.operationType,
+        );
+      const canIncassare = canMarkIncassatoForCompetencePeriod(
+        supply,
+        rowPeriod,
+      );
+      if (!canIncassare) {
+        skippedCollected++;
+        continue;
+      }
+
       const existing = await prisma.recurringMonth.findUnique({
         where: {
           contractId_period: {
@@ -435,21 +462,16 @@ export async function applyHeliosProvvigioniAction(
         });
       }
 
-      const contract = await prisma.contract.findUnique({
-        where: { id: row.contractId },
-        select: { status: true },
-      });
       const [y, mo] = rowPeriod.split("-").map(Number);
       await prisma.contract.update({
         where: { id: row.contractId },
         data: {
-          // Incassato dal fornitore — NON liquidare il collaboratore (Pagato)
+          recurrence: "M",
           ...(contract?.status === "PROVVIGIONE_LIQUIDATA"
             ? {}
             : { status: "PAGATO_DAL_FORNITORE" }),
           paymentStatus: "Incassato",
           collectionDate: new Date(y, mo - 1, 1),
-          recurrence: "M",
         },
       });
 

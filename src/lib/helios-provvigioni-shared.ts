@@ -48,6 +48,22 @@ export function heliosContractCoversPeriod(
   return true;
 }
 
+/** Fornitore ha pagato per questo mese solo se il contratto era già in fornitura. */
+export function canMarkIncassatoForCompetencePeriod(
+  supplyStart: Date,
+  period: string,
+): boolean {
+  if (!/^\d{4}-\d{2}$/.test(period)) return false;
+  const [y, m] = period.split("-").map(Number);
+  const monthEnd = new Date(y, m, 0, 23, 59, 59, 999);
+  const startDay = new Date(
+    supplyStart.getFullYear(),
+    supplyStart.getMonth(),
+    supplyStart.getDate(),
+  );
+  return startDay <= monthEnd;
+}
+
 /**
  * Switch Helios: stesso POD può avere vecchio + nuovo contratto.
  * Sceglie quello la cui finestra [ingresso, chiusura] contiene il mese competenza.

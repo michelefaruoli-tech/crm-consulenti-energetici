@@ -9,7 +9,10 @@
  * Uso:
  *   npx tsx scripts/sync-helios-all-rendiconti.ts
  */
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+dotenv.config();
+
 import fs from "fs";
 import path from "path";
 import ExcelJS from "exceljs";
@@ -20,6 +23,7 @@ import { parsePrivatoDisplayName } from "../src/lib/utils";
 import {
   guessCompetenceFromFilename,
   periodFromSheetName,
+  canMarkIncassatoForCompetencePeriod,
 } from "../src/lib/helios-provvigioni-shared";
 import {
   monthsBetween,
@@ -33,6 +37,7 @@ const FILES = [
   "Provvigioni_Aprile_2026_AG_MELFI_PZ4 - FARUOLI MICHELE.xlsx",
   "Provvigioni_Maggio_2026_AG_MELFI_PZ4 - FARUOLI MICHELE.xlsx",
   "Provvigioni_Giugno_2026_AG_MELFI_PZ4 - FARUOLI MICHELE.xlsx",
+  "Provvigioni_Luglio_2026_AG_MELFI_PZ4 - FARUOLI MICHELE.xlsx",
 ];
 
 const AMOUNT_PRIVATO = 4;
@@ -469,6 +474,10 @@ async function main() {
       entry.supplyStart ??
       contract?.supplyStartDate ??
       new Date(2026, 0, 1);
+    const supplyStartedByLatest = canMarkIncassatoForCompetencePeriod(
+      supplyStart,
+      latestPeriod,
+    );
 
     if (!contract) {
       const client = await prisma.client.create({
@@ -490,7 +499,6 @@ async function main() {
           collaboratorId: michele?.id ?? admin.id,
           createdById: admin.id,
           supplierId: helios.id,
-          status: "PAGATO_DAL_FORNITORE",
           utilityType: "Luce",
           podPdr: entry.pod,
           pod: entry.pod,
@@ -498,12 +506,20 @@ async function main() {
           operationType: "CAMBIO",
           insertionDate: supplyStart,
           supplyStartDate: supplyStart,
-          paymentStatus: "Incassato",
-          collectionDate: new Date(
-            +latestPeriod.slice(0, 4),
-            +latestPeriod.slice(5, 7) - 1,
-            1,
-          ),
+          paymentStatus: supplyStartedByLatest ? "Incassato" : "Da incassare",
+          ...(supplyStartedByLatest
+            ? {
+                status: "PAGATO_DAL_FORNITORE",
+                collectionDate: new Date(
+                  +latestPeriod.slice(0, 4),
+                  +latestPeriod.slice(5, 7) - 1,
+                  1,
+                ),
+              }
+            : {
+                status: "IN_ATTESA_PAGAMENTO",
+                collectionDate: null,
+              }),
           isHistorical: false,
           notes: "Helios ricorrente — sync rendiconti",
         },
@@ -547,13 +563,17 @@ async function main() {
           recurrence: "Ricorrente",
           supplyStartDate: supplyStart,
           utilityType: "Luce",
-          paymentStatus: "Incassato",
-          status: "PAGATO_DAL_FORNITORE",
-          collectionDate: new Date(
-            +latestPeriod.slice(0, 4),
-            +latestPeriod.slice(5, 7) - 1,
-            1,
-          ),
+          paymentStatus: supplyStartedByLatest ? "Incassato" : "Da incassare",
+          status: supplyStartedByLatest
+            ? "PAGATO_DAL_FORNITORE"
+            : "IN_ATTESA_PAGAMENTO",
+          collectionDate: supplyStartedByLatest
+            ? new Date(
+                +latestPeriod.slice(0, 4),
+                +latestPeriod.slice(5, 7) - 1,
+                1,
+              )
+            : null,
         },
       });
 
@@ -586,8 +606,11 @@ async function main() {
     const inLatest = present.has(latestPeriod);
 
     for (const period of expectedPeriods) {
+      if (period < startPeriod) continue;
+      if (!canMarkIncassatoForCompetencePeriod(supplyStart, period)) continue;
+
       if (present.has(period) || inLatest) {
-        // Presente nel file, oppure in giugno ⇒ tutto dall'ingresso è pagato
+        // Presente nel file, oppure nell'ultimo rendiconto ⇒ mesi in fornitura pagati
         await upsertMonth(contract.id, period, "PAID", amount);
       } else {
         // Era dovuto ma non compare in nessun file e non è in giugno

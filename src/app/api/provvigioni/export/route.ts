@@ -5,9 +5,13 @@ import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
-import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
+import { buildProvvigioniContractWhere, provvigioniCompetenceWhere } from "@/lib/provvigioni-filters";
 import { formatMonthYear } from "@/lib/date-parse";
-import { periodLabel, toPeriod } from "@/lib/recurring";
+import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
+import {
+  parseProvvigioniVista,
+  vistaToRecurrenceMode,
+} from "@/lib/provvigioni-competence";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(request: Request) {
@@ -29,15 +33,25 @@ export async function GET(request: Request) {
     focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
       ? focusRaw
       : undefined;
-  const vista =
-    vistaRaw === "annuale"
-      ? "annuale"
-      : vistaRaw === "mensile" || vistaRaw === "ricorrente"
-        ? "mensile"
-        : "tutti";
-  const recurrenceMode =
-    vista === "mensile" ? "monthly" : vista === "annuale" ? "annual" : "all";
+  const vista = parseProvvigioniVista(vistaRaw);
+  const recurrenceMode = vistaToRecurrenceMode(vista);
   const canViewAll = hasPermission(session.role, "commissions.view_all");
+  const competenceRaw = url.searchParams.get("competence")?.trim() || "";
+  const competencePeriod =
+    /^\d{4}-\d{2}$/.test(competenceRaw) ? competenceRaw : undefined;
+  const settled =
+    settledPeriod && /^\d{4}-\d{2}$/.test(settledPeriod)
+      ? settledPeriod
+      : toPeriod(new Date());
+  const showCompetencePanel = vista === "mensile" || vista === "annuale";
+  const statoNeedsCompetence =
+    Boolean(stato?.includes("Incassato")) ||
+    Boolean(stato?.includes("Pagato")) ||
+    Boolean(stato?.includes("Da incassare"));
+  const effectiveCompetence =
+    competencePeriod ??
+    (showCompetencePanel || statoNeedsCompetence ? addMonths(settled, -1) : undefined);
+  const applyCompetenceToList = Boolean(effectiveCompetence);
 
   const baseContractWhere = buildProvvigioniContractWhere({
     canViewAll,
@@ -48,6 +62,7 @@ export async function GET(request: Request) {
     tipologia,
     q,
     recurrenceMode,
+    competencePeriod: effectiveCompetence,
   });
   const contractWhere: Prisma.ContractWhereInput =
     focus === "da-confermare"
@@ -66,7 +81,14 @@ export async function GET(request: Request) {
               },
             ],
           }
-        : baseContractWhere;
+        : applyCompetenceToList
+          ? {
+              AND: [
+                baseContractWhere,
+                provvigioniCompetenceWhere(effectiveCompetence!, stato),
+              ],
+            }
+          : baseContractWhere;
 
   const contracts = await prisma.contract.findMany({
     where: contractWhere,

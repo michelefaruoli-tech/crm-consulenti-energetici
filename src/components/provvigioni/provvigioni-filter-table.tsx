@@ -5,10 +5,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
-  bulkLiquidateRecurringPeriodAction,
-  bulkLiquidateSelectedAction,
-  bulkMarkPaidAction,
-  bulkPayRecurringAction,
+  bulkMarkIncassatoCompetenceAction,
+  bulkMarkPagatoCompetenceAction,
   bulkUpdateCommissionFieldsAction,
 } from "@/lib/commission-actions";
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
@@ -189,11 +187,12 @@ export function ProvvigioniFilterTable({
     }
   }
   const settleOpts = useMemo(() => settledOptions(), []);
-  const [settledPeriod, setSettledPeriod] = useState(listQuery?.competence ?? "");
-  const [paidMonth, setPaidMonth] = useState(() => {
-    const d = new Date();
-    return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-  });
+  const [competencePeriod, setCompetencePeriod] = useState(
+    () => listQuery?.competence ?? toPeriod(new Date()),
+  );
+  useEffect(() => {
+    if (listQuery?.competence) setCompetencePeriod(listQuery.competence);
+  }, [listQuery?.competence]);
   /** Contatore per forzare reset filtri colonna locali (ExcelFilterTable) */
   const [localFilterClearN, setLocalFilterClearN] = useState(0);
   const filterResetKey = [
@@ -495,10 +494,14 @@ export function ProvvigioniFilterTable({
         }
       | { ok: false; error: string }
     >,
-    options: { collectionMonth?: string } = {},
+    options: { competencePeriod?: string } = {},
   ) {
     if (selectedCount === 0) {
       setError("Seleziona almeno una riga (checkbox a sinistra).");
+      return;
+    }
+    if (!competencePeriod) {
+      setError("Seleziona un mese di competenza.");
       return;
     }
     const collaboratorsLabel =
@@ -514,9 +517,11 @@ export function ProvvigioniFilterTable({
         currency: "EUR",
       })}`,
       `Collaboratori: ${collaboratorsLabel}`,
-      options.collectionMonth
-        ? `Data incasso: ${options.collectionMonth}`
-        : null,
+      options.competencePeriod
+        ? `Mese competenza: ${periodLabel(options.competencePeriod)}`
+        : competencePeriod
+          ? `Mese competenza: ${periodLabel(competencePeriod)}`
+          : null,
       "",
       "Confermi l'operazione?",
     ]
@@ -1006,136 +1011,77 @@ export function ProvvigioniFilterTable({
           </span>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1fr_1.35fr_auto]">
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-800">Gettoni</p>
-            <div className="flex flex-wrap items-end gap-2">
-          <label className="text-[11px] text-slate-600">
-            Data incassato
-            <input
-              className="mt-0.5 block w-28 rounded border border-slate-300 bg-white px-2 py-1 text-xs"
-              value={paidMonth}
-              onChange={(e) => setPaidMonth(e.target.value)}
-              placeholder="MM/AAAA"
-              title="Usata per «Segna incassato» (selezione multipla)"
-            />
-          </label>
-          <button
-            type="button"
-            disabled={pending}
-            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-            onClick={() =>
-              runBulk(
-                "Segna incassato",
-                async () => {
-                  const fd = new FormData();
-                  fd.set("commissionIds", selectedCommissionIds.join(","));
-                  fd.set("collectionMonth", paidMonth);
-                  return bulkMarkPaidAction(fd);
-                },
-                { collectionMonth: paidMonth },
-              )
-            }
-          >
-            Segna incassato
-          </button>
+        <div className="mt-4 grid gap-3 xl:grid-cols-[1fr_auto]">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="text-[11px] text-slate-600">
+                Mese di competenza
+                <select
+                  className="mt-0.5 block min-w-[9rem] rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                  value={competencePeriod}
+                  onChange={(e) => {
+                    const period = e.target.value;
+                    setCompetencePeriod(period);
+                    if (!period) return;
+                    if (!confirmLeaveDrafts()) return;
+                    router.push(
+                      buildPageHref("/provvigioni", {
+                        ...baseQuery({ competence: period }),
+                        page: undefined,
+                      }),
+                    );
+                  }}
+                >
+                  {settleOpts.map((p) => (
+                    <option key={p} value={p}>
+                      {periodLabel(p)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={pending || !competencePeriod}
+                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+                onClick={() =>
+                  runBulk(
+                    `Segna incassato · ${periodLabel(competencePeriod)}`,
+                    async () => {
+                      const fd = new FormData();
+                      fd.set("commissionIds", selectedCommissionIds.join(","));
+                      fd.set("competencePeriod", competencePeriod);
+                      return bulkMarkIncassatoCompetenceAction(fd);
+                    },
+                    { competencePeriod },
+                  )
+                }
+                title="Incasso dal fornitore: data incasso = mese di competenza"
+              >
+                Segna incassato
+              </button>
 
-          {canConfirm ? (
-            <button
-              type="button"
-              disabled={pending}
-              className="rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
-              onClick={() =>
-                runBulk(
-                  "Segna pagato",
-                  async () => {
-                    const fd = new FormData();
-                    fd.set("contractIds", selectedContractIds.join(","));
-                    fd.set("collectionMonth", paidMonth);
-                    return bulkLiquidateSelectedAction(fd);
-                  },
-                  { collectionMonth: paidMonth },
-                )
-              }
-              title="Liquidazione collaboratore: imposta stato PROVVIGIONE_LIQUIDATA"
-            >
-              Segna pagato
-            </button>
-          ) : null}
-
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900">Ricorrenze</p>
-            <div className="flex flex-wrap items-end gap-2">
-          <label className="text-[11px] text-slate-600">
-            Mese di competenza
-            <select
-              className="mt-0.5 block rounded border border-slate-300 bg-white px-2 py-1 text-xs"
-              value={settledPeriod}
-              onChange={(e) => {
-                const period = e.target.value;
-                setSettledPeriod(period);
-                if (!confirmLeaveDrafts()) return;
-                router.push(
-                  buildPageHref("/provvigioni", {
-                    ...baseQuery({ competence: period, vista: "mensile" }),
-                    page: undefined,
-                  }),
-                );
-              }}
-            >
-              <option value="">Seleziona mese</option>
-              {settleOpts.map((p) => (
-                <option key={p} value={p}>
-                  {periodLabel(p)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            disabled={pending || !settledPeriod}
-            className="rounded-lg bg-amber-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-800 disabled:opacity-50"
-            onClick={() =>
-              runBulk(
-                `Segna incassato · competenza ${periodLabel(settledPeriod)}`,
-                async () => {
-                  const fd = new FormData();
-                  fd.set("commissionIds", selectedCommissionIds.join(","));
-                  fd.set("settledPeriod", settledPeriod);
-                  fd.set("competencePeriod", settledPeriod);
-                  fd.set("mode", "exact");
-                  return bulkPayRecurringAction(fd);
-                },
-              )
-            }
-          >
-            Segna incassato
-          </button>
-
-          {canConfirm ? (
-            <button
-              type="button"
-              disabled={pending || !settledPeriod}
-              className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-900 disabled:opacity-50"
-              onClick={() =>
-                runBulk(
-                  `Segna pagato · competenza ${periodLabel(settledPeriod)}`,
-                  async () => {
-                    const fd = new FormData();
-                    fd.set("commissionIds", selectedCommissionIds.join(","));
-                    fd.set("competencePeriod", settledPeriod);
-                    return bulkLiquidateRecurringPeriodAction(fd);
-                  },
-                )
-              }
-            >
-              Segna pagato
-            </button>
-          ) : null}
-
+              {canConfirm ? (
+                <button
+                  type="button"
+                  disabled={pending || !competencePeriod}
+                  className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-900 disabled:opacity-50"
+                  onClick={() =>
+                    runBulk(
+                      `Segna pagato · ${periodLabel(competencePeriod)}`,
+                      async () => {
+                        const fd = new FormData();
+                        fd.set("commissionIds", selectedCommissionIds.join(","));
+                        fd.set("competencePeriod", competencePeriod);
+                        return bulkMarkPagatoCompetenceAction(fd);
+                      },
+                      { competencePeriod },
+                    )
+                  }
+                  title="Liquidazione collaboratore per il mese di competenza scelto"
+                >
+                  Segna pagato
+                </button>
+              ) : null}
             </div>
           </div>
 

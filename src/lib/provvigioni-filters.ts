@@ -33,6 +33,8 @@ export type ProvvigioniFilters = {
   recurrenceMode?: "exclude" | "only" | "all" | "monthly" | "annual" | null;
   /** Scope backoffice / collaboratore (AND aggiuntivo) */
   visibility?: Prisma.ContractWhereInput | null;
+  /** Mese competenza YYYY-MM — allinea filtro Incassato/Pagato alle rate mensili */
+  competencePeriod?: string | null;
 };
 
 /** Qualsiasi ricorrenza (mensile M o annuale R + legacy). */
@@ -107,15 +109,21 @@ export function formatStatoFilter(values: string[]): string | null {
  * - Stornato = storno gettone applicato (clawback, importo negativo in Report)
  * - KO / Cessato = pratica chiusa (anche se aveva già un incasso storico)
  */
+export type ProvvigioneStatoWhereOpts = {
+  /** Mese competenza YYYY-MM per rate ricorrenti Helios */
+  competencePeriod?: string | null;
+};
+
 export function provvigioneStatoWhere(
   stato: string | null | undefined,
+  opts?: ProvvigioneStatoWhereOpts,
 ): Prisma.ContractWhereInput | undefined {
   const parts = parseStatoFilter(stato);
   if (parts.length === 0) return undefined;
-  if (parts.length === 1) return provvigioneStatoWhereOne(parts[0]!);
+  if (parts.length === 1) return provvigioneStatoWhereOne(parts[0]!, opts);
 
   const ors = parts
-    .map((p) => provvigioneStatoWhereOne(p))
+    .map((p) => provvigioneStatoWhereOne(p, opts))
     .filter((w): w is Prisma.ContractWhereInput => Boolean(w));
   if (ors.length === 0) return undefined;
   if (ors.length === 1) return ors[0];
@@ -124,6 +132,7 @@ export function provvigioneStatoWhere(
 
 function provvigioneStatoWhereOne(
   stato: string,
+  opts?: ProvvigioneStatoWhereOpts,
 ): Prisma.ContractWhereInput | undefined {
   const s = stato.trim();
   if (!s || s === "Tutti") return undefined;
@@ -142,16 +151,45 @@ function provvigioneStatoWhereOne(
     };
   }
   if (s === "Incassato") {
+    const competence = opts?.competencePeriod?.trim();
+    const excludedStatus = [
+      "PROVVIGIONE_LIQUIDATA",
+      "DA_CONTROLLARE",
+      "STORNATO",
+      ...KO_STATUSES,
+    ] as const;
+    const recurringPaid: Prisma.RecurringMonthWhereInput = {
+      status: "PAID",
+      ...(competence ? { period: competence } : {}),
+    };
     return {
-      collectionDate: { not: null },
-      status: {
-        notIn: ["PROVVIGIONE_LIQUIDATA", "DA_CONTROLLARE", "STORNATO", ...KO_STATUSES],
-      },
-      // Solo già in fornitura (altrimenti la data è attivazione, non incasso)
-      supplyStartDate: { lte: today },
+      OR: [
+        {
+          collectionDate: { not: null },
+          status: { notIn: [...excludedStatus] },
+          // Solo già in fornitura (altrimenti la data è attivazione, non incasso)
+          supplyStartDate: { lte: today },
+        },
+        {
+          recurringMonths: { some: recurringPaid },
+          status: { notIn: [...excludedStatus] },
+        },
+      ],
     };
   }
   if (s === "Da incassare") {
+    const competence = opts?.competencePeriod?.trim();
+    if (competence) {
+      return {
+        status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
+        recurringMonths: {
+          some: {
+            period: competence,
+            status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
+          },
+        },
+      };
+    }
     return {
       status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
       OR: [
@@ -163,9 +201,22 @@ function provvigioneStatoWhereOne(
     };
   }
   if (s === "Pagato") {
+    const competence = opts?.competencePeriod?.trim();
     return {
-      status: { equals: "PROVVIGIONE_LIQUIDATA" },
-      supplyStartDate: { lte: today },
+      OR: [
+        {
+          status: { equals: "PROVVIGIONE_LIQUIDATA" },
+          supplyStartDate: { lte: today },
+        },
+        {
+          recurringMonths: {
+            some: {
+              status: "LIQUIDATED",
+              ...(competence ? { period: competence } : {}),
+            },
+          },
+        },
+      ],
     };
   }
   if (s === "KO / Cessato") {
@@ -217,7 +268,9 @@ export function buildProvvigioniContractWhere(
     });
   }
 
-  const statoWhere = provvigioneStatoWhere(stato);
+  const statoWhere = provvigioneStatoWhere(stato, {
+    competencePeriod: f.competencePeriod,
+  });
   if (statoWhere) and.push(statoWhere);
 
   const clientTypes = tipologie
@@ -258,6 +311,31 @@ export function buildProvvigioniContractWhere(
     ...(collaboratorFilter ? { collaboratorId: collaboratorFilter } : {}),
     ...(and.length ? { AND: and } : {}),
   };
+}
+
+/** Filtro mese competenza: con Incassato/Pagato/Da incassare usa lo stato rata coerente. */
+export function provvigioniCompetenceWhere(
+  period: string,
+  stato?: string | null,
+): Prisma.ContractWhereInput {
+  const stati = parseStatoFilter(stato);
+  if (stati.length === 1 && stati[0] === "Incassato") {
+    return { recurringMonths: { some: { period, status: "PAID" } } };
+  }
+  if (stati.length === 1 && stati[0] === "Pagato") {
+    return { recurringMonths: { some: { period, status: "LIQUIDATED" } } };
+  }
+  if (stati.length === 1 && stati[0] === "Da incassare") {
+    return {
+      recurringMonths: {
+        some: {
+          period,
+          status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
+        },
+      },
+    };
+  }
+  return { recurringMonths: { some: { period, status: { not: "CLOSED" } } } };
 }
 
 export type ProvvigioniTotals = {

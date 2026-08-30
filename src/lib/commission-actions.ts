@@ -22,6 +22,7 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
+import { isRecurringMonthly } from "@/lib/recurring";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
@@ -790,6 +791,19 @@ function parseIdList(formData: FormData, key: string): string[] {
   return [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
 }
 
+function parseCompetencePeriod(formData: FormData): string {
+  const period = String(formData.get("competencePeriod") ?? "").trim();
+  if (!/^\d{4}-\d{2}$/.test(period)) {
+    throw new Error("Seleziona un mese di competenza valido");
+  }
+  return period;
+}
+
+function competencePeriodToDate(period: string): Date {
+  const [y, mo] = period.split("-").map(Number);
+  return new Date(y, mo - 1, 1);
+}
+
 async function assertCanAccessCommissions(
   session: { id: string; role: Parameters<typeof hasPermission>[0] },
   commissionIds: string[],
@@ -815,6 +829,276 @@ async function assertCanAccessCommissions(
     }
   }
   return rows;
+}
+
+/**
+ * Segna incassato per il mese di competenza scelto.
+ * Gettoni: collectionDate = primo giorno del mese.
+ * Ricorrenti mensili: rata PAID per quel mese, collectionDate allineata.
+ */
+export async function bulkMarkIncassatoCompetenceAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number; monthsPaid: number }> {
+  const session = await requireSession();
+  const period = parseCompetencePeriod(formData);
+  const collectionDate = competencePeriodToDate(period);
+  const ids = parseIdList(formData, "commissionIds");
+  const rows = await assertCanAccessCommissions(session, ids);
+
+  let monthsPaid = 0;
+  let count = 0;
+
+  for (const r of rows) {
+    if (isRecurringMonthly(r.contract.recurrence)) {
+      const existing = await prisma.recurringMonth.findUnique({
+        where: {
+          contractId_period: { contractId: r.contractId, period },
+        },
+      });
+      if (existing?.status === "LIQUIDATED") continue;
+
+      const amount = existing?.amount ?? r.expected;
+      if (existing) {
+        await prisma.recurringMonth.update({
+          where: { id: existing.id },
+          data: {
+            status: "PAID",
+            paidAt: existing.paidAt ?? new Date(),
+            settledPeriod: period,
+          },
+        });
+      } else {
+        await prisma.recurringMonth.create({
+          data: {
+            contractId: r.contractId,
+            period,
+            status: "PAID",
+            paidAt: new Date(),
+            settledPeriod: period,
+            amount: Number(amount ?? 0) || null,
+            note: "Incassato da selezione multipla",
+          },
+        });
+      }
+      monthsPaid += 1;
+
+      const contract = await prisma.contract.findUnique({
+        where: { id: r.contractId },
+        select: { status: true },
+      });
+      await prisma.contract.update({
+        where: { id: r.contractId },
+        data: {
+          paymentStatus: "Incassato",
+          collectionDate,
+          ...(contract?.status === "PROVVIGIONE_LIQUIDATA"
+            ? {}
+            : { status: "PAGATO_DAL_FORNITORE" }),
+        },
+      });
+      await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);
+      count += 1;
+      continue;
+    }
+
+    const full = await prisma.contract.findUnique({
+      where: { id: r.contractId },
+      select: {
+        insertionDate: true,
+        supplyStartDate: true,
+        operationType: true,
+        status: true,
+      },
+    });
+    const dates = full
+      ? fixFutureDatesForPayment({
+          insertionDate: full.insertionDate,
+          supplyStartDate: full.supplyStartDate,
+          operationType: full.operationType,
+        })
+      : null;
+    await prisma.contract.update({
+      where: { id: r.contractId },
+      data: {
+        paymentStatus: "Incassato",
+        collectionDate,
+        ...(full?.status === "PROVVIGIONE_LIQUIDATA"
+          ? {}
+          : { status: "PAGATO_DAL_FORNITORE" }),
+        ...(dates?.adjusted
+          ? {
+              insertionDate: dates.insertionDate,
+              supplyStartDate: dates.supplyStartDate,
+            }
+          : {}),
+      },
+    });
+    await prisma.commission.update({
+      where: { id: r.id },
+      data: {
+        received: Number(r.expected ?? 0) || 0,
+        accrued: Number(r.expected ?? 0) || 0,
+      },
+    });
+    await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);
+    count += 1;
+  }
+
+  if (count === 0) throw new Error("Nessun contratto aggiornato");
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Commission",
+    entityId: rows[0]?.contractId ?? "",
+    details: {
+      source: "bulk_mark_incassato_competence",
+      competencePeriod: period,
+      count,
+      monthsPaid,
+    },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath("/contratti");
+  return { ok: true, count, monthsPaid };
+}
+
+/**
+ * Segna pagato (liquidazione collaboratore) per il mese di competenza scelto.
+ * Gettoni: PROVVIGIONE_LIQUIDATA con collectionDate = mese competenza.
+ * Ricorrenti mensili: rata LIQUIDATED per quel mese.
+ */
+export async function bulkMarkPagatoCompetenceAction(
+  formData: FormData,
+): Promise<{ ok: true; count: number }> {
+  const session = await requireSession();
+  const period = parseCompetencePeriod(formData);
+  const collectionDate = competencePeriodToDate(period);
+  const ids = parseIdList(formData, "commissionIds");
+  const rows = await assertCanAccessCommissions(session, ids);
+
+  let count = 0;
+
+  for (const r of rows) {
+    if (isRecurringMonthly(r.contract.recurrence)) {
+      const commission = await prisma.commission.findUnique({
+        where: { id: r.id },
+        select: { expected: true, received: true, paid: true },
+      });
+      let month = await prisma.recurringMonth.findUnique({
+        where: {
+          contractId_period: { contractId: r.contractId, period },
+        },
+      });
+      const amount =
+        Number(month?.amount ?? commission?.expected ?? r.expected ?? 0) || 0;
+
+      if (month) {
+        if (month.status !== "LIQUIDATED") {
+          await prisma.recurringMonth.update({
+            where: { id: month.id },
+            data: {
+              status: "LIQUIDATED",
+              paidAt: month.paidAt ?? new Date(),
+              settledPeriod: period,
+              note: month.note ?? "Liquidato da selezione multipla",
+            },
+          });
+        }
+      } else {
+        month = await prisma.recurringMonth.create({
+          data: {
+            contractId: r.contractId,
+            period,
+            status: "LIQUIDATED",
+            paidAt: new Date(),
+            settledPeriod: period,
+            amount: amount || null,
+            note: "Liquidato da selezione multipla",
+          },
+        });
+      }
+
+      if (commission) {
+        const paid = Number(commission.paid ?? 0) || 0;
+        const received = Number(commission.received ?? 0) || 0;
+        await prisma.commission.update({
+          where: { id: r.id },
+          data: {
+            paid: paid + amount,
+            received: Math.max(received, paid + amount),
+          },
+        });
+      }
+
+      await prisma.contract.update({
+        where: { id: r.contractId },
+        data: {
+          status: "PROVVIGIONE_LIQUIDATA",
+          paymentStatus: "Pagato",
+          collectionDate,
+        },
+      });
+      await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);
+      count += 1;
+      continue;
+    }
+
+    const commission = await prisma.commission.findUnique({
+      where: { id: r.id },
+      select: { received: true, paid: true },
+    });
+    const received = Number(commission?.received ?? r.expected ?? 0) || 0;
+    const paid = Number(commission?.paid ?? 0) || 0;
+    const remaining = Math.max(0, received - paid);
+
+    if (remaining > 0) {
+      await prisma.commission.update({
+        where: { id: r.id },
+        data: { paid: paid + remaining },
+      });
+      await prisma.commissionEntry.create({
+        data: {
+          commissionId: r.id,
+          type: "paid",
+          amount: remaining,
+          paidById: session.id,
+          note: `Liquidazione collaboratore · competenza ${period}`,
+        },
+      });
+    }
+
+    await prisma.contract.update({
+      where: { id: r.contractId },
+      data: {
+        status: "PROVVIGIONE_LIQUIDATA",
+        paymentStatus: "Incassato",
+        collectionDate,
+      },
+    });
+    count += 1;
+  }
+
+  if (count === 0) throw new Error("Nessun contratto aggiornato");
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "UPDATE",
+    entity: "Commission",
+    entityId: rows[0]?.contractId ?? "",
+    details: {
+      source: "bulk_mark_pagato_competence",
+      competencePeriod: period,
+      count,
+    },
+  });
+
+  revalidatePath("/provvigioni");
+  revalidatePath("/");
+  revalidatePath("/contratti");
+  return { ok: true, count };
 }
 
 /** Segna incassato (collectionDate) su più contratti. */

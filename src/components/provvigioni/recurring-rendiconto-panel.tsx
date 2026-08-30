@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatCurrency } from "@/lib/commission";
-import { periodLabel } from "@/lib/recurring";
+import { periodLabel, addMonths } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
 
 export type SettledRow = {
@@ -130,10 +130,10 @@ export function RecurringRendicontoPanel({
                     </td>
                     <td className="px-3 py-2">
                       <Link
-                        href={`/provvigioni?collab=${c.id}&stato=Incassato&vista=ricorrente&settled=${settledPeriod}`}
+                        href={`/provvigioni?collab=${c.id}&stato=Incassato&vista=mensile&settled=${settledPeriod}&competence=${addMonths(settledPeriod, -1)}`}
                         className="text-emerald-700 underline hover:text-emerald-900"
                       >
-                        Vedi rate Incassato
+                        Vedi incassati
                       </Link>
                     </td>
                   </tr>
