@@ -153,6 +153,34 @@ export function effectiveGettone(opts: {
   return 0;
 }
 
+type RecurringMonthAmount = {
+  period: string;
+  amount: { toString(): string } | null;
+};
+
+/** Importo colonna Gettone (tabella + card): rata del mese competenza o gettone. */
+export function provvigioneDisplayAmount(opts: {
+  commissionExpected: number;
+  clientType: string;
+  supplierName: string;
+  recurringMonths?: RecurringMonthAmount[];
+  competencePeriod?: string | null;
+}): number {
+  const competence = opts.competencePeriod?.trim();
+  if (competence && opts.recurringMonths?.length) {
+    const row = opts.recurringMonths.find((m) => m.period === competence);
+    if (row?.amount != null) {
+      const monthAmount = Number(row.amount.toString());
+      if (monthAmount > 0) return monthAmount;
+    }
+  }
+  return effectiveGettone({
+    expected: opts.commissionExpected,
+    clientType: opts.clientType,
+    supplierName: opts.supplierName,
+  });
+}
+
 export { isRecurringMonthly };
 
 /** Ultima competenza pagata (Incassato o Pagato) — sempre utile in tabella. */

@@ -54,9 +54,9 @@ import { addMonths, periodLabel, toPeriod, isRecurring } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   defaultGettonePrivato,
-  effectiveGettone,
   lastRecurringIncassoNote,
   operationTypeLabel,
+  provvigioneDisplayAmount,
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
@@ -680,14 +680,6 @@ export default async function ProvvigioniPage({
       .filter(Boolean)
       .join(" · ") || undefined;
 
-    const competenceMonthRow = effectiveCompetence
-      ? contract.recurringMonths.find((m) => m.period === effectiveCompetence)
-      : undefined;
-    const monthAmount =
-      competenceMonthRow?.amount != null
-        ? Number(competenceMonthRow.amount.toString())
-        : null;
-
     return {
       id: contract.id,
       clientId: contract.clientId,
@@ -698,13 +690,13 @@ export default async function ProvvigioniPage({
       supplierName: contract.supplier.name,
       clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
       amount: String(
-        monthAmount != null && monthAmount > 0
-          ? monthAmount
-          : effectiveGettone({
-              expected: Number(item?.expected ?? 0),
-              clientType: contract.client.type,
-              supplierName: contract.supplier.name,
-            }),
+        provvigioneDisplayAmount({
+          commissionExpected: Number(item?.expected ?? 0),
+          clientType: contract.client.type,
+          supplierName: contract.supplier.name,
+          recurringMonths: contract.recurringMonths,
+          competencePeriod: effectiveCompetence,
+        }),
       ),
       supplyStartDate: supply ? formatItDate(supply) : "",
       operationType: operationTypeLabel(contract.operationType),

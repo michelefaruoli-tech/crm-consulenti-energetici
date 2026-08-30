@@ -1,14 +1,14 @@
 /**
- * Totali finanziari Provvigioni — stessa query Prisma della lista.
+ * Totali finanziari Provvigioni — stessa query e importi della lista.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   buildProvvigioniListWhere,
-  recurringWhereOr,
   type ProvvigioniFilters,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
+import { provvigioneDisplayAmount } from "@/lib/provvigioni-stato";
 
 export type ProvvigioniFinancialSummary = {
   incassatoCount: number;
@@ -19,86 +19,40 @@ export type ProvvigioniFinancialSummary = {
   pagatoAmount: number;
 };
 
-const UT_ONLY: Prisma.ContractWhereInput = {
-  OR: [
-    { recurrence: null },
-    { recurrence: { equals: "" } },
-    { NOT: { OR: recurringWhereOr } },
-  ],
-};
-
-const MISSING = ["MISSING", "PENDING", "ERROR_UNPAID"] as const;
-
 type StatoCard = "Incassato" | "Da incassare" | "Pagato";
 
-function num(value: Prisma.Decimal | number | null | undefined): number {
-  return Number(value?.toString() ?? 0) || 0;
-}
+const contractAmountSelect = {
+  client: { select: { type: true } },
+  supplier: { select: { name: true } },
+  commission: { select: { expected: true } },
+  recurringMonths: {
+    select: { period: true, amount: true },
+  },
+} as const;
 
+/** Somma importi colonna Gettone per tutti i contratti del filtro. */
 export async function sumAmountForStato(
   where: Prisma.ContractWhereInput,
-  stato: StatoCard,
+  _stato: StatoCard,
   competencePeriod: string | null,
 ): Promise<number> {
-  const periodFilter = competencePeriod ? { period: competencePeriod } : {};
+  const contracts = await prisma.contract.findMany({
+    where,
+    select: contractAmountSelect,
+  });
 
-  if (stato === "Incassato") {
-    const [recurring, ut] = await Promise.all([
-      prisma.recurringMonth.aggregate({
-        where: {
-          status: "PAID",
-          ...periodFilter,
-          contract: where,
-        },
-        _sum: { amount: true },
-      }),
-      prisma.commission.aggregate({
-        where: {
-          contract: { AND: [where, UT_ONLY] },
-        },
-        _sum: { expected: true },
-      }),
-    ]);
-    return num(recurring._sum.amount) + num(ut._sum.expected);
-  }
-
-  if (stato === "Da incassare") {
-    const [recurring, ut] = await Promise.all([
-      prisma.recurringMonth.aggregate({
-        where: {
-          status: { in: [...MISSING] },
-          ...periodFilter,
-          contract: where,
-        },
-        _sum: { amount: true },
-      }),
-      prisma.commission.aggregate({
-        where: {
-          contract: { AND: [where, UT_ONLY] },
-        },
-        _sum: { expected: true },
-      }),
-    ]);
-    return num(recurring._sum.amount) + num(ut._sum.expected);
-  }
-
-  const [recurring, ut] = await Promise.all([
-    prisma.recurringMonth.aggregate({
-      where: {
-        status: "LIQUIDATED",
-        ...periodFilter,
-        contract: where,
-      },
-      _sum: { amount: true },
-    }),
-    prisma.commission.aggregate({
-      where: {
-        contract: { AND: [where, { status: "PROVVIGIONE_LIQUIDATA" }] },
-      },
-      _sum: { expected: true },
-    }),
-  ]);
-  return num(recurring._sum.amount) + num(ut._sum.expected);
+  return contracts.reduce((sum, c) => {
+    return (
+      sum +
+      provvigioneDisplayAmount({
+        commissionExpected: Number(c.commission?.expected ?? 0),
+        clientType: c.client.type,
+        supplierName: c.supplier.name,
+        recurringMonths: c.recurringMonths,
+        competencePeriod,
+      })
+    );
+  }, 0);
 }
 
 export type ProvvigioniSummaryContext = {
