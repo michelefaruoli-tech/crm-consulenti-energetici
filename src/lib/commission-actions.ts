@@ -75,6 +75,49 @@ async function loadCommission(commissionId: string) {
   });
 }
 
+async function resolveCommissionForEdit(commissionOrContractId: string) {
+  const direct = await loadCommission(commissionOrContractId);
+  if (direct) return direct;
+
+  const contract = await prisma.contract.findUnique({
+    where: { id: commissionOrContractId },
+    select: {
+      id: true,
+      clientId: true,
+      collaboratorId: true,
+      collectionDate: true,
+      insertionDate: true,
+      operationType: true,
+      supplyStartDate: true,
+      status: true,
+      deletedAt: true,
+      client: { select: { type: true } },
+      supplier: { select: { name: true } },
+      commission: true,
+    },
+  });
+  if (!contract || contract.deletedAt) return null;
+
+  let commission = contract.commission;
+  if (!commission) {
+    commission = await prisma.commission.create({
+      data: {
+        contractId: contract.id,
+        expected: 0,
+        accrued: 0,
+        received: 0,
+        paid: 0,
+      },
+    });
+  }
+
+  const { commission: _drop, ...contractFields } = contract;
+  return {
+    ...commission,
+    contract: contractFields,
+  };
+}
+
 async function applyCommissionField(
   session: SessionLike,
   commission: CommissionWithContract,
@@ -228,13 +271,23 @@ async function applyCommissionField(
     }
     await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
   } else if (field === "recurrence") {
-    const { normalizeRecurrence } = await import("@/lib/recurring");
     const normalized = normalizeRecurrence(value);
     await prisma.contract.update({
       where: { id: commission.contractId },
       data: { recurrence: normalized },
     });
-    await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
+    void syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: commission.contractId,
+      details: {
+        field: "recurrence",
+        to: normalized,
+        source: "provvigioni_table",
+      },
+    });
   } else if (field === "operationType") {
     const mapped = operationTypeFromLabel(value);
     // Per date fornitura usiamo la normalizzazione storica (Switch/Voltura/Attivazione)
@@ -698,7 +751,6 @@ export async function bulkUpdateCommissionFieldsAction(
     }
 
     let count = 0;
-    const clientIds = new Set<string>();
 
     // Ordine sicuro per riga: prima i campi «normali», poi stato, infine storno
     // (così un Storno Sì/No manuale non viene sovrascritto dallo stato).
@@ -721,11 +773,10 @@ export async function bulkUpdateCommissionFieldsAction(
       const field = String(ch.field ?? "").trim();
       if (!commissionId || !field) continue;
 
-      const commission = await loadCommission(commissionId);
+      const commission = await resolveCommissionForEdit(commissionId);
       if (!commission || commission.contract.deletedAt) continue;
 
       await applyCommissionField(session, commission, field, String(ch.value ?? ""));
-      clientIds.add(commission.contract.clientId);
       count += 1;
     }
 
@@ -734,9 +785,7 @@ export async function bulkUpdateCommissionFieldsAction(
     }
 
     revalidatePath("/provvigioni");
-    revalidatePath("/");
     revalidatePath("/contratti");
-    for (const id of clientIds) revalidatePath(`/clienti/${id}`);
 
     return { ok: true, count };
   } catch (e) {
@@ -849,10 +898,8 @@ export async function bulkSetRecurrenceAction(
     }
 
     const canAll = hasPermission(session.role, "commissions.view_all");
-    let count = 0;
+    const toUpdate: typeof contracts = [];
     let skipped = 0;
-    const clientIds = new Set<string>();
-    const updatedIds: string[] = [];
 
     for (const contract of contracts) {
       if (!canAll && contract.collaboratorId !== session.id) {
@@ -864,17 +911,10 @@ export async function bulkSetRecurrenceAction(
         skipped += 1;
         continue;
       }
-
-      await prisma.contract.update({
-        where: { id: contract.id },
-        data: { recurrence: kind },
-      });
-      updatedIds.push(contract.id);
-      clientIds.add(contract.clientId);
-      count += 1;
+      toUpdate.push(contract);
     }
 
-    if (count === 0) {
+    if (toUpdate.length === 0) {
       return {
         ok: false,
         error:
@@ -883,6 +923,13 @@ export async function bulkSetRecurrenceAction(
             : "Nessun contratto aggiornato",
       };
     }
+
+    const updatedIds = toUpdate.map((c) => c.id);
+    await prisma.contract.updateMany({
+      where: { id: { in: updatedIds } },
+      data: { recurrence: kind },
+    });
+    const count = updatedIds.length;
 
     // Sync rate in background (evita timeout su selezioni grandi)
     void (async () => {
@@ -900,7 +947,7 @@ export async function bulkSetRecurrenceAction(
       userId: session.id,
       action: "UPDATE",
       entity: "Contract",
-      entityId: contracts[0]?.id ?? "",
+      entityId: toUpdate[0]?.id ?? "",
       details: {
         source: "bulk_set_recurrence",
         kind,
@@ -910,11 +957,7 @@ export async function bulkSetRecurrenceAction(
     });
 
     revalidatePath("/provvigioni");
-    revalidatePath("/");
     revalidatePath("/contratti");
-    for (const clientId of clientIds) {
-      revalidatePath(`/clienti/${clientId}`);
-    }
 
     return { ok: true, count, skipped, kind };
   } catch (e) {

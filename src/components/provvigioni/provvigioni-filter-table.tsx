@@ -13,7 +13,7 @@ import {
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
-import { toPeriod, periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS } from "@/lib/recurring";
+import { toPeriod, periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
   PROVVIGIONE_OPERATION_OPTIONS,
@@ -86,10 +86,10 @@ function contractIdOf(
   return rawId || String(r.commissionId ?? "");
 }
 
-function commissionIdOf(row: { commissionId?: string; id?: string } | Record<string, unknown>) {
+function commissionIdOf(row: { commissionId?: string; id?: string; contractId?: string } | Record<string, unknown>) {
   const c = String((row as { commissionId?: string }).commissionId || "");
   if (c) return c;
-  return String((row as { id?: string }).id || "");
+  return contractIdOf(row);
 }
 
 const STORAGE_KEY_ADVANCED = "provvigioni-colonne-avanzate";
@@ -411,13 +411,19 @@ export function ProvvigioniFilterTable({
     const id = rowId(row);
     if (!id) return;
     const base = rows.find((r) => rowId(r) === id);
-    const original = base ? originalCellValue(base, key) : "";
+    const normalizedValue = key === "recurrence" ? normalizeRecurrence(value) : value;
+    const original =
+      key === "recurrence"
+        ? normalizeRecurrence(String((base as ProvvigioneRow | undefined)?.recurrence ?? ""))
+        : base
+          ? originalCellValue(base, key)
+          : "";
     setDrafts((prev) => {
       const nextRow = { ...(prev[id] ?? {}) };
-      if (value === original) {
+      if (normalizedValue === original) {
         delete nextRow[key];
       } else {
-        nextRow[key] = value;
+        nextRow[key] = normalizedValue;
       }
       const next = { ...prev };
       if (Object.keys(nextRow).length === 0) delete next[id];
@@ -852,10 +858,11 @@ export function ProvvigioniFilterTable({
       getValue: (r) => baseCellValue(r, "recurrence"),
       sortKind: "text",
       render: (r) => {
-        const currentCode = shortRecurrence(getDraftValue(r, "recurrence"));
+        const draftRecurrence = getDraftValue(r, "recurrence");
         const dirty = isDraftDirty(r, "recurrence");
-        const value =
-          currentCode === "M" ? "M" : currentCode === "R" ? "R" : "Una tantum";
+        const value = normalizeRecurrence(
+          draftRecurrence || String(r.recurrence ?? ""),
+        );
         return (
           <select
             className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs font-semibold ${

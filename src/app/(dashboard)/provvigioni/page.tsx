@@ -47,7 +47,9 @@ import {
   buildStornoMaps,
   countExpandedListRows,
   expandContractsToProvvigioneRows,
+  fetchExpandedProvvigionePage,
   getRecurringExpandMode,
+  loadStornoContractsForMaps,
   type ContractForProvvigioneRow,
 } from "@/lib/provvigioni-rows";
 import { Button } from "@/components/ui/button";
@@ -228,12 +230,12 @@ export default async function ProvvigioniPage({
   };
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
-  // Prima di conteggi e avvisi genera tutte le rate dovute e rimuove quelle fuori periodo.
+  // Sync rate in background: non bloccare il render (evita timeout dopo bulk UT/M/R).
   if (recurringOperationalView) {
-    await syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
+    void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
       console.error("sync all recurring", e),
     );
-    await reconcileAllRecurringBounds().catch((e) =>
+    void reconcileAllRecurringBounds().catch((e) =>
       console.error("reconcile recurring bounds", e),
     );
   }
@@ -279,6 +281,9 @@ export default async function ProvvigioniPage({
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
   const listUsesExpandedRows = Boolean(expandMode);
+  const expandFetchAllForSort =
+    listUsesExpandedRows && sortByClient && total <= 400;
+  const expandUsePaginatedFetch = listUsesExpandedRows && !expandFetchAllForSort;
 
   const summaryContext = {
     focus,
@@ -405,7 +410,9 @@ export default async function ProvvigioniPage({
     tabCounts,
     financialSummary,
   ] = await Promise.all([
-    listUsesExpandedRows
+    expandUsePaginatedFetch
+      ? Promise.resolve([])
+      : listUsesExpandedRows
       ? prisma.contract.findMany({
           where: contractWhere,
           select: contractSelect,
@@ -482,16 +489,43 @@ export default async function ProvvigioniPage({
   const { tutti: countTutti, mensile: countMensili, annuale: countAnnuali } =
     tabCounts;
 
-  const contracts =
+  let contracts: (typeof contractsRaw)[number][] =
     pageContractIds == null
       ? contractsRaw
       : pageContractIds
           .map((id) => contractsRaw.find((c) => c.id === id))
           .filter((c): c is (typeof contractsRaw)[number] => Boolean(c));
 
+  const buildRowOpts = {
+    effectiveCompetence,
+    expandMode,
+    latestMap: new Map<string, boolean>(),
+    earlyMap: new Map<string, boolean>(),
+    now: new Date(),
+  };
+  let prebuiltExpandedRows: ProvvigioneRow[] | null = null;
+
+  if (expandUsePaginatedFetch && expandMode) {
+    const stornoContracts = await loadStornoContractsForMaps(contractWhere);
+    const stornoMaps = buildStornoMaps(stornoContracts);
+    buildRowOpts.latestMap = stornoMaps.latestMap;
+    buildRowOpts.earlyMap = stornoMaps.earlyMap;
+    const expandedPage = await fetchExpandedProvvigionePage({
+      contractWhere,
+      expandMode,
+      page,
+      pageSize: PAGE_SIZE,
+      contractSelect,
+      buildOpts: buildRowOpts,
+      orderBy: defaultOrderBy,
+    });
+    contracts = expandedPage.contracts as (typeof contractsRaw)[number][];
+    prebuiltExpandedRows = expandedPage.rows;
+  }
+
   // Allinea in memoria subito; scrittura DB in background (pagina più veloce)
   const alignJobs: Promise<unknown>[] = [];
-  const now = new Date();
+  const now = buildRowOpts.now;
   for (const c of contracts) {
     const supply =
       c.supplyStartDate ??
@@ -566,36 +600,38 @@ export default async function ProvvigioniPage({
     void Promise.all(alignJobs);
   }
 
-  const { latestMap, earlyMap } = buildStornoMaps(
-    contracts as ContractForProvvigioneRow[],
-  );
+  let rows: ProvvigioneRow[];
+  if (prebuiltExpandedRows) {
+    rows = prebuiltExpandedRows;
+  } else {
+    const stornoSource = listUsesExpandedRows
+      ? await loadStornoContractsForMaps(contractWhere)
+      : (contracts as ContractForProvvigioneRow[]);
+    const { latestMap, earlyMap } = buildStornoMaps(stornoSource);
+    buildRowOpts.latestMap = latestMap;
+    buildRowOpts.earlyMap = earlyMap;
+
+    rows = expandContractsToProvvigioneRows(
+      contracts as ContractForProvvigioneRow[],
+      buildRowOpts,
+    );
+
+    if (listUsesExpandedRows && sortByClient) {
+      rows.sort((a, b) => {
+        const cmp = a.clientName.localeCompare(b.clientName, "it", {
+          sensitivity: "base",
+          numeric: true,
+        });
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+    }
+
+    if (listUsesExpandedRows) {
+      rows = rows.slice(pageSkip(page), pageSkip(page) + PAGE_SIZE);
+    }
+  }
 
   const totals = { daConfermare: daConfermareCount };
-
-  let rows: ProvvigioneRow[] = expandContractsToProvvigioneRows(
-    contracts as ContractForProvvigioneRow[],
-    {
-      effectiveCompetence,
-      expandMode,
-      latestMap,
-      earlyMap,
-      now,
-    },
-  );
-
-  if (listUsesExpandedRows && sortByClient) {
-    rows.sort((a, b) => {
-      const cmp = a.clientName.localeCompare(b.clientName, "it", {
-        sensitivity: "base",
-        numeric: true,
-      });
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }
-
-  if (listUsesExpandedRows) {
-    rows = rows.slice(pageSkip(page), pageSkip(page) + PAGE_SIZE);
-  }
 
   const nameById = Object.fromEntries(collaboratorOptions.map((u) => [u.id, u.name]));
   const collabCounts = collabGroups
