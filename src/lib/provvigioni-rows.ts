@@ -458,16 +458,31 @@ export async function sumExpandedAmountForStato(
         client: { select: { type: true } },
         supplier: { select: { name: true } },
         commission: { select: { expected: true } },
+        ...(competencePeriod
+          ? {
+              recurringMonths: {
+                where: { period: competencePeriod },
+                select: { period: true, amount: true },
+              },
+            }
+          : {}),
       },
-      take: 8000,
     });
     return contracts.reduce(
       (sum, c) =>
         sum +
-        effectiveGettone({
-          expected: Number(c.commission?.expected ?? 0),
+        provvigioneDisplayAmount({
+          commissionExpected: Number(c.commission?.expected ?? 0),
           clientType: c.client.type,
           supplierName: c.supplier.name,
+          recurringMonths:
+            "recurringMonths" in c
+              ? (c.recurringMonths as Array<{
+                  period: string;
+                  amount: { toString(): string } | null;
+                }>)
+              : undefined,
+          competencePeriod,
         }),
       0,
     );
@@ -513,7 +528,6 @@ export async function sumExpandedAmountForStato(
         supplier: { select: { name: true } },
         commission: { select: { expected: true } },
       },
-      take: 8000,
     }),
   ]);
 

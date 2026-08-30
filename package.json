@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && tsx scripts/check-server-actions.ts && next build",
     "start": "next start",
     "lint": "eslint",
+    "check:server-actions": "tsx scripts/check-server-actions.ts",
     "postinstall": "prisma generate",
     "db:import-dati": "tsx scripts/import-excel-dati.ts",
     "db:setup": "prisma migrate deploy && tsx prisma/seed.ts",

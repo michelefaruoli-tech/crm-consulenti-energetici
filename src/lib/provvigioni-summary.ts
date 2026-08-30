@@ -77,13 +77,11 @@ async function summaryForStato(
     applyCompetenceToList: ctx.applyCompetenceToList,
   });
 
-  // Card non-attive: conteggio espanso (accurato) ma importo semplice (no expand per-rata)
-  // per evitare query pesanti in parallelo su Neon HTTP.
   const [count, amount] = await Promise.all([
     expandMode
       ? countExpandedListRows(where, expandMode)
       : prisma.contract.count({ where }),
-    sumExpandedAmountForStato(where, null, competenceForAmount),
+    sumExpandedAmountForStato(where, expandMode, competenceForAmount),
   ]);
   return { count, amount };
 }

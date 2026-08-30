@@ -858,12 +858,6 @@ function parseRecurrenceBulkKind(raw: string): RecurrenceKind {
   throw new Error("Scegli UT, M o R");
 }
 
-const RECURRENCE_BULK_LABELS: Record<RecurrenceKind, string> = {
-  "Una tantum": "Gettone (UT)",
-  M: "Ricorrente mensile (M)",
-  R: "Ricorrente annuale (R)",
-};
-
 /**
  * Imposta UT / M / R su più contratti selezionati (max 200).
  * Deduplica per contractId; sincronizza le rate ricorrenti dopo il cambio.
@@ -968,8 +962,6 @@ export async function bulkSetRecurrenceAction(
     };
   }
 }
-
-export { RECURRENCE_BULK_LABELS };
 
 function competencePeriodToDate(period: string): Date {
   const [y, mo] = period.split("-").map(Number);
