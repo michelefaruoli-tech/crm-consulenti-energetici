@@ -37,20 +37,22 @@ export async function GET(request: Request) {
   const recurrenceMode = vistaToRecurrenceMode(vista);
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const competenceRaw = url.searchParams.get("competence")?.trim() || "";
+  const competenceAll = competenceRaw === "tutti";
   const competencePeriod =
-    /^\d{4}-\d{2}$/.test(competenceRaw) ? competenceRaw : undefined;
+    competenceRaw &&
+    competenceRaw !== "tutti" &&
+    /^\d{4}-\d{2}$/.test(competenceRaw)
+      ? competenceRaw
+      : undefined;
   const settled =
     settledPeriod && /^\d{4}-\d{2}$/.test(settledPeriod)
       ? settledPeriod
       : toPeriod(new Date());
   const showCompetencePanel = vista === "mensile" || vista === "annuale";
-  const statoNeedsCompetence =
-    Boolean(stato?.includes("Incassato")) ||
-    Boolean(stato?.includes("Pagato")) ||
-    Boolean(stato?.includes("Da incassare"));
-  const effectiveCompetence =
-    competencePeriod ??
-    (showCompetencePanel || statoNeedsCompetence ? addMonths(settled, -1) : undefined);
+  const effectiveCompetence = competenceAll
+    ? undefined
+    : (competencePeriod ??
+      (showCompetencePanel ? addMonths(settled, -1) : undefined));
   const applyCompetenceToList = Boolean(effectiveCompetence);
 
   const baseContractWhere = buildProvvigioniContractWhere({

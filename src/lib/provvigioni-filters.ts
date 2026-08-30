@@ -158,45 +158,63 @@ function provvigioneStatoWhereOne(
       "STORNATO",
       ...KO_STATUSES,
     ] as const;
+    /** Solo PAID: LIQUIDATED = già pagato al collaboratore (scheda Pagato). */
     const recurringPaid: Prisma.RecurringMonthWhereInput = {
-      status: { in: ["PAID", "LIQUIDATED"] },
+      status: "PAID",
       ...(competence ? { period: competence } : {}),
     };
     return {
+      status: { notIn: [...excludedStatus] },
       OR: [
         {
-          collectionDate: { not: null },
-          status: { notIn: [...excludedStatus] },
-          // Solo già in fornitura (altrimenti la data è attivazione, non incasso)
-          supplyStartDate: { lte: today },
+          AND: [
+            {
+              OR: [
+                { recurrence: null },
+                { recurrence: { equals: "" } },
+                { NOT: { OR: recurringWhereOr } },
+              ],
+            },
+            { collectionDate: { not: null } },
+            { supplyStartDate: { lte: today } },
+          ],
         },
         {
           recurringMonths: { some: recurringPaid },
-          status: { notIn: [...excludedStatus] },
         },
       ],
     };
   }
   if (s === "Da incassare") {
     const competence = opts?.competencePeriod?.trim();
-    if (competence) {
-      return {
-        status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
-        recurringMonths: {
-          some: {
-            period: competence,
-            status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
-          },
-        },
-      };
-    }
+    const missingRate: Prisma.RecurringMonthWhereInput = {
+      status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
+      ...(competence ? { period: competence } : {}),
+    };
     return {
       status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
       OR: [
-        { collectionDate: null },
-        // Incasso/Pagato prematuro: non ancora in fornitura
-        { supplyStartDate: { gt: today } },
-        { supplyStartDate: null },
+        {
+          AND: [
+            {
+              OR: [
+                { recurrence: null },
+                { recurrence: { equals: "" } },
+                { NOT: { OR: recurringWhereOr } },
+              ],
+            },
+            {
+              OR: [
+                { collectionDate: null },
+                { supplyStartDate: { gt: today } },
+                { supplyStartDate: null },
+              ],
+            },
+          ],
+        },
+        {
+          recurringMonths: { some: missingRate },
+        },
       ],
     };
   }
@@ -322,7 +340,7 @@ export function provvigioniCompetenceWhere(
   if (stati.length === 1 && stati[0] === "Incassato") {
     return {
       recurringMonths: {
-        some: { period, status: { in: ["PAID", "LIQUIDATED"] } },
+        some: { period, status: "PAID" },
       },
     };
   }

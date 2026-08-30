@@ -142,16 +142,18 @@ export default async function ProvvigioniPage({
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
   const reconciliationPeriod = addMonths(settledPeriod, -1);
   const showCompetencePanel = vista === "mensile" || vista === "annuale";
-  const statoNeedsCompetence =
-    Boolean(stato?.includes("Incassato")) ||
-    Boolean(stato?.includes("Pagato")) ||
-    Boolean(stato?.includes("Da incassare"));
-  /** Mese competenza: esplicito, default su M/R o filtro stato; «tutti» = nessun filtro mese */
+  /** Mese competenza: esplicito o default su schede M/R; mai forzato dal solo filtro stato su Tutti */
   const effectiveCompetence = competenceAll
     ? undefined
     : (competencePeriod ??
-      (showCompetencePanel || statoNeedsCompetence ? reconciliationPeriod : undefined));
+      (showCompetencePanel ? reconciliationPeriod : undefined));
   const applyCompetenceToList = Boolean(effectiveCompetence);
+  /** Valore URL competenza: tutti | YYYY-MM */
+  const viewingAllPeriods =
+    competenceAll || (!competencePeriod && !showCompetencePanel);
+  const competenceQueryValue = viewingAllPeriods
+    ? "tutti"
+    : effectiveCompetence;
 
   const statsBaseWhere = buildProvvigioniContractWhere({
     canViewAll: canViewAll || isScoped,
@@ -516,7 +518,7 @@ export default async function ProvvigioniPage({
     loadProvvigioniFinancialSummary(
       statsBaseWhere,
       vistaTab,
-      competenceAll ? null : effectiveCompetence ?? null,
+      viewingAllPeriods ? null : effectiveCompetence ?? null,
     ),
   ]);
 
@@ -843,7 +845,7 @@ export default async function ProvvigioniPage({
     q,
     vista: vistaTab === "tutti" ? undefined : vistaTab,
     focus,
-    competence: competenceAll ? "tutti" : effectiveCompetence,
+    competence: competenceQueryValue,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
@@ -875,8 +877,7 @@ export default async function ProvvigioniPage({
   if (q) exportParams.set("q", q);
   if (vistaTab !== "tutti") exportParams.set("vista", vistaTab);
   if (focus) exportParams.set("focus", focus);
-  if (competenceAll) exportParams.set("competence", "tutti");
-  else if (effectiveCompetence) exportParams.set("competence", effectiveCompetence);
+  if (competenceQueryValue) exportParams.set("competence", competenceQueryValue);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
   function vistaHref(nextVista: "tutti" | "mensile" | "annuale") {
@@ -888,11 +889,7 @@ export default async function ProvvigioniPage({
       ...(tipologia ? { tipologia } : {}),
       ...(q ? { q } : {}),
       ...(focus ? { focus } : {}),
-      ...(competenceAll
-        ? { competence: "tutti" }
-        : effectiveCompetence && (nextVista === "mensile" || nextVista === "annuale")
-          ? { competence: effectiveCompetence }
-          : {}),
+      ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
       ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
   }
@@ -905,11 +902,7 @@ export default async function ProvvigioniPage({
     q,
     focus,
     stato,
-    ...(competenceAll
-      ? { competence: "tutti" }
-      : effectiveCompetence && showCompetencePanel
-        ? { competence: effectiveCompetence }
-        : {}),
+    ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
   };
 
   const sortHint = sortByClient
@@ -970,7 +963,7 @@ export default async function ProvvigioniPage({
       <ProvvigioniToolbar
         q={q}
         competencePeriod={effectiveCompetence ?? null}
-        competenceAll={competenceAll}
+        competenceAll={viewingAllPeriods}
         monthOptions={competenceMonthOptions()}
         queryBase={tabQueryBase}
         clearHref={vistaHref(vistaTab)}
@@ -988,19 +981,10 @@ export default async function ProvvigioniPage({
       <ProvvigioniSummaryCards
         summary={financialSummary}
         competencePeriod={effectiveCompetence ?? null}
-        competenceAll={competenceAll}
+        competenceAll={viewingAllPeriods}
         queryBase={tabQueryBase}
         contractCount={total}
       />
-
-      {statoNeedsCompetence && vistaTab === "tutti" && !competenceAll ? (
-        <p className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
-          Filtro <strong>{stato}</strong> attivo: stai vedendo le rate del mese{" "}
-          <strong>{periodLabel(effectiveCompetence!)}</strong>. Per l&apos;elenco completo
-          usa la scheda <strong>M</strong> o <strong>R</strong>, oppure seleziona
-          &quot;Tutti i mesi&quot; nel periodo competenza.
-        </p>
-      ) : null}
 
       <ProvvigioniAnomaliesSection alertCount={anomalyCount}>
         {alertRows.length > 0 ? (
@@ -1048,7 +1032,7 @@ export default async function ProvvigioniPage({
           q,
           vista: vistaTab === "tutti" ? undefined : vistaTab,
           focus,
-          competence: competenceAll ? "tutti" : effectiveCompetence,
+          competence: competenceQueryValue,
         }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}
