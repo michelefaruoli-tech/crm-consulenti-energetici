@@ -52,11 +52,10 @@ async function summaryForStato(
       ? null
       : getRecurringExpandMode(stato, viewingAllPeriods, ctx.effectiveCompetence);
 
-  if (
-    ctx.activeStato?.trim() === stato &&
-    ctx.activeListWhere &&
-    ctx.activeListTotal !== undefined
-  ) {
+  const isActive = ctx.activeStato?.trim() === stato;
+
+  // Card attiva: usa dati già calcolati per il conteggio; espansi solo se necessario.
+  if (isActive && ctx.activeListWhere && ctx.activeListTotal !== undefined) {
     return {
       count: ctx.activeListTotal,
       amount: await sumExpandedAmountForStato(
@@ -78,11 +77,13 @@ async function summaryForStato(
     applyCompetenceToList: ctx.applyCompetenceToList,
   });
 
+  // Card non-attive: conteggio espanso (accurato) ma importo semplice (no expand per-rata)
+  // per evitare query pesanti in parallelo su Neon HTTP.
   const [count, amount] = await Promise.all([
     expandMode
       ? countExpandedListRows(where, expandMode)
       : prisma.contract.count({ where }),
-    sumExpandedAmountForStato(where, expandMode, competenceForAmount),
+    sumExpandedAmountForStato(where, null, competenceForAmount),
   ]);
   return { count, amount };
 }
@@ -94,11 +95,10 @@ export async function loadProvvigioniFinancialSummary(
   _vista: SummaryVista,
   ctx: ProvvigioniSummaryContext,
 ): Promise<ProvvigioniFinancialSummary> {
-  const [incassato, daIncassare, pagato] = await Promise.all([
-    summaryForStato(base, "Incassato", ctx),
-    summaryForStato(base, "Da incassare", ctx),
-    summaryForStato(base, "Pagato", ctx),
-  ]);
+  // Eseguire in serie per non saturare le connessioni Neon HTTP con troppe query parallele.
+  const incassato = await summaryForStato(base, "Incassato", ctx);
+  const daIncassare = await summaryForStato(base, "Da incassare", ctx);
+  const pagato = await summaryForStato(base, "Pagato", ctx);
 
   return {
     incassatoCount: incassato.count,

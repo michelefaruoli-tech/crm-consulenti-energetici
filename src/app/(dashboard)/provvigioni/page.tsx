@@ -399,6 +399,8 @@ export default async function ProvvigioniPage({
       .map((r) => r.id);
   }
 
+  // Separiamo il summary finanziario (query pesanti) dal batch principale per non
+  // saturare le connessioni Neon HTTP con troppi paralleli contemporaneamente.
   const [
     contractsRaw,
     daConfermareCount,
@@ -409,7 +411,6 @@ export default async function ProvvigioniPage({
     collabGroups,
     deletedRecent,
     tabCounts,
-    financialSummary,
   ] = await Promise.all([
     expandUsePaginatedFetch
       ? Promise.resolve([])
@@ -484,8 +485,10 @@ export default async function ProvvigioniPage({
       take: 12,
     }),
     loadProvvigioniTabCounts(tabCountsBase, activeRecurringPeriod),
-    loadProvvigioniFinancialSummary(statsBaseFilters, vistaTab, summaryContext),
   ]);
+
+  // Summary finanziario eseguito dopo il batch principale (query in serie internamente).
+  const financialSummary = await loadProvvigioniFinancialSummary(statsBaseFilters, vistaTab, summaryContext);
 
   const { tutti: countTutti, mensile: countMensili, annuale: countAnnuali } =
     tabCounts;
