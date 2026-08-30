@@ -152,14 +152,18 @@ export async function mergeDuplicateClientsOnce(): Promise<{
     if (!sources.length) continue;
 
     for (const src of sources) {
-      await prisma.contract.updateMany({
-        where: { clientId: src.id },
-        data: { clientId: keeper.id },
-      });
-      await prisma.document.updateMany({
-        where: { clientId: src.id },
-        data: { clientId: keeper.id },
-      });
+      // SQL grezzo: Prisma avvolge updateMany in una transazione, non supportata
+      // dall'adapter Neon HTTP.
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Contract" SET "clientId" = $1 WHERE "clientId" = $2`,
+        keeper.id,
+        src.id,
+      );
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Document" SET "clientId" = $1 WHERE "clientId" = $2`,
+        keeper.id,
+        src.id,
+      );
 
       await prisma.client.update({
         where: { id: keeper.id },

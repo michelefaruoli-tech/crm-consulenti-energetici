@@ -135,22 +135,25 @@ export async function mergeDuplicateSuppliers(): Promise<MergeSuppliersResult> {
     let rulesMoved = 0;
 
     for (const other of others) {
-      const c = await prisma.contract.updateMany({
-        where: { supplierId: other.id },
-        data: { supplierId: keep.id },
-      });
-      contractsMoved += c.count;
+      // SQL grezzo: Prisma avvolge updateMany in una transazione, non supportata
+      // dall'adapter Neon HTTP.
+      contractsMoved += await prisma.$executeRawUnsafe(
+        `UPDATE "Contract" SET "supplierId" = $1 WHERE "supplierId" = $2`,
+        keep.id,
+        other.id,
+      );
 
-      const rules = await prisma.commissionRule.updateMany({
-        where: { supplierId: other.id },
-        data: { supplierId: keep.id },
-      });
-      rulesMoved += rules.count;
+      rulesMoved += await prisma.$executeRawUnsafe(
+        `UPDATE "CommissionRule" SET "supplierId" = $1 WHERE "supplierId" = $2`,
+        keep.id,
+        other.id,
+      );
 
-      await prisma.service.updateMany({
-        where: { supplierId: other.id },
-        data: { supplierId: keep.id },
-      });
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Service" SET "supplierId" = $1 WHERE "supplierId" = $2`,
+        keep.id,
+        other.id,
+      );
 
       // Disattiva con nome interno: niente «Enel (unito in…)» in filtri/ricerche
       const mergedCode = `${other.code}_MERGED_${Date.now()}`.slice(0, 60);

@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && tsx scripts/check-server-actions.ts && next build",
+    "build": "prisma generate && npm run check && next build",
     "start": "next start",
     "lint": "eslint",
+    "check": "tsx scripts/check-server-actions.ts && tsx scripts/check-neon-http.ts",
     "check:server-actions": "tsx scripts/check-server-actions.ts",
+    "check:neon-http": "tsx scripts/check-neon-http.ts",
     "check:recurrence": "tsx scripts/verify-recurrence-kind.ts",
     "postinstall": "prisma generate",
     "db:import-dati": "tsx scripts/import-excel-dati.ts",

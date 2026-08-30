@@ -924,10 +924,18 @@ export async function bulkSetRecurrenceAction(
     }
 
     const updatedIds = toUpdate.map((c) => c.id);
-    await prisma.contract.updateMany({
-      where: { id: { in: updatedIds } },
-      data: recurrenceWriteData(kind),
-    });
+    // SQL grezzo: Prisma avvolge updateMany in una transazione, non supportata
+    // dall'adapter Neon HTTP. Una sola statement per tutti gli ID selezionati.
+    const { recurrence, recurrenceKind } = recurrenceWriteData(kind);
+    const idParams = updatedIds.map((_, i) => `$${i + 3}`).join(", ");
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Contract"
+         SET "recurrence" = $1, "recurrenceKind" = $2::"ContractRecurrenceKind"
+       WHERE "id" IN (${idParams})`,
+      recurrence,
+      recurrenceKind,
+      ...updatedIds,
+    );
     const count = updatedIds.length;
 
     // Sync rate in background (evita timeout su selezioni grandi)
