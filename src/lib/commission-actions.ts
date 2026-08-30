@@ -852,6 +852,7 @@ export async function bulkSetRecurrenceAction(
     let count = 0;
     let skipped = 0;
     const clientIds = new Set<string>();
+    const updatedIds: string[] = [];
 
     for (const contract of contracts) {
       if (!canAll && contract.collaboratorId !== session.id) {
@@ -868,7 +869,7 @@ export async function bulkSetRecurrenceAction(
         where: { id: contract.id },
         data: { recurrence: kind },
       });
-      await syncRecurringMonthsForContract(contract.id).catch(() => undefined);
+      updatedIds.push(contract.id);
       clientIds.add(contract.clientId);
       count += 1;
     }
@@ -882,6 +883,18 @@ export async function bulkSetRecurrenceAction(
             : "Nessun contratto aggiornato",
       };
     }
+
+    // Sync rate in background (evita timeout su selezioni grandi)
+    void (async () => {
+      for (let i = 0; i < updatedIds.length; i += 10) {
+        const chunk = updatedIds.slice(i, i + 10);
+        await Promise.all(
+          chunk.map((id) =>
+            syncRecurringMonthsForContract(id).catch(() => undefined),
+          ),
+        );
+      }
+    })();
 
     await writeAuditLog({
       userId: session.id,

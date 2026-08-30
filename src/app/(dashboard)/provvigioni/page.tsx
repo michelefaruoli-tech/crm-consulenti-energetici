@@ -58,6 +58,8 @@ import {
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
 
+export const maxDuration = 60;
+
 export const dynamic = "force-dynamic";
 
 type SearchParams = {
@@ -264,11 +266,6 @@ export default async function ProvvigioniPage({
       console.error("sync recurring", e),
     );
   }
-
-  // Rate aggiornate per conteggio badge tab M (mese operativo)
-  await syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
-    console.error("sync recurring tab counts", e),
-  );
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
   const expandMode = getRecurringExpandMode(
