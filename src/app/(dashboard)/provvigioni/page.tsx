@@ -50,6 +50,8 @@ import {
 } from "@/lib/provvigioni-filters";
 import {
   competenceMonthOptions,
+  competenceSummaryForStato,
+  incassatoCompetenceTotals,
   loadCompetenceMonthStats,
   parseProvvigioniVista,
   vistaToRecurrenceMode,
@@ -901,6 +903,12 @@ export default async function ProvvigioniPage({
     settledPeriod: row.settledPeriod,
   }));
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
+  const competenceSummary = competenceStats
+    ? competenceSummaryForStato(competenceStats, stato)
+    : null;
+  const incassatoTotals = competenceStats
+    ? incassatoCompetenceTotals(competenceStats)
+    : null;
   const queryBase = {
     collab: collabFilter,
     settled: settledPeriod,
@@ -1002,8 +1010,14 @@ export default async function ProvvigioniPage({
           </h1>
           <p className="text-sm text-slate-500 sm:text-base">
             {total} contratti in elenco
-            {competenceStats && filterHints.some((h) => h?.includes("competenza"))
-              ? ` · ${competenceStats.paidCount} incassate ${formatCurrency(competenceStats.paidAmount)}`
+            {competenceSummary && filterHints.some((h) => h?.includes("competenza"))
+              ? stato === "Pagato"
+                ? ` · ${competenceSummary.primaryCount} pagate ${formatCurrency(competenceSummary.primaryAmount)}`
+                : stato === "Da incassare"
+                  ? ` · ${competenceSummary.primaryCount} da incassare ${formatCurrency(competenceSummary.primaryAmount)}`
+                  : incassatoTotals
+                    ? ` · ${incassatoTotals.count} incassate ${formatCurrency(incassatoTotals.amount)}`
+                    : ""
               : ""}
             {filterHints.length
               ? ` · ${filterHints.join(" · ")}`
@@ -1179,30 +1193,64 @@ export default async function ProvvigioniPage({
           <p className="mt-2 text-3xl font-bold text-slate-900">{total}</p>
           <p className="mt-1 text-xs text-slate-500">Con filtri attivi</p>
         </div>
-        {competenceStats ? (
+        {competenceSummary ? (
           <>
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
-                Incassate {periodLabel(competenceStats.period)}
+            <div
+              className={`rounded-xl border p-4 shadow-sm ${
+                competenceSummary.primaryTone === "indigo"
+                  ? "border-indigo-200 bg-indigo-50"
+                  : competenceSummary.primaryTone === "amber"
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-emerald-200 bg-emerald-50"
+              }`}
+            >
+              <p
+                className={`text-xs font-semibold uppercase tracking-wide ${
+                  competenceSummary.primaryTone === "indigo"
+                    ? "text-indigo-800"
+                    : competenceSummary.primaryTone === "amber"
+                      ? "text-amber-800"
+                      : "text-emerald-800"
+                }`}
+              >
+                {competenceSummary.primaryLabel} {periodLabel(competenceStats!.period)}
               </p>
-              <p className="mt-2 text-3xl font-bold text-emerald-900">
-                {competenceStats.paidCount}
+              <p
+                className={`mt-2 text-3xl font-bold ${
+                  competenceSummary.primaryTone === "indigo"
+                    ? "text-indigo-900"
+                    : competenceSummary.primaryTone === "amber"
+                      ? "text-amber-950"
+                      : "text-emerald-900"
+                }`}
+              >
+                {competenceSummary.primaryCount}
               </p>
-              <p className="mt-1 text-sm font-semibold text-emerald-800">
-                {formatCurrency(competenceStats.paidAmount)}
+              <p
+                className={`mt-1 text-sm font-semibold ${
+                  competenceSummary.primaryTone === "indigo"
+                    ? "text-indigo-800"
+                    : competenceSummary.primaryTone === "amber"
+                      ? "text-amber-800"
+                      : "text-emerald-800"
+                }`}
+              >
+                {formatCurrency(competenceSummary.primaryAmount)}
               </p>
             </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                Da incassare {periodLabel(competenceStats.period)}
-              </p>
-              <p className="mt-2 text-3xl font-bold text-amber-950">
-                {competenceStats.missingCount}
-              </p>
-              <p className="mt-1 text-sm font-semibold text-amber-800">
-                {formatCurrency(competenceStats.missingAmount)}
-              </p>
-            </div>
+            {competenceSummary.secondaryLabel ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                  {competenceSummary.secondaryLabel} {periodLabel(competenceStats!.period)}
+                </p>
+                <p className="mt-2 text-3xl font-bold text-amber-950">
+                  {competenceSummary.secondaryCount}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-amber-800">
+                  {formatCurrency(competenceSummary.secondaryAmount)}
+                </p>
+              </div>
+            ) : null}
           </>
         ) : (
           <>
@@ -1235,18 +1283,24 @@ export default async function ProvvigioniPage({
                   : "Complessivo"}
           </p>
           <p className="mt-2 text-3xl font-bold text-sky-950">
-            {competenceStats
-              ? formatCurrency(competenceStats.paidAmount + competenceStats.missingAmount)
-              : formatCurrency(totals.ricorrenti || totals.complessivo)}
+            {competenceSummary
+              ? formatCurrency(competenceSummary.overallAmount)
+              : competenceStats
+                ? formatCurrency(
+                    incassatoTotals!.amount + competenceStats.missingAmount,
+                  )
+                : formatCurrency(totals.ricorrenti || totals.complessivo)}
           </p>
           <p className="mt-1 text-xs text-sky-800/70">
             {vista === "ut"
               ? `${countGettoni} contratti UT`
-              : vista === "mensile"
-                ? `${countMensili} contratti M attivi`
-                : vista === "annuale"
-                  ? `${countAnnuali} contratti R attivi`
-                  : `${countTutti} contratti totali`}
+              : competenceSummary || competenceStats
+                ? `${total} contratti con filtri attivi`
+                : vista === "mensile"
+                  ? `${countMensili} contratti M attivi`
+                  : vista === "annuale"
+                    ? `${countAnnuali} contratti R attivi`
+                    : `${countTutti} contratti totali`}
           </p>
         </div>
       </div>

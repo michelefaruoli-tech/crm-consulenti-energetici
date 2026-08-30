@@ -159,7 +159,7 @@ function provvigioneStatoWhereOne(
       ...KO_STATUSES,
     ] as const;
     const recurringPaid: Prisma.RecurringMonthWhereInput = {
-      status: "PAID",
+      status: { in: ["PAID", "LIQUIDATED"] },
       ...(competence ? { period: competence } : {}),
     };
     return {
@@ -320,7 +320,11 @@ export function provvigioniCompetenceWhere(
 ): Prisma.ContractWhereInput {
   const stati = parseStatoFilter(stato);
   if (stati.length === 1 && stati[0] === "Incassato") {
-    return { recurringMonths: { some: { period, status: "PAID" } } };
+    return {
+      recurringMonths: {
+        some: { period, status: { in: ["PAID", "LIQUIDATED"] } },
+      },
+    };
   }
   if (stati.length === 1 && stati[0] === "Pagato") {
     return { recurringMonths: { some: { period, status: "LIQUIDATED" } } };

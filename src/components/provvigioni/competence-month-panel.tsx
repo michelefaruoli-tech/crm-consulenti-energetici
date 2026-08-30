@@ -4,6 +4,7 @@ import Link from "next/link";
 import { formatCurrency } from "@/lib/commission";
 import { periodLabel } from "@/lib/recurring";
 import type { CompetenceMonthStats } from "@/lib/provvigioni-competence";
+import { incassatoCompetenceTotals } from "@/lib/provvigioni-competence";
 
 function buildHref(
   base: Record<string, string | undefined>,
@@ -29,6 +30,7 @@ export function CompetenceMonthPanel({
   activeStato?: string;
 }) {
   const period = stats.period;
+  const incassato = incassatoCompetenceTotals(stats);
 
   function chipClass(active: boolean, color: "slate" | "emerald" | "amber" | "indigo") {
     const colors = {
@@ -90,10 +92,10 @@ export function CompetenceMonthPanel({
           <p className="text-xs text-slate-500">{stats.contractCount} contratti</p>
         </div>
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-          <p className="text-xs font-medium text-emerald-700">Incassate (PAID)</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-900">{stats.paidCount}</p>
+          <p className="text-xs font-medium text-emerald-700">Incassate (PAID + liquidate)</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-900">{incassato.count}</p>
           <p className="text-sm font-semibold text-emerald-800">
-            {formatCurrency(stats.paidAmount)}
+            {formatCurrency(incassato.amount)}
           </p>
         </div>
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
@@ -123,7 +125,7 @@ export function CompetenceMonthPanel({
           href={buildHref(queryBase, { competence: period, stato: "Incassato" })}
           className={chipClass(isIncassato, "emerald")}
         >
-          Incassate ({stats.paidCount}) · {formatCurrency(stats.paidAmount)}
+          Incassate ({incassato.count}) · {formatCurrency(incassato.amount)}
         </Link>
         <Link
           href={buildHref(queryBase, { competence: period, stato: "Da incassare" })}

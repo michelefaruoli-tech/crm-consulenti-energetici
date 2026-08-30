@@ -60,16 +60,98 @@ export async function loadCompetenceMonthStats(
   );
   const liquidated = rows.filter((r) => r.status === "LIQUIDATED");
 
+  const paidAmount = sumAmounts(paid);
+  const liquidatedAmount = sumAmounts(liquidated);
+
   return {
     period,
     totalRates: rows.length,
     paidCount: paid.length,
-    paidAmount: sumAmounts(paid),
+    paidAmount,
     missingCount: missing.length,
     missingAmount: sumAmounts(missing),
     liquidatedCount: liquidated.length,
-    liquidatedAmount: sumAmounts(liquidated),
+    liquidatedAmount,
     contractCount: new Set(rows.map((r) => r.contractId)).size,
+  };
+}
+
+/** Incassato dal fornitore = PAID + LIQUIDATED (liquidato implica già incassato). */
+export function incassatoCompetenceTotals(stats: CompetenceMonthStats): {
+  count: number;
+  amount: number;
+} {
+  return {
+    count: stats.paidCount + stats.liquidatedCount,
+    amount: stats.paidAmount + stats.liquidatedAmount,
+  };
+}
+
+export type CompetenceSummaryView = {
+  primaryLabel: string;
+  primaryCount: number;
+  primaryAmount: number;
+  primaryTone: "emerald" | "indigo" | "amber";
+  secondaryLabel: string | null;
+  secondaryCount: number;
+  secondaryAmount: number;
+  overallAmount: number;
+};
+
+/** Riquadri riepilogo in base al filtro stato attivo. */
+export function competenceSummaryForStato(
+  stats: CompetenceMonthStats,
+  stato?: string | null,
+): CompetenceSummaryView {
+  const incassato = incassatoCompetenceTotals(stats);
+  const s = stato?.trim();
+
+  if (s === "Pagato") {
+    return {
+      primaryLabel: "Pagate al collaboratore",
+      primaryCount: stats.liquidatedCount,
+      primaryAmount: stats.liquidatedAmount,
+      primaryTone: "indigo",
+      secondaryLabel: null,
+      secondaryCount: 0,
+      secondaryAmount: 0,
+      overallAmount: stats.liquidatedAmount,
+    };
+  }
+  if (s === "Incassato") {
+    return {
+      primaryLabel: "Incassate dal fornitore",
+      primaryCount: incassato.count,
+      primaryAmount: incassato.amount,
+      primaryTone: "emerald",
+      secondaryLabel: null,
+      secondaryCount: 0,
+      secondaryAmount: 0,
+      overallAmount: incassato.amount,
+    };
+  }
+  if (s === "Da incassare") {
+    return {
+      primaryLabel: "Da incassare",
+      primaryCount: stats.missingCount,
+      primaryAmount: stats.missingAmount,
+      primaryTone: "amber",
+      secondaryLabel: null,
+      secondaryCount: 0,
+      secondaryAmount: 0,
+      overallAmount: stats.missingAmount,
+    };
+  }
+
+  return {
+    primaryLabel: "Incassate dal fornitore",
+    primaryCount: incassato.count,
+    primaryAmount: incassato.amount,
+    primaryTone: "emerald",
+    secondaryLabel: "Da incassare",
+    secondaryCount: stats.missingCount,
+    secondaryAmount: stats.missingAmount,
+    overallAmount: incassato.amount + stats.missingAmount,
   };
 }
 
