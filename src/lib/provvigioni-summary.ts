@@ -2,13 +2,16 @@
  * Totali finanziari Provvigioni — stessa query e importi della lista.
  */
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
 import {
   buildProvvigioniListWhere,
   type ProvvigioniFilters,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
-import { provvigioneDisplayAmount } from "@/lib/provvigioni-stato";
+import {
+  countExpandedForStatoCard,
+  getRecurringExpandMode,
+  sumExpandedAmountForStato,
+} from "@/lib/provvigioni-rows";
 
 export type ProvvigioniFinancialSummary = {
   incassatoCount: number;
@@ -21,44 +24,11 @@ export type ProvvigioniFinancialSummary = {
 
 type StatoCard = "Incassato" | "Da incassare" | "Pagato";
 
-const contractAmountSelect = {
-  client: { select: { type: true } },
-  supplier: { select: { name: true } },
-  commission: { select: { expected: true } },
-  recurringMonths: {
-    select: { period: true, amount: true },
-  },
-} as const;
-
-/** Somma importi colonna Gettone per tutti i contratti del filtro. */
-export async function sumAmountForStato(
-  where: Prisma.ContractWhereInput,
-  _stato: StatoCard,
-  competencePeriod: string | null,
-): Promise<number> {
-  const contracts = await prisma.contract.findMany({
-    where,
-    select: contractAmountSelect,
-  });
-
-  return contracts.reduce((sum, c) => {
-    return (
-      sum +
-      provvigioneDisplayAmount({
-        commissionExpected: Number(c.commission?.expected ?? 0),
-        clientType: c.client.type,
-        supplierName: c.supplier.name,
-        recurringMonths: c.recurringMonths,
-        competencePeriod,
-      })
-    );
-  }, 0);
-}
-
 export type ProvvigioniSummaryContext = {
   focus?: ProvvigioniListFocus | null;
   effectiveCompetence?: string;
   applyCompetenceToList: boolean;
+  viewingAllPeriods?: boolean;
   /** Lista corrente: allinea la card dello stato attivo */
   activeStato?: string | null;
   activeListWhere?: Prisma.ContractWhereInput;
@@ -73,6 +43,12 @@ async function summaryForStato(
   const competenceForAmount = ctx.applyCompetenceToList
     ? ctx.effectiveCompetence ?? null
     : null;
+  const viewingAllPeriods = ctx.viewingAllPeriods ?? !ctx.applyCompetenceToList;
+  const expandMode = getRecurringExpandMode(
+    stato,
+    viewingAllPeriods,
+    ctx.effectiveCompetence,
+  );
 
   if (
     ctx.activeStato?.trim() === stato &&
@@ -81,9 +57,9 @@ async function summaryForStato(
   ) {
     return {
       count: ctx.activeListTotal,
-      amount: await sumAmountForStato(
+      amount: await sumExpandedAmountForStato(
         ctx.activeListWhere,
-        stato,
+        expandMode,
         competenceForAmount,
       ),
     };
@@ -101,8 +77,13 @@ async function summaryForStato(
   });
 
   const [count, amount] = await Promise.all([
-    prisma.contract.count({ where }),
-    sumAmountForStato(where, stato, competenceForAmount),
+    countExpandedForStatoCard(
+      where,
+      stato,
+      viewingAllPeriods,
+      ctx.effectiveCompetence,
+    ),
+    sumExpandedAmountForStato(where, expandMode, competenceForAmount),
   ]);
   return { count, amount };
 }

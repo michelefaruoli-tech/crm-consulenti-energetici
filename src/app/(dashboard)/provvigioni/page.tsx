@@ -24,14 +24,7 @@ import {
   reconcileAllRecurringBounds,
 } from "@/lib/recurring-sync";
 import {
-  effectiveCollectionDate,
-  markEarlyReswitchContracts,
-  markLatestContractsByPod,
-  resolveStornoInfo,
-} from "@/lib/storno-status";
-import {
   computeSupplyStartDate,
-  formatItDate,
   isInFornitura,
 } from "@/lib/supply-dates";
 import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
@@ -49,15 +42,19 @@ import {
   type ProvvigioniVista,
 } from "@/lib/provvigioni-competence";
 import { loadProvvigioniFinancialSummary } from "@/lib/provvigioni-summary";
+import { loadProvvigioniTabCounts, activeRecurringContractWhere } from "@/lib/provvigioni-tab-counts";
+import {
+  buildStornoMaps,
+  countExpandedListRows,
+  expandContractsToProvvigioneRows,
+  getRecurringExpandMode,
+  type ContractForProvvigioneRow,
+} from "@/lib/provvigioni-rows";
 import { Button } from "@/components/ui/button";
-import { addMonths, periodLabel, toPeriod, isRecurring } from "@/lib/recurring";
+import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   defaultGettonePrivato,
-  lastRecurringIncassoNote,
-  operationTypeLabel,
-  provvigioneDisplayAmount,
-  simplifiedProvvigioneStato,
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
 
@@ -188,12 +185,7 @@ export default async function ProvvigioniPage({
   });
 
   const activeRecurringPeriod = addMonths(toPeriod(new Date()), -1);
-  const [activeYear, activeMonth] = activeRecurringPeriod.split("-").map(Number);
-  const activeRecurringEnd = new Date(activeYear, activeMonth, 0, 23, 59, 59, 999);
-  const activeRecurringWhere: Prisma.ContractWhereInput = {
-    status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
-    supplyStartDate: { not: null, lte: activeRecurringEnd },
-  };
+  const activeRecurringWhere = activeRecurringContractWhere();
   let collaboratorCountsWhere: Prisma.ContractWhereInput = buildProvvigioniListWhere({
     filters: {
       canViewAll: canViewAll || isScoped,
@@ -223,16 +215,15 @@ export default async function ProvvigioniPage({
         : undefined
       : session.id;
 
-  const tabCountsBase = buildProvvigioniContractWhere({
+  const tabCountsBase = {
     canViewAll: canViewAll || isScoped,
     sessionUserId: session.id,
-    collab,
+    collab: collabFilter,
     supplier,
     tipologia,
     q,
-    recurrenceMode: "all",
     visibility,
-  });
+  };
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
   // Prima di conteggi e avvisi genera tutte le rate dovute e rimuove quelle fuori periodo.
@@ -274,15 +265,29 @@ export default async function ProvvigioniPage({
     );
   }
 
+  // Rate aggiornate per conteggio badge tab M (mese operativo)
+  await syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
+    console.error("sync recurring tab counts", e),
+  );
+
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
-  const total = await prisma.contract.count({ where: contractWhere });
+  const expandMode = getRecurringExpandMode(
+    stato,
+    viewingAllPeriods,
+    effectiveCompetence,
+  );
+  const total = expandMode
+    ? await countExpandedListRows(contractWhere, expandMode)
+    : await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
+  const listUsesExpandedRows = Boolean(expandMode);
 
   const summaryContext = {
     focus,
     effectiveCompetence,
     applyCompetenceToList,
+    viewingAllPeriods,
     activeStato: stato,
     activeListWhere: contractWhere,
     activeListTotal: total,
@@ -363,7 +368,7 @@ export default async function ProvvigioniPage({
 
   // Ordinamento cliente: solo se il filtro non è enorme (altrimenti troppo lento)
   let pageContractIds: string[] | null = null;
-  if (sortByClient && total <= 800) {
+  if (sortByClient && !listUsesExpandedRows && total <= 800) {
     const light = await prisma.contract.findMany({
       where: contractWhere,
       select: {
@@ -400,12 +405,16 @@ export default async function ProvvigioniPage({
     heliosAbsent,
     collabGroups,
     deletedRecent,
-    countMensili,
-    countAnnuali,
-    countTutti,
+    tabCounts,
     financialSummary,
   ] = await Promise.all([
-    pageContractIds
+    listUsesExpandedRows
+      ? prisma.contract.findMany({
+          where: contractWhere,
+          select: contractSelect,
+          orderBy: defaultOrderBy,
+        })
+      : pageContractIds
       ? pageContractIds.length === 0
         ? Promise.resolve([])
         : prisma.contract.findMany({
@@ -469,43 +478,12 @@ export default async function ProvvigioniPage({
       orderBy: { deletedAt: "desc" },
       take: 12,
     }),
-    prisma.contract.count({ where: tabCountsBase }),
-    prisma.contract.count({
-      where: {
-        AND: [
-          buildProvvigioniContractWhere({
-            canViewAll: canViewAll || isScoped,
-            sessionUserId: session.id,
-            collab,
-            supplier,
-            tipologia,
-            q,
-            recurrenceMode: "monthly",
-            visibility,
-          }),
-          activeRecurringWhere,
-        ],
-      },
-    }),
-    prisma.contract.count({
-      where: {
-        AND: [
-          buildProvvigioniContractWhere({
-            canViewAll: canViewAll || isScoped,
-            sessionUserId: session.id,
-            collab,
-            supplier,
-            tipologia,
-            q,
-            recurrenceMode: "annual",
-            visibility,
-          }),
-          activeRecurringWhere,
-        ],
-      },
-    }),
+    loadProvvigioniTabCounts(tabCountsBase, activeRecurringPeriod),
     loadProvvigioniFinancialSummary(statsBaseFilters, vistaTab, summaryContext),
   ]);
+
+  const { tutti: countTutti, mensile: countMensili, annuale: countAnnuali } =
+    tabCounts;
 
   const contracts =
     pageContractIds == null
@@ -591,144 +569,36 @@ export default async function ProvvigioniPage({
     void Promise.all(alignJobs);
   }
 
-  const latestMap = markLatestContractsByPod(
-    contracts.map((c) => ({
-      id: c.id,
-      clientId: c.clientId,
-      supplierId: c.supplierId,
-      podPdr: c.podPdr || c.pod || c.pdr,
-      supplyStartDate: c.supplyStartDate,
-      insertionDate: c.insertionDate,
-      createdAt: c.createdAt,
-    })),
-  );
-  const earlyMap = markEarlyReswitchContracts(
-    contracts.map((c) => ({
-      id: c.id,
-      clientId: c.clientId,
-      supplierId: c.supplierId,
-      podPdr: c.podPdr || c.pod || c.pdr,
-      supplyStartDate: c.supplyStartDate,
-      insertionDate: c.insertionDate,
-      createdAt: c.createdAt,
-      collectionDate: c.collectionDate,
-      stornoMonths: c.supplier.stornoMonths,
-      stornoEndDate: c.stornoEndDate,
-    })),
+  const { latestMap, earlyMap } = buildStornoMaps(
+    contracts as ContractForProvvigioneRow[],
   );
 
   const totals = { daConfermare: daConfermareCount };
 
-  const rows: ProvvigioneRow[] = contracts.map((contract) => {
-    const item = contract.commission;
-    const supply =
-      contract.supplyStartDate ??
-      computeSupplyStartDate(contract.insertionDate, contract.operationType);
-    const inFornitura = isInFornitura(supply);
-    const effectiveCollection = effectiveCollectionDate(
-      contract.collectionDate,
-      supply,
-    );
-    const paidRecurringForCompetence = effectiveCompetence
-      ? contract.recurringMonths.some(
-          (m) =>
-            m.period === effectiveCompetence &&
-            (m.status === "PAID" || m.status === "LIQUIDATED"),
-        )
-      : contract.recurringMonths.some((m) => m.status === "PAID");
-    const hasDate = Boolean(effectiveCollection) || paidRecurringForCompetence;
-    const paidLabel = hasDate ? "Incassato" : "Da incassare";
-    const competencePaidMonth = effectiveCompetence
-      ? contract.recurringMonths.find(
-          (m) =>
-            m.period === effectiveCompetence &&
-            (m.status === "PAID" || m.status === "LIQUIDATED"),
-        )
-      : undefined;
-    // Colonna Incasso: pagamento reale o rata PAID nel mese competenza
-    const collectionMonth = competencePaidMonth
-      ? formatMonthYear(new Date(competencePaidMonth.period + "-01"))
-      : hasDate
-        ? formatMonthYear(effectiveCollection)
-        : "";
-    const activationNote =
-      !inFornitura && supply
-        ? `attiv. ${formatMonthYear(supply)}`
-        : undefined;
-    const storno = resolveStornoInfo({
-      status: contract.status,
-      recurrence: contract.recurrence,
-      supplyStartDate: supply,
-      stornoMonths: contract.supplier.stornoMonths,
-      stornoEndDate: contract.stornoEndDate,
-      expiryDate: contract.expiryDate,
-      durationMonths: contract.durationMonths,
-      isLatestForPod: latestMap.get(contract.id) ?? true,
-      collectionDate: effectiveCollection,
-      isEarlyReswitch: earlyMap.get(contract.id) ?? false,
+  let rows: ProvvigioneRow[] = expandContractsToProvvigioneRows(
+    contracts as ContractForProvvigioneRow[],
+    {
+      effectiveCompetence,
+      expandMode,
+      latestMap,
+      earlyMap,
+      now,
+    },
+  );
+
+  if (listUsesExpandedRows && sortByClient) {
+    rows.sort((a, b) => {
+      const cmp = a.clientName.localeCompare(b.clientName, "it", {
+        sensitivity: "base",
+        numeric: true,
+      });
+      return sortDir === "asc" ? cmp : -cmp;
     });
+  }
 
-    const stato = simplifiedProvvigioneStato(contract.status, hasDate, {
-      inFornitura: inFornitura || paidRecurringForCompetence,
-      hasStorno: Boolean(item?.stornoDate),
-    });
-
-    const lastPaidNote = isRecurring(contract.recurrence)
-      ? lastRecurringIncassoNote(contract.recurringMonths, stato)
-      : "";
-    const recurringIncassoNote = [activationNote, lastPaidNote]
-      .filter(Boolean)
-      .join(" · ") || undefined;
-
-    return {
-      id: contract.id,
-      clientId: contract.clientId,
-      commissionId: item?.id ?? "",
-      clientName: clientDisplayName(contract.client),
-      podPdr: contract.podPdr || contract.pod || contract.pdr || "",
-      collaboratorName: contract.collaborator.name,
-      supplierName: contract.supplier.name,
-      clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
-      amount: String(
-        provvigioneDisplayAmount({
-          commissionExpected: Number(item?.expected ?? 0),
-          clientType: contract.client.type,
-          supplierName: contract.supplier.name,
-          recurringMonths: contract.recurringMonths,
-          competencePeriod: effectiveCompetence,
-        }),
-      ),
-      supplyStartDate: supply ? formatItDate(supply) : "",
-      operationType: operationTypeLabel(contract.operationType),
-      recurrence: contract.recurrence || "Una tantum",
-      stato,
-      paymentStatus: paidLabel,
-      confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
-      collectionMonth,
-      recurringIncassoNote,
-      stornoFlag: item?.stornoDate ? "Sì" : "No",
-      stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
-      stornoAmount: item?.stornoAmount != null ? String(Number(item.stornoAmount)) : "",
-      notes: contract.notes || "",
-      stornoLabel:
-        stato === "Da controllare"
-          ? "Da controllare (non ancora contrattualizzato)"
-          : stato === "Stornato"
-            ? "Stornato (clawback applicato)"
-            : storno.label,
-      stornoRowClass:
-        stato === "Da controllare"
-          ? "bg-fuchsia-100 hover:bg-fuchsia-200/80"
-          : stato === "Stornato"
-            ? "bg-rose-100 hover:bg-rose-200/80"
-            : storno.rowClassName,
-      warnOnEdit: storno.warnOnEdit,
-      missingSupplyStart: storno.missingSupplyStart === true,
-      gettoneBorderClass: contract.commissionConfirmed
-        ? "border-l-4 border-l-emerald-600"
-        : "border-l-4 border-l-amber-500",
-    };
-  });
+  if (listUsesExpandedRows) {
+    rows = rows.slice(pageSkip(page), pageSkip(page) + PAGE_SIZE);
+  }
 
   const nameById = Object.fromEntries(collaboratorOptions.map((u) => [u.id, u.name]));
   const collabCounts = collabGroups
@@ -898,7 +768,7 @@ export default async function ProvvigioniPage({
                 : "Provvigioni"}
           </h1>
           <p className="text-sm text-slate-500 sm:text-base">
-            {total} contratti in elenco
+            {total} {listUsesExpandedRows ? "voci" : "contratti"} in elenco
             {filterHints.length
               ? ` · ${filterHints.join(" · ")}`
               : canViewAll

@@ -7,6 +7,7 @@ import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-fi
 import {
   bulkMarkIncassatoCompetenceAction,
   bulkMarkPagatoCompetenceAction,
+  bulkSetRecurrenceAction,
   bulkUpdateCommissionFieldsAction,
 } from "@/lib/commission-actions";
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
@@ -62,9 +63,27 @@ function settledOptions(): string[] {
   return out;
 }
 
-/** Chiave bozza = contratto (sempre unico). Il salvataggio usa commissionId. */
-function rowId(row: { commissionId?: string; id?: string } | Record<string, unknown>) {
-  return String((row as { id?: string }).id || (row as { commissionId?: string }).commissionId || "");
+/** Chiave riga tabella (contratto o contratto:mese). */
+function rowId(
+  row:
+    | { rowKey?: string; commissionId?: string; id?: string }
+    | Record<string, unknown>,
+) {
+  const r = row as { rowKey?: string; id?: string; commissionId?: string };
+  return String(r.rowKey ?? r.id ?? r.commissionId ?? "");
+}
+
+function contractIdOf(
+  row:
+    | { contractId?: string; commissionId?: string; id?: string }
+    | Record<string, unknown>,
+) {
+  const r = row as { contractId?: string; id?: string; commissionId?: string };
+  const contractId = String(r.contractId ?? "");
+  if (contractId) return contractId;
+  const rawId = String(r.id ?? "");
+  if (rawId.includes(":")) return rawId.split(":")[0] ?? rawId;
+  return rawId || String(r.commissionId ?? "");
 }
 
 function commissionIdOf(row: { commissionId?: string; id?: string } | Record<string, unknown>) {
@@ -162,6 +181,9 @@ export function ProvvigioniFilterTable({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [bulkRecurrenceKind, setBulkRecurrenceKind] = useState<
+    "UT" | "M" | "R" | null
+  >(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Bozze: rowId → { colonna → valore } */
@@ -362,13 +384,17 @@ export function ProvvigioniFilterTable({
     () => [...new Set(selectedRows.map((row) => row.collaboratorName).filter(Boolean))],
     [selectedRows],
   );
-  /** ID contratto delle righe spuntate (chiave tabella = rowId = contratto). */
+  /** ID contratto univoci (anche con righe clone mese). */
   const selectedContractIds = useMemo(
     () =>
-      rows
-        .filter((r) => selectedKeys.has(rowId(r)))
-        .map((r) => String(r.id))
-        .filter(Boolean),
+      [
+        ...new Set(
+          rows
+            .filter((r) => selectedKeys.has(rowId(r)))
+            .map((r) => contractIdOf(r))
+            .filter(Boolean),
+        ),
+      ],
     [rows, selectedKeys],
   );
   /** ID commissione delle stesse righe (azioni gettone / incasso). */
@@ -552,6 +578,63 @@ export function ProvvigioniFilterTable({
         router.refresh();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Errore azione multipla");
+      }
+    });
+  }
+
+  function applyBulkRecurrence() {
+    if (selectedContractIds.length === 0) {
+      setError("Seleziona almeno una riga (checkbox a sinistra).");
+      return;
+    }
+    if (!bulkRecurrenceKind) {
+      setError("Scegli UT, M o R prima di applicare.");
+      return;
+    }
+
+    const kindLabel =
+      bulkRecurrenceKind === "UT"
+        ? "Gettone (UT) — scheda Tutti"
+        : bulkRecurrenceKind === "M"
+          ? "Ricorrente mensile (M)"
+          : "Ricorrente annuale (R)";
+
+    const summary = [
+      `Sposta in categoria: ${kindLabel}`,
+      "",
+      `Contratti selezionati: ${selectedContractIds.length}`,
+      `(righe spuntate: ${selectedCount})`,
+      "",
+      "I contratti compariranno nella scheda corrispondente (Tutti / M / R).",
+      "Confermi?",
+    ].join("\n");
+
+    if (!window.confirm(summary)) return;
+
+    setError(null);
+    setMessage(null);
+    start(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("contractIds", selectedContractIds.join(","));
+        fd.set("recurrence", bulkRecurrenceKind);
+        const result = await bulkSetRecurrenceAction(fd);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSelectedKeys(new Set());
+        setBulkRecurrenceKind(null);
+        const skippedHint =
+          result.skipped > 0 ? ` · ${result.skipped} già ok o senza permesso` : "";
+        const shortKind =
+          result.kind === "Una tantum" ? "UT" : result.kind === "M" ? "M" : "R";
+        setMessage(
+          `Categoria ${shortKind}: aggiornati ${result.count} contratti${skippedHint}`,
+        );
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Errore cambio categoria");
       }
     });
   }
@@ -1013,7 +1096,7 @@ export function ProvvigioniFilterTable({
           </span>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1fr_auto]">
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
             <div className="flex flex-wrap items-end gap-3">
               <label className="text-[11px] text-slate-600">
@@ -1085,6 +1168,73 @@ export function ProvvigioniFilterTable({
                 </button>
               ) : null}
             </div>
+          </div>
+
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-900">
+              Categoria UT / M / R
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-indigo-800/80">
+              Sposta i contratti selezionati nella scheda corretta (gettone, mensile o
+              annuale).
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(
+                [
+                  { id: "UT" as const, label: "UT", hint: "Una tantum" },
+                  { id: "M" as const, label: "M", hint: "Mensile" },
+                  { id: "R" as const, label: "R", hint: "Annuale" },
+                ] as const
+              ).map((opt) => {
+                const active = bulkRecurrenceKind === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={pending}
+                    title={opt.hint}
+                    onClick={() => setBulkRecurrenceKind(opt.id)}
+                    className={`min-w-[3.25rem] rounded-lg border px-3 py-2 text-center transition ${
+                      active
+                        ? opt.id === "UT"
+                          ? "border-slate-800 bg-slate-900 text-white"
+                          : opt.id === "M"
+                            ? "border-teal-700 bg-teal-600 text-white"
+                            : "border-indigo-700 bg-indigo-600 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="block text-sm font-bold">{opt.label}</span>
+                    <span
+                      className={`block text-[10px] ${active ? "text-white/85" : "text-slate-500"}`}
+                    >
+                      {opt.hint}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              disabled={
+                pending || selectedContractIds.length === 0 || !bulkRecurrenceKind
+              }
+              className="mt-3 w-full rounded-lg bg-indigo-800 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-900 disabled:opacity-50"
+              onClick={applyBulkRecurrence}
+            >
+              Applica categoria
+            </button>
+            {bulkRecurrenceKind && selectedContractIds.length > 0 ? (
+              <p className="mt-2 text-[11px] text-indigo-900/80">
+                {selectedContractIds.length} contratt
+                {selectedContractIds.length === 1 ? "o" : "i"} →{" "}
+                {bulkRecurrenceKind === "UT"
+                  ? "UT"
+                  : bulkRecurrenceKind === "M"
+                    ? "M"
+                    : "R"}
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">

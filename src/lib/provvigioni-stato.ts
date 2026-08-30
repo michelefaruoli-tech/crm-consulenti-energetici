@@ -6,7 +6,13 @@
 import { isRecurring, isRecurringMonthly, periodLabel, toPeriod } from "@/lib/recurring";
 
 export type ProvvigioneRow = {
+  /** Chiave riga tabella (contratto o contratto:mese). */
   id: string;
+  rowKey?: string;
+  /** ID contratto originale (bulk action). */
+  contractId?: string;
+  /** Mese competenza YYYY-MM per clone ricorrente. */
+  competencePeriod?: string;
   clientId: string;
   commissionId: string;
   clientName: string;

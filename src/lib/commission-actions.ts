@@ -22,7 +22,7 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
-import { isRecurringMonthly } from "@/lib/recurring";
+import { isRecurringMonthly, normalizeRecurrence, type RecurrenceKind } from "@/lib/recurring";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
@@ -798,6 +798,122 @@ function parseCompetencePeriod(formData: FormData): string {
   }
   return period;
 }
+
+function parseRecurrenceBulkKind(raw: string): RecurrenceKind {
+  const v = raw.trim().toLowerCase();
+  if (v === "ut" || v === "una tantum" || v === "gettone" || v === "tantum") {
+    return "Una tantum";
+  }
+  if (v === "m" || v === "mensile" || v === "mensili") return "M";
+  if (v === "r" || v === "annuale" || v === "annuali") return "R";
+  throw new Error("Scegli UT, M o R");
+}
+
+const RECURRENCE_BULK_LABELS: Record<RecurrenceKind, string> = {
+  "Una tantum": "Gettone (UT)",
+  M: "Ricorrente mensile (M)",
+  R: "Ricorrente annuale (R)",
+};
+
+/**
+ * Imposta UT / M / R su più contratti selezionati (max 200).
+ * Deduplica per contractId; sincronizza le rate ricorrenti dopo il cambio.
+ */
+export async function bulkSetRecurrenceAction(
+  formData: FormData,
+): Promise<
+  | { ok: true; count: number; skipped: number; kind: RecurrenceKind }
+  | { ok: false; error: string }
+> {
+  try {
+    const session = await requireSession();
+    const contractIds = parseIdList(formData, "contractIds").slice(0, 200);
+    if (contractIds.length === 0) {
+      return { ok: false, error: "Nessun contratto selezionato" };
+    }
+
+    const kind = parseRecurrenceBulkKind(String(formData.get("recurrence") ?? ""));
+
+    const contracts = await prisma.contract.findMany({
+      where: { id: { in: contractIds }, deletedAt: null, isHistorical: false },
+      select: {
+        id: true,
+        clientId: true,
+        collaboratorId: true,
+        recurrence: true,
+      },
+    });
+
+    if (contracts.length === 0) {
+      return { ok: false, error: "Nessun contratto valido trovato" };
+    }
+
+    const canAll = hasPermission(session.role, "commissions.view_all");
+    let count = 0;
+    let skipped = 0;
+    const clientIds = new Set<string>();
+
+    for (const contract of contracts) {
+      if (!canAll && contract.collaboratorId !== session.id) {
+        skipped += 1;
+        continue;
+      }
+      const current = normalizeRecurrence(contract.recurrence);
+      if (current === kind) {
+        skipped += 1;
+        continue;
+      }
+
+      await prisma.contract.update({
+        where: { id: contract.id },
+        data: { recurrence: kind },
+      });
+      await syncRecurringMonthsForContract(contract.id).catch(() => undefined);
+      clientIds.add(contract.clientId);
+      count += 1;
+    }
+
+    if (count === 0) {
+      return {
+        ok: false,
+        error:
+          skipped > 0
+            ? "Nessun contratto aggiornato (permesso negato o già nella categoria scelta)"
+            : "Nessun contratto aggiornato",
+      };
+    }
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: contracts[0]?.id ?? "",
+      details: {
+        source: "bulk_set_recurrence",
+        kind,
+        count,
+        skipped,
+      },
+    });
+
+    revalidatePath("/provvigioni");
+    revalidatePath("/");
+    revalidatePath("/contratti");
+    for (const clientId of clientIds) {
+      revalidatePath(`/clienti/${clientId}`);
+    }
+
+    return { ok: true, count, skipped, kind };
+  } catch (e) {
+    console.error("[bulkSetRecurrenceAction]", e);
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message.slice(0, 200) : "Operazione non riuscita",
+    };
+  }
+}
+
+export { RECURRENCE_BULK_LABELS };
 
 function competencePeriodToDate(period: string): Date {
   const [y, mo] = period.split("-").map(Number);

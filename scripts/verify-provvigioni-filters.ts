@@ -3,8 +3,12 @@
  * Uso: npx tsx scripts/verify-provvigioni-filters.ts "Marco Fagiano"
  */
 import { prisma } from "../src/lib/prisma";
-import { buildProvvigioniContractWhere, buildProvvigioniListWhere } from "../src/lib/provvigioni-filters";
+import { buildProvvigioniListWhere } from "../src/lib/provvigioni-filters";
 import { loadProvvigioniFinancialSummary } from "../src/lib/provvigioni-summary";
+import {
+  countExpandedListRows,
+  getRecurringExpandMode,
+} from "../src/lib/provvigioni-rows";
 
 async function main() {
   const nameQuery = process.argv[2] ?? "Marco Fagiano";
@@ -26,6 +30,7 @@ async function main() {
 
   const summary = await loadProvvigioniFinancialSummary(base, "tutti", {
     applyCompetenceToList: false,
+    viewingAllPeriods: true,
   });
 
   for (const stato of ["Incassato", "Da incassare", "Pagato"] as const) {
@@ -33,7 +38,10 @@ async function main() {
       filters: { ...base, stato },
       applyCompetenceToList: false,
     });
-    const count = await prisma.contract.count({ where });
+    const expandMode = getRecurringExpandMode(stato, true, undefined);
+    const count = expandMode
+      ? await countExpandedListRows(where, expandMode)
+      : await prisma.contract.count({ where });
     const cardCount =
       stato === "Incassato"
         ? summary.incassatoCount
