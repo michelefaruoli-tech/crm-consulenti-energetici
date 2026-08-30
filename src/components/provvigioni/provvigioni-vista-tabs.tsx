@@ -1,10 +1,10 @@
 import Link from "next/link";
 
-export type ProvvigioniVistaTab = "tutti" | "ut" | "mensile" | "annuale";
+/** Schede principali Provvigioni (3 tab). */
+export type ProvvigioniVistaTab = "tutti" | "mensile" | "annuale";
 
 type TabCounts = {
   tutti: number;
-  ut: number;
   mensile: number;
   annuale: number;
 };
@@ -42,23 +42,15 @@ export function ProvvigioniVistaTabs({
       id: "tutti",
       label: "Tutti i contratti",
       short: "Tutti",
-      hint: "Gettoni + ricorrenti M e R",
+      hint: "Gettoni UT + ricorrenti M e R",
       activeClass: "bg-slate-900 text-white border-slate-900",
       idleClass: "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
-    },
-    {
-      id: "ut",
-      label: "Gettoni una tantum",
-      short: "UT",
-      hint: "Solo provvigioni gettone (una tantum)",
-      activeClass: "bg-violet-700 text-white border-violet-700",
-      idleClass: "bg-violet-50 text-violet-950 border-violet-200 hover:bg-violet-100",
     },
     {
       id: "mensile",
       label: "Ricorrenti mensili",
       short: "M",
-      hint: "Helios, Sorgenia Business… pagamento mensile",
+      hint: "Helios, Sorgenia… pagamento ogni mese",
       activeClass: "bg-teal-600 text-white border-teal-600",
       idleClass: "bg-teal-50 text-teal-950 border-teal-200 hover:bg-teal-100",
     },
@@ -66,14 +58,14 @@ export function ProvvigioniVistaTabs({
       id: "annuale",
       label: "Ricorrenti annuali",
       short: "R",
-      hint: "Etruria, Sinergy… dopo 12 mesi",
+      hint: "Etruria, Sinergy… ogni 12 mesi",
       activeClass: "bg-indigo-600 text-white border-indigo-600",
       idleClass: "bg-indigo-50 text-indigo-950 border-indigo-200 hover:bg-indigo-100",
     },
   ];
 
   return (
-    <nav className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="Tipo provvigione">
+    <nav className="grid gap-2 sm:grid-cols-3" aria-label="Tipo provvigione">
       {tabs.map((tab) => {
         const isActive = active === tab.id;
         return (

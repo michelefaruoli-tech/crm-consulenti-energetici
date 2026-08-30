@@ -75,16 +75,18 @@ function commissionIdOf(row: { commissionId?: string; id?: string } | Record<str
 
 const STORAGE_KEY_ADVANCED = "provvigioni-colonne-avanzate";
 
-/** Ordine colonne vista semplificata */
+/** Colonne principali Provvigioni (spec utente) */
 const SIMPLE_COLUMN_ORDER = [
   "clientName",
+  "podPdr",
   "collaboratorName",
   "supplierName",
-  "amount",
+  "operationType",
   "stato",
   "collectionMonth",
-  "notes",
   "recurrence",
+  "stornoFlag",
+  "amount",
   "_del",
 ] as const;
 

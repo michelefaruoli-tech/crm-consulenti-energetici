@@ -2,7 +2,6 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { canConfirmCommission, hasPermission } from "@/lib/permissions";
-import { formatCurrency } from "@/lib/commission";
 import { formatMonthYear } from "@/lib/date-parse";
 import { clientDisplayName, clientSortKey } from "@/lib/utils";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
@@ -12,20 +11,14 @@ import {
 import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
 import { HeliosAbsentPanel } from "@/components/provvigioni/helios-absent-panel";
-import { RecurringReconciliationPanel } from "@/components/provvigioni/recurring-reconciliation-panel";
 import { ProvvigioniVistaTabs } from "@/components/provvigioni/provvigioni-vista-tabs";
-import { CompetenceMonthPanel } from "@/components/provvigioni/competence-month-panel";
-import {
-  RecurringRendicontoPanel,
-  toSettledRow,
-} from "@/components/provvigioni/recurring-rendiconto-panel";
+import { ProvvigioniToolbar } from "@/components/provvigioni/provvigioni-toolbar";
+import { ProvvigioniSummaryCards } from "@/components/provvigioni/provvigioni-summary-cards";
+import { ProvvigioniAnomaliesSection } from "@/components/provvigioni/provvigioni-anomalies-section";
 import { PaginationNav } from "@/components/ui/pagination-nav";
-import { ListSearchForm } from "@/components/ui/list-search-form";
-import { Button } from "@/components/ui/button";
 import {
   getMissingRecurringAlerts,
   getHeliosAbsentAlerts,
-  getSettledRecurringForPeriod,
   syncAllRecurringMonths,
   syncRecurringMonthsForContract,
   reconcileAllRecurringBounds,
@@ -46,17 +39,16 @@ import {
   buildProvvigioniContractWhere,
   provvigioniCompetenceWhere,
   recurringMonthlyWhereOr,
-  sumProvvigioniTotals,
 } from "@/lib/provvigioni-filters";
 import {
   competenceMonthOptions,
-  competenceSummaryForStato,
-  incassatoCompetenceTotals,
-  loadCompetenceMonthStats,
+  parseProvvigioniTab,
   parseProvvigioniVista,
   vistaToRecurrenceMode,
   type ProvvigioniVista,
 } from "@/lib/provvigioni-competence";
+import { loadProvvigioniFinancialSummary } from "@/lib/provvigioni-summary";
+import { Button } from "@/components/ui/button";
 import { addMonths, periodLabel, toPeriod, isRecurring } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
 import {
@@ -125,13 +117,18 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
+  const competenceAll = competenceRaw === "tutti";
   const competencePeriod =
-    competenceRaw && /^\d{4}-\d{2}$/.test(competenceRaw) ? competenceRaw : undefined;
+    competenceRaw &&
+    competenceRaw !== "tutti" &&
+    /^\d{4}-\d{2}$/.test(competenceRaw)
+      ? competenceRaw
+      : undefined;
   const focus =
     focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
       ? focusRaw
       : undefined;
-  // Schede: tutti | ut (gettone) | mensile (M) | annuale (R)
+  const vistaTab = parseProvvigioniTab(vistaRaw);
   const vista: ProvvigioniVista = parseProvvigioniVista(vistaRaw);
   const recurrenceMode = vistaToRecurrenceMode(vista);
   const recurringKind =
@@ -149,11 +146,23 @@ export default async function ProvvigioniPage({
     Boolean(stato?.includes("Incassato")) ||
     Boolean(stato?.includes("Pagato")) ||
     Boolean(stato?.includes("Da incassare"));
-  /** Mese competenza: su M/R sempre; con filtro stato Incassato/Pagato/Da incassare anche su Tutti/UT */
-  const effectiveCompetence =
-    competencePeriod ??
-    (showCompetencePanel || statoNeedsCompetence ? reconciliationPeriod : undefined);
+  /** Mese competenza: esplicito, default su M/R o filtro stato; «tutti» = nessun filtro mese */
+  const effectiveCompetence = competenceAll
+    ? undefined
+    : (competencePeriod ??
+      (showCompetencePanel || statoNeedsCompetence ? reconciliationPeriod : undefined));
   const applyCompetenceToList = Boolean(effectiveCompetence);
+
+  const statsBaseWhere = buildProvvigioniContractWhere({
+    canViewAll: canViewAll || isScoped,
+    sessionUserId: session.id,
+    collab,
+    supplier,
+    tipologia,
+    q,
+    recurrenceMode,
+    visibility,
+  });
 
   const baseContractWhere = buildProvvigioniContractWhere({
     // Backoffice: non forzare collaboratorId = sé (usa solo visibility)
@@ -231,14 +240,6 @@ export default async function ProvvigioniPage({
         ? collabFilter
         : undefined
       : session.id;
-  const reconciliationContractWhere = buildProvvigioniContractWhere({
-    canViewAll: canViewAll || isScoped,
-    sessionUserId: session.id,
-    collab,
-    supplier,
-    recurrenceMode: "monthly",
-    visibility,
-  });
 
   const tabCountsBase = buildProvvigioniContractWhere({
     canViewAll: canViewAll || isScoped,
@@ -401,21 +402,17 @@ export default async function ProvvigioniPage({
 
   const [
     contractsRaw,
-    moneyTotals,
     daConfermareCount,
     collaboratorOptions,
     supplierOptions,
     missing,
     heliosAbsent,
     collabGroups,
-    settledRowsRaw,
     deletedRecent,
-    countGettoni,
     countMensili,
     countAnnuali,
     countTutti,
-    competenceStats,
-    reconciliationRowsRaw,
+    financialSummary,
   ] = await Promise.all([
     pageContractIds
       ? pageContractIds.length === 0
@@ -431,7 +428,6 @@ export default async function ProvvigioniPage({
           skip: pageSkip(page),
           take: PAGE_SIZE,
         }),
-    sumProvvigioniTotals(contractWhere),
     prisma.contract.count({
       where: { ...contractWhere, commissionConfirmed: false },
     }),
@@ -459,7 +455,6 @@ export default async function ProvvigioniPage({
           _count: { id: true },
         })
       : Promise.resolve([]),
-    getSettledRecurringForPeriod(settledPeriod, sessionCollabFilter),
     prisma.contract.findMany({
       where: {
         deletedAt: { not: null },
@@ -484,18 +479,6 @@ export default async function ProvvigioniPage({
       take: 12,
     }),
     prisma.contract.count({ where: tabCountsBase }),
-    prisma.contract.count({
-      where: buildProvvigioniContractWhere({
-        canViewAll: canViewAll || isScoped,
-        sessionUserId: session.id,
-        collab,
-        supplier,
-        tipologia,
-        q,
-        recurrenceMode: "exclude",
-        visibility,
-      }),
-    }),
     prisma.contract.count({
       where: {
         AND: [
@@ -530,48 +513,11 @@ export default async function ProvvigioniPage({
         ],
       },
     }),
-    effectiveCompetence && (showCompetencePanel || statoNeedsCompetence)
-      ? loadCompetenceMonthStats(
-          effectiveCompetence,
-          buildProvvigioniContractWhere({
-            canViewAll: canViewAll || isScoped,
-            sessionUserId: session.id,
-            collab,
-            supplier,
-            tipologia,
-            q,
-            recurrenceMode:
-              vista === "annuale" ? "annual" : vista === "ut" ? "exclude" : "monthly",
-            visibility,
-          }),
-        )
-      : Promise.resolve(null),
-    prisma.recurringMonth.findMany({
-      where: {
-        period: reconciliationPeriod,
-        status: { not: "CLOSED" },
-        contract: reconciliationContractWhere,
-      },
-      select: {
-        id: true,
-        contractId: true,
-        status: true,
-        amount: true,
-        settledPeriod: true,
-        contract: {
-          select: {
-            podPdr: true,
-            pod: true,
-            pdr: true,
-            client: { select: { type: true, companyName: true, firstName: true, lastName: true } },
-            supplier: { select: { name: true } },
-            commission: { select: { expected: true } },
-          },
-        },
-      },
-      orderBy: { contract: { supplier: { name: "asc" } } },
-      take: 3000,
-    }),
+    loadProvvigioniFinancialSummary(
+      statsBaseWhere,
+      vistaTab,
+      competenceAll ? null : effectiveCompetence ?? null,
+    ),
   ]);
 
   const contracts =
@@ -684,12 +630,7 @@ export default async function ProvvigioniPage({
     })),
   );
 
-  const totals = {
-    complessivo: moneyTotals.complessivo,
-    daIncassare: moneyTotals.daIncassare,
-    ricorrenti: moneyTotals.ricorrenti,
-    daConfermare: daConfermareCount,
-  };
+  const totals = { daConfermare: daConfermareCount };
 
   const rows: ProvvigioneRow[] = contracts.map((contract) => {
     const item = contract.commission;
@@ -891,24 +832,8 @@ export default async function ProvvigioniPage({
     note: m.note,
   }));
 
-  const settledRows = settledRowsRaw.map(toSettledRow);
-  const reconciliationRows = reconciliationRowsRaw.map((row) => ({
-    id: row.id,
-    contractId: row.contractId,
-    clientName: clientDisplayName(row.contract.client),
-    podPdr: row.contract.pod || row.contract.pdr || row.contract.podPdr || "",
-    supplierName: row.contract.supplier.name,
-    amount: Number(row.amount?.toString() ?? row.contract.commission?.expected?.toString() ?? 0),
-    status: row.status,
-    settledPeriod: row.settledPeriod,
-  }));
+  const anomalyCount = alertRows.length + heliosAbsentRows.length;
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
-  const competenceSummary = competenceStats
-    ? competenceSummaryForStato(competenceStats, stato)
-    : null;
-  const incassatoTotals = competenceStats
-    ? incassatoCompetenceTotals(competenceStats)
-    : null;
   const queryBase = {
     collab: collabFilter,
     settled: settledPeriod,
@@ -916,9 +841,9 @@ export default async function ProvvigioniPage({
     stato,
     tipologia,
     q,
-    vista: vista === "tutti" ? undefined : vista,
+    vista: vistaTab === "tutti" ? undefined : vistaTab,
     focus,
-    competence: effectiveCompetence,
+    competence: competenceAll ? "tutti" : effectiveCompetence,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
@@ -926,31 +851,21 @@ export default async function ProvvigioniPage({
     selectedCollabName ? `collab. ${selectedCollabName}` : null,
     supplier ? `fornitore ${supplier.split("|").join(" + ")}` : null,
     stato ? `stato ${stato.split("|").join(" + ")}` : null,
-    effectiveCompetence ? `competenza ${periodLabel(effectiveCompetence)}` : null,
+    effectiveCompetence && !competenceAll
+      ? `competenza ${periodLabel(effectiveCompetence)}`
+      : competenceAll
+        ? "tutti i mesi"
+        : null,
     tipologia ? `tipologia ${tipologia.split("|").join(" + ")}` : null,
     q ? `cerca «${q}»` : null,
     focus === "da-confermare" ? "solo provvigioni da confermare" : null,
     focus === "ricorrenze-mancanti" ? "solo ricorrenze mancanti" : null,
-    vista === "ut"
-      ? "scheda UT (gettoni)"
-      : vista === "mensile"
-        ? "scheda M (mensile)"
-        : vista === "annuale"
-          ? "scheda R (annuale)"
-          : "tutti (UT+M+R)",
+    vistaTab === "mensile"
+      ? "scheda M (mensile)"
+      : vistaTab === "annuale"
+        ? "scheda R (annuale)"
+        : "tutti (UT+M+R)",
   ].filter(Boolean);
-  const collabQs = [
-    collabFilter ? `collab=${encodeURIComponent(collabFilter)}` : null,
-    supplier ? `supplier=${encodeURIComponent(supplier)}` : null,
-    stato ? `stato=${encodeURIComponent(stato)}` : null,
-    tipologia ? `tipologia=${encodeURIComponent(tipologia)}` : null,
-    q ? `q=${encodeURIComponent(q)}` : null,
-    vista !== "tutti" ? `vista=${vista}` : null,
-    focus ? `focus=${focus}` : null,
-  ]
-    .filter(Boolean)
-    .map((p) => `&${p}`)
-    .join("");
   const exportParams = new URLSearchParams();
   exportParams.set("settled", settledPeriod);
   if (collabFilter) exportParams.set("collab", collabFilter);
@@ -958,12 +873,13 @@ export default async function ProvvigioniPage({
   if (stato) exportParams.set("stato", stato);
   if (tipologia) exportParams.set("tipologia", tipologia);
   if (q) exportParams.set("q", q);
-  if (vista !== "tutti") exportParams.set("vista", vista);
+  if (vistaTab !== "tutti") exportParams.set("vista", vistaTab);
   if (focus) exportParams.set("focus", focus);
-  if (effectiveCompetence) exportParams.set("competence", effectiveCompetence);
+  if (competenceAll) exportParams.set("competence", "tutti");
+  else if (effectiveCompetence) exportParams.set("competence", effectiveCompetence);
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
-  function vistaHref(nextVista: ProvvigioniVista) {
+  function vistaHref(nextVista: "tutti" | "mensile" | "annuale") {
     return `/provvigioni?${new URLSearchParams({
       settled: settledPeriod,
       ...(collabFilter ? { collab: collabFilter } : {}),
@@ -972,9 +888,11 @@ export default async function ProvvigioniPage({
       ...(tipologia ? { tipologia } : {}),
       ...(q ? { q } : {}),
       ...(focus ? { focus } : {}),
-      ...(effectiveCompetence && (nextVista === "mensile" || nextVista === "annuale")
-        ? { competence: effectiveCompetence }
-        : {}),
+      ...(competenceAll
+        ? { competence: "tutti" }
+        : effectiveCompetence && (nextVista === "mensile" || nextVista === "annuale")
+          ? { competence: effectiveCompetence }
+          : {}),
       ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
   }
@@ -986,9 +904,12 @@ export default async function ProvvigioniPage({
     tipologia,
     q,
     focus,
-    ...(effectiveCompetence && showCompetencePanel
-      ? { competence: effectiveCompetence }
-      : {}),
+    stato,
+    ...(competenceAll
+      ? { competence: "tutti" }
+      : effectiveCompetence && showCompetencePanel
+        ? { competence: effectiveCompetence }
+        : {}),
   };
 
   const sortHint = sortByClient
@@ -1000,25 +921,14 @@ export default async function ProvvigioniPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            {vista === "ut"
-              ? "Provvigioni · Gettoni (UT)"
-              : vista === "mensile"
-                ? "Provvigioni · Ricorrenti mensili (M)"
-                : vista === "annuale"
-                  ? "Provvigioni · Ricorrenti annuali (R)"
-                  : "Provvigioni"}
+            {vistaTab === "mensile"
+              ? "Provvigioni · Ricorrenti mensili (M)"
+              : vistaTab === "annuale"
+                ? "Provvigioni · Ricorrenti annuali (R)"
+                : "Provvigioni"}
           </h1>
           <p className="text-sm text-slate-500 sm:text-base">
             {total} contratti in elenco
-            {competenceSummary && filterHints.some((h) => h?.includes("competenza"))
-              ? stato === "Pagato"
-                ? ` · ${competenceSummary.primaryCount} pagate ${formatCurrency(competenceSummary.primaryAmount)}`
-                : stato === "Da incassare"
-                  ? ` · ${competenceSummary.primaryCount} da incassare ${formatCurrency(competenceSummary.primaryAmount)}`
-                  : incassatoTotals
-                    ? ` · ${incassatoTotals.count} incassate ${formatCurrency(incassatoTotals.amount)}`
-                    : ""
-              : ""}
             {filterHints.length
               ? ` · ${filterHints.join(" · ")}`
               : canViewAll
@@ -1048,125 +958,63 @@ export default async function ProvvigioniPage({
       </div>
 
       <ProvvigioniVistaTabs
-        active={vista}
+        active={vistaTab}
         counts={{
           tutti: countTutti,
-          ut: countGettoni,
           mensile: countMensili,
           annuale: countAnnuali,
         }}
         queryBase={tabQueryBase}
       />
 
-      {applyCompetenceToList && competenceStats ? (
-        <CompetenceMonthPanel
-          stats={competenceStats}
-          monthOptions={competenceMonthOptions()}
-          queryBase={{
-            ...tabQueryBase,
-            vista: showCompetencePanel ? vista : "mensile",
-            ...(stato ? { stato } : {}),
-          }}
-          activeStato={stato}
-        />
-      ) : null}
+      <ProvvigioniToolbar
+        q={q}
+        competencePeriod={effectiveCompetence ?? null}
+        competenceAll={competenceAll}
+        monthOptions={competenceMonthOptions()}
+        queryBase={tabQueryBase}
+        clearHref={vistaHref(vistaTab)}
+        canViewAll={canViewAll}
+        collabFilter={collabFilter}
+        collabCounts={collabCounts.map((c) => ({
+          id: c.id,
+          name: c.name,
+          count: c.n,
+        }))}
+        selectedCollabIds={selectedCollabIds}
+        totalCollabCount={collabCounts.reduce((s, c) => s + c.n, 0)}
+      />
 
-      {statoNeedsCompetence && vista === "tutti" ? (
+      <ProvvigioniSummaryCards
+        summary={financialSummary}
+        competencePeriod={effectiveCompetence ?? null}
+        competenceAll={competenceAll}
+        queryBase={tabQueryBase}
+        contractCount={total}
+      />
+
+      {statoNeedsCompetence && vistaTab === "tutti" && !competenceAll ? (
         <p className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
           Filtro <strong>{stato}</strong> attivo: stai vedendo le rate del mese{" "}
           <strong>{periodLabel(effectiveCompetence!)}</strong>. Per l&apos;elenco completo
-          Helios usa la scheda <strong>M</strong> oppure seleziona il mese nel pannello sopra.
+          usa la scheda <strong>M</strong> o <strong>R</strong>, oppure seleziona
+          &quot;Tutti i mesi&quot; nel periodo competenza.
         </p>
       ) : null}
 
-      <ListSearchForm
-        action="/provvigioni"
-        q={q}
-        placeholder="Cerca nome, cognome, CF, POD, telefono, note, fornitore…"
-        hidden={{
-          collab: collabFilter,
-          settled: settledPeriod,
-          supplier: supplier || undefined,
-          stato: stato || undefined,
-          tipologia: tipologia || undefined,
-          vista: vista !== "tutti" ? vista : undefined,
-          focus,
-          competence: effectiveCompetence,
-        }}
-        clearHref={vistaHref(vista)}
-      />
-
-      {canViewAll ? (
-        <div className="flex flex-wrap gap-2 text-sm">
-          <Link
-            href={`/provvigioni?${new URLSearchParams({
-              settled: settledPeriod,
-              ...(supplier ? { supplier } : {}),
-              ...(stato ? { stato } : {}),
-              ...(tipologia ? { tipologia } : {}),
-              ...(q ? { q } : {}),
-              ...(focus ? { focus } : {}),
-              ...(vista !== "tutti" ? { vista } : {}),
-            }).toString()}`}
-            className={
-              !collabFilter
-                ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
-                : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-800"
-            }
-          >
-            Tutti i collaboratori ({collabCounts.reduce((s, c) => s + c.n, 0)})
-          </Link>
-          {collabCounts.map((c) => (
-            <Link
-              key={c.id}
-              href={`/provvigioni?${new URLSearchParams({
-                collab: c.id,
-                settled: settledPeriod,
-                ...(supplier ? { supplier } : {}),
-                ...(stato ? { stato } : {}),
-                ...(tipologia ? { tipologia } : {}),
-                ...(q ? { q } : {}),
-                ...(focus ? { focus } : {}),
-                ...(vista !== "tutti" ? { vista } : {}),
-              }).toString()}`}
-              className={
-                selectedCollabIds.includes(c.id)
-                  ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
-                  : "rounded-lg bg-slate-100 px-3 py-1.5 text-slate-800"
-              }
-            >
-              {c.name} ({c.n})
-            </Link>
-          ))}
-        </div>
-      ) : null}
-
-      {showCompetencePanel || focus === "ricorrenze-mancanti" ? (
-        <RecurringMissingPanel
-          alerts={alertRows}
-          otherRecurringCount={otherRecurringCount}
-          kind={recurringKind}
-          summary={monthlySummary}
-        />
-      ) : null}
-
-      {vista === "mensile" ? (
-        <RecurringReconciliationPanel
-          competencePeriod={reconciliationPeriod}
-          settledPeriod={settledPeriod}
-          rows={reconciliationRows}
-          supplierLabel={supplier ? supplier.split("|").join(" + ") : "Tutti i fornitori"}
-          filteredContractCount={total}
-          filterQuery={{
-            supplier,
-            stato,
-            collab: collabFilter,
-            competence: effectiveCompetence,
-          }}
-        />
-      ) : null}
-
-      {vista === "mensile" ? <HeliosAbsentPanel alerts={heliosAbsentRows} /> : null}
+      <ProvvigioniAnomaliesSection alertCount={anomalyCount}>
+        {alertRows.length > 0 ? (
+          <RecurringMissingPanel
+            alerts={alertRows}
+            otherRecurringCount={otherRecurringCount}
+            kind={recurringKind}
+            summary={monthlySummary}
+          />
+        ) : null}
+        {heliosAbsentRows.length > 0 ? (
+          <HeliosAbsentPanel alerts={heliosAbsentRows} />
+        ) : null}
+      </ProvvigioniAnomaliesSection>
 
       <ProvvigioniTrashPanel
         rows={deletedRecent.map((c) => ({
@@ -1178,132 +1026,6 @@ export default async function ProvvigioniPage({
           deletedAt: c.deletedAt?.toISOString() ?? "",
         }))}
       />
-
-      <RecurringRendicontoPanel
-        settledPeriod={settledPeriod}
-        rows={settledRows}
-        collabQuery={collabQs}
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Contratti in elenco
-          </p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{total}</p>
-          <p className="mt-1 text-xs text-slate-500">Con filtri attivi</p>
-        </div>
-        {competenceSummary ? (
-          <>
-            <div
-              className={`rounded-xl border p-4 shadow-sm ${
-                competenceSummary.primaryTone === "indigo"
-                  ? "border-indigo-200 bg-indigo-50"
-                  : competenceSummary.primaryTone === "amber"
-                    ? "border-amber-200 bg-amber-50"
-                    : "border-emerald-200 bg-emerald-50"
-              }`}
-            >
-              <p
-                className={`text-xs font-semibold uppercase tracking-wide ${
-                  competenceSummary.primaryTone === "indigo"
-                    ? "text-indigo-800"
-                    : competenceSummary.primaryTone === "amber"
-                      ? "text-amber-800"
-                      : "text-emerald-800"
-                }`}
-              >
-                {competenceSummary.primaryLabel} {periodLabel(competenceStats!.period)}
-              </p>
-              <p
-                className={`mt-2 text-3xl font-bold ${
-                  competenceSummary.primaryTone === "indigo"
-                    ? "text-indigo-900"
-                    : competenceSummary.primaryTone === "amber"
-                      ? "text-amber-950"
-                      : "text-emerald-900"
-                }`}
-              >
-                {competenceSummary.primaryCount}
-              </p>
-              <p
-                className={`mt-1 text-sm font-semibold ${
-                  competenceSummary.primaryTone === "indigo"
-                    ? "text-indigo-800"
-                    : competenceSummary.primaryTone === "amber"
-                      ? "text-amber-800"
-                      : "text-emerald-800"
-                }`}
-              >
-                {formatCurrency(competenceSummary.primaryAmount)}
-              </p>
-            </div>
-            {competenceSummary.secondaryLabel ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                  {competenceSummary.secondaryLabel} {periodLabel(competenceStats!.period)}
-                </p>
-                <p className="mt-2 text-3xl font-bold text-amber-950">
-                  {competenceSummary.secondaryCount}
-                </p>
-                <p className="mt-1 text-sm font-semibold text-amber-800">
-                  {formatCurrency(competenceSummary.secondaryAmount)}
-                </p>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Totale gettoni
-              </p>
-              <p className="mt-2 text-3xl font-bold">{formatCurrency(totals.complessivo)}</p>
-              <p className="mt-1 text-xs text-slate-500">Incassato + da incassare</p>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
-                Da incassare
-              </p>
-              <p className="mt-2 text-3xl font-bold text-amber-950">
-                {formatCurrency(totals.daIncassare)}
-              </p>
-              <p className="mt-1 text-xs text-amber-800/70">Senza incasso registrato</p>
-            </div>
-          </>
-        )}
-        <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-sky-800">
-            {vista === "ut"
-              ? "Gettoni UT"
-              : vista === "annuale"
-                ? "Ricorrenti R"
-                : vista === "mensile"
-                  ? "Ricorrenti M"
-                  : "Complessivo"}
-          </p>
-          <p className="mt-2 text-3xl font-bold text-sky-950">
-            {competenceSummary
-              ? formatCurrency(competenceSummary.overallAmount)
-              : competenceStats
-                ? formatCurrency(
-                    incassatoTotals!.amount + competenceStats.missingAmount,
-                  )
-                : formatCurrency(totals.ricorrenti || totals.complessivo)}
-          </p>
-          <p className="mt-1 text-xs text-sky-800/70">
-            {vista === "ut"
-              ? `${countGettoni} contratti UT`
-              : competenceSummary || competenceStats
-                ? `${total} contratti con filtri attivi`
-                : vista === "mensile"
-                  ? `${countMensili} contratti M attivi`
-                  : vista === "annuale"
-                    ? `${countAnnuali} contratti R attivi`
-                    : `${countTutti} contratti totali`}
-          </p>
-        </div>
-      </div>
 
       <PaginationNav
         path="/provvigioni"
@@ -1324,9 +1046,9 @@ export default async function ProvvigioniPage({
           stato,
           tipologia,
           q,
-          vista: vista === "tutti" ? undefined : vista,
+          vista: vistaTab === "tutti" ? undefined : vistaTab,
           focus,
-          competence: effectiveCompetence,
+          competence: competenceAll ? "tutti" : effectiveCompetence,
         }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}

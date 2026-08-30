@@ -158,9 +158,19 @@ export function competenceSummaryForStato(
 export type ProvvigioniVista = "tutti" | "ut" | "mensile" | "annuale";
 
 export function parseProvvigioniVista(raw: string | null | undefined): ProvvigioniVista {
-  if (raw === "ut") return "ut";
+  if (raw === "ut") return "tutti";
   if (raw === "annuale") return "annuale";
   if (raw === "mensile" || raw === "ricorrente") return "mensile";
+  return "tutti";
+}
+
+/** Vista per UI tab (3 schede). */
+export function parseProvvigioniTab(
+  raw: string | null | undefined,
+): "tutti" | "mensile" | "annuale" {
+  const v = parseProvvigioniVista(raw);
+  if (v === "mensile") return "mensile";
+  if (v === "annuale") return "annuale";
   return "tutti";
 }
 
