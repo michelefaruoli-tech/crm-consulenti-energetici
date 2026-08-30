@@ -423,9 +423,7 @@ export function ExcelFilterTable({
     sticky.scrollLeft = main.scrollLeft;
   }, [showFixedHScroll, scrollWidth]);
 
-  const showHScrollChrome = !fitWidth || needsHScroll;
-  /** Sidebar fissa a schermo (vista avanzata): sempre in primo piano */
-  const showFixedSideNav = !fitWidth;
+  const showHScrollChrome = fitWidth && needsHScroll;
 
   return (
     <div
@@ -435,33 +433,6 @@ export function ExcelFilterTable({
         showFixedHScroll ? "pb-6" : null,
       )}
     >
-      {showFixedSideNav ? (
-        <div
-          className="pointer-events-none fixed bottom-24 right-3 z-[60] flex flex-col gap-2 sm:right-5"
-          aria-label="Scorri tabella a destra e sinistra"
-        >
-          <button
-            type="button"
-            className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-xl font-bold text-white shadow-lg ring-2 ring-white hover:bg-emerald-700"
-            title="Scorri a sinistra"
-            onClick={() => scrollTable("left")}
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-xl font-bold text-white shadow-lg ring-2 ring-white hover:bg-emerald-700"
-            title="Scorri a destra"
-            onClick={() => scrollTable("right")}
-          >
-            →
-          </button>
-          <p className="pointer-events-none mt-1 max-w-[3.5rem] text-center text-[9px] font-semibold leading-tight text-slate-600">
-            scorri
-          </p>
-        </div>
-      ) : null}
-
       {hasAnyFilter ? (
         <div className="flex flex-col gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 sm:flex-row sm:items-center sm:justify-between">
           <span>
@@ -479,8 +450,7 @@ export function ExcelFilterTable({
         </div>
       ) : null}
 
-      {/* In vista avanzata i ← → sono già fissi a destra: niente duplicati sopra la tabella */}
-      {showHScrollChrome && !showFixedSideNav ? (
+      {showHScrollChrome ? (
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
           <p className="text-[11px] leading-snug text-slate-600 sm:text-xs">
             Scorri in orizzontale se serve (barra fissa in basso)
