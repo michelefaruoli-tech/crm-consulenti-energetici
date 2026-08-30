@@ -9,6 +9,7 @@ import {
   hasPermission,
 } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { defaultCommissionExpected } from "@/lib/commission";
 import { parseFlexibleDate } from "@/lib/date-parse";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 import {
@@ -108,7 +109,7 @@ async function resolveCommissionForEdit(commissionOrContractId: string) {
     commission = await prisma.commission.create({
       data: {
         contractId: contract.id,
-        expected: 0,
+        expected: defaultCommissionExpected(contract.client.type),
         accrued: 0,
         received: 0,
         paid: 0,

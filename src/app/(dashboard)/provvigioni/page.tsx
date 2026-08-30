@@ -55,6 +55,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
+import { defaultCommissionExpected } from "@/lib/commission";
 import {
   defaultGettonePrivato,
   type ProvvigioneRow,
@@ -300,7 +301,7 @@ export default async function ProvvigioniPage({
   void prisma.contract
     .findMany({
       where: { ...contractWhere, commission: { is: null } },
-      select: { id: true },
+      select: { id: true, client: { select: { type: true } } },
       take: 20,
     })
     .then((missingCommission) =>
@@ -310,7 +311,7 @@ export default async function ProvvigioniPage({
             .create({
               data: {
                 contractId: c.id,
-                expected: 0,
+                expected: defaultCommissionExpected(c.client.type),
                 accrued: 0,
                 received: 0,
                 paid: 0,

@@ -20,6 +20,7 @@ import {
 } from "@/lib/contract-number";
 import { canonicalSupplierName } from "@/lib/supplier-merge";
 import { suggestPersonNameOrder } from "@/lib/italian-person-name";
+import { defaultCommissionExpected } from "@/lib/commission";
 
 function normalizePrivatoNames(client: NewContractPayload["client"]) {
   if (client.type !== "PRIVATO") return client;
@@ -625,9 +626,11 @@ async function createFullContractActionInner(
           select: { fixedAmount: true },
         })
       : null;
-    const expected = expectedFromRule?.fixedAmount
+    const fromRule = expectedFromRule?.fixedAmount
       ? Number(expectedFromRule.fixedAmount.toString()) || 0
       : 0;
+    const expected =
+      fromRule > 0 ? fromRule : defaultCommissionExpected(payload.client.type);
 
     await prisma.commission.create({
       data: { contractId: created.id, expected },

@@ -300,8 +300,13 @@ export async function createContractAction(formData: FormData): Promise<void> {
     ? await prisma.commissionRule.findUnique({ where: { id: commissionRuleId } })
     : null;
 
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { type: true },
+  });
+
   const contractNumber = await generateContractNumber();
-  const expected = calculateExpectedCommission(rule);
+  const expected = calculateExpectedCommission(rule, client?.type);
 
   const created = await prisma.contract.create({
     data: {
