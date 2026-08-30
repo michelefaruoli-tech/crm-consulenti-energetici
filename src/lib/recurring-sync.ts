@@ -6,6 +6,7 @@ import {
   isRecurringMonthly,
   monthsBetween,
   normalizeRecurrence,
+  recurrenceWriteData,
   toPeriod,
 } from "@/lib/recurring";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
@@ -157,7 +158,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   if (contract.recurrence?.trim() !== normalized) {
     await prisma.contract.update({
       where: { id: contractId },
-      data: { recurrence: normalized },
+      data: recurrenceWriteData(normalized),
     });
     contract.recurrence = normalized;
   }

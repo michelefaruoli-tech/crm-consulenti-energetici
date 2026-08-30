@@ -54,6 +54,14 @@ enum ClientType {
   AZIENDA
 }
 
+/// Ricorrenza canonica e indicizzabile (deriva da Contract.recurrence testuale).
+/// UT = gettone una tantum · M = ricorrente mensile · R = ricorrente annuale (12 mesi)
+enum ContractRecurrenceKind {
+  UT
+  M
+  R
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -266,8 +274,11 @@ model Contract {
   bandCount        Int?
   bandsJson        String?
   economicNotes    String?
-  /// Una tantum / Mensile...
+  /// Una tantum / Mensile... (testo storico, resta fonte di verità per la UI)
   recurrence       String?
+  /// Versione canonica e indicizzata di `recurrence`: usare SEMPRE questa nei filtri.
+  /// Mantenuta in sync dalle scritture tramite `recurrenceWriteData()`.
+  recurrenceKind   ContractRecurrenceKind @default(UT)
   paymentMethod    String?
   /// IBAN specifico del contratto (copia indipendente dall'anagrafica)
   contractIban     String?
@@ -360,6 +371,10 @@ model Contract {
   @@index([status])
   @@index([collaboratorId])
   @@index([supplierId])
+  @@index([recurrenceKind])
+  /// Percorso caldo liste (Provvigioni/Contratti): base filtro + categoria UT/M/R
+  @@index([deletedAt, isHistorical, recurrenceKind])
+  @@index([collaboratorId, deletedAt, isHistorical])
   @@index([podPdr])
   @@index([pod])
   @@index([pdr])
@@ -434,6 +449,9 @@ model RecurringMonth {
   @@index([period])
   @@index([settledPeriod])
   @@index([contractId])
+  /// Espansione righe per stato rata (Incassato / Da incassare / Pagato)
+  @@index([status, period])
+  @@index([contractId, status])
 }
 
 model CommissionEntry {

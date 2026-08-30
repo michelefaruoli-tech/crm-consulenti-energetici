@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "check:server-actions": "tsx scripts/check-server-actions.ts",
+    "check:recurrence": "tsx scripts/verify-recurrence-kind.ts",
     "postinstall": "prisma generate",
     "db:import-dati": "tsx scripts/import-excel-dati.ts",
     "db:setup": "prisma migrate deploy && tsx prisma/seed.ts",

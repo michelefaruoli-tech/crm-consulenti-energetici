@@ -38,36 +38,34 @@ export type ProvvigioniFilters = {
   competencePeriod?: string | null;
 };
 
-/** Qualsiasi ricorrenza (mensile M o annuale R + legacy). */
+/**
+ * Filtri ricorrenza su `recurrenceKind` (colonna enum indicizzata).
+ *
+ * Prima si interrogava il testo libero `recurrence` con ILIKE '%ricor%': Postgres
+ * non puo' usare un indice con wildcard iniziale, quindi ogni lista faceva una
+ * scansione completa della tabella. `recurrenceKind` e' mantenuta in sync dalle
+ * scritture tramite `recurrenceWriteData()` in src/lib/recurring.ts.
+ */
+
+/** Qualsiasi ricorrenza (mensile M o annuale R). */
 export const recurringWhereOr: Prisma.ContractWhereInput[] = [
-  { recurrence: { equals: "M", mode: "insensitive" } },
-  { recurrence: { equals: "R", mode: "insensitive" } },
-  { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
-  { recurrence: { contains: "ricor", mode: "insensitive" } },
-  { recurrence: { contains: "mensil", mode: "insensitive" } },
-  { recurrence: { contains: "annu", mode: "insensitive" } },
+  { recurrenceKind: { in: ["M", "R"] } },
 ];
 
-/** Solo ricorrenti mensili (M + legacy Ricorrente). */
+/** Solo ricorrenti mensili (M). */
 export const recurringMonthlyWhereOr: Prisma.ContractWhereInput[] = [
-  { recurrence: { equals: "M", mode: "insensitive" } },
-  { recurrence: { equals: "Ricorrente", mode: "insensitive" } },
-  { recurrence: { contains: "mensil", mode: "insensitive" } },
-  {
-    AND: [
-      { recurrence: { contains: "ricor", mode: "insensitive" } },
-      { NOT: { recurrence: { contains: "annu", mode: "insensitive" } } },
-      { NOT: { recurrence: { equals: "R", mode: "insensitive" } } },
-    ],
-  },
+  { recurrenceKind: "M" },
 ];
 
 /** Solo ricorrenti annuali (R / 12 mesi). */
 export const recurringAnnualWhereOr: Prisma.ContractWhereInput[] = [
-  { recurrence: { equals: "R", mode: "insensitive" } },
-  { recurrence: { contains: "annu", mode: "insensitive" } },
-  { recurrence: { contains: "12 mes", mode: "insensitive" } },
+  { recurrenceKind: "R" },
 ];
+
+/** Gettone una tantum: tutto cio' che non e' ricorrente. */
+export const nonRecurringWhere: Prisma.ContractWhereInput = {
+  recurrenceKind: "UT",
+};
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
@@ -169,13 +167,7 @@ function provvigioneStatoWhereOne(
       OR: [
         {
           AND: [
-            {
-              OR: [
-                { recurrence: null },
-                { recurrence: { equals: "" } },
-                { NOT: { OR: recurringWhereOr } },
-              ],
-            },
+            nonRecurringWhere,
             { collectionDate: { not: null } },
             { supplyStartDate: { lte: today } },
           ],
@@ -197,13 +189,7 @@ function provvigioneStatoWhereOne(
       OR: [
         {
           AND: [
-            {
-              OR: [
-                { recurrence: null },
-                { recurrence: { equals: "" } },
-                { NOT: { OR: recurringWhereOr } },
-              ],
-            },
+            nonRecurringWhere,
             {
               OR: [
                 { collectionDate: null },
@@ -315,14 +301,7 @@ export function buildProvvigioniContractWhere(
   } else if (recurrenceMode === "annual") {
     and.push({ OR: recurringAnnualWhereOr });
   } else if (recurrenceMode === "exclude") {
-    // Ricorrenza NULL/vuota = gettone/una tantum (SQL NOT su NULL escludeva migliaia di righe)
-    and.push({
-      OR: [
-        { recurrence: null },
-        { recurrence: { equals: "" } },
-        { NOT: { OR: recurringWhereOr } },
-      ],
-    });
+    and.push(nonRecurringWhere);
   }
 
   return {

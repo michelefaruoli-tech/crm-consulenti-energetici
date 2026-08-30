@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { clientDisplayName } from "@/lib/utils";
@@ -20,15 +21,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** Contratti attivi con R/G = R (ricorrente mensile). */
-const recurringContractFilter = {
-  deletedAt: null as null,
-  isHistorical: false as const,
-  OR: [
-    { recurrence: { equals: "R", mode: "insensitive" as const } },
-    { recurrence: { contains: "Ricor", mode: "insensitive" as const } },
-    { recurrence: { contains: "mensil", mode: "insensitive" as const } },
-  ],
+/** Contratti attivi ricorrenti (mensili o annuali). */
+const recurringContractFilter: Prisma.ContractWhereInput = {
+  deletedAt: null,
+  isHistorical: false,
+  recurrenceKind: { in: ["M", "R"] },
 };
 
 /** Solo contratti attivi (non storici, non eliminati). */

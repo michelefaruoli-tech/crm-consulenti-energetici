@@ -120,6 +120,29 @@ export function shortRecurrenceCode(recurrence: string | null | undefined): stri
   return "UT";
 }
 
+/** Valore della colonna enum indicizzata `Contract.recurrenceKind`. */
+export function recurrenceKindOf(
+  recurrence: string | null | undefined,
+): "UT" | "M" | "R" {
+  const n = normalizeRecurrence(recurrence);
+  return n === "M" ? "M" : n === "R" ? "R" : "UT";
+}
+
+/**
+ * Dati da passare a `contract.update/updateMany/create` per cambiare ricorrenza.
+ *
+ * Scrive SEMPRE entrambi i campi: `recurrence` (testo, usato dalla UI) e
+ * `recurrenceKind` (enum indicizzato, usato da tutti i filtri). Usare questo
+ * helper al posto di `{ recurrence: ... }` evita che i due campi divergano.
+ */
+export function recurrenceWriteData(raw: string | null | undefined): {
+  recurrence: RecurrenceKind;
+  recurrenceKind: "UT" | "M" | "R";
+} {
+  const recurrence = normalizeRecurrence(raw);
+  return { recurrence, recurrenceKind: recurrenceKindOf(recurrence) };
+}
+
 /** Etichetta lunga per select / tooltip */
 export function recurrenceLabel(recurrence: string | null | undefined): string {
   const n = normalizeRecurrence(recurrence);

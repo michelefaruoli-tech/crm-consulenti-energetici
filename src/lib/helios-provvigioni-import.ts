@@ -22,6 +22,7 @@ import {
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
+import { recurrenceWriteData } from "@/lib/recurring";
 import { repairMonthlySwitchArchives } from "@/lib/contract-pod-archive";
 
 export type {
@@ -466,7 +467,7 @@ export async function applyHeliosProvvigioniAction(
       await prisma.contract.update({
         where: { id: row.contractId },
         data: {
-          recurrence: "M",
+          ...recurrenceWriteData("M"),
           ...(contract?.status === "PROVVIGIONE_LIQUIDATA"
             ? {}
             : { status: "PAGATO_DAL_FORNITORE" }),

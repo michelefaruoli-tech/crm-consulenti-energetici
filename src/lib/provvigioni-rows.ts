@@ -20,9 +20,9 @@ import {
 } from "@/lib/supply-dates";
 import { isRecurringMonthly, periodLabel } from "@/lib/recurring";
 import {
+  nonRecurringWhere,
   parseStatoFilter,
   recurringMonthlyWhereOr,
-  recurringWhereOr,
 } from "@/lib/provvigioni-filters";
 import {
   effectiveGettone,
@@ -34,13 +34,7 @@ import {
 
 export type RecurringExpandMode = "incassato" | "da-incassare" | "pagato";
 
-const NON_RECURRING_WHERE: Prisma.ContractWhereInput = {
-  OR: [
-    { recurrence: null },
-    { recurrence: { equals: "" } },
-    { NOT: { OR: recurringWhereOr } },
-  ],
-};
+const NON_RECURRING_WHERE: Prisma.ContractWhereInput = nonRecurringWhere;
 
 const MONTHLY_RECURRING_WHERE: Prisma.ContractWhereInput = {
   OR: recurringMonthlyWhereOr,

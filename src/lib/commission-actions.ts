@@ -22,7 +22,12 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
-import { isRecurringMonthly, normalizeRecurrence, type RecurrenceKind } from "@/lib/recurring";
+import {
+  isRecurringMonthly,
+  normalizeRecurrence,
+  recurrenceWriteData,
+  type RecurrenceKind,
+} from "@/lib/recurring";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
@@ -274,7 +279,7 @@ async function applyCommissionField(
     const normalized = normalizeRecurrence(value);
     await prisma.contract.update({
       where: { id: commission.contractId },
-      data: { recurrence: normalized },
+      data: recurrenceWriteData(normalized),
     });
     void syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     await writeAuditLog({
@@ -921,7 +926,7 @@ export async function bulkSetRecurrenceAction(
     const updatedIds = toUpdate.map((c) => c.id);
     await prisma.contract.updateMany({
       where: { id: { in: updatedIds } },
-      data: { recurrence: kind },
+      data: recurrenceWriteData(kind),
     });
     const count = updatedIds.length;
 
