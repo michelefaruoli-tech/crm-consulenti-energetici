@@ -8,6 +8,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { contractTextSearchWhere } from "@/lib/list-search";
+import { toPeriod } from "@/lib/recurring";
 
 export type ProvvigioniFilters = {
   canViewAll: boolean;
@@ -329,6 +330,58 @@ export function buildProvvigioniContractWhere(
     ...(collaboratorFilter ? { collaboratorId: collaboratorFilter } : {}),
     ...(and.length ? { AND: and } : {}),
   };
+}
+
+export type ProvvigioniListFocus = "da-confermare" | "ricorrenze-mancanti";
+
+export type ProvvigioniListWhereOpts = {
+  filters: ProvvigioniFilters;
+  focus?: ProvvigioniListFocus | null;
+  /** Mese competenza attivo sulla lista (YYYY-MM) */
+  effectiveCompetence?: string;
+  applyCompetenceToList?: boolean;
+};
+
+/**
+ * Where identico alla lista Provvigioni (pagina + export + card).
+ * Include focus, stato, collaboratore e filtro mese competenza.
+ */
+export function buildProvvigioniListWhere(
+  opts: ProvvigioniListWhereOpts,
+): Prisma.ContractWhereInput {
+  let where = buildProvvigioniContractWhere(opts.filters);
+
+  if (opts.focus === "da-confermare") {
+    where = { AND: [where, { commissionConfirmed: false }] };
+  } else if (opts.focus === "ricorrenze-mancanti") {
+    where = {
+      AND: [
+        where,
+        {
+          recurringMonths: {
+            some: {
+              status: { in: ["MISSING", "PENDING"] },
+              period: { lt: toPeriod(new Date()) },
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  if (opts.applyCompetenceToList && opts.effectiveCompetence) {
+    where = {
+      AND: [
+        where,
+        provvigioniCompetenceWhere(
+          opts.effectiveCompetence,
+          opts.filters.stato,
+        ),
+      ],
+    };
+  }
+
+  return where;
 }
 
 /** Filtro mese competenza: con Incassato/Pagato/Da incassare usa lo stato rata coerente. */

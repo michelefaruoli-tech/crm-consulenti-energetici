@@ -5,7 +5,7 @@ import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
-import { buildProvvigioniContractWhere, provvigioniCompetenceWhere } from "@/lib/provvigioni-filters";
+import { buildProvvigioniContractWhere, buildProvvigioniListWhere } from "@/lib/provvigioni-filters";
 import { formatMonthYear } from "@/lib/date-parse";
 import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
 import {
@@ -55,42 +55,22 @@ export async function GET(request: Request) {
       (showCompetencePanel ? addMonths(settled, -1) : undefined));
   const applyCompetenceToList = Boolean(effectiveCompetence);
 
-  const baseContractWhere = buildProvvigioniContractWhere({
-    canViewAll,
-    sessionUserId: session.id,
-    collab,
-    supplier,
-    stato,
-    tipologia,
-    q,
-    recurrenceMode,
-    competencePeriod: effectiveCompetence,
+  const contractWhere = buildProvvigioniListWhere({
+    filters: {
+      canViewAll,
+      sessionUserId: session.id,
+      collab,
+      supplier,
+      stato,
+      tipologia,
+      q,
+      recurrenceMode,
+      competencePeriod: effectiveCompetence,
+    },
+    focus,
+    effectiveCompetence,
+    applyCompetenceToList,
   });
-  const contractWhere: Prisma.ContractWhereInput =
-    focus === "da-confermare"
-      ? { AND: [baseContractWhere, { commissionConfirmed: false }] }
-      : focus === "ricorrenze-mancanti"
-        ? {
-            AND: [
-              baseContractWhere,
-              {
-                recurringMonths: {
-                  some: {
-                    status: "MISSING",
-                    period: { lt: toPeriod(new Date()) },
-                  },
-                },
-              },
-            ],
-          }
-        : applyCompetenceToList
-          ? {
-              AND: [
-                baseContractWhere,
-                provvigioniCompetenceWhere(effectiveCompetence!, stato),
-              ],
-            }
-          : baseContractWhere;
 
   const contracts = await prisma.contract.findMany({
     where: contractWhere,

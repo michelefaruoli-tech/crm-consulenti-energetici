@@ -37,8 +37,9 @@ import {
 import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import {
   buildProvvigioniContractWhere,
-  provvigioniCompetenceWhere,
+  buildProvvigioniListWhere,
   recurringMonthlyWhereOr,
+  type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
 import {
   competenceMonthOptions,
@@ -124,7 +125,7 @@ export default async function ProvvigioniPage({
     /^\d{4}-\d{2}$/.test(competenceRaw)
       ? competenceRaw
       : undefined;
-  const focus =
+  const focus: ProvvigioniListFocus | undefined =
     focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
       ? focusRaw
       : undefined;
@@ -155,10 +156,13 @@ export default async function ProvvigioniPage({
     ? "tutti"
     : effectiveCompetence;
 
+  const collabFilter =
+    (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
+
   const statsBaseFilters = {
     canViewAll: canViewAll || isScoped,
     sessionUserId: session.id,
-    collab,
+    collab: collabFilter,
     supplier,
     tipologia,
     q,
@@ -166,50 +170,23 @@ export default async function ProvvigioniPage({
     visibility,
   };
 
-  const baseContractWhere = buildProvvigioniContractWhere({
-    // Backoffice: non forzare collaboratorId = sé (usa solo visibility)
-    canViewAll: canViewAll || isScoped,
-    sessionUserId: session.id,
-    collab,
-    supplier,
+  const listFilters = {
+    ...statsBaseFilters,
     stato,
-    tipologia,
-    q,
-    recurrenceMode,
-    visibility,
     competencePeriod: effectiveCompetence,
+  };
+
+  const listWhereOpts = {
+    focus,
+    effectiveCompetence,
+    applyCompetenceToList,
+  };
+
+  const contractWhere = buildProvvigioniListWhere({
+    filters: listFilters,
+    ...listWhereOpts,
   });
-  function applyFocus(where: Prisma.ContractWhereInput): Prisma.ContractWhereInput {
-    if (focus === "da-confermare") {
-      return { AND: [where, { commissionConfirmed: false }] };
-    }
-    if (focus === "ricorrenze-mancanti") {
-      return {
-        AND: [
-          where,
-          {
-            recurringMonths: {
-              some: {
-                status: { in: ["MISSING", "PENDING"] },
-                period: { lt: toPeriod(new Date()) },
-              },
-            },
-          },
-        ],
-      };
-    }
-    return where;
-  }
-  const contractWhere = applyFocus(
-    applyCompetenceToList
-      ? {
-          AND: [
-            baseContractWhere,
-            provvigioniCompetenceWhere(effectiveCompetence!, stato),
-          ],
-        }
-      : baseContractWhere,
-  );
+
   const activeRecurringPeriod = addMonths(toPeriod(new Date()), -1);
   const [activeYear, activeMonth] = activeRecurringPeriod.split("-").map(Number);
   const activeRecurringEnd = new Date(activeYear, activeMonth, 0, 23, 59, 59, 999);
@@ -217,24 +194,27 @@ export default async function ProvvigioniPage({
     status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
     supplyStartDate: { not: null, lte: activeRecurringEnd },
   };
-  const collaboratorBaseWhere = buildProvvigioniContractWhere({
-    canViewAll: canViewAll || isScoped,
-    sessionUserId: session.id,
-    supplier,
-    stato,
-    tipologia,
-    q,
-    recurrenceMode,
-    visibility,
-    competencePeriod: effectiveCompetence,
+  let collaboratorCountsWhere: Prisma.ContractWhereInput = buildProvvigioniListWhere({
+    filters: {
+      canViewAll: canViewAll || isScoped,
+      sessionUserId: session.id,
+      supplier,
+      stato,
+      tipologia,
+      q,
+      recurrenceMode,
+      visibility,
+      competencePeriod: effectiveCompetence,
+    },
+    focus,
+    effectiveCompetence,
+    applyCompetenceToList,
   });
-  const collaboratorCountsWhere = applyFocus(
-    vista === "mensile" || vista === "annuale"
-      ? { AND: [collaboratorBaseWhere, activeRecurringWhere] }
-      : collaboratorBaseWhere,
-  );
-  const collabFilter =
-    (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
+  if (vista === "mensile" || vista === "annuale") {
+    collaboratorCountsWhere = {
+      AND: [collaboratorCountsWhere, activeRecurringWhere],
+    };
+  }
   const sessionCollabFilter = isScoped
     ? undefined
     : canViewAll
@@ -277,7 +257,7 @@ export default async function ProvvigioniPage({
   // Con una ricerca mirata riconcilia subito i contratti trovati; altrimenti usa il sync leggero.
   if (q) {
     const matchingRecurring = await prisma.contract.findMany({
-      where: baseContractWhere,
+      where: buildProvvigioniContractWhere(statsBaseFilters),
       select: { id: true },
       take: 100,
     });
@@ -298,6 +278,15 @@ export default async function ProvvigioniPage({
   const total = await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
+
+  const summaryContext = {
+    focus,
+    effectiveCompetence,
+    applyCompetenceToList,
+    activeStato: stato,
+    activeListWhere: contractWhere,
+    activeListTotal: total,
+  };
 
   // Commissoni mancanti: in background (non blocca il caricamento)
   void prisma.contract
@@ -515,11 +504,7 @@ export default async function ProvvigioniPage({
         ],
       },
     }),
-    loadProvvigioniFinancialSummary(
-      statsBaseFilters,
-      vistaTab,
-      viewingAllPeriods ? null : effectiveCompetence ?? null,
-    ),
+    loadProvvigioniFinancialSummary(statsBaseFilters, vistaTab, summaryContext),
   ]);
 
   const contracts =

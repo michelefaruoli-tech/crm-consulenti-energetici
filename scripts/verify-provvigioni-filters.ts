@@ -3,7 +3,7 @@
  * Uso: npx tsx scripts/verify-provvigioni-filters.ts "Marco Fagiano"
  */
 import { prisma } from "../src/lib/prisma";
-import { buildProvvigioniContractWhere } from "../src/lib/provvigioni-filters";
+import { buildProvvigioniContractWhere, buildProvvigioniListWhere } from "../src/lib/provvigioni-filters";
 import { loadProvvigioniFinancialSummary } from "../src/lib/provvigioni-summary";
 
 async function main() {
@@ -24,10 +24,15 @@ async function main() {
     recurrenceMode: "all" as const,
   };
 
-  const summary = await loadProvvigioniFinancialSummary(base, "tutti", null);
+  const summary = await loadProvvigioniFinancialSummary(base, "tutti", {
+    applyCompetenceToList: false,
+  });
 
   for (const stato of ["Incassato", "Da incassare", "Pagato"] as const) {
-    const where = buildProvvigioniContractWhere({ ...base, stato });
+    const where = buildProvvigioniListWhere({
+      filters: { ...base, stato },
+      applyCompetenceToList: false,
+    });
     const count = await prisma.contract.count({ where });
     const cardCount =
       stato === "Incassato"

@@ -1,13 +1,13 @@
 /**
- * Totali finanziari Provvigioni: incassato, da incassare, pagato.
- * Usa gli stessi filtri Prisma della lista (buildProvvigioniContractWhere + stato).
+ * Totali finanziari Provvigioni — stessa query Prisma della lista.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
-  buildProvvigioniContractWhere,
+  buildProvvigioniListWhere,
   recurringWhereOr,
   type ProvvigioniFilters,
+  type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
 
 export type ProvvigioniFinancialSummary = {
@@ -29,13 +29,15 @@ const UT_ONLY: Prisma.ContractWhereInput = {
 
 const MISSING = ["MISSING", "PENDING", "ERROR_UNPAID"] as const;
 
+type StatoCard = "Incassato" | "Da incassare" | "Pagato";
+
 function num(value: Prisma.Decimal | number | null | undefined): number {
   return Number(value?.toString() ?? 0) || 0;
 }
 
-async function sumAmountForStato(
+export async function sumAmountForStato(
   where: Prisma.ContractWhereInput,
-  stato: "Incassato" | "Da incassare" | "Pagato",
+  stato: StatoCard,
   competencePeriod: string | null,
 ): Promise<number> {
   const periodFilter = competencePeriod ? { period: competencePeriod } : {};
@@ -99,37 +101,69 @@ async function sumAmountForStato(
   return num(recurring._sum.amount) + num(ut._sum.expected);
 }
 
+export type ProvvigioniSummaryContext = {
+  focus?: ProvvigioniListFocus | null;
+  effectiveCompetence?: string;
+  applyCompetenceToList: boolean;
+  /** Lista corrente: allinea la card dello stato attivo */
+  activeStato?: string | null;
+  activeListWhere?: Prisma.ContractWhereInput;
+  activeListTotal?: number;
+};
+
 async function summaryForStato(
   base: Omit<ProvvigioniFilters, "stato">,
-  stato: "Incassato" | "Da incassare" | "Pagato",
-  competencePeriod: string | null,
+  stato: StatoCard,
+  ctx: ProvvigioniSummaryContext,
 ): Promise<{ count: number; amount: number }> {
-  const where = buildProvvigioniContractWhere({
-    ...base,
-    stato,
-    competencePeriod,
+  const competenceForAmount = ctx.applyCompetenceToList
+    ? ctx.effectiveCompetence ?? null
+    : null;
+
+  if (
+    ctx.activeStato?.trim() === stato &&
+    ctx.activeListWhere &&
+    ctx.activeListTotal !== undefined
+  ) {
+    return {
+      count: ctx.activeListTotal,
+      amount: await sumAmountForStato(
+        ctx.activeListWhere,
+        stato,
+        competenceForAmount,
+      ),
+    };
+  }
+
+  const where = buildProvvigioniListWhere({
+    filters: {
+      ...base,
+      stato,
+      competencePeriod: ctx.effectiveCompetence,
+    },
+    focus: ctx.focus,
+    effectiveCompetence: ctx.effectiveCompetence,
+    applyCompetenceToList: ctx.applyCompetenceToList,
   });
+
   const [count, amount] = await Promise.all([
     prisma.contract.count({ where }),
-    sumAmountForStato(where, stato, competencePeriod),
+    sumAmountForStato(where, stato, competenceForAmount),
   ]);
   return { count, amount };
 }
 
 export type SummaryVista = "tutti" | "mensile" | "annuale";
 
-/**
- * Totali allineati ai filtri lista (stessa logica del click sulle card).
- */
 export async function loadProvvigioniFinancialSummary(
   base: Omit<ProvvigioniFilters, "stato">,
   _vista: SummaryVista,
-  competencePeriod: string | null,
+  ctx: ProvvigioniSummaryContext,
 ): Promise<ProvvigioniFinancialSummary> {
   const [incassato, daIncassare, pagato] = await Promise.all([
-    summaryForStato(base, "Incassato", competencePeriod),
-    summaryForStato(base, "Da incassare", competencePeriod),
-    summaryForStato(base, "Pagato", competencePeriod),
+    summaryForStato(base, "Incassato", ctx),
+    summaryForStato(base, "Da incassare", ctx),
+    summaryForStato(base, "Pagato", ctx),
   ]);
 
   return {
