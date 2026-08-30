@@ -272,6 +272,10 @@ export function ProvvigioniFilterTable({
     return n;
   }, [drafts]);
 
+  function reloadList() {
+    router.push(buildPageHref("/provvigioni", baseQuery()));
+  }
+
   function baseQuery(extra: Record<string, string | undefined | null> = {}) {
     return {
       collab: listQuery?.collab,
@@ -510,7 +514,7 @@ export function ProvvigioniFilterTable({
         }
         setDrafts({});
         setMessage(`Salvate ${res.count} modifiche`);
-        router.refresh();
+        reloadList();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Errore salvataggio");
       }
@@ -581,7 +585,7 @@ export function ProvvigioniFilterTable({
               ? ` · ${result.count} contratti`
               : "";
         setMessage(`${label} — ok${extra}`);
-        router.refresh();
+        reloadList();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Errore azione multipla");
       }
@@ -638,7 +642,15 @@ export function ProvvigioniFilterTable({
         setMessage(
           `Categoria ${shortKind}: aggiornati ${result.count} contratti${skippedHint}`,
         );
-        router.refresh();
+        const vistaAfter =
+          result.kind === "Una tantum"
+            ? undefined
+            : result.kind === "M"
+              ? "mensile"
+              : "annuale";
+        router.push(
+          buildPageHref("/provvigioni", baseQuery({ vista: vistaAfter })),
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : "Errore cambio categoria");
       }

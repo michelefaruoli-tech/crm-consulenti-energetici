@@ -32,6 +32,9 @@ import {
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
 
+/** Oltre questa soglia l'expand rate mensili viene disattivato (evita timeout RSC). */
+export const EXPAND_ROW_CAP = 1000;
+
 export type RecurringExpandMode = "incassato" | "da-incassare" | "pagato";
 
 const NON_RECURRING_WHERE: Prisma.ContractWhereInput = {
@@ -171,12 +174,12 @@ function buildSingleRow(
     : null;
 
   const paidRecurringForCompetence = competencePeriod
-    ? contract.recurringMonths.some(
+    ? (contract.recurringMonths ?? []).some(
         (m) =>
           m.period === competencePeriod &&
           (m.status === "PAID" || m.status === "LIQUIDATED"),
       )
-    : contract.recurringMonths.some((m) => m.status === "PAID");
+    : (contract.recurringMonths ?? []).some((m) => m.status === "PAID");
 
   const hasDate =
     expandStato === "Incassato" ||
@@ -195,7 +198,7 @@ function buildSingleRow(
     ? formatMonthYear(new Date(`${monthOverride.period}-01`))
     : competencePeriod
       ? (() => {
-          const m = contract.recurringMonths.find(
+          const m = (contract.recurringMonths ?? []).find(
             (r) =>
               r.period === competencePeriod &&
               (r.status === "PAID" || r.status === "LIQUIDATED"),
@@ -239,7 +242,7 @@ function buildSingleRow(
     ? monthOverride.amount
     : competencePeriod
       ? (() => {
-          const row = contract.recurringMonths.find(
+          const row = (contract.recurringMonths ?? []).find(
             (m) => m.period === competencePeriod,
           );
           if (row) return monthAmount(row, contract);
@@ -279,7 +282,7 @@ function buildSingleRow(
     commissionId: item?.id ?? "",
     clientName: clientDisplayName(contract.client),
     podPdr: contract.podPdr || contract.pod || contract.pdr || "",
-    collaboratorName: contract.collaborator.name,
+    collaboratorName: contract.collaborator?.name ?? "—",
     supplierName: contract.supplier.name,
     clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
     amount: String(amountValue),
@@ -335,7 +338,7 @@ export function expandContractsToProvvigioneRows(
       continue;
     }
 
-    const months = contract.recurringMonths
+    const months = (contract.recurringMonths ?? [])
       .filter((m) => statuses.includes(m.status))
       .sort((a, b) => b.period.localeCompare(a.period));
 
@@ -651,10 +654,6 @@ export async function loadStornoContractsForMaps(
           stornoDate: true,
           stornoAmount: true,
         },
-      },
-      recurringMonths: {
-        select: { period: true, status: true, amount: true },
-        take: 0,
       },
     },
   }) as Promise<ContractForProvvigioneRow[]>;

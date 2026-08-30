@@ -47,6 +47,7 @@ import {
   buildStornoMaps,
   countExpandedListRows,
   expandContractsToProvvigioneRows,
+  EXPAND_ROW_CAP,
   fetchExpandedProvvigionePage,
   getRecurringExpandMode,
   loadStornoContractsForMaps,
@@ -270,14 +271,19 @@ export default async function ProvvigioniPage({
   }
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
-  const expandMode = getRecurringExpandMode(
+  const expandModeRequested = getRecurringExpandMode(
     stato,
     viewingAllPeriods,
     effectiveCompetence,
   );
-  const total = expandMode
+  let expandMode = expandModeRequested;
+  let total = expandMode
     ? await countExpandedListRows(contractWhere, expandMode)
     : await prisma.contract.count({ where: contractWhere });
+  if (expandMode && total > EXPAND_ROW_CAP) {
+    expandMode = null;
+    total = await prisma.contract.count({ where: contractWhere });
+  }
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
   const listUsesExpandedRows = Boolean(expandMode);
@@ -669,40 +675,60 @@ export default async function ProvvigioniPage({
   const tabRecurringCount = vista === "annuale" ? countAnnuali : countMensili;
   const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
   const otherRecurringCount = Math.max(0, tabRecurringCount - missingContractCount);
-  const monthlyStatusRows =
-    vista === "mensile"
-      ? await prisma.recurringMonth.findMany({
-          where: {
-            period: { lte: activeRecurringPeriod },
-            status: { not: "CLOSED" },
-            contract: {
-              AND: [
-                activeRecurringWhere,
-                { OR: recurringMonthlyWhereOr },
-                { isHistorical: false, deletedAt: null },
-              ],
-            },
-          },
-          select: { period: true, status: true },
-        })
-      : [];
+  const monthlyRecurringRateWhere = {
+    period: { lte: activeRecurringPeriod },
+    status: { not: "CLOSED" as const },
+    contract: {
+      AND: [
+        activeRecurringWhere,
+        { OR: recurringMonthlyWhereOr },
+        { isHistorical: false, deletedAt: null },
+      ],
+    },
+  };
   const monthlySummary =
-    showCompetencePanel
+    showCompetencePanel && vista === "mensile"
       ? {
           periodLabel: periodLabel(activeRecurringPeriod),
           activeContracts: countMensili,
-          matured: monthlyStatusRows.filter((row) => row.period === activeRecurringPeriod).length,
-          paid: monthlyStatusRows.filter(
-            (row) => row.period === activeRecurringPeriod && ["PAID", "LIQUIDATED"].includes(row.status),
-          ).length,
-          currentOpen: monthlyStatusRows.filter(
-            (row) => row.period === activeRecurringPeriod && ["MISSING", "PENDING"].includes(row.status),
-          ).length,
-          arrears: monthlyStatusRows.filter(
-            (row) => row.period < activeRecurringPeriod && ["MISSING", "PENDING"].includes(row.status),
-          ).length,
+          matured: await prisma.recurringMonth.count({
+            where: {
+              ...monthlyRecurringRateWhere,
+              period: activeRecurringPeriod,
+            },
+          }),
+          paid: await prisma.recurringMonth.count({
+            where: {
+              ...monthlyRecurringRateWhere,
+              period: activeRecurringPeriod,
+              status: { in: ["PAID", "LIQUIDATED"] },
+            },
+          }),
+          currentOpen: await prisma.recurringMonth.count({
+            where: {
+              ...monthlyRecurringRateWhere,
+              period: activeRecurringPeriod,
+              status: { in: ["MISSING", "PENDING"] },
+            },
+          }),
+          arrears: await prisma.recurringMonth.count({
+            where: {
+              ...monthlyRecurringRateWhere,
+              period: { lt: activeRecurringPeriod },
+              status: { in: ["MISSING", "PENDING"] },
+            },
+          }),
         }
-      : undefined;
+      : showCompetencePanel
+        ? {
+            periodLabel: periodLabel(activeRecurringPeriod),
+            activeContracts: countAnnuali,
+            matured: 0,
+            paid: 0,
+            currentOpen: 0,
+            arrears: 0,
+          }
+        : undefined;
 
   const heliosAbsentRows = heliosAbsent.map((m) => ({
     id: m.id,
@@ -710,7 +736,7 @@ export default async function ProvvigioniPage({
     contractId: m.contractId,
     podPdr: m.contract.podPdr || "",
     clientName: clientDisplayName(m.contract.client),
-    collaboratorName: m.contract.collaborator.name,
+    collaboratorName: m.contract.collaborator?.name ?? "—",
     note: m.note,
   }));
 
