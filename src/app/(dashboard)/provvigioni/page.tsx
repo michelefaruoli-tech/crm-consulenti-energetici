@@ -155,7 +155,7 @@ export default async function ProvvigioniPage({
     ? "tutti"
     : effectiveCompetence;
 
-  const statsBaseWhere = buildProvvigioniContractWhere({
+  const statsBaseFilters = {
     canViewAll: canViewAll || isScoped,
     sessionUserId: session.id,
     collab,
@@ -164,7 +164,7 @@ export default async function ProvvigioniPage({
     q,
     recurrenceMode,
     visibility,
-  });
+  };
 
   const baseContractWhere = buildProvvigioniContractWhere({
     // Backoffice: non forzare collaboratorId = sé (usa solo visibility)
@@ -516,7 +516,7 @@ export default async function ProvvigioniPage({
       },
     }),
     loadProvvigioniFinancialSummary(
-      statsBaseWhere,
+      statsBaseFilters,
       vistaTab,
       viewingAllPeriods ? null : effectiveCompetence ?? null,
     ),

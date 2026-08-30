@@ -3,9 +3,7 @@
  * Uso: npx tsx scripts/verify-provvigioni-filters.ts "Marco Fagiano"
  */
 import { prisma } from "../src/lib/prisma";
-import {
-  buildProvvigioniContractWhere,
-} from "../src/lib/provvigioni-filters";
+import { buildProvvigioniContractWhere } from "../src/lib/provvigioni-filters";
 import { loadProvvigioniFinancialSummary } from "../src/lib/provvigioni-summary";
 
 async function main() {
@@ -19,34 +17,29 @@ async function main() {
     process.exit(1);
   }
 
-  const base = buildProvvigioniContractWhere({
+  const base = {
     canViewAll: true,
     sessionUserId: user.id,
     collab: user.id,
-    recurrenceMode: "all",
-  });
+    recurrenceMode: "all" as const,
+  };
 
   const summary = await loadProvvigioniFinancialSummary(base, "tutti", null);
 
   for (const stato of ["Incassato", "Da incassare", "Pagato"] as const) {
-    const where = buildProvvigioniContractWhere({
-      canViewAll: true,
-      sessionUserId: user.id,
-      collab: user.id,
-      stato,
-      recurrenceMode: "all",
-    });
+    const where = buildProvvigioniContractWhere({ ...base, stato });
     const count = await prisma.contract.count({ where });
-    console.log(`${user.name} · ${stato}: ${count} contratti (card: ${
+    const cardCount =
       stato === "Incassato"
         ? summary.incassatoCount
         : stato === "Da incassare"
           ? summary.daIncassareCount
-          : summary.pagatoCount
-    })`);
+          : summary.pagatoCount;
+    const ok = count === cardCount ? "OK" : "MISMATCH";
+    console.log(`${ok} ${user.name} · ${stato}: lista=${count} card=${cardCount}`);
   }
 
-  console.log("Card importi:", {
+  console.log("Importi card:", {
     incassato: summary.incassatoAmount,
     daIncassare: summary.daIncassareAmount,
     pagato: summary.pagatoAmount,
