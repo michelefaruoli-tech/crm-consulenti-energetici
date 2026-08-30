@@ -32,9 +32,6 @@ import {
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
 
-/** Oltre questa soglia l'expand rate mensili viene disattivato (evita timeout RSC). */
-export const EXPAND_ROW_CAP = 1000;
-
 export type RecurringExpandMode = "incassato" | "da-incassare" | "pagato";
 
 const NON_RECURRING_WHERE: Prisma.ContractWhereInput = {
@@ -461,20 +458,16 @@ export async function sumExpandedAmountForStato(
         client: { select: { type: true } },
         supplier: { select: { name: true } },
         commission: { select: { expected: true } },
-        recurringMonths: {
-          select: { period: true, amount: true },
-        },
       },
+      take: 8000,
     });
     return contracts.reduce(
       (sum, c) =>
         sum +
-        provvigioneDisplayAmount({
-          commissionExpected: Number(c.commission?.expected ?? 0),
+        effectiveGettone({
+          expected: Number(c.commission?.expected ?? 0),
           clientType: c.client.type,
           supplierName: c.supplier.name,
-          recurringMonths: c.recurringMonths,
-          competencePeriod,
         }),
       0,
     );
@@ -520,6 +513,7 @@ export async function sumExpandedAmountForStato(
         supplier: { select: { name: true } },
         commission: { select: { expected: true } },
       },
+      take: 8000,
     }),
   ]);
 
@@ -554,58 +548,6 @@ export async function countExpandedForStatoCard(
     return prisma.contract.count({ where: contractWhere });
   }
   return countExpandedListRows(contractWhere, mode);
-}
-
-type ExpandPageSlice =
-  | { kind: "ut"; contractId: string }
-  | { kind: "rates"; contractId: string; rateSkip: number; rateTake: number };
-
-function rowCountForExpandContract(
-  recurrence: string | null | undefined,
-  matchingRates: number,
-): number {
-  if (isRecurringMonthly(recurrence)) return matchingRates;
-  return 1;
-}
-
-function buildExpandPageSlices(
-  index: Array<{ id: string; recurrence: string | null; rowCount: number }>,
-  skip: number,
-  take: number,
-): ExpandPageSlice[] {
-  const slices: ExpandPageSlice[] = [];
-  let remainingSkip = skip;
-  let remainingTake = take;
-
-  for (const entry of index) {
-    if (remainingTake <= 0) break;
-    if (entry.rowCount <= 0) continue;
-
-    if (remainingSkip >= entry.rowCount) {
-      remainingSkip -= entry.rowCount;
-      continue;
-    }
-
-    if (isRecurringMonthly(entry.recurrence)) {
-      const rateSkip = remainingSkip;
-      const rateTake = Math.min(remainingTake, entry.rowCount - remainingSkip);
-      slices.push({
-        kind: "rates",
-        contractId: entry.id,
-        rateSkip,
-        rateTake,
-      });
-      remainingTake -= rateTake;
-      remainingSkip = 0;
-      continue;
-    }
-
-    slices.push({ kind: "ut", contractId: entry.id });
-    remainingTake -= 1;
-    remainingSkip = 0;
-  }
-
-  return slices;
 }
 
 /** Contratti leggeri per mappe storno (senza caricare tutte le rate). */
@@ -659,7 +601,59 @@ export async function loadStornoContractsForMaps(
   }) as Promise<ContractForProvvigioneRow[]>;
 }
 
-/** Pagina elenco espanso senza caricare tutti i contratti/rate in memoria. */
+/** Storno mappe solo per i contratti visibili in pagina (leggero). */
+export async function loadStornoContractsForIds(
+  contractIds: string[],
+): Promise<ContractForProvvigioneRow[]> {
+  if (contractIds.length === 0) return [];
+  return prisma.contract.findMany({
+    where: { id: { in: contractIds } },
+    select: {
+      id: true,
+      clientId: true,
+      supplierId: true,
+      status: true,
+      paymentStatus: true,
+      recurrence: true,
+      podPdr: true,
+      pod: true,
+      pdr: true,
+      collectionDate: true,
+      commissionConfirmed: true,
+      supplyStartDate: true,
+      insertionDate: true,
+      createdAt: true,
+      expiryDate: true,
+      durationMonths: true,
+      stornoEndDate: true,
+      operationType: true,
+      collaboratorId: true,
+      notes: true,
+      client: {
+        select: {
+          type: true,
+          companyName: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      collaborator: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true, stornoMonths: true } },
+      commission: {
+        select: {
+          id: true,
+          expected: true,
+          received: true,
+          paid: true,
+          stornoDate: true,
+          stornoAmount: true,
+        },
+      },
+    },
+  }) as Promise<ContractForProvvigioneRow[]>;
+}
+
+/** Pagina elenco espanso: pagina rate/UT direttamente in DB (no scan completo). */
 export async function fetchExpandedProvvigionePage(args: {
   contractWhere: Prisma.ContractWhereInput;
   expandMode: RecurringExpandMode;
@@ -676,93 +670,113 @@ export async function fetchExpandedProvvigionePage(args: {
   const skip = paginationSkip(args.page, args.pageSize);
   const take = args.pageSize;
 
-  const contractIndex = await prisma.contract.findMany({
-    where: args.contractWhere,
-    select: { id: true, recurrence: true },
-    orderBy: args.orderBy,
-  });
+  const utWhere: Prisma.ContractWhereInput = {
+    AND: [args.contractWhere, NON_RECURRING_WHERE],
+  };
+  const rateWhere: Prisma.RecurringMonthWhereInput = {
+    status: { in: statuses },
+    contract: { AND: [args.contractWhere, MONTHLY_RECURRING_WHERE] },
+  };
 
-  const monthlyIds = contractIndex
-    .filter((c) => isRecurringMonthly(c.recurrence))
-    .map((c) => c.id);
+  type PageItem =
+    | { kind: "ut"; contract: ContractForProvvigioneRow }
+    | {
+        kind: "rate";
+        contract: ContractForProvvigioneRow;
+        rate: { period: string; status: string; amount: unknown };
+      };
 
-  const rateCountByContract = new Map<string, number>();
-  if (monthlyIds.length > 0) {
-    const groups = await prisma.recurringMonth.groupBy({
-      by: ["contractId"],
-      where: {
-        contractId: { in: monthlyIds },
-        status: { in: statuses },
-      },
-      _count: { _all: true },
+  const items: PageItem[] = [];
+  const utCount = await prisma.contract.count({ where: utWhere });
+
+  if (skip < utCount) {
+    const utTake = Math.min(take, utCount - skip);
+    const utContracts = await prisma.contract.findMany({
+      where: utWhere,
+      select: args.contractSelect,
+      orderBy: args.orderBy,
+      skip,
+      take: utTake,
     });
-    for (const group of groups) {
-      rateCountByContract.set(group.contractId, group._count._all);
+    for (const contract of utContracts) {
+      items.push({ kind: "ut", contract: contract as ContractForProvvigioneRow });
     }
-  }
-
-  const virtualIndex = contractIndex
-    .map((c) => ({
-      id: c.id,
-      recurrence: c.recurrence,
-      rowCount: rowCountForExpandContract(
-        c.recurrence,
-        rateCountByContract.get(c.id) ?? 0,
-      ),
-    }))
-    .filter((c) => c.rowCount > 0);
-
-  const slices = buildExpandPageSlices(virtualIndex, skip, take);
-  const contractIds = [...new Set(slices.map((s) => s.contractId))];
-  if (contractIds.length === 0) {
-    return { rows: [], contracts: [] };
-  }
-
-  const contractsRaw = await prisma.contract.findMany({
-    where: { id: { in: contractIds } },
-    select: args.contractSelect,
-  });
-  const contractById = new Map(
-    contractsRaw.map((c) => [c.id, c as ContractForProvvigioneRow]),
-  );
-
-  const rows: ProvvigioneRow[] = [];
-  for (const slice of slices) {
-    const contract = contractById.get(slice.contractId);
-    if (!contract) continue;
-
-    if (slice.kind === "rates") {
+    const remaining = take - utTake;
+    if (remaining > 0) {
       const rates = await prisma.recurringMonth.findMany({
-        where: {
-          contractId: slice.contractId,
-          status: { in: statuses },
+        where: rateWhere,
+        orderBy: [{ period: "desc" }, { contractId: "asc" }],
+        take: remaining,
+        select: {
+          period: true,
+          status: true,
+          amount: true,
+          contract: { select: args.contractSelect },
         },
-        orderBy: { period: "desc" },
-        skip: slice.rateSkip,
-        take: slice.rateTake,
-        select: { period: true, status: true, amount: true },
       });
       for (const rate of rates) {
-        rows.push(
-          buildSingleRow(contract, args.buildOpts, {
+        items.push({
+          kind: "rate",
+          contract: rate.contract as ContractForProvvigioneRow,
+          rate: {
             period: rate.period,
             status: rate.status,
-            amount: monthAmount(rate, contract),
-          }),
-        );
+            amount: rate.amount,
+          },
+        });
       }
-      continue;
     }
-
-    rows.push(buildSingleRow(contract, args.buildOpts));
+  } else {
+    const rateSkip = skip - utCount;
+    const rates = await prisma.recurringMonth.findMany({
+      where: rateWhere,
+      orderBy: [{ period: "desc" }, { contractId: "asc" }],
+      skip: rateSkip,
+      take,
+      select: {
+        period: true,
+        status: true,
+        amount: true,
+        contract: { select: args.contractSelect },
+      },
+    });
+    for (const rate of rates) {
+      items.push({
+        kind: "rate",
+        contract: rate.contract as ContractForProvvigioneRow,
+        rate: {
+          period: rate.period,
+          status: rate.status,
+          amount: rate.amount,
+        },
+      });
+    }
   }
 
-  return {
-    rows,
-    contracts: contractIds
-      .map((id) => contractById.get(id))
-      .filter((c): c is ContractForProvvigioneRow => Boolean(c)),
+  const contractIds = [...new Set(items.map((i) => i.contract.id))];
+  const stornoMaps = buildStornoMaps(
+    await loadStornoContractsForIds(contractIds),
+  );
+  const buildOpts: BuildProvvigioneRowsOpts = {
+    ...args.buildOpts,
+    latestMap: stornoMaps.latestMap,
+    earlyMap: stornoMaps.earlyMap,
   };
+
+  const rows: ProvvigioneRow[] = items.map((item) =>
+    item.kind === "ut"
+      ? buildSingleRow(item.contract, buildOpts)
+      : buildSingleRow(item.contract, buildOpts, {
+          period: item.rate.period,
+          status: item.rate.status,
+          amount: monthAmount(item.rate, item.contract),
+        }),
+  );
+
+  const contracts = [
+    ...new Map(items.map((i) => [i.contract.id, i.contract])).values(),
+  ];
+  return { rows, contracts };
 }
 
 export { isRecurringMonthly };

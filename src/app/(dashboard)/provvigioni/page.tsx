@@ -47,7 +47,6 @@ import {
   buildStornoMaps,
   countExpandedListRows,
   expandContractsToProvvigioneRows,
-  EXPAND_ROW_CAP,
   fetchExpandedProvvigionePage,
   getRecurringExpandMode,
   loadStornoContractsForMaps,
@@ -271,19 +270,14 @@ export default async function ProvvigioniPage({
   }
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
-  const expandModeRequested = getRecurringExpandMode(
+  const expandMode = getRecurringExpandMode(
     stato,
     viewingAllPeriods,
     effectiveCompetence,
   );
-  let expandMode = expandModeRequested;
-  let total = expandMode
+  const total = expandMode
     ? await countExpandedListRows(contractWhere, expandMode)
     : await prisma.contract.count({ where: contractWhere });
-  if (expandMode && total > EXPAND_ROW_CAP) {
-    expandMode = null;
-    total = await prisma.contract.count({ where: contractWhere });
-  }
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
   const listUsesExpandedRows = Boolean(expandMode);
@@ -299,6 +293,7 @@ export default async function ProvvigioniPage({
     activeStato: stato,
     activeListWhere: contractWhere,
     activeListTotal: total,
+    allowExpand: Boolean(expandMode),
   };
 
   // Commissoni mancanti: in background (non blocca il caricamento)
@@ -512,10 +507,6 @@ export default async function ProvvigioniPage({
   let prebuiltExpandedRows: ProvvigioneRow[] | null = null;
 
   if (expandUsePaginatedFetch && expandMode) {
-    const stornoContracts = await loadStornoContractsForMaps(contractWhere);
-    const stornoMaps = buildStornoMaps(stornoContracts);
-    buildRowOpts.latestMap = stornoMaps.latestMap;
-    buildRowOpts.earlyMap = stornoMaps.earlyMap;
     const expandedPage = await fetchExpandedProvvigionePage({
       contractWhere,
       expandMode,

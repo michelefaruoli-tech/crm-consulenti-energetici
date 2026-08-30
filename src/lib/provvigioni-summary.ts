@@ -8,10 +8,11 @@ import {
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
 import {
-  countExpandedForStatoCard,
+  countExpandedListRows,
   getRecurringExpandMode,
   sumExpandedAmountForStato,
 } from "@/lib/provvigioni-rows";
+import { prisma } from "@/lib/prisma";
 
 export type ProvvigioniFinancialSummary = {
   incassatoCount: number;
@@ -33,6 +34,8 @@ export type ProvvigioniSummaryContext = {
   activeStato?: string | null;
   activeListWhere?: Prisma.ContractWhereInput;
   activeListTotal?: number;
+  /** Se false, card e importi usano 1 riga/contratto (no expand rate). */
+  allowExpand?: boolean;
 };
 
 async function summaryForStato(
@@ -44,11 +47,10 @@ async function summaryForStato(
     ? ctx.effectiveCompetence ?? null
     : null;
   const viewingAllPeriods = ctx.viewingAllPeriods ?? !ctx.applyCompetenceToList;
-  const expandMode = getRecurringExpandMode(
-    stato,
-    viewingAllPeriods,
-    ctx.effectiveCompetence,
-  );
+  const expandMode =
+    ctx.allowExpand === false
+      ? null
+      : getRecurringExpandMode(stato, viewingAllPeriods, ctx.effectiveCompetence);
 
   if (
     ctx.activeStato?.trim() === stato &&
@@ -77,12 +79,9 @@ async function summaryForStato(
   });
 
   const [count, amount] = await Promise.all([
-    countExpandedForStatoCard(
-      where,
-      stato,
-      viewingAllPeriods,
-      ctx.effectiveCompetence,
-    ),
+    expandMode
+      ? countExpandedListRows(where, expandMode)
+      : prisma.contract.count({ where }),
     sumExpandedAmountForStato(where, expandMode, competenceForAmount),
   ]);
   return { count, amount };
