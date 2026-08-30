@@ -62,6 +62,17 @@ enum ContractRecurrenceKind {
   R
 }
 
+enum AgendaItemType {
+  APPOINTMENT
+  TASK
+}
+
+enum AgendaPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -88,6 +99,7 @@ model User {
   collaboratorScopes UserCollaboratorScope[] @relation("BackofficeUser")
   /// Dove questo utente compare nello scope di un backoffice / area manager
   scopedByBackoffices UserCollaboratorScope[] @relation("ScopedCollaborator")
+  agendaItems          AgendaItem[]
 }
 
 model Client {
@@ -135,6 +147,7 @@ model Client {
   contracts Contract[]
   documents Document[]
   history   ClientHistory[]
+  agendaItems AgendaItem[]
 
   @@index([fiscalCode])
   @@index([vatNumber])
@@ -611,4 +624,26 @@ model BackupLog {
   size      Int?
   status    String
   createdAt DateTime @default(now())
+}
+
+model AgendaItem {
+  id          String         @id @default(cuid())
+  title       String
+  notes       String?
+  type        AgendaItemType @default(TASK)
+  priority    AgendaPriority @default(MEDIUM)
+  scheduledAt DateTime
+  allDay      Boolean        @default(false)
+  completed   Boolean        @default(false)
+  alertAt     DateTime?
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId    String?
+  client      Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([userId, scheduledAt])
+  @@index([userId, completed])
+  @@index([alertAt])
 }

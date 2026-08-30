@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
-  Users,
+  CalendarDays,
   FileText,
   Building2,
   Coins,
@@ -41,7 +41,7 @@ const NAV_ITEMS: Array<{
     icon: Briefcase,
     roles: ["ADMIN", "SEGRETERIA", "BACKOFFICE"],
   },
-  { href: "/clienti", label: "Clienti", icon: Users, roles: "all" },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays, roles: "all" },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" },
   {
     href: "/archivio",
