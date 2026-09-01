@@ -158,7 +158,7 @@ export function provvigioneAgencyLabel(supplierName: string): string {
   }
   if (n.includes("edison") || n.includes("dolomit")) return "MADA";
   if (n.includes("enel")) return "Achille";
-  if (n.includes("sinerg")) return "broker";
+  if (n.includes("sinerg") || n.includes("etruri")) return "BROKER";
   if (n.includes("sorgenia") || n.includes("a2a")) return "POWER";
   return "—";
 }
