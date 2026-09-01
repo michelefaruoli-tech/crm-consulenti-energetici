@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
@@ -11,6 +11,11 @@ import {
   SERVICE_OPTIONS,
 } from "@/lib/constants";
 import type { ContractServiceLine } from "@/lib/contract-form-types";
+import {
+  heliosMonthlyCommission,
+  isHeliosSupplier,
+  pickHeliosListinoRule,
+} from "@/lib/helios-contract-rules";
 import { computeSupplyStartDate, formatItDate } from "@/lib/supply-dates";
 
 export type ListinoRuleOption = {
@@ -105,6 +110,9 @@ export function ServiceContractBlocks({
   const hasSupplier = Boolean(line.supplierId || line.supplierName?.trim());
   const hasPayment = Boolean(line.paymentMethod);
   const ingresso = computeSupplyStartDate(insertionDate, line.operationType);
+  const supplierLabel =
+    suppliers.find((s) => s.id === line.supplierId)?.name ?? line.supplierName ?? "";
+  const isHelios = isHeliosSupplier(supplierLabel);
 
   function applyListino(ruleId: string) {
     if (!ruleId) {
@@ -128,6 +136,26 @@ export function ServiceContractBlocks({
       onContractIbanChange(anagraficaIban, true);
     }
   }
+
+  function applyHeliosListino(classificationValue?: string) {
+    if (!isHelios || rulesForSupplier.length === 0) return;
+    const match = pickHeliosListinoRule(
+      rulesForSupplier,
+      clientType,
+      classificationValue ?? classification,
+    );
+    if (match) applyListino(match.id);
+  }
+
+  useEffect(() => {
+    if (!isHelios) return;
+    applyHeliosListino(classification);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo quando cambia fornitore/classificazione Helios
+  }, [isHelios, line.supplierId, line.supplierName, classification, clientType]);
+
+  const heliosMonthly = isHelios
+    ? heliosMonthlyCommission({ clientType, classification })
+    : null;
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -187,7 +215,11 @@ export function ServiceContractBlocks({
           >
             <Select
               value={classification ?? ""}
-              onChange={(e) => onClassificationChange(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                onClassificationChange(value);
+                if (isHelios) applyHeliosListino(value);
+              }}
             >
               <option value="">Seleziona</option>
               {classificationOptions.map((o) => (
@@ -436,6 +468,12 @@ export function ServiceContractBlocks({
               productName: "",
               offerCode: "",
             });
+            const picked = suppliers.find((s) => s.id === v);
+            if (picked && isHeliosSupplier(picked.name)) {
+              const rules = listinoRules.filter((r) => r.supplierId === v);
+              const match = pickHeliosListinoRule(rules, clientType, classification);
+              if (match) applyListino(match.id);
+            }
           }}
         >
           <option value="">Seleziona fornitore</option>
@@ -480,6 +518,17 @@ export function ServiceContractBlocks({
           </Select>
         </Field>
       ) : null}
+
+      {isHelios ? (
+        <p className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900">
+          <strong>Helios</strong> — ricorrente mensile:{" "}
+          <strong>€{heliosMonthly ?? "…"} / mese</strong>
+          {classification
+            ? ""
+            : " (seleziona la classificazione per confermare l’importo)"}
+        </p>
+      ) : null}
+
       <Field label="Nome offerta">
         <Input
           value={line.productName ?? ""}

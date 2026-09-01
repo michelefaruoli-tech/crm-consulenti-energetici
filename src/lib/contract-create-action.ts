@@ -21,6 +21,12 @@ import {
 import { canonicalSupplierName } from "@/lib/supplier-merge";
 import { suggestPersonNameOrder } from "@/lib/italian-person-name";
 import { defaultCommissionExpected } from "@/lib/commission";
+import {
+  heliosMonthlyCommission,
+  isHeliosSupplier,
+} from "@/lib/helios-contract-rules";
+import { recurrenceWriteData } from "@/lib/recurring";
+import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 
 function normalizePrivatoNames(client: NewContractPayload["client"]) {
   if (client.type !== "PRIVATO") return client;
@@ -450,6 +456,7 @@ async function createFullContractActionInner(
     : null;
 
   const createdIds: string[] = [];
+  const heliosContractIds: string[] = [];
   let firstId = "";
 
   for (const line of services) {
@@ -458,6 +465,12 @@ async function createFullContractActionInner(
         supplierId: line.supplierId,
         supplierName: line.supplierName,
       })) || defaultSupplierId;
+
+    const lineSupplier = await prisma.supplier.findUnique({
+      where: { id: lineSupplierId },
+      select: { name: true },
+    });
+    const isHelios = isHeliosSupplier(lineSupplier?.name);
 
     const operationType = line.operationType || payload.operationType || "SWITCH";
     const supplyStart =
@@ -578,6 +591,7 @@ async function createFullContractActionInner(
               propertyHolder: line.propertyHolder,
             }),
             parentContractId: firstId || null,
+            ...(isHelios ? recurrenceWriteData("M") : {}),
           },
           select: { id: true },
         });
@@ -600,6 +614,7 @@ async function createFullContractActionInner(
 
     if (!firstId) firstId = created.id;
     createdIds.push(created.id);
+    if (isHelios) heliosContractIds.push(created.id);
 
     await prisma.contractStatusHistory.create({
       data: {
@@ -623,14 +638,28 @@ async function createFullContractActionInner(
     const expectedFromRule = ruleId
       ? await prisma.commissionRule.findUnique({
           where: { id: ruleId },
-          select: { fixedAmount: true },
+          select: { fixedAmount: true, gettoneMensile: true, paymentType: true },
         })
       : null;
-    const fromRule = expectedFromRule?.fixedAmount
+    const fromRuleMensile = expectedFromRule?.gettoneMensile
+      ? Number(expectedFromRule.gettoneMensile.toString()) || 0
+      : 0;
+    const fromRuleFixed = expectedFromRule?.fixedAmount
       ? Number(expectedFromRule.fixedAmount.toString()) || 0
       : 0;
-    const expected =
-      fromRule > 0 ? fromRule : defaultCommissionExpected(payload.client.type);
+    const fromRule =
+      (expectedFromRule?.paymentType ?? "").toUpperCase() === "MENSILE" &&
+      fromRuleMensile > 0
+        ? fromRuleMensile
+        : fromRuleFixed;
+    const expected = isHelios
+      ? heliosMonthlyCommission({
+          clientType: payload.client.type,
+          classification,
+        })
+      : fromRule > 0
+        ? fromRule
+        : defaultCommissionExpected(payload.client.type);
 
     await prisma.commission.create({
       data: { contractId: created.id, expected },
@@ -667,6 +696,16 @@ async function createFullContractActionInner(
   }
 
   // Email Master inviata dal client via API dopo upload allegati (evita body/timeout Server Action)
+
+  if (!payload.draft && heliosContractIds.length > 0) {
+    for (const contractId of heliosContractIds) {
+      try {
+        await syncRecurringMonthsForContract(contractId);
+      } catch (e) {
+        console.error("[syncRecurringMonthsForContract] Helios", contractId, e);
+      }
+    }
+  }
 
   // POD ricontrattualizzato → archivia i precedenti (CRM snello)
   // Bozze: non toccare i precedenti. Ricorrenti mensili (Helios): restano
