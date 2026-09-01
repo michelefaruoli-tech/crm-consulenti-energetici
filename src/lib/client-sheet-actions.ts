@@ -378,6 +378,11 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
     });
   }
 
+  const { alignHeliosContractIfNeeded } = await import("@/lib/helios-align");
+  await alignHeliosContractIfNeeded(contractId).catch((e) =>
+    console.error("[alignHeliosContractIfNeeded]", contractId, e),
+  );
+
   revalidatePath(`/clienti/${clientId}`);
   revalidatePath(`/contratti/${contractId}`);
   revalidatePath("/contratti");
