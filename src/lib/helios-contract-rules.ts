@@ -1,4 +1,4 @@
-import { canonicalSupplierName } from "@/lib/supplier-merge";
+import { canonicalSupplierName } from "@/lib/supplier-names";
 
 export const HELIOS_MONTHLY_RESIDENTE = 4;
 export const HELIOS_MONTHLY_ALTRO = 6;
