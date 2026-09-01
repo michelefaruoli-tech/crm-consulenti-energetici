@@ -119,6 +119,8 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return row.collaboratorName ?? "";
     case "supplierName":
       return row.supplierName ?? "";
+    case "agency":
+      return row.agency ?? "";
     case "clientType":
       return shortClientType(row.clientType ?? "");
     case "amount":
@@ -762,6 +764,13 @@ export function ProvvigioniFilterTable({
       sortKind: "text",
     },
     {
+      key: "agency",
+      label: "Agenzia",
+      getValue: (r) => String((r as ProvvigioneRow).agency ?? ""),
+      sortKind: "text",
+      inputClassName: "max-w-[6rem] truncate text-xs font-medium text-slate-800",
+    },
+    {
       key: "clientType",
       label: "Tip.",
       getValue: (r) => shortClientType(String(r.clientType ?? "")),
@@ -1007,6 +1016,7 @@ export function ProvvigioniFilterTable({
         podPdr: "w-[12rem] min-w-[12rem] max-w-[12rem]",
         collaboratorName: "w-[8rem] min-w-[8rem] max-w-[8rem]",
         supplierName: "w-[8rem] min-w-[8rem] max-w-[8rem]",
+        agency: "w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem]",
         clientType: "w-[4rem] min-w-[4rem] max-w-[4rem]",
         amount: "w-[5rem] min-w-[5rem] max-w-[5rem] text-right",
         supplyStartDate: "w-[7rem] min-w-[7rem] max-w-[7rem]",
@@ -1025,6 +1035,7 @@ export function ProvvigioniFilterTable({
         amount: "w-full text-right font-semibold tabular-nums",
         clientType: "w-full text-center",
         supplierName: "w-full truncate",
+        agency: "w-full truncate",
         supplyStartDate: "w-full tabular-nums",
         collectionMonth: "w-full tabular-nums",
         stornoMonth: "w-full tabular-nums",
@@ -1308,9 +1319,9 @@ export function ProvvigioniFilterTable({
         <p className="mt-2 max-w-4xl leading-relaxed">
           {advancedView ? (
             <>
-              Vista <strong>avanzata</strong>: tutte le colonne (POD, collab., tip.,
-              inizio fornitura, tipo op., storno…). Scorri in orizzontale
-              sulla tabella se serve. Celle modificabili = bozza
+              Vista <strong>avanzata</strong>: tutte le colonne (POD, collab., forn.,
+              agenzia pagatrice, tip., inizio fornitura, tipo op., storno…). Scorri in
+              orizzontale sulla tabella se serve. Celle modificabili = bozza
               (giallo) finché non salvi.{" "}
             </>
           ) : (

@@ -19,6 +19,8 @@ export type ProvvigioneRow = {
   podPdr: string;
   collaboratorName: string;
   supplierName: string;
+  /** Chi paga il gettone (da fornitore) — vista avanzata */
+  agency: string;
   clientType: string;
   /** Gettone effettivo mostrato in colonna Gettone */
   amount: string;
@@ -143,6 +145,22 @@ export function defaultGettonePrivato(supplierName: string): number | null {
   if (n.includes("plenitud") || n.includes("enipro")) return 60;
   if (n.includes("enel")) return 65;
   return null;
+}
+
+/**
+ * Agenzia pagatrice del gettone (vista avanzata Provvigioni).
+ * Deriva dal nome fornitore.
+ */
+export function provvigioneAgencyLabel(supplierName: string): string {
+  const n = supplierName.toLowerCase().replace(/\s+/g, "");
+  if (n.includes("iren") || n.includes("plenitud") || n.includes("enipro")) {
+    return "COMPARA";
+  }
+  if (n.includes("edison") || n.includes("dolomit")) return "MADA";
+  if (n.includes("enel")) return "Achille";
+  if (n.includes("sinerg")) return "broker";
+  if (n.includes("sorgenia") || n.includes("a2a")) return "POWER";
+  return "—";
 }
 
 /** Gettone effettivo allineato a quanto vedi in tabella. */

@@ -27,6 +27,7 @@ import {
 import {
   effectiveGettone,
   operationTypeLabel,
+  provvigioneAgencyLabel,
   provvigioneDisplayAmount,
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
@@ -275,6 +276,7 @@ function buildSingleRow(
     podPdr: contract.podPdr || contract.pod || contract.pdr || "",
     collaboratorName: contract.collaborator?.name ?? "—",
     supplierName: contract.supplier.name,
+    agency: provvigioneAgencyLabel(contract.supplier.name),
     clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
     amount: String(amountValue),
     supplyStartDate: supply ? formatItDate(supply) : "",
