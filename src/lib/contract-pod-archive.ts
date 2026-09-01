@@ -54,15 +54,15 @@ export async function repairMonthlySwitchArchives(): Promise<{ repaired: number 
   return { repaired };
 }
 
-/** Chiusura soft ricorrente mensile: resta visibile, non va in Archivio. */
+/** Chiusura ricorrente mensile sostituito: resta visibile, stato KO (non Archivio). */
 function monthlySwitchCloseData(latestSupply: Date) {
   const expiryDate = dayBeforeSupplyStart(latestSupply);
   return {
     isHistorical: false as const,
     archiveLabel: null as string | null,
-    status: "CHIUSO" as const,
+    status: "KO" as const,
     expiryDate,
-    koNotes: closeNote(latestSupply),
+    koNotes: supersedeNote(latestSupply),
   };
 }
 
@@ -117,15 +117,15 @@ export function keepMonthlyRecurringUntilNewSupply(opts: {
   return !isInFornitura(opts.newerSupplyStart, opts.now ?? new Date());
 }
 
-function closeNote(supply: Date): string {
-  return `Chiuso: nuovo contratto stesso POD in fornitura dal ${formatItDate(supply)}`;
+function supersedeNote(supply: Date): string {
+  return `KO: nuovo contratto stesso POD in fornitura dal ${formatItDate(supply)}`;
 }
 
 /**
  * Archivia contratti «precedenti» sullo stesso POD quando ne esiste uno più recente.
  *
  * Eccezione: ricorrente mensile (Helios, …) resta in Provvigioni fino all’ingresso
- * del nuovo contratto; solo allora viene chiuso (CHIUSO, non KO).
+ * del nuovo contratto; solo allora passa in KO (mai CHIUSO automatico).
  */
 export async function archiveSupersededPodContracts(options?: {
   /** Se valorizzato, archivia solo questo POD (dopo nuovo contratto). */
@@ -252,6 +252,8 @@ export async function archiveSupersededPodContracts(options?: {
         data: {
           isHistorical: true,
           archiveLabel: POD_ARCHIVE_LABEL,
+          status: "KO",
+          koNotes: supersedeNote(latestSupply),
         },
       });
       archived += 1;
@@ -377,6 +379,10 @@ export async function archiveOlderForContractPods(
         data: {
           isHistorical: true,
           archiveLabel: POD_ARCHIVE_LABEL,
+          status: "KO",
+          koNotes: latestSupply
+            ? supersedeNote(latestSupply)
+            : "KO: POD ricontrattualizzato",
         },
       });
       if (monthly) {

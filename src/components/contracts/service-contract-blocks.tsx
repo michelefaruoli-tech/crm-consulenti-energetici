@@ -55,6 +55,9 @@ export function ServiceContractBlocks({
   clientEmail,
   residence,
   insertionDate,
+  classification,
+  classificationOptions,
+  onClassificationChange,
   highlightRequired = false,
   highlightBase = false,
 }: {
@@ -79,6 +82,10 @@ export function ServiceContractBlocks({
     region: string;
   };
   insertionDate: Date;
+  /** Solo sul primo servizio: classificazione utenza (residente, business, …). */
+  classification?: string;
+  classificationOptions?: ReadonlyArray<{ value: string; label: string }>;
+  onClassificationChange?: (value: string) => void;
   highlightRequired?: boolean;
   highlightBase?: boolean;
 }) {
@@ -146,7 +153,9 @@ export function ServiceContractBlocks({
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div
+        className={`grid gap-3 ${classificationOptions ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+      >
         <Field label="Tipo operazione" fillStatus={fsBase(Boolean(line.operationType))}>
           <Select
             value={line.operationType ?? "SWITCH"}
@@ -171,6 +180,24 @@ export function ServiceContractBlocks({
             ))}
           </Select>
         </Field>
+        {classificationOptions && onClassificationChange ? (
+          <Field
+            label="Classificazione"
+            fillStatus={fs(Boolean(classification?.trim()))}
+          >
+            <Select
+              value={classification ?? ""}
+              onChange={(e) => onClassificationChange(e.target.value)}
+            >
+              <option value="">Seleziona</option>
+              {classificationOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
       </div>
       {line.operationType === "ALTRO" ? (
         <Field

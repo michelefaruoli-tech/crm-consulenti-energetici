@@ -957,19 +957,6 @@ export function NuovoContrattoForm({
                 }}
               />
             </div>
-            <Field
-              label="Classificazione"
-              fillStatus={fillStatus(req, Boolean(classification.trim()))}
-            >
-              <Select value={classification} onChange={(e) => setClassification(e.target.value)}>
-                <option value="">Seleziona</option>
-                {classificationOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -1018,19 +1005,6 @@ export function NuovoContrattoForm({
             </Field>
             <Field label="CF rappresentante">
               <Input value={legalFiscalCode} onChange={(e) => setLegalFiscalCode(e.target.value)} />
-            </Field>
-            <Field
-              label="Classificazione"
-              fillStatus={fillStatus(req, Boolean(classification.trim()))}
-            >
-              <Select value={classification} onChange={(e) => setClassification(e.target.value)}>
-                <option value="">Seleziona</option>
-                {classificationOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
             </Field>
             <Field label="Codice SDI">
               <Input value={sdiCode} onChange={(e) => setSdiCode(e.target.value)} />
@@ -1189,6 +1163,9 @@ export function NuovoContrattoForm({
               region,
             }}
             insertionDate={registrationDate}
+            classification={idx === 0 ? classification : undefined}
+            classificationOptions={idx === 0 ? classificationOptions : undefined}
+            onClassificationChange={idx === 0 ? setClassification : undefined}
             highlightRequired={req}
             highlightBase={reqBase}
           />
