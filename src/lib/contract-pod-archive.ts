@@ -8,6 +8,7 @@ import {
   formatItDate,
   isInFornitura,
 } from "@/lib/supply-dates";
+import { isManuallyRestoredArchiveLabel } from "@/lib/contract-reactivate";
 
 const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
 
@@ -151,6 +152,7 @@ export async function archiveSupersededPodContracts(options?: {
       recurrence: true,
       status: true,
       expiryDate: true,
+      archiveLabel: true,
     },
     take: 12000,
   });
@@ -195,6 +197,7 @@ export async function archiveSupersededPodContracts(options?: {
     const latest = list[0]!;
     for (const older of list.slice(1)) {
       if (older.id === latest.id) continue;
+      if (isManuallyRestoredArchiveLabel(older.archiveLabel)) continue;
       if (
         keepMonthlyRecurringUntilNewSupply({
           olderRecurrence: older.recurrence,
@@ -322,6 +325,7 @@ export async function archiveOlderForContractPods(
       recurrence: true,
       status: true,
       expiryDate: true,
+      archiveLabel: true,
     },
     take: 12000,
   });
@@ -332,6 +336,7 @@ export async function archiveOlderForContractPods(
   for (const candidate of candidates) {
     const key = normalizePodKey(candidate.podPdr || candidate.pod || candidate.pdr);
     if (!keys.has(key)) continue;
+    if (isManuallyRestoredArchiveLabel(candidate.archiveLabel)) continue;
     const latestSupply = newSupplyByPod.get(key);
     try {
       if (

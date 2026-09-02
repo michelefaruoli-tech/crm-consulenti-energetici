@@ -32,6 +32,7 @@ import {
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
+import { reactivateContractFields } from "@/lib/contract-reactivate";
 
 type SessionLike = { id: string; role: Role };
 
@@ -441,6 +442,9 @@ async function applyCommissionField(
   } else if (field === "stato") {
     const raw = value.trim().toLowerCase();
     const contractId = commission.contractId;
+    const wasTerminal = ["KO", "ANNULLATO", "CHIUSO"].includes(
+      commission.contract.status,
+    );
     if (/ko|cessat|annull|chius/.test(raw)) {
       const wasPaid = Boolean(commission.contract.collectionDate);
       await prisma.contract.update({
@@ -471,6 +475,7 @@ async function applyCommissionField(
         data: {
           status: "DA_CONTROLLARE",
           paymentStatus: "Da controllare",
+          ...(wasTerminal ? reactivateContractFields() : {}),
         },
       });
     } else if (/^storn/.test(raw)) {
@@ -495,6 +500,7 @@ async function applyCommissionField(
         data: {
           status: "STORNATO",
           paymentStatus: "Stornato",
+          ...(wasTerminal ? reactivateContractFields() : {}),
         },
       });
     } else if (/pagat/.test(raw)) {
@@ -517,6 +523,19 @@ async function applyCommissionField(
             note: "Liquidazione collaboratore",
           },
         });
+      } else if (wasTerminal && received <= 0) {
+        // Ripristino da KO: allinea received/paid al gettone se manca
+        const expected = Number(commission.expected ?? 0) || 0;
+        if (expected > 0) {
+          await prisma.commission.update({
+            where: { id: commission.id },
+            data: {
+              received: expected,
+              paid: expected,
+              accrued: expected,
+            },
+          });
+        }
       }
 
       const dates = fixFutureDatesForPayment({
@@ -530,6 +549,7 @@ async function applyCommissionField(
           status: "PROVVIGIONE_LIQUIDATA",
           paymentStatus: "Incassato",
           collectionDate: commission.contract.collectionDate ?? new Date(),
+          ...(wasTerminal ? reactivateContractFields() : {}),
           ...(dates.adjusted
             ? {
                 insertionDate: dates.insertionDate,
@@ -545,12 +565,20 @@ async function applyCommissionField(
         supplyStartDate: commission.contract.supplyStartDate,
         operationType: commission.contract.operationType,
       });
+      const expected = Number(commission.expected ?? 0) || 0;
+      if (wasTerminal && expected > 0 && Number(commission.received ?? 0) <= 0) {
+        await prisma.commission.update({
+          where: { id: commission.id },
+          data: { received: expected, accrued: expected },
+        });
+      }
       await prisma.contract.update({
         where: { id: contractId },
         data: {
           status: "PAGATO_DAL_FORNITORE",
           paymentStatus: "Incassato",
           collectionDate: commission.contract.collectionDate ?? new Date(),
+          ...(wasTerminal ? reactivateContractFields() : {}),
           ...(dates.adjusted
             ? {
                 insertionDate: dates.insertionDate,
@@ -567,6 +595,7 @@ async function applyCommissionField(
           status: "IN_ATTESA_PAGAMENTO",
           paymentStatus: "Da incassare",
           collectionDate: null,
+          ...(wasTerminal ? reactivateContractFields() : {}),
         },
       });
     }

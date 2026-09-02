@@ -8,6 +8,7 @@ import { canEditGettoneAmount, hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
+import { reactivateContractFields } from "@/lib/contract-reactivate";
 
 function numOrNull(v: FormDataEntryValue | null): number | null {
   const s = String(v ?? "").trim().replace(",", ".");
@@ -236,12 +237,17 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
     }
 
     if (status !== contract.status) {
+      const leavingTerminal =
+        ["KO", "ANNULLATO", "CHIUSO"].includes(contract.status) && !terminal;
       await prisma.contract.update({
         where: { id: contractId },
         data: {
           status,
-          koReason: terminal ? koReason : contract.koReason,
-          koNotes: terminal ? koNotes : contract.koNotes,
+          koReason: terminal ? koReason : leavingTerminal ? null : contract.koReason,
+          koNotes: terminal ? koNotes : leavingTerminal ? null : contract.koNotes,
+          ...(leavingTerminal || contract.isHistorical
+            ? reactivateContractFields({ clearKo: false })
+            : {}),
           productName: clean(formData.get("productName")),
           offerCode: clean(formData.get("offerCode")),
           commissionRuleId: clean(formData.get("commissionRuleId")),

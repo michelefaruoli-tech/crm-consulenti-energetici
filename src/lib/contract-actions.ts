@@ -12,6 +12,7 @@ import {
 } from "@/lib/supply-dates";
 import { CONTRACT_STATUS_LABELS, type AppContractStatus } from "@/lib/constants";
 import { notifyCollaboratorStatusChange } from "@/lib/notify-collaborator-status";
+import { reactivateContractFields } from "@/lib/contract-reactivate";
 
 function statusFromLabel(value: string): AppContractStatus | null {
   const raw = value.trim();
@@ -118,12 +119,17 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     if (terminal && !closureDate) throw new Error("Data chiusura obbligatoria");
     if (terminal && !closureReason) throw new Error("Motivo chiusura obbligatorio");
     const fromStatus = contract.status;
+    const leavingTerminal =
+      ["CHIUSO", "KO", "ANNULLATO"].includes(fromStatus) && !terminal;
     await prisma.contract.update({
       where: { id: contractId },
       data: {
         status,
         ...(status === "KO" || status === "ANNULLATO"
           ? { koReason: closureReason, koNotes: closureNotes || null }
+          : {}),
+        ...(leavingTerminal || contract.isHistorical
+          ? reactivateContractFields()
           : {}),
       },
     });

@@ -253,9 +253,31 @@ export function buildProvvigioniContractWhere(
 
   const and: Prisma.ContractWhereInput[] = [
     { deletedAt: null },
-    { isHistorical: false },
-    { status: { notIn: [...KO_STATUSES] } },
   ];
+
+  const statoParts = parseStatoFilter(stato);
+  const includesKo = statoParts.includes("KO / Cessato");
+  const onlyKo = includesKo && statoParts.length === 1;
+
+  if (onlyKo) {
+    // Solo KO: includi anche storici archiviati per poterli ripristinare
+  } else if (includesKo) {
+    // Misto (es. Incassato|KO): attivi non-KO oppure qualsiasi KO
+    and.push({
+      OR: [
+        {
+          AND: [
+            { isHistorical: false },
+            { status: { notIn: [...KO_STATUSES] } },
+          ],
+        },
+        { status: { in: [...KO_STATUSES] } },
+      ],
+    });
+  } else {
+    and.push({ isHistorical: false });
+    and.push({ status: { notIn: [...KO_STATUSES] } });
+  }
 
   if (f.visibility && Object.keys(f.visibility).length > 0) {
     and.push(f.visibility);

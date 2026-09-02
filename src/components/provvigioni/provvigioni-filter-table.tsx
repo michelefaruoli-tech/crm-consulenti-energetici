@@ -860,7 +860,7 @@ export function ProvvigioniFilterTable({
                 ? current
                 : "Da incassare"
             }
-            title="Bozza: Da controllare = non contrattualizzato · Stornato = clawback applicato"
+            title="Cambia stato: da KO/Cessato puoi tornare a Da incassare, Incassato o Pagato (rientra in Provvigioni)"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => queueDraft(r, "stato", e.target.value)}
           >

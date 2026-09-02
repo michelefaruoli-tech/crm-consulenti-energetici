@@ -9,6 +9,7 @@ import { ContractsFilterTable } from "@/components/contracts/contracts-filter-ta
 import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toContractRows } from "@/lib/contract-row";
 import { ArchiveImportForm } from "@/components/archive/archive-import-form";
+import { ArchiveRestorePanel } from "@/components/archive/archive-restore-panel";
 import { HeliosImportPanel } from "@/components/provvigioni/helios-import-panel";
 import { contractTextSearchWhere } from "@/lib/list-search";
 
@@ -175,6 +176,8 @@ export default async function ArchivioPage({
           ? `${contracts.length} risultati (max 500) per «${q.trim()}».`
           : "Mostra fino a 500 contratti. Usa la ricerca per trovare un cliente o POD."}
       </p>
+
+      <ArchiveRestorePanel rows={rows} />
 
       <ContractsFilterTable rows={rows} editable={false} canDelete />
     </div>
