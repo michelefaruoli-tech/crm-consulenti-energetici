@@ -47,7 +47,7 @@ const NAV_ITEMS: Array<{
     href: "/archivio",
     label: "Archivio",
     icon: Archive,
-    roles: ["ADMIN", "SEGRETERIA"],
+    roles: "all",
   },
   {
     href: "/fornitori",
