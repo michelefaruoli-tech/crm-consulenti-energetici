@@ -68,6 +68,10 @@ export function CapAddressFields({
   const [multi, setMulti] = useState(false);
   const [capStatus, setCapStatus] = useState<"idle" | "loading" | "ok" | "missing">("idle");
   const [lastLookedUp, setLastLookedUp] = useState("");
+  const [cityLookupStatus, setCityLookupStatus] = useState<
+    "idle" | "loading" | "ok" | "missing"
+  >("idle");
+  const [lastCityLookedUp, setLastCityLookedUp] = useState("");
 
   useEffect(() => {
     const clean = zipCode.replace(/\D/g, "");
@@ -133,12 +137,103 @@ export function CapAddressFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambio CAP
   }, [zipCode]);
 
+  // Autocomplete inverso: comune (+ eventuale provincia) → CAP
+  useEffect(() => {
+    const cityQ = city.trim();
+    const hasCap = zipCode.replace(/\D/g, "").length === 5;
+    if (hasCap || cityQ.length < 3) {
+      setCityLookupStatus("idle");
+      return;
+    }
+    const key = `${cityQ}|${province}`.toLowerCase();
+    if (key === lastCityLookedUp) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCityLookupStatus("loading");
+      const qs = new URLSearchParams({ q: cityQ });
+      if (province.trim()) qs.set("province", province.trim());
+      void fetch(`/api/cap/city?${qs.toString()}`)
+        .then((r) => r.json())
+        .then(
+          (d: {
+            found?: boolean;
+            multi?: boolean;
+            matches?: Array<{
+              city: string;
+              province: string;
+              region: string;
+              zipCode: string;
+              label: string;
+            }>;
+            zipCode?: string;
+            city?: string;
+            province?: string;
+            region?: string;
+          }) => {
+            if (cancelled) return;
+            setLastCityLookedUp(key);
+            const list = d.matches ?? [];
+            if (list.length === 1 || (d.found && d.zipCode)) {
+              const m = list[0];
+              const zip = m?.zipCode || d.zipCode || "";
+              if (zip) onZipChange(zip);
+              if (m?.city || d.city) onCityChange(m?.city || d.city || cityQ);
+              if (m?.province || d.province) {
+                onProvinceChange(
+                  normalizeProvinceSigla(m?.province || d.province || ""),
+                );
+              }
+              if (m?.region || d.region) {
+                onRegionChange(m?.region || d.region || "");
+              }
+              setCityLookupStatus("ok");
+              setPlaces(
+                list.map((x) => ({
+                  city: x.city,
+                  province: x.province,
+                  region: x.region,
+                  label: x.label,
+                })),
+              );
+              setMulti(list.length > 1);
+            } else if (list.length > 1) {
+              setPlaces(
+                list.map((x) => ({
+                  city: x.city,
+                  province: x.province,
+                  region: x.region,
+                  label: x.label,
+                })),
+              );
+              setMulti(true);
+              setCityLookupStatus("ok");
+            } else {
+              setCityLookupStatus("missing");
+            }
+          },
+        )
+        .catch(() => {
+          if (!cancelled) setCityLookupStatus("missing");
+        });
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [city, province, zipCode]);
+
   function pickPlace(label: string) {
     const p = places.find((x) => x.label === label);
     if (!p) return;
     onCityChange(p.city);
     onProvinceChange(normalizeProvinceSigla(p.province));
     onRegionChange(p.region);
+    // Se la label contiene CAP (es. "Manfredonia — FG — 71043")
+    const zipInLabel = label.match(/\b(\d{5})\b/);
+    if (zipInLabel?.[1]) onZipChange(zipInLabel[1]);
   }
 
   const selectedLabel =
@@ -172,7 +267,7 @@ export function CapAddressFields({
     const parsed = parseItalianAddressLine(raw);
     onStreetChange(parsed.street);
     onStreetNumberChange(parsed.streetNumber);
-    onZipChange(parsed.zipCode);
+    if (parsed.zipCode) onZipChange(parsed.zipCode);
     if (parsed.city) onCityChange(parsed.city);
     if (parsed.province) onProvinceChange(parsed.province);
   }
@@ -203,7 +298,7 @@ export function CapAddressFields({
               setCompactFocused(false);
               applyParsedLine(compactDraft);
             }}
-            placeholder="Via Roma 12, 85025 Melfi PZ"
+            placeholder="Via Roma 12, Manfredonia FG (CAP automatico)"
             autoComplete="street-address"
           />
         </Field>
@@ -334,6 +429,17 @@ export function CapAddressFields({
             />
           </Field>
         </div>
+      ) : null}
+      {cityLookupStatus === "loading" ? (
+        <p className="text-xs text-slate-500">Cerco CAP da comune…</p>
+      ) : null}
+      {cityLookupStatus === "missing" &&
+      city.trim().length >= 3 &&
+      zipCode.replace(/\D/g, "").length !== 5 ? (
+        <p className="text-xs text-amber-800">
+          Comune non riconosciuto automaticamente: inserisci il CAP a mano (5
+          cifre), poi Comune e Provincia si compilano.
+        </p>
       ) : null}
       {multi ? (
         <p className="text-xs text-amber-800">
