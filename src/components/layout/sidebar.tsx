@@ -47,7 +47,8 @@ const NAV_ITEMS: Array<{
     href: "/archivio",
     label: "Archivio",
     icon: Archive,
-    roles: "all",
+    // Solo staff: evita confusione ai collaboratori commerciali
+    roles: ["ADMIN", "SEGRETERIA", "BACKOFFICE", "AREA_MANAGER"],
   },
   {
     href: "/fornitori",

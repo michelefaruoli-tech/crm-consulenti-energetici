@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Archive } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
@@ -16,12 +17,23 @@ import type { Prisma } from "@/generated/prisma/client";
 
 export const dynamic = "force-dynamic";
 
+const ARCHIVE_ROLES = new Set([
+  "ADMIN",
+  "SEGRETERIA",
+  "BACKOFFICE",
+  "AREA_MANAGER",
+]);
+
 export default async function ArchivioPage({
   searchParams,
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
   const session = await requireSession();
+  // Collaboratori/commerciali: niente Archivio (confonde con Contratti/Provvigioni)
+  if (!ARCHIVE_ROLES.has(session.role)) {
+    redirect("/contratti");
+  }
   const canManage = hasPermission(session.role, "contracts.edit_all");
   const visibility = await contractVisibilityWhere(session);
 

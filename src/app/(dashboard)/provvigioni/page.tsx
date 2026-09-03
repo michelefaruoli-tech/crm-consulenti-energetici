@@ -838,11 +838,13 @@ export default async function ProvvigioniPage({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/archivio#helios-import">
-            <Button type="button" variant="secondary">
-              Importa Helios
-            </Button>
-          </Link>
+          {canViewAll || isScoped ? (
+            <Link href="/archivio#helios-import">
+              <Button type="button" variant="secondary">
+                Importa Helios
+              </Button>
+            </Link>
+          ) : null}
           {canExport ? (
             <a href={exportHref}>
               <Button variant="secondary">Scarica Excel</Button>
