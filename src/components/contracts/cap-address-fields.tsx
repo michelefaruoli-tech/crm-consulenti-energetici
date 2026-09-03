@@ -115,6 +115,11 @@ export function CapAddressFields({
           }
           setCapStatus("ok");
         } else {
+          // CAP fuori elenco Zippopotam: precompila comunque provincia/regione
+          if (d.province) {
+            onProvinceChange(normalizeProvinceSigla(d.province));
+          }
+          if (d.region) onRegionChange(d.region);
           setCapStatus("missing");
         }
         setLastLookedUp(clean);
@@ -299,6 +304,37 @@ export function CapAddressFields({
           </Select>
         </Field>
       ) : null}
+      {compact &&
+      capStatus === "missing" &&
+      zipCode.replace(/\D/g, "").length === 5 ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Comune" fillStatus={fs(Boolean(city.trim()))}>
+            <Input
+              value={city}
+              onChange={(e) => onCityChange(e.target.value)}
+              placeholder="Manfredonia"
+              autoComplete="address-level2"
+            />
+          </Field>
+          <Field label="Provincia" fillStatus={fs(Boolean(province.trim()))}>
+            <Input
+              value={province}
+              onChange={(e) =>
+                onProvinceChange(normalizeProvinceSigla(e.target.value))
+              }
+              placeholder="FG"
+              maxLength={2}
+            />
+          </Field>
+          <Field label="Regione" fillStatus={fs(Boolean(region.trim()))}>
+            <Input
+              value={region}
+              onChange={(e) => onRegionChange(e.target.value)}
+              placeholder="Puglia"
+            />
+          </Field>
+        </div>
+      ) : null}
       {multi ? (
         <p className="text-xs text-amber-800">
           Questo CAP corrisponde a più località: scegli il comune (es. Melfi —
@@ -308,8 +344,12 @@ export function CapAddressFields({
       {capStatus === "missing" &&
       zipCode.replace(/\D/g, "").length === 5 ? (
         <p className="text-xs text-amber-800">
-          CAP non trovato in elenco: inserisci manualmente Comune e Provincia
-          (sigla a 2 lettere, es. PZ).
+          CAP non in elenco automatico
+          {province ? ` (provincia ${province}` : ""}
+          {region ? `${province ? ", " : " ("}${region}` : ""}
+          {province || region ? ")" : ""}. Inserisci il <strong>Comune</strong>
+          {province ? "" : " e la Provincia (sigla a 2 lettere, es. FG)"}
+          . Per Manfredonia il CAP corretto è <strong>71043</strong>.
         </p>
       ) : null}
     </div>

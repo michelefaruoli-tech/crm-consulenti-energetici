@@ -129,6 +129,36 @@ const CAP_RANGES: CapRange[] = [
 const CAP_OVERRIDE: Record<string, string> = {
   "85025": "PZ", // Melfi
   "75100": "MT", // Matera
+  "71121": "FG", // Foggia (CAP nuovi, assenti da Zippopotam)
+  "71122": "FG",
+};
+
+/**
+ * Località note quando Zippopotam non risponde (CAP nuovi / split Poste).
+ * Usato come fallback in /api/cap.
+ */
+export const CAP_LOCAL_PLACES: Record<
+  string,
+  Array<{ city: string; province: string; region: string }>
+> = {
+  "71121": [{ city: "Foggia", province: "FG", region: "Puglia" }],
+  "71122": [{ city: "Foggia", province: "FG", region: "Puglia" }],
+  "71043": [
+    { city: "Manfredonia", province: "FG", region: "Puglia" },
+    { city: "Siponto", province: "FG", region: "Puglia" },
+  ],
+};
+
+/** Regione indicativa da sigla provincia (per CAP fuori elenco Zippopotam). */
+const REGION_BY_PROVINCE: Record<string, string> = {
+  FG: "Puglia",
+  BA: "Puglia",
+  BR: "Puglia",
+  LE: "Puglia",
+  TA: "Puglia",
+  BT: "Puglia",
+  PZ: "Basilicata",
+  MT: "Basilicata",
 };
 
 /**
@@ -156,4 +186,10 @@ export function normalizeProvinceSigla(raw: string): string {
     .toUpperCase()
     .replace(/[^A-Z]/g, "")
     .slice(0, 2);
+}
+
+/** Regione da sigla provincia (se nota). */
+export function regionFromProvinceSigla(sigla: string): string {
+  const p = normalizeProvinceSigla(sigla);
+  return REGION_BY_PROVINCE[p] ?? "";
 }

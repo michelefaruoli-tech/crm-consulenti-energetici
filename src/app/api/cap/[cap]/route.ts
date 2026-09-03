@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { provinceSiglaFromCap } from "@/lib/italy-cap-province";
+import {
+  CAP_LOCAL_PLACES,
+  provinceSiglaFromCap,
+  regionFromProvinceSigla,
+} from "@/lib/italy-cap-province";
 
 type Place = {
   city: string;
@@ -7,6 +11,19 @@ type Place = {
   region: string;
   label: string;
 };
+
+function toPlace(p: {
+  city: string;
+  province: string;
+  region: string;
+}): Place {
+  return {
+    city: p.city,
+    province: p.province,
+    region: p.region,
+    label: [p.city, p.province, p.region].filter(Boolean).join(" — "),
+  };
+}
 
 /** Lookup CAP italiano: restituisce TUTTE le località (es. 85025 → Melfi + PZ). */
 export async function GET(
@@ -20,13 +37,38 @@ export async function GET(
   }
 
   const fallbackProvince = provinceSiglaFromCap(clean);
+  const fallbackRegion = regionFromProvinceSigla(fallbackProvince);
 
   try {
     const res = await fetch(`https://api.zippopotam.us/it/${clean}`, {
       next: { revalidate: 86400 },
     });
     if (!res.ok) {
-      return NextResponse.json({ found: false, cap: clean, places: [] });
+      const local = CAP_LOCAL_PLACES[clean];
+      if (local?.length) {
+        const places = local.map(toPlace);
+        const first = places[0]!;
+        return NextResponse.json({
+          found: true,
+          cap: clean,
+          multi: places.length > 1,
+          places,
+          city: places.length === 1 ? first.city : "",
+          province: places.length === 1 ? first.province : "",
+          region: places.length === 1 ? first.region : "",
+          country: "Italia",
+          source: "local",
+        });
+      }
+      // CAP fuori elenco Zippopotam: comunque provincia da range → form compilabile
+      return NextResponse.json({
+        found: false,
+        cap: clean,
+        places: [],
+        province: fallbackProvince,
+        region: fallbackRegion,
+        country: "Italia",
+      });
     }
     const data = (await res.json()) as {
       places?: {
@@ -42,13 +84,8 @@ export async function GET(
       const fromApi = (p["state abbreviation"] ?? "").trim().toUpperCase();
       const province =
         fromApi.length === 2 ? fromApi : fallbackProvince;
-      const region = (p.state ?? "").trim();
-      return {
-        city,
-        province,
-        region,
-        label: [city, province, region].filter(Boolean).join(" — "),
-      };
+      const region = (p.state ?? "").trim() || regionFromProvinceSigla(province);
+      return toPlace({ city, province, region });
     });
 
     const seen = new Set<string>();
@@ -79,6 +116,29 @@ export async function GET(
       country: "Italia",
     });
   } catch {
-    return NextResponse.json({ found: false, cap: clean, places: [] });
+    const local = CAP_LOCAL_PLACES[clean];
+    if (local?.length) {
+      const places = local.map(toPlace);
+      const first = places[0]!;
+      return NextResponse.json({
+        found: true,
+        cap: clean,
+        multi: places.length > 1,
+        places,
+        city: places.length === 1 ? first.city : "",
+        province: places.length === 1 ? first.province : "",
+        region: places.length === 1 ? first.region : "",
+        country: "Italia",
+        source: "local",
+      });
+    }
+    return NextResponse.json({
+      found: false,
+      cap: clean,
+      places: [],
+      province: fallbackProvince,
+      region: fallbackRegion,
+      country: "Italia",
+    });
   }
 }
