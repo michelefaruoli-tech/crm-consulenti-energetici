@@ -34,48 +34,105 @@ function personKey(c: {
   return `pr|${fold(c.lastName)}|${fold(c.firstName)}|${idCode}`;
 }
 
-/** Condizioni di ricerca: anche “Cognome Nome” e “Nome Cognome”. */
+function identityFieldsOr(
+  term: string,
+  mode: "insensitive",
+): Prisma.ClientWhereInput[] {
+  return [
+    { firstName: { contains: term, mode } },
+    { lastName: { contains: term, mode } },
+    { companyName: { contains: term, mode } },
+    { fiscalCode: { contains: term, mode } },
+    { vatNumber: { contains: term, mode } },
+    { email: { contains: term, mode } },
+    { phone: { contains: term, mode } },
+  ];
+}
+
+/**
+ * Condizioni di ricerca.
+ * - 1 parola (es. «Rossi» o CF): OR su i campi anagrafica
+ * - 2+ token (es. «Rossi Mario»): ogni token deve matchare (AND),
+ *   così non escono tutti i Rossi + tutti i Mario mescolati
+ */
 function buildWhere(q: string): Prisma.ClientWhereInput {
   const tokens = q.split(/\s+/).filter(Boolean);
   const mode = "insensitive" as const;
 
-  const or: Prisma.ClientWhereInput[] = [
-    { firstName: { contains: q, mode } },
-    { lastName: { contains: q, mode } },
-    { companyName: { contains: q, mode } },
-    { fiscalCode: { contains: q, mode } },
-    { vatNumber: { contains: q, mode } },
-    { email: { contains: q, mode } },
-    { phone: { contains: q, mode } },
-  ];
-
-  for (const t of tokens) {
-    if (t.length < 2) continue;
-    or.push(
-      { firstName: { contains: t, mode } },
-      { lastName: { contains: t, mode } },
-      { companyName: { contains: t, mode } },
-      { fiscalCode: { contains: t, mode } },
-      { vatNumber: { contains: t, mode } },
-    );
+  if (tokens.length <= 1) {
+    const t = tokens[0] ?? q;
+    return { deletedAt: null, OR: identityFieldsOr(t, mode) };
   }
 
-  // Due o più parole: prova cognome+nome e nome+cognome
+  const meaningful = tokens.filter((t) => t.length >= 2);
+  if (meaningful.length === 0) {
+    return { deletedAt: null, OR: identityFieldsOr(q, mode) };
+  }
+
+  // Ogni pezzo deve trovare qualcosa (nome+cognome, cognome+CF, …)
+  const andTokens: Prisma.ClientWhereInput[] = meaningful.map((t) => ({
+    OR: identityFieldsOr(t, mode),
+  }));
+
+  // Match anche su stringa intera (ragione sociale / CF con spazi)
+  return {
+    deletedAt: null,
+    OR: [
+      { companyName: { contains: q, mode } },
+      { fiscalCode: { contains: q.replace(/\s+/g, ""), mode } },
+      { AND: andTokens },
+    ],
+  };
+}
+
+/** Punteggio: privilegia chi ha cognome+nome che combaciano con i token. */
+function matchScore(
+  c: {
+    type: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    companyName?: string | null;
+    fiscalCode?: string | null;
+    vatNumber?: string | null;
+  },
+  q: string,
+): number {
+  const tokens = q
+    .split(/\s+/)
+    .map(fold)
+    .filter((t) => t.length >= 2);
+  if (tokens.length === 0) return 0;
+
+  const first = fold(c.firstName);
+  const last = fold(c.lastName);
+  const company = fold(c.companyName);
+  const cf = fold(c.fiscalCode).replace(/\s+/g, "");
+  const vat = fold(c.vatNumber).replace(/\s+/g, "");
+
+  let score = 0;
+
   if (tokens.length >= 2) {
-    const first = tokens[0]!;
-    const rest = tokens.slice(1).join(" ");
-    const last = tokens[tokens.length - 1]!;
-    const head = tokens.slice(0, -1).join(" ");
-
-    or.push(
-      { AND: [{ lastName: { contains: first, mode } }, { firstName: { contains: rest, mode } }] },
-      { AND: [{ firstName: { contains: first, mode } }, { lastName: { contains: rest, mode } }] },
-      { AND: [{ lastName: { contains: head, mode } }, { firstName: { contains: last, mode } }] },
-      { AND: [{ firstName: { contains: head, mode } }, { lastName: { contains: last, mode } }] },
-    );
+    const a = tokens[0]!;
+    const b = tokens[tokens.length - 1]!;
+    // Cognome Nome
+    if (last.includes(a) && first.includes(b)) score += 100;
+    // Nome Cognome
+    if (first.includes(a) && last.includes(b)) score += 90;
+    // Tutti i token nel cognome+nome
+    if (tokens.every((t) => last.includes(t) || first.includes(t))) score += 40;
+  } else {
+    const t = tokens[0]!;
+    if (last === t || first === t || company === t) score += 80;
+    else if (last.startsWith(t) || first.startsWith(t)) score += 50;
+    else if (last.includes(t) || first.includes(t)) score += 30;
   }
 
-  return { deletedAt: null, OR: or };
+  if (tokens.some((t) => cf.includes(t.replace(/\s+/g, "")) || vat.includes(t))) {
+    score += 60;
+  }
+  if (company && tokens.every((t) => company.includes(t))) score += 50;
+
+  return score;
 }
 
 function clientLabel(c: {
@@ -152,12 +209,14 @@ export async function GET(request: Request) {
 
   if (q.length < 2) return NextResponse.json({ items: [] });
 
-  // Prendi più righe del necessario, poi deduplica (stesso nome+CF → una sola)
+  // Prendi più righe del necessario, poi ordina per pertinenza e deduplica
   const clients = await prisma.client.findMany({
     where: buildWhere(q),
     take: 80,
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { updatedAt: "desc" }],
   });
+
+  clients.sort((a, b) => matchScore(b, q) - matchScore(a, q));
 
   const seen = new Set<string>();
   const unique = [];
