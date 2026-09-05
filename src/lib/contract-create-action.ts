@@ -712,6 +712,7 @@ async function createFullContractActionInner(
   // attivi fino all’ingresso fornitura del nuovo contratto.
   let archivedOlder = 0;
   let keptMonthly = 0;
+  let keptForStorno = 0;
   if (!payload.draft) {
     try {
       const { archiveOlderForContractPods } = await import(
@@ -720,6 +721,7 @@ async function createFullContractActionInner(
       const arch = await archiveOlderForContractPods(createdIds);
       archivedOlder = arch.archived;
       keptMonthly = arch.keptMonthly;
+      keptForStorno = arch.keptForStorno;
     } catch (e) {
       console.error("[archiveOlderForContractPods]", e);
     }
@@ -737,6 +739,7 @@ async function createFullContractActionInner(
         sendToMaster,
         archivedOlderPods: archivedOlder,
         keptMonthlyRecurring: keptMonthly,
+        keptForStorno,
       }),
     },
   });
@@ -775,11 +778,15 @@ async function createFullContractActionInner(
     keptMonthly > 0
       ? ` · ${keptMonthly} ricorrente/i mensili restano attivi fino all’ingresso del nuovo contratto`
       : "";
+  const stornoMsg =
+    keptForStorno > 0
+      ? ` · ${keptForStorno} precedente/i in storno restano in Provvigioni (gestisci a mano)`
+      : "";
 
   return {
     ok: true,
     contractIds: createdIds,
-    message: `${baseMsg}${archiveMsg}${keepMsg}`,
+    message: `${baseMsg}${archiveMsg}${keepMsg}${stornoMsg}`,
     code: sendToMaster ? "CREATED_PENDING_EMAIL" : "CREATED",
     emailSent: false,
   };

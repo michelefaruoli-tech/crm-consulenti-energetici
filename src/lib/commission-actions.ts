@@ -634,6 +634,12 @@ async function applyCommissionField(
       where: { id: commission.contractId },
       data: { supplierId: supplier.id },
     });
+  } else if (field === "agency") {
+    const raw = value.trim();
+    await prisma.contract.update({
+      where: { id: commission.contractId },
+      data: { agency: raw && raw !== "—" ? raw : null },
+    });
   } else if (field === "clientType") {
     const raw = value.trim().toLowerCase();
     const type =

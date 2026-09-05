@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { recurringMonthlyWhereOr } from "@/lib/provvigioni-filters";
 import { isRecurringMonthly } from "@/lib/recurring";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
-import { normalizePodKey } from "@/lib/storno-status";
+import { normalizePodKey, computeStornoEndDate } from "@/lib/storno-status";
 import {
   computeSupplyStartDate,
   formatItDate,
@@ -11,6 +11,31 @@ import {
 import { isManuallyRestoredArchiveLabel } from "@/lib/contract-reactivate";
 
 const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
+
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/**
+ * Se il contratto precedente è ancora nel periodo storno, NON archiviare:
+ * restano entrambi in Provvigioni finché l’utente non li gestisce.
+ */
+function keepBothWhileInStorno(opts: {
+  supplyStartDate: Date | null | undefined;
+  stornoEndDate: Date | null | undefined;
+  stornoMonths: number | null | undefined;
+  now?: Date;
+}): boolean {
+  if (opts.stornoMonths === 0) return false;
+  const end = computeStornoEndDate(
+    opts.supplyStartDate,
+    opts.stornoMonths,
+    opts.stornoEndDate,
+  );
+  if (!end) return false;
+  const now = opts.now ?? new Date();
+  return startOfDay(now) <= startOfDay(end);
+}
 
 /** Ultimo giorno utile del contratto precedente (es. nuovo 1/10 → 30/09). */
 function dayBeforeSupplyStart(supplyStart: Date): Date {
@@ -125,14 +150,15 @@ function supersedeNote(supply: Date): string {
 /**
  * Archivia contratti «precedenti» sullo stesso POD quando ne esiste uno più recente.
  *
- * Eccezione: ricorrente mensile (Helios, …) resta in Provvigioni fino all’ingresso
- * del nuovo contratto; solo allora passa in KO (mai CHIUSO automatico).
+ * Eccezioni (restano entrambi in Provvigioni):
+ * - ricorrente mensile finché il nuovo non è in fornitura
+ * - contratto precedente ancora in periodo storno (gestione manuale)
  */
 export async function archiveSupersededPodContracts(options?: {
   /** Se valorizzato, archivia solo questo POD (dopo nuovo contratto). */
   onlyPodKey?: string;
   now?: Date;
-}): Promise<{ archived: number; keptMonthly: number }> {
+}): Promise<{ archived: number; keptMonthly: number; keptForStorno: number }> {
   const now = options?.now ?? new Date();
   const contracts = await prisma.contract.findMany({
     where: {
@@ -153,6 +179,8 @@ export async function archiveSupersededPodContracts(options?: {
       status: true,
       expiryDate: true,
       archiveLabel: true,
+      stornoEndDate: true,
+      supplier: { select: { stornoMonths: true } },
     },
     take: 12000,
   });
@@ -191,6 +219,7 @@ export async function archiveSupersededPodContracts(options?: {
 
   const toArchive: Array<{ older: Row; latestSupply: Date }> = [];
   const toKeep: Array<{ older: Row; until: Date }> = [];
+  let keptForStorno = 0;
   for (const [, list] of byPod) {
     if (list.length < 2) continue;
     list.sort((a, b) => b.score - a.score);
@@ -198,6 +227,17 @@ export async function archiveSupersededPodContracts(options?: {
     for (const older of list.slice(1)) {
       if (older.id === latest.id) continue;
       if (isManuallyRestoredArchiveLabel(older.archiveLabel)) continue;
+      if (
+        keepBothWhileInStorno({
+          supplyStartDate: older.supplyStartDate ?? older.supplyResolved,
+          stornoEndDate: older.stornoEndDate,
+          stornoMonths: older.supplier.stornoMonths,
+          now,
+        })
+      ) {
+        keptForStorno += 1;
+        continue;
+      }
       if (
         keepMonthlyRecurringUntilNewSupply({
           olderRecurrence: older.recurrence,
@@ -233,7 +273,7 @@ export async function archiveSupersededPodContracts(options?: {
     }
   }
 
-  if (toArchive.length === 0) return { archived: 0, keptMonthly };
+  if (toArchive.length === 0) return { archived: 0, keptMonthly, keptForStorno };
 
   // update uno-a-uno: updateMany usa transazioni non supportate da PrismaNeonHttp
   let archived = 0;
@@ -264,14 +304,16 @@ export async function archiveSupersededPodContracts(options?: {
       console.error("[archiveSupersededPodContracts] update", older.id, e);
     }
   }
-  return { archived, keptMonthly };
+  return { archived, keptMonthly, keptForStorno };
 }
 
 /** Dopo creazione contratto: archivia eventuali precedenti sullo stesso POD. */
 export async function archiveOlderForContractPods(
   contractIds: string[],
-): Promise<{ archived: number; keptMonthly: number }> {
-  if (contractIds.length === 0) return { archived: 0, keptMonthly: 0 };
+): Promise<{ archived: number; keptMonthly: number; keptForStorno: number }> {
+  if (contractIds.length === 0) {
+    return { archived: 0, keptMonthly: 0, keptForStorno: 0 };
+  }
   const rows = await prisma.contract.findMany({
     where: { id: { in: contractIds } },
     select: { podPdr: true, pod: true, pdr: true },
@@ -281,10 +323,11 @@ export async function archiveOlderForContractPods(
     const k = normalizePodKey(r.podPdr || r.pod || r.pdr);
     if (k && k.length >= 6) keys.add(k);
   }
-  if (keys.size === 0) return { archived: 0, keptMonthly: 0 };
+  if (keys.size === 0) return { archived: 0, keptMonthly: 0, keptForStorno: 0 };
 
   // Prevale il contratto appena creato (anche con decorrenza anteriore),
   // ma i ricorrenti mensili restano attivi fino all’ingresso del nuovo.
+  // Se il precedente è in storno, restano entrambi in Provvigioni.
   const created = await prisma.contract.findMany({
     where: { id: { in: contractIds } },
     select: {
@@ -326,19 +369,39 @@ export async function archiveOlderForContractPods(
       status: true,
       expiryDate: true,
       archiveLabel: true,
+      supplyStartDate: true,
+      insertionDate: true,
+      operationType: true,
+      stornoEndDate: true,
+      supplier: { select: { stornoMonths: true } },
     },
     take: 12000,
   });
 
   let archived = 0;
   let keptMonthly = 0;
+  let keptForStorno = 0;
   const now = new Date();
   for (const candidate of candidates) {
     const key = normalizePodKey(candidate.podPdr || candidate.pod || candidate.pdr);
     if (!keys.has(key)) continue;
     if (isManuallyRestoredArchiveLabel(candidate.archiveLabel)) continue;
     const latestSupply = newSupplyByPod.get(key);
+    const supplyResolved =
+      candidate.supplyStartDate ??
+      computeSupplyStartDate(candidate.insertionDate, candidate.operationType);
     try {
+      if (
+        keepBothWhileInStorno({
+          supplyStartDate: supplyResolved,
+          stornoEndDate: candidate.stornoEndDate,
+          stornoMonths: candidate.supplier.stornoMonths,
+          now,
+        })
+      ) {
+        keptForStorno += 1;
+        continue;
+      }
       if (
         keepMonthlyRecurringUntilNewSupply({
           olderRecurrence: candidate.recurrence,
@@ -400,5 +463,5 @@ export async function archiveOlderForContractPods(
       console.error("[archiveOlderForContractPods]", candidate.id, e);
     }
   }
-  return { archived, keptMonthly };
+  return { archived, keptMonthly, keptForStorno };
 }

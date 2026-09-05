@@ -344,6 +344,7 @@ export default async function ProvvigioniPage({
     operationType: true,
     collaboratorId: true,
     notes: true,
+    agency: true,
     client: {
       select: {
         type: true,

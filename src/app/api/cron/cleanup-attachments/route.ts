@@ -26,6 +26,7 @@ export async function GET(request: Request) {
       cleared: 0,
       closedSuperseded: closed.archived,
       keptMonthly: closed.keptMonthly,
+      keptForStorno: closed.keptForStorno,
       message: "Retention disabilitata",
     });
   }
@@ -67,6 +68,7 @@ export async function GET(request: Request) {
     days,
     closedSuperseded: closed.archived,
     keptMonthly: closed.keptMonthly,
+    keptForStorno: closed.keptForStorno,
     message: `Puliti ${cleared} contenuti allegati (metadati conservati)`,
   });
 }

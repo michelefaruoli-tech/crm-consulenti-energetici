@@ -91,6 +91,7 @@ export type ContractForProvvigioneRow = {
   operationType: string | null;
   collaboratorId: string;
   notes: string | null;
+  agency: string | null;
   client: {
     type: string;
     companyName: string | null;
@@ -276,7 +277,7 @@ function buildSingleRow(
     podPdr: contract.podPdr || contract.pod || contract.pdr || "",
     collaboratorName: contract.collaborator?.name ?? "—",
     supplierName: contract.supplier.name,
-    agency: provvigioneAgencyLabel(contract.supplier.name),
+    agency: provvigioneAgencyLabel(contract.supplier.name, contract.agency),
     clientType: contract.client.type === "AZIENDA" ? "Business" : "Domestico",
     amount: String(amountValue),
     supplyStartDate: supply ? formatItDate(supply) : "",
@@ -587,6 +588,7 @@ export async function loadStornoContractsForMaps(
       operationType: true,
       collaboratorId: true,
       notes: true,
+      agency: true,
       client: {
         select: {
           type: true,
@@ -639,6 +641,7 @@ export async function loadStornoContractsForIds(
       operationType: true,
       collaboratorId: true,
       notes: true,
+      agency: true,
       client: {
         select: {
           type: true,

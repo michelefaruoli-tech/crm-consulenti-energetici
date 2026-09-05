@@ -16,6 +16,7 @@ import { StornoLegend } from "@/components/ui/storno-legend";
 import { toPeriod, periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
+  PROVVIGIONE_AGENCY_OPTIONS,
   PROVVIGIONE_OPERATION_OPTIONS,
   PROVVIGIONE_STATO_OPTIONS,
   formatCollaboratorShort,
@@ -30,6 +31,7 @@ const FIELD_MAP: Record<string, string> = {
   podPdr: "podPdr",
   collaboratorName: "collaboratorName",
   supplierName: "supplierName",
+  agency: "agency",
   clientType: "clientType",
   amount: "expected",
   operationType: "operationType",
@@ -766,9 +768,37 @@ export function ProvvigioniFilterTable({
     {
       key: "agency",
       label: "Agenzia",
-      getValue: (r) => String((r as ProvvigioneRow).agency ?? ""),
+      getValue: (r) => baseCellValue(r, "agency"),
       sortKind: "text",
-      inputClassName: "max-w-[6rem] truncate text-xs font-medium text-slate-800",
+      render: (r) => {
+        const current = getDraftValue(r, "agency") || "—";
+        const options = [...PROVVIGIONE_AGENCY_OPTIONS];
+        const dirty = isDraftDirty(r, "agency");
+        const known = options.includes(
+          current as (typeof options)[number],
+        );
+        return (
+          <select
+            className={`max-w-[7rem] rounded border px-1 py-1 text-xs font-medium ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={known ? current : current === "—" || !current ? "" : current}
+            title="Agenzia pagatrice del gettone (modificabile)"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "agency", e.target.value)}
+          >
+            <option value="">—</option>
+            {!known && current && current !== "—" ? (
+              <option value={current}>{current}</option>
+            ) : null}
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        );
+      },
     },
     {
       key: "clientType",

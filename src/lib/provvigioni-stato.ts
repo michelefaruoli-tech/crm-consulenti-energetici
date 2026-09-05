@@ -149,9 +149,17 @@ export function defaultGettonePrivato(supplierName: string): number | null {
 
 /**
  * Agenzia pagatrice del gettone (vista avanzata Provvigioni).
- * Deriva dal nome fornitore.
+ * Usa il valore salvato sul contratto se presente, altrimenti deriva dal fornitore.
  */
-export function provvigioneAgencyLabel(supplierName: string): string {
+export const PROVVIGIONE_AGENCY_OPTIONS = [
+  "COMPARA",
+  "MADA",
+  "Achille",
+  "BROKER",
+  "POWER",
+] as const;
+
+export function agencyFromSupplierName(supplierName: string): string {
   const n = supplierName.toLowerCase().replace(/\s+/g, "");
   if (n.includes("iren") || n.includes("plenitud") || n.includes("enipro")) {
     return "COMPARA";
@@ -161,6 +169,15 @@ export function provvigioneAgencyLabel(supplierName: string): string {
   if (n.includes("sinerg") || n.includes("etruri")) return "BROKER";
   if (n.includes("sorgenia") || n.includes("a2a")) return "POWER";
   return "—";
+}
+
+export function provvigioneAgencyLabel(
+  supplierName: string,
+  storedAgency?: string | null,
+): string {
+  const stored = String(storedAgency ?? "").trim();
+  if (stored) return stored;
+  return agencyFromSupplierName(supplierName);
 }
 
 /** Gettone effettivo allineato a quanto vedi in tabella. */

@@ -56,6 +56,11 @@ export async function cleanupClientDuplicatesAction(): Promise<{
         `${archived.keptMonthly} ricorrenti mensili tenuti attivi fino alla nuova fornitura`,
       );
     }
+    if (archived.keptForStorno > 0) {
+      parts.push(
+        `${archived.keptForStorno} contratti in storno lasciati in Provvigioni (gestione manuale)`,
+      );
+    }
     return {
       ok: true,
       message: parts.length ? parts.join(" · ") : "Nessuna modifica necessaria",
