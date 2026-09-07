@@ -6,8 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import { simplifiedProvvigioneStato } from "@/lib/provvigioni-stato";
-import { periodLabel } from "@/lib/recurring";
 import {
+  groupReportRecurringByContract,
   loadReportRecurringPaid,
   sumReportRecurring,
 } from "@/lib/report-recurring";
@@ -375,46 +375,6 @@ export async function GET(req: NextRequest) {
     styleSubtotal(subSto, "FF9F1239");
     subSto.getCell(7).font = { bold: true, color: { argb: "FFFECACA" } };
 
-    // Ricorrenti: somma + elenco
-    if (includeRecurring && block.ricorrenti.length > 0) {
-      const ricTitle = rend.addRow([
-        `RATE RICORRENTI - somma ${block.subRicorrenti}`,
-        `${block.countRicorrenti} rate`,
-        "",
-        "",
-        "",
-        "",
-        block.subRicorrenti,
-      ]);
-      styleSection(ricTitle, "FF6B21A8", "FFFFFFFF");
-      for (const line of block.ricorrenti) {
-        const r = rend.addRow([
-          "Ricorrente",
-          line.contractNumber,
-          line.clientName,
-          line.supplierName,
-          line.collaboratorName,
-          line.dateLabel,
-          line.amount,
-        ]);
-        styleAmountCell(r.getCell(7), line.amount);
-      }
-      const subRic = rend.addRow([
-        "Somma rate ricorrenti",
-        `${block.countRicorrenti} rate`,
-        "",
-        "",
-        "",
-        "",
-        block.subRicorrenti,
-      ]);
-      styleSubtotal(subRic, "FF6B21A8");
-      subRic.getCell(7).font = {
-        bold: true,
-        color: { argb: "FFE9D5FF" },
-      };
-    }
-
     if (rendiconto.months.length > 1) {
       const subNet = rend.addRow([
         `Subtotale netto ${block.label}`,
@@ -432,6 +392,46 @@ export async function GET(req: NextRequest) {
       };
     }
 
+    rend.addRow([]);
+  }
+
+  if (includeRecurring && rendiconto.ricorrentiGrouped.length > 0) {
+    const ricTitle = rend.addRow([
+      `RATE RICORRENTI - ${rendiconto.countRicorrenti} contratti`,
+      rendiconto.totRicorrenti,
+      "",
+      "",
+      "",
+      "",
+      rendiconto.totRicorrenti,
+    ]);
+    styleSection(ricTitle, "FF6B21A8", "FFFFFFFF");
+    for (const line of rendiconto.ricorrentiGrouped) {
+      const r = rend.addRow([
+        "Ricorrente",
+        line.contractNumber,
+        line.clientName,
+        line.supplierName,
+        line.collaboratorName,
+        line.dateLabel,
+        line.amount,
+      ]);
+      styleAmountCell(r.getCell(7), line.amount);
+    }
+    const subRic = rend.addRow([
+      "Somma ricorrenti",
+      `${rendiconto.countRicorrenti} contratti`,
+      "",
+      "",
+      "",
+      "",
+      rendiconto.totRicorrenti,
+    ]);
+    styleSubtotal(subRic, "FF6B21A8");
+    subRic.getCell(7).font = {
+      bold: true,
+      color: { argb: "FFE9D5FF" },
+    };
     rend.addRow([]);
   }
 
@@ -513,26 +513,26 @@ export async function GET(req: NextRequest) {
   // ─── Foglio 3: Rate ricorrenti ───
   const sheet2 = workbook.addWorksheet("Rate ricorrenti");
   sheet2.columns = [
-    { header: "Competenza", key: "competence", width: 14 },
-    { header: "Rendiconto (bonifico)", key: "settled", width: 18 },
     { header: "Cliente", key: "client", width: 28 },
     { header: "Tipo", key: "tipo", width: 12 },
     { header: "POD/PDR", key: "pod", width: 18 },
     { header: "Collaboratore", key: "collaborator", width: 18 },
     { header: "Fornitore", key: "supplier", width: 16 },
+    { header: "Mesi pagati", key: "months", width: 36 },
+    { header: "N. mesi", key: "monthCount", width: 10 },
     { header: "Importo", key: "amount", width: 12 },
     { header: "N. contratto", key: "number", width: 16 },
   ];
   styleHeader(sheet2.getRow(1), "FF6B21A8");
-  for (const r of recurringRows) {
+  for (const r of groupReportRecurringByContract(recurringRows)) {
     sheet2.addRow({
-      competence: periodLabel(r.period),
-      settled: r.settledPeriod ? periodLabel(r.settledPeriod) : "",
       client: r.clientName,
       tipo: r.clientType === "AZIENDA" ? "ALTRI USI" : "DOMESTICO",
       pod: r.podPdr ?? "",
       collaborator: r.collaboratorName,
       supplier: r.supplierName,
+      months: r.paidMonthsLabel,
+      monthCount: r.monthCount,
       amount: r.amount,
       number: r.contractNumber,
     });

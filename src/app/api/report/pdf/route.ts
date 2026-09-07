@@ -356,65 +356,6 @@ export async function GET(req: NextRequest) {
     });
     y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
 
-    if (includeRecurring && block.ricorrenti.length > 0) {
-      if (y > 250) {
-        doc.addPage();
-        y = 16;
-      }
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(107, 33, 168);
-      doc.text(
-        `Rate ricorrenti - somma ${formatEuro(block.subRicorrenti)} (${block.countRicorrenti} rate)`,
-        14,
-        y,
-      );
-      doc.setTextColor(0, 0, 0);
-      y += 2;
-      autoTable(doc, {
-        startY: y,
-        head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Competenza", "Importo"]],
-        body: block.ricorrenti.map((l) => [
-          l.contractNumber,
-          l.clientName,
-          l.supplierName,
-          l.collaboratorName,
-          l.dateLabel,
-          formatEuro(l.amount),
-        ]),
-        styles: { fontSize: 7, textColor: [15, 23, 42] },
-        headStyles: {
-          fillColor: [88, 28, 135],
-          textColor: [255, 255, 255],
-          fontStyle: "bold",
-        },
-        margin: { left: 14, right: 14 },
-        foot: [
-          [
-            "Somma rate",
-            "",
-            "",
-            "",
-            `${block.countRicorrenti} rate`,
-            formatEuro(block.subRicorrenti),
-          ],
-        ],
-        footStyles: {
-          fillColor: [88, 28, 135],
-          textColor: [255, 255, 255],
-          fontStyle: "bold",
-          fontSize: 8,
-        },
-        didParseCell: (data) => {
-          if (data.section !== "body" || data.column.index !== 5) return;
-          const amount = block.ricorrenti[data.row.index]?.amount ?? 0;
-          data.cell.styles.textColor =
-            amount < 0 ? [185, 28, 28] : [4, 120, 87];
-          data.cell.styles.fontStyle = "bold";
-        },
-      });
-      y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
-    }
-
     if (rendiconto.months.length > 1) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
@@ -425,6 +366,66 @@ export async function GET(req: NextRequest) {
       );
       y += 8;
     }
+  }
+
+  if (includeRecurring && rendiconto.ricorrentiGrouped.length > 0) {
+    if (y > 240) {
+      doc.addPage();
+      y = 16;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(107, 33, 168);
+    doc.text(
+      `Rate ricorrenti - ${rendiconto.countRicorrenti} contratti · ${formatEuro(rendiconto.totRicorrenti)}`,
+      14,
+      y,
+    );
+    doc.setTextColor(0, 0, 0);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Mesi pagati", "Importo"]],
+      body: rendiconto.ricorrentiGrouped.map((l) => [
+        l.contractNumber,
+        l.clientName,
+        l.supplierName,
+        l.collaboratorName,
+        l.dateLabel,
+        formatEuro(l.amount),
+      ]),
+      styles: { fontSize: 7, textColor: [15, 23, 42] },
+      headStyles: {
+        fillColor: [88, 28, 135],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
+      margin: { left: 14, right: 14 },
+      foot: [
+        [
+          "Somma ricorrenti",
+          "",
+          "",
+          "",
+          `${rendiconto.countRicorrenti} contratti`,
+          formatEuro(rendiconto.totRicorrenti),
+        ],
+      ],
+      footStyles: {
+        fillColor: [88, 28, 135],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        fontSize: 8,
+      },
+      didParseCell: (data) => {
+        if (data.section !== "body" || data.column.index !== 5) return;
+        const amount = rendiconto.ricorrentiGrouped[data.row.index]?.amount ?? 0;
+        data.cell.styles.textColor =
+          amount < 0 ? [185, 28, 28] : [4, 120, 87];
+        data.cell.styles.fontStyle = "bold";
+      },
+    });
+    y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 8;
   }
 
   if (y > 270) {

@@ -5,7 +5,10 @@
 import { formatCurrency } from "@/lib/commission";
 import { effectiveGettone } from "@/lib/provvigioni-stato";
 import { formatMonthLabel } from "@/lib/report-month";
-import type { ReportRecurringRow } from "@/lib/report-recurring";
+import {
+  groupReportRecurringByContract,
+  type ReportRecurringRow,
+} from "@/lib/report-recurring";
 import type { ReportStornoRow } from "@/lib/report-stornos";
 import { isRecurring } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
@@ -105,6 +108,8 @@ export type RendicontoSummary = {
   countRicorrenti: number;
   /** Totali Incassato per fornitore su tutto il periodo */
   incassatoBySupplier: RendicontoSupplierBlock[];
+  /** Ricorrenti raggruppate per contratto (mesi pagati in dateLabel) */
+  ricorrentiGrouped: RendicontoLine[];
 };
 
 function monthKeyFromDate(d: Date): string {
@@ -163,31 +168,27 @@ export function buildRendiconto(params: {
     });
   }
 
-  if (!params.skipRecurring) {
-    for (const r of params.recurringRows) {
-      const month = r.period;
-      lines.push({
-        kind: "ricorrente",
-        month,
-        contractNumber: r.contractNumber,
-        clientName: r.clientName,
-        supplierName: r.supplierName,
-        collaboratorName: r.collaboratorName,
-        amount: r.amount,
-        dateLabel: r.period,
-      });
-    }
-  }
+  const ricorrentiGrouped: RendicontoLine[] = params.skipRecurring
+    ? []
+    : groupReportRecurringByContract(params.recurringRows).map((g) => ({
+        kind: "ricorrente" as const,
+        month: g.periods[0] ?? "",
+        contractNumber: g.contractNumber,
+        clientName: g.clientName,
+        supplierName: g.supplierName,
+        collaboratorName: g.collaboratorName,
+        amount: g.amount,
+        dateLabel: g.paidMonthsLabel,
+      }));
 
   const monthKeys = [...new Set(lines.map((l) => l.month))].sort();
   const months: RendicontoMonthBlock[] = monthKeys.map((month) => {
     const ofMonth = lines.filter((l) => l.month === month);
     const incassato = ofMonth.filter((l) => l.kind === "incassato");
     const storni = ofMonth.filter((l) => l.kind === "storno");
-    const ricorrenti = ofMonth.filter((l) => l.kind === "ricorrente");
+    const ricorrenti: RendicontoLine[] = [];
     const subIncassato = incassato.reduce((s, l) => s + l.amount, 0);
     const subStorni = storni.reduce((s, l) => s + l.amount, 0);
-    const subRicorrenti = ricorrenti.reduce((s, l) => s + l.amount, 0);
     return {
       month,
       label: formatMonthLabel(month),
@@ -197,17 +198,17 @@ export function buildRendiconto(params: {
       ricorrenti,
       subIncassato,
       subStorni,
-      subRicorrenti,
-      subNetto: subIncassato + subStorni + subRicorrenti,
+      subRicorrenti: 0,
+      subNetto: subIncassato + subStorni,
       countIncassato: incassato.length,
       countStorni: storni.length,
-      countRicorrenti: ricorrenti.length,
+      countRicorrenti: 0,
     };
   });
 
   const totIncassato = months.reduce((s, m) => s + m.subIncassato, 0);
   const totStorni = months.reduce((s, m) => s + m.subStorni, 0);
-  const totRicorrenti = months.reduce((s, m) => s + m.subRicorrenti, 0);
+  const totRicorrenti = ricorrentiGrouped.reduce((s, l) => s + l.amount, 0);
   const allIncassato = months.flatMap((m) => m.incassato);
 
   return {
@@ -218,8 +219,9 @@ export function buildRendiconto(params: {
     totNetto: totIncassato + totStorni + totRicorrenti,
     countIncassato: months.reduce((s, m) => s + m.countIncassato, 0),
     countStorni: months.reduce((s, m) => s + m.countStorni, 0),
-    countRicorrenti: months.reduce((s, m) => s + m.countRicorrenti, 0),
+    countRicorrenti: ricorrentiGrouped.length,
     incassatoBySupplier: groupLinesBySupplier(allIncassato),
+    ricorrentiGrouped,
   };
 }
 

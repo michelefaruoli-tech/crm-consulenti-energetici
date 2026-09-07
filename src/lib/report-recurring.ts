@@ -6,9 +6,11 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseFilterList, resolveReportPeriod } from "@/lib/report-filters";
+import { REPORT_MONTH_LABELS } from "@/lib/report-month";
 
 export type ReportRecurringRow = {
   id: string;
+  contractId: string;
   period: string;
   settledPeriod: string | null;
   amount: number;
@@ -21,6 +23,78 @@ export type ReportRecurringRow = {
   clientName: string;
   clientType: string;
 };
+
+export type GroupedReportRecurring = {
+  contractId: string;
+  contractNumber: string;
+  clientName: string;
+  supplierName: string;
+  collaboratorId: string;
+  collaboratorName: string;
+  clientType: string;
+  podPdr: string | null;
+  amount: number;
+  monthCount: number;
+  periods: string[];
+  paidMonthsLabel: string;
+};
+
+/** «Maggio, Giugno 2026 · Gennaio 2027» */
+export function formatPaidMonthsLabel(periods: string[]): string {
+  const byYear = new Map<string, string[]>();
+  for (const p of [...new Set(periods)].sort()) {
+    const [y, m] = p.split("-");
+    if (!y || !m) continue;
+    const label = REPORT_MONTH_LABELS[Number(m) - 1] ?? m;
+    const arr = byYear.get(y) ?? [];
+    arr.push(label);
+    byYear.set(y, arr);
+  }
+  return [...byYear.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([y, months]) => `${months.join(", ")} ${y}`)
+    .join(" · ");
+}
+
+/** Una riga per contratto: somma importi e elenca i mesi pagati. */
+export function groupReportRecurringByContract(
+  rows: ReportRecurringRow[],
+): GroupedReportRecurring[] {
+  const map = new Map<string, ReportRecurringRow[]>();
+  for (const r of rows) {
+    const key =
+      r.contractId ||
+      `${r.contractNumber}|${r.clientName}|${r.supplierName}|${r.collaboratorId}`;
+    const arr = map.get(key) ?? [];
+    arr.push(r);
+    map.set(key, arr);
+  }
+
+  return [...map.values()]
+    .map((group) => {
+      const first = group[0]!;
+      const periods = [...new Set(group.map((g) => g.period))].sort();
+      return {
+        contractId: first.contractId,
+        contractNumber: first.contractNumber,
+        clientName: first.clientName,
+        supplierName: first.supplierName,
+        collaboratorId: first.collaboratorId,
+        collaboratorName: first.collaboratorName,
+        clientType: first.clientType,
+        podPdr: first.podPdr,
+        amount: group.reduce((s, g) => s + g.amount, 0),
+        monthCount: periods.length,
+        periods,
+        paidMonthsLabel: formatPaidMonthsLabel(periods),
+      };
+    })
+    .sort((a, b) => {
+      const byClient = a.clientName.localeCompare(b.clientName, "it");
+      if (byClient !== 0) return byClient;
+      return a.supplierName.localeCompare(b.supplierName, "it");
+    });
+}
 
 function periodsInRange(from: string, to: string, month?: string | null): string[] {
   // Mesi espliciti (anche multi: 2026-05|2026-06)
@@ -108,6 +182,7 @@ export async function loadReportRecurringPaid(params: {
     include: {
       contract: {
         select: {
+          id: true,
           contractNumber: true,
           podPdr: true,
           collaboratorId: true,
@@ -136,6 +211,7 @@ export async function loadReportRecurringPaid(params: {
         : [c.lastName, c.firstName].filter(Boolean).join(" ").trim() || "—";
     return {
       id: m.id,
+      contractId: m.contract.id,
       period: m.period,
       settledPeriod: m.settledPeriod,
       amount: Number(m.amount ?? 0),
