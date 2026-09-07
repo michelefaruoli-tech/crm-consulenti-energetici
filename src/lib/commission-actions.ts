@@ -356,7 +356,7 @@ async function applyCommissionField(
         });
       }
     } else {
-      // Compensazione: gettone storno in negativo + stato Stornato
+      // Storno Sì = da applicare. Recuperato solo quando lo stato diventa Stornato.
       const amount = Math.abs(
         effectiveGettone({
           expected: Number(commission.expected ?? 0),
@@ -369,13 +369,6 @@ async function applyCommissionField(
         data: {
           stornoDate: commission.stornoDate ?? new Date(),
           stornoAmount: amount > 0 ? -amount : 0,
-        },
-      });
-      await prisma.contract.update({
-        where: { id: commission.contractId },
-        data: {
-          status: "STORNATO",
-          paymentStatus: "Stornato",
         },
       });
     }
@@ -422,10 +415,6 @@ async function applyCommissionField(
         where: { id: commission.id },
         data: { stornoDate: d, stornoAmount: base > 0 ? -base : 0 },
       });
-      await prisma.contract.update({
-        where: { id: commission.contractId },
-        data: { status: "STORNATO", paymentStatus: "Stornato" },
-      });
     }
   } else if (field === "stornoAmount") {
     const amount = Number(value.replace(",", ".")) || 0;
@@ -439,12 +428,6 @@ async function applyCommissionField(
           signed !== 0 ? (commission.stornoDate ?? new Date()) : null,
       },
     });
-    if (signed !== 0) {
-      await prisma.contract.update({
-        where: { id: commission.contractId },
-        data: { status: "STORNATO", paymentStatus: "Stornato" },
-      });
-    }
   } else if (field === "podPdr") {
     await prisma.contract.update({
       where: { id: commission.contractId },
@@ -495,7 +478,7 @@ async function applyCommissionField(
         },
       });
     } else if (/^storn/.test(raw)) {
-      // Storno applicato e conteggiato in Report Incassato (importo negativo)
+      // Gettone recuperato: esce dalla lista storni da applicare
       const amount = Math.abs(
         Number(commission.stornoAmount ?? 0) ||
           effectiveGettone({

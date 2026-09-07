@@ -1057,7 +1057,7 @@ export function ProvvigioniFilterTable({
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
             value={current === "Sì" ? "Sì" : "No"}
-            title="Storno gettone: solo se lo imposti tu (Sì/No). KO/cessato NON attiva storno automatico."
+            title="Storno Sì = da applicare. Poi metti stato Stornato quando il gettone è recuperato: esce dalla lista."
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {
               const v = e.target.value;

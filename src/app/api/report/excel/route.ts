@@ -24,6 +24,7 @@ import {
   buildReportContractWhere,
   formatMonthsLabel,
   reportHasStato,
+  reportIncludesStornos,
   reportPeriodUsesCollectionDate,
   reportPeriodUsesStornoDate,
   reportRecurringCompetenceOnly,
@@ -132,11 +133,7 @@ export async function GET(req: NextRequest) {
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 
-  const includeStornos =
-    reportHasStato(stati, "Incassato") ||
-    reportHasStato(stati, "Pagato") ||
-    reportHasStato(stati, "Tutti") ||
-    reportHasStato(stati, "Stornato");
+  const includeStornos = reportIncludesStornos(stati);
   const includeRecurring =
     reportHasStato(stati, "Incassato") ||
     reportHasStato(stati, "Pagato") ||
@@ -344,11 +341,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Storni
+    if (includeStornos) {
     const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", ""]);
     styleSection(stoTitle, "FFFFE4E6", "FF9F1239");
     if (block.storni.length === 0) {
-      rend.addRow(["", "(nessuno storno)", "", "", "", "", ""]);
+      rend.addRow(["", "(nessuno storno da recuperare)", "", "", "", "", ""]);
     } else {
       for (const line of block.storni) {
         const r = rend.addRow([
@@ -374,6 +371,7 @@ export async function GET(req: NextRequest) {
     ]);
     styleSubtotal(subSto, "FF9F1239");
     subSto.getCell(7).font = { bold: true, color: { argb: "FFFECACA" } };
+    }
 
     if (rendiconto.months.length > 1) {
       const subNet = rend.addRow([
@@ -538,7 +536,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ─── Foglio 4: Storni (dettaglio dedicato) ───
+  if (includeStornos) {
   const sheet3 = workbook.addWorksheet("Storni");
   sheet3.columns = [
     { header: "Cliente", key: "client", width: 28 },
@@ -569,6 +567,7 @@ export async function GET(req: NextRequest) {
     });
     styleSubtotal(tot, "FF9F1239");
     tot.getCell("amount").font = { bold: true, color: { argb: "FFFECACA" } };
+  }
   }
 
   // ─── Foglio 5: Filtri / meta ───

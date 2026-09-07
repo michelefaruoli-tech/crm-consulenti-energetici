@@ -17,6 +17,7 @@ import {
   buildReportContractWhere,
   formatMonthsLabel,
   reportHasStato,
+  reportIncludesStornos,
   reportPeriodUsesCollectionDate,
   reportRecurringCompetenceOnly,
   resolveReportPeriod,
@@ -58,11 +59,7 @@ export async function GET(req: NextRequest) {
       : { insertionDate: "desc" },
   });
 
-  const includeStornos =
-    reportHasStato(stati, "Incassato") ||
-    reportHasStato(stati, "Pagato") ||
-    reportHasStato(stati, "Tutti") ||
-    reportHasStato(stati, "Stornato");
+  const includeStornos = reportIncludesStornos(stati);
   const includeRecurring =
     reportHasStato(stati, "Incassato") ||
     reportHasStato(stati, "Pagato") ||
@@ -315,6 +312,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (includeStornos) {
     if (y > 250) {
       doc.addPage();
       y = 16;
@@ -331,7 +329,7 @@ export async function GET(req: NextRequest) {
       head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
       body:
         block.storni.length === 0
-          ? [["-", "Nessuno storno", "", "", "", ""]]
+          ? [["-", "Nessuno storno da recuperare", "", "", "", ""]]
           : block.storni.map((l) => [
               l.contractNumber,
               l.clientName,
@@ -355,6 +353,7 @@ export async function GET(req: NextRequest) {
       },
     });
     y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? y) + 6;
+    }
 
     if (rendiconto.months.length > 1) {
       doc.setFont("helvetica", "bold");

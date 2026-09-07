@@ -32,6 +32,7 @@ import {
   recentMonthOptions,
   reportDateRange,
   reportHasStato,
+  reportIncludesStornos,
   reportPeriodUsesCollectionDate,
   reportRecurringCompetenceOnly,
   reportStatoHint,
@@ -157,11 +158,7 @@ export default async function ReportPage({
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 
-  const includeStornos =
-    reportHasStato(stati, "Incassato") ||
-    reportHasStato(stati, "Pagato") ||
-    reportHasStato(stati, "Tutti") ||
-    reportHasStato(stati, "Stornato");
+  const includeStornos = reportIncludesStornos(stati);
   const stornoRows = includeStornos
     ? await loadReportStornos({
         from,
@@ -432,8 +429,9 @@ export default async function ReportPage({
             <strong>Pagato</strong> = tu hai già liquidato i collaboratori
           </li>
           <li>
-            <strong>Stornato</strong> = storno gettone applicato (clawback): in Report
-            Incassato l’importo negativo detrae dal totale del mese
+            <strong>Stornato</strong> = solo gettoni ancora da recuperare (Storno
+            Sì). Quando metti stato Stornato il gettone è recuperato e sparisce
+            dalla lista. Non compare se non selezioni questo filtro.
           </li>
         </ul>
       </div>
@@ -456,8 +454,9 @@ export default async function ReportPage({
             {formatCurrency(recurringTotals.amount)}
           </p>
         </div>
+        {includeStornos ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
-          <p className="text-sm text-rose-700">Storni (detrazioni)</p>
+          <p className="text-sm text-rose-700">Storni da recuperare</p>
           <p className="mt-2 text-3xl font-bold text-rose-900">
             {stornoTotals.count}
           </p>
@@ -465,6 +464,7 @@ export default async function ReportPage({
             {formatCurrency(stornoTotals.amount)}
           </p>
         </div>
+        ) : null}
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
           <p className="text-sm text-emerald-700">Totale ricevuto (netto)</p>
           <p className="mt-2 text-3xl font-bold text-emerald-900">
@@ -566,13 +566,14 @@ export default async function ReportPage({
         )}
       </section>
 
+      {includeStornos ? (
       <section className="rounded-xl border border-rose-200 bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-semibold text-slate-900">
-          Storni nel periodo ({stornoTotals.count})
+          Storni da recuperare ({stornoTotals.count})
         </h2>
         <p className="mb-4 text-sm text-slate-500">
-          Importi negativi: in Report <strong>Incassato</strong> detraggono il totale del
-          mese (es. FRUIT TRANI storno 08/2026).
+          Solo gettoni con Storno Sì non ancora recuperati. Quando lo stato è
+          Stornato spariscono da qui.
         </p>
         {stornoRows.length === 0 ? (
           <p className="text-sm text-slate-500">Nessuno storno nel periodo selezionato.</p>
@@ -617,6 +618,7 @@ export default async function ReportPage({
           </div>
         )}
       </section>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <ReportExportPanel baseQuery={exportBaseQuery} />

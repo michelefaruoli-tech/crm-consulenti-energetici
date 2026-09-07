@@ -142,10 +142,12 @@ function provvigioneStatoWhereOne(
     return { status: { equals: "DA_CONTROLLARE" } };
   }
   if (s === "Stornato") {
+    // Da applicare: Storno Sì, gettone non ancora recuperato.
+    // Recuperato (status STORNATO) esce dalla lista.
     return {
-      OR: [
-        { status: { equals: "STORNATO" } },
+      AND: [
         { commission: { stornoDate: { not: null } } },
+        { status: { not: "STORNATO" } },
       ],
     };
   }

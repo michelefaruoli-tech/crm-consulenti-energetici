@@ -73,8 +73,8 @@ export function simplifiedProvvigioneStato(
 ): string {
   // KO / cessato: ha priorità anche se c’è già una data di incasso (Helios).
   if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
-  // Storno applicato e conteggiato (clawback)
-  if (status === "STORNATO" || opts?.hasStorno) return "Stornato";
+  // Recuperato: solo se lo stato è Stornato (Storno Sì da solo = ancora da applicare)
+  if (status === "STORNATO") return "Stornato";
   // Inserito ma non contrattualizzato: priorità su fornitura/incasso
   if (status === "DA_CONTROLLARE") return "Da controllare";
   if (opts?.inFornitura === false) return "Da incassare";

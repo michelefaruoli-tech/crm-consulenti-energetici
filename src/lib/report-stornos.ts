@@ -68,6 +68,7 @@ export async function loadReportStornos(params: {
           params.visibility,
           { deletedAt: null },
           { isHistorical: false },
+          { status: { not: "STORNATO" } },
           ...(collabIds.length === 1
             ? [{ collaboratorId: collabIds[0]! }]
             : collabIds.length > 1

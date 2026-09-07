@@ -85,6 +85,12 @@ export function reportHasStato(
   return list.includes(needle);
 }
 
+/** Sezione storni nel Report solo se «Stornato» è selezionato esplicitamente. */
+export function reportIncludesStornos(stato: string | string[]): boolean {
+  const list = Array.isArray(stato) ? stato : resolveReportStati(stato);
+  return list.includes("Stornato");
+}
+
 /**
  * Intervallo date in Europe/Rome (allineato alla colonna Incasso MM/AAAA).
  * Evita che su Vercel (UTC) un 01/06 Roma finisca fuori dal mese.
@@ -139,7 +145,10 @@ function dateWhereForStato(
   dateTo: Date,
 ): Prisma.ContractWhereInput {
   if (stato === "Stornato") {
-    return { commission: { stornoDate: { gte: dateFrom, lte: dateTo } } };
+    return {
+      status: { not: "STORNATO" },
+      commission: { stornoDate: { gte: dateFrom, lte: dateTo } },
+    };
   }
   if (
     stato === "Incassato" ||
@@ -243,11 +252,11 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":
-      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Include anche gli storni del mese (importi negativi).";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni compaiono solo se selezioni anche «Stornato».";
     case "Pagato":
       return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori.";
     case "Stornato":
-      return "Periodo = data storno (MM/AAAA). Storni applicati: importo negativo che detrae dalle provvigioni.";
+      return "Solo storni ancora da recuperare (Storno Sì, stato non ancora Stornato). Il gettone già recuperato non compare.";
     case "KO / Cessato":
       return "Periodo = data inserimento. Pratiche KO / annullate / chiuse.";
     default:
