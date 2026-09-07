@@ -55,6 +55,94 @@ function shortClientType(value: string): string {
   return "Dom";
 }
 
+/** Campo libero con suggerimenti cliccabili (non è una tendina chiusa). */
+function FreeSuggestInput({
+  value,
+  suggestions,
+  dirty,
+  placeholder,
+  title,
+  className,
+  onChange,
+}: {
+  value: string;
+  suggestions: string[];
+  dirty: boolean;
+  placeholder: string;
+  title: string;
+  className?: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const q = value.trim().toLowerCase();
+  const filtered = suggestions.filter((s) =>
+    q ? s.toLowerCase().includes(q) : true,
+  );
+  const exact = suggestions.some((s) => s.toLowerCase() === q);
+  return (
+    <div className="relative min-w-0">
+      <input
+        className={`w-full rounded border px-1 py-1 text-xs ${
+          dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+        } ${className ?? ""}`}
+        value={value}
+        placeholder={placeholder}
+        title={title}
+        autoComplete="off"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 150);
+        }}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+      />
+      {open ? (
+        <ul className="absolute left-0 top-full z-40 mt-0.5 max-h-44 min-w-[9rem] overflow-auto rounded border border-slate-200 bg-white py-0.5 shadow-lg">
+          {filtered.map((s) => (
+            <li key={s}>
+              <button
+                type="button"
+                className="w-full px-2 py-1 text-left text-xs hover:bg-emerald-50"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(s);
+                  setOpen(false);
+                }}
+              >
+                {s}
+              </button>
+            </li>
+          ))}
+          {q && !exact ? (
+            <li>
+              <button
+                type="button"
+                className="w-full px-2 py-1 text-left text-xs font-medium text-emerald-800 hover:bg-emerald-50"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onChange(value.trim());
+                  setOpen(false);
+                }}
+              >
+                Usa «{value.trim()}»
+              </button>
+            </li>
+          ) : null}
+          {filtered.length === 0 && !q ? (
+            <li className="px-2 py-1 text-xs text-slate-400">Digita un nome</li>
+          ) : null}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function settledOptions(): string[] {
   const now = new Date();
   const out: string[] = [];
@@ -775,16 +863,14 @@ export function ProvvigioniFilterTable({
         const current = getDraftValue(r, "supplierName");
         const dirty = isDraftDirty(r, "supplierName");
         return (
-          <input
-            list="provvigioni-supplier-datalist"
-            className={`max-w-[9rem] rounded border px-1 py-1 text-xs ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
-            }`}
+          <FreeSuggestInput
             value={current}
+            suggestions={supplierNames ?? []}
+            dirty={dirty}
             placeholder="Scegli o digita…"
-            title="Fornitore: scegli dall’elenco completo o digita un nome nuovo (si salva)"
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => queueDraft(r, "supplierName", e.target.value)}
+            title="Fornitore: scegli dall’elenco o digita un nome nuovo e salva"
+            className="max-w-[9rem]"
+            onChange={(v) => queueDraft(r, "supplierName", v)}
           />
         );
       },
@@ -799,16 +885,14 @@ export function ProvvigioniFilterTable({
         const display = current === "—" ? "" : current;
         const dirty = isDraftDirty(r, "agency");
         return (
-          <input
-            list="provvigioni-agency-datalist"
-            className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs font-medium ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
-            }`}
+          <FreeSuggestInput
             value={display}
-            placeholder="Libero…"
-            title="Agenzia: scegli un suggerimento o digita liberamente e salva"
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => queueDraft(r, "agency", e.target.value)}
+            suggestions={agencySuggestions}
+            dirty={dirty}
+            placeholder="Digita o scegli…"
+            title="Agenzia libera: Helios è in elenco, oppure scrivi qualsiasi nome e salva"
+            className="max-w-[7.5rem] font-medium"
+            onChange={(v) => queueDraft(r, "agency", v)}
           />
         );
       },
@@ -1442,16 +1526,6 @@ export function ProvvigioniFilterTable({
           </button>
         </div>
       </div>
-      <datalist id="provvigioni-supplier-datalist">
-        {(supplierNames ?? []).map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
-      <datalist id="provvigioni-agency-datalist">
-        {agencySuggestions.map((o) => (
-          <option key={o} value={o} />
-        ))}
-      </datalist>
       <ExcelFilterTable
         dense
         fitWidth={!advancedView}
@@ -1531,6 +1605,7 @@ export function ProvvigioniFilterTable({
             ? { collaboratorName: Object.keys(collaboratorByName) }
             : {}),
           ...(supplierNames?.length ? { supplierName: supplierNames } : {}),
+          agency: agencySuggestions,
           stato: [...PROVVIGIONE_STATO_OPTIONS],
           clientType: ["Business", "Domestico"],
           operationType: [...PROVVIGIONE_OPERATION_OPTIONS],

@@ -157,6 +157,7 @@ export const PROVVIGIONE_AGENCY_OPTIONS = [
   "Achille",
   "BROKER",
   "POWER",
+  "HELIOS",
 ] as const;
 
 export function agencyFromSupplierName(supplierName: string): string {
@@ -168,6 +169,7 @@ export function agencyFromSupplierName(supplierName: string): string {
   if (n.includes("enel")) return "Achille";
   if (n.includes("sinerg") || n.includes("etruri")) return "BROKER";
   if (n.includes("sorgenia") || n.includes("a2a")) return "POWER";
+  if (n.includes("helios")) return "HELIOS";
   return "—";
 }
 
