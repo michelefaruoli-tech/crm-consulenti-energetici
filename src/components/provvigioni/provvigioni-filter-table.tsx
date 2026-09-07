@@ -763,59 +763,57 @@ export function ProvvigioniFilterTable({
       key: "clientName",
       label: "Cliente",
       getValue: (r) => String(r.clientName ?? ""),
-      editable: true,
-      sortKind: "text",
-      inputClassName:
-        "min-w-[11rem] text-[13px] font-semibold tracking-tight text-slate-900",
-    },
-    {
-      key: "podPdr",
-      label: "POD / PDR",
-      getValue: (r) => String(r.podPdr ?? ""),
-      // Non editabile: clic = apri scheda contratto (sulla scheda cliente)
-      editable: false,
       sortKind: "text",
       render: (r) => {
         const row = r as unknown as ProvvigioneRow;
-        const pod = String(row.podPdr ?? "").trim();
+        const name = String(row.clientName ?? "").trim() || "—";
+        const contractId = String(row.contractId || row.id || "").split(":")[0];
         const missing = Boolean(row.missingSupplyStart);
-        const alertClass = missing
-          ? "font-bold text-red-700 underline decoration-red-500"
-          : "font-medium text-emerald-700 underline decoration-emerald-300";
-        if (!pod) {
-          return (
-            <Link
-              href={`/clienti/${row.clientId}?contratto=${row.id}`}
-              className={`text-xs ${missing ? "font-bold text-red-700 underline" : "font-medium text-emerald-700 underline"}`}
-              title={
-                missing
-                  ? "Manca data ingresso fornitura — apri e sistema"
-                  : "Apri contratto (POD assente)"
-              }
-              onClick={(e) => e.stopPropagation()}
-            >
-              {missing ? "Sistema ingresso →" : "Apri contratto"}
-            </Link>
-          );
-        }
         return (
           <Link
-            href={`/clienti/${row.clientId}?contratto=${row.id}`}
-            className={`font-mono text-xs underline-offset-2 hover:opacity-90 ${alertClass}`}
+            href={`/clienti/${row.clientId}?contratto=${contractId}`}
+            className={`block truncate text-[13px] font-semibold underline-offset-2 hover:underline ${
+              missing
+                ? "text-red-700 decoration-red-400"
+                : "text-slate-900 decoration-emerald-400"
+            }`}
             title={
               missing
-                ? "Manca data ingresso fornitura — apri e sistema"
+                ? "Manca data ingresso fornitura — apri contratto"
                 : "Apri scheda contratto"
             }
             onClick={(e) => e.stopPropagation()}
           >
-            {pod}
-            {missing ? (
-              <span className="ml-1 font-sans text-[10px] font-bold uppercase">
-                ingresso?
-              </span>
-            ) : null}
+            {name}
           </Link>
+        );
+      },
+    },
+    {
+      key: "podPdr",
+      label: "POD / PDR",
+      getValue: (r) => baseCellValue(r, "podPdr"),
+      sortKind: "text",
+      render: (r) => {
+        const row = r as unknown as ProvvigioneRow;
+        const current = getDraftValue(r, "podPdr");
+        const dirty = isDraftDirty(r, "podPdr");
+        const missing = Boolean(row.missingSupplyStart);
+        return (
+          <input
+            className={`max-w-[11rem] rounded border px-1 py-1 font-mono text-xs ${
+              dirty
+                ? "border-amber-400 bg-amber-50"
+                : missing
+                  ? "border-red-300 bg-red-50 text-red-800"
+                  : "border-slate-200 bg-white"
+            }`}
+            value={current}
+            placeholder="POD / PDR…"
+            title="Scrivi POD o PDR, poi Salva modifiche"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "podPdr", e.target.value)}
+          />
         );
       },
     },
@@ -1478,8 +1476,10 @@ export function ProvvigioniFilterTable({
           Colori riga (legenda sotto): 1 da incassare · 2 rosso BLOCCA storno · 3
           verde fuori storno · 4 ciano ricorrente · 5 viola fine storno · 6 arancio
           scadenza 12 mesi.
+          Clic sul <strong>nominativo</strong> = apri contratto. Colonna{" "}
+          <strong>POD / PDR</strong> editabile (bozza gialla → Salva).
           {advancedView
-            ? " POD rosso = manca ingresso fornitura."
+            ? " Campo POD rosso = manca ingresso fornitura."
             : ""}{" "}
           <strong>Tipo</strong>: UT gettone · M mensile · R annuale (12 mesi).
           {canDelete ? " × rossa = elimina." : ""}
