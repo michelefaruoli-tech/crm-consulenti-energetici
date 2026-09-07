@@ -170,6 +170,21 @@ async function applyCommissionField(
           ? { commissionConfirmed: true, commissionConfirmedAt: new Date() }
           : { commissionConfirmed: false, commissionConfirmedAt: null },
       });
+      // Rate mensili: senza questo il gettone in tabella resta quello della rata (es. 50)
+      const months = await prisma.recurringMonth.findMany({
+        where: {
+          contractId: commission.contractId,
+          status: { notIn: ["CLOSED"] },
+        },
+        select: { id: true },
+        take: 500,
+      });
+      for (const m of months) {
+        await prisma.recurringMonth.update({
+          where: { id: m.id },
+          data: { amount },
+        });
+      }
       await writeAuditLog({
         userId: session.id,
         action: "UPDATE",
@@ -179,6 +194,7 @@ async function applyCommissionField(
           field: "expected",
           to: amount,
           confirmed: isAdminGettone,
+          monthsAligned: months.length,
           source: "provvigioni_table",
         },
       });
@@ -625,11 +641,28 @@ async function applyCommissionField(
   } else if (field === "supplierName") {
     if (!canAll) throw new Error("Solo Admin/Segreteria possono cambiare fornitore");
     const raw = value.trim();
-    const supplier = await prisma.supplier.findFirst({
+    if (!raw) throw new Error("Fornitore vuoto");
+    let supplier = await prisma.supplier.findFirst({
       where: { name: { equals: raw, mode: "insensitive" } },
       select: { id: true },
     });
-    if (!supplier) throw new Error(`Fornitore non trovato: ${raw}`);
+    if (!supplier) {
+      const baseCode = raw
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Z0-9]+/g, "")
+        .slice(0, 16);
+      const code = `${baseCode || "FORN"}_${Date.now().toString(36).slice(-5)}`.slice(0, 40);
+      supplier = await prisma.supplier.create({
+        data: {
+          name: raw,
+          code,
+          active: true,
+        },
+        select: { id: true },
+      });
+    }
     await prisma.contract.update({
       where: { id: commission.contractId },
       data: { supplierId: supplier.id },

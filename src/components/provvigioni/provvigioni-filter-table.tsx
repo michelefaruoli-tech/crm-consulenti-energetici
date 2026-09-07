@@ -215,6 +215,14 @@ export function ProvvigioniFilterTable({
     }
   }
   const settleOpts = useMemo(() => settledOptions(), []);
+  const agencySuggestions = useMemo(() => {
+    const fromRows = rows
+      .map((row) => String(row.agency ?? "").trim())
+      .filter((a) => a && a !== "—");
+    return Array.from(
+      new Set([...PROVVIGIONE_AGENCY_OPTIONS, ...fromRows]),
+    ).sort((a, b) => a.localeCompare(b, "it"));
+  }, [rows]);
   const [competencePeriod, setCompetencePeriod] = useState(
     () => listQuery?.competence ?? toPeriod(new Date()),
   );
@@ -761,9 +769,25 @@ export function ProvvigioniFilterTable({
     {
       key: "supplierName",
       label: "Forn.",
-      getValue: (r) => String(r.supplierName ?? ""),
-      editable: Boolean(supplierNames?.length),
+      getValue: (r) => baseCellValue(r, "supplierName"),
       sortKind: "text",
+      render: (r) => {
+        const current = getDraftValue(r, "supplierName");
+        const dirty = isDraftDirty(r, "supplierName");
+        return (
+          <input
+            list="provvigioni-supplier-datalist"
+            className={`max-w-[9rem] rounded border px-1 py-1 text-xs ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={current}
+            placeholder="Scegli o digita…"
+            title="Fornitore: scegli dall’elenco completo o digita un nome nuovo (si salva)"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "supplierName", e.target.value)}
+          />
+        );
+      },
     },
     {
       key: "agency",
@@ -771,32 +795,21 @@ export function ProvvigioniFilterTable({
       getValue: (r) => baseCellValue(r, "agency"),
       sortKind: "text",
       render: (r) => {
-        const current = getDraftValue(r, "agency") || "—";
-        const options = [...PROVVIGIONE_AGENCY_OPTIONS];
+        const current = getDraftValue(r, "agency");
+        const display = current === "—" ? "" : current;
         const dirty = isDraftDirty(r, "agency");
-        const known = options.includes(
-          current as (typeof options)[number],
-        );
         return (
-          <select
-            className={`max-w-[7rem] rounded border px-1 py-1 text-xs font-medium ${
+          <input
+            list="provvigioni-agency-datalist"
+            className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs font-medium ${
               dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
             }`}
-            value={known ? current : current === "—" || !current ? "" : current}
-            title="Agenzia pagatrice del gettone (modificabile)"
+            value={display}
+            placeholder="Libero…"
+            title="Agenzia: scegli un suggerimento o digita liberamente e salva"
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => queueDraft(r, "agency", e.target.value)}
-          >
-            <option value="">—</option>
-            {!known && current && current !== "—" ? (
-              <option value={current}>{current}</option>
-            ) : null}
-            {options.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
+          />
         );
       },
     },
@@ -811,10 +824,25 @@ export function ProvvigioniFilterTable({
     {
       key: "amount",
       label: "Gettone",
-      getValue: (r) => String(r.amount ?? ""),
-      editable: true,
+      getValue: (r) => baseCellValue(r, "amount"),
       sortKind: "number",
-      inputClassName: "max-w-[4.5rem] text-right tabular-nums",
+      render: (r) => {
+        const current = getDraftValue(r, "amount");
+        const dirty = isDraftDirty(r, "amount");
+        return (
+          <input
+            className={`max-w-[4.5rem] rounded border px-1 py-1 text-right text-xs tabular-nums ${
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+            }`}
+            value={current}
+            inputMode="decimal"
+            placeholder="0"
+            title="Gettone libero: digita e salva (allinea anche le rate mensili)"
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => queueDraft(r, "amount", e.target.value)}
+          />
+        );
+      },
     },
     {
       key: "supplyStartDate",
@@ -1414,6 +1442,16 @@ export function ProvvigioniFilterTable({
           </button>
         </div>
       </div>
+      <datalist id="provvigioni-supplier-datalist">
+        {(supplierNames ?? []).map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+      <datalist id="provvigioni-agency-datalist">
+        {agencySuggestions.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
       <ExcelFilterTable
         dense
         fitWidth={!advancedView}

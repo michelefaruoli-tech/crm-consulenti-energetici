@@ -77,6 +77,25 @@ export async function alignHeliosContractIfNeeded(
     updated = true;
   }
 
+  // Rate mensili: allinea importo gettone (anche se già create con valore sbagliato)
+  const months = await prisma.recurringMonth.findMany({
+    where: {
+      contractId,
+      status: { notIn: ["CLOSED"] },
+    },
+    select: { id: true, amount: true },
+    take: 500,
+  });
+  for (const m of months) {
+    const cur = m.amount == null ? null : Number(m.amount);
+    if (cur != null && Math.abs(cur - expected) < 0.009) continue;
+    await prisma.recurringMonth.update({
+      where: { id: m.id },
+      data: { amount: expected },
+    });
+    updated = true;
+  }
+
   let synced = false;
   if (contract.status !== "BOZZA") {
     await syncRecurringMonthsForContract(contractId);
@@ -132,7 +151,7 @@ export async function alignAllHeliosContracts(): Promise<AlignAllHeliosResult> {
   };
 }
 
-/** Imposta listino Helios: MENSILE, 4€ residente / 6€ business. */
+/** Imposta listino Helios: MENSILE, 4€ domestico / 6€ business. */
 export async function alignHeliosListinoRules(supplierId: string): Promise<number> {
   const rules = await prisma.commissionRule.findMany({
     where: { supplierId, active: true },
@@ -142,10 +161,10 @@ export async function alignHeliosListinoRules(supplierId: string): Promise<numbe
   let touched = 0;
   for (const rule of rules) {
     const segment = `${rule.clientSegment ?? ""} ${rule.name ?? ""}`.toLowerCase();
-    const isResidente =
-      /residente|privato|domestico/.test(segment) &&
-      !/non\s*residente|business|azienda|condominio|altri|pa/.test(segment);
-    const want = isResidente ? HELIOS_MONTHLY_RESIDENTE : HELIOS_MONTHLY_ALTRO;
+    const isBusiness =
+      /business|azienda|condominio|\bpa\b|altri\s*usi/.test(segment) &&
+      !/privato|domestico|residente/.test(segment);
+    const want = isBusiness ? HELIOS_MONTHLY_ALTRO : HELIOS_MONTHLY_RESIDENTE;
     await prisma.commissionRule.update({
       where: { id: rule.id },
       data: {

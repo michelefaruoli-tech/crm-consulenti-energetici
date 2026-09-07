@@ -14,23 +14,18 @@ export function isHeliosSupplier(name: string | null | undefined): boolean {
 
 /**
  * Gettone mensile Helios:
- * - €4 solo per privato residente
- * - €6 per business, non residente, altri usi, aziende
+ * - €4 per tutti i domestici / privati
+ * - €6 per business / aziende
  */
 export function heliosMonthlyCommission(opts: {
   clientType?: string | null;
   classification?: string | null;
 }): number {
   const clientType = (opts.clientType ?? "").trim().toUpperCase();
-  const classification = (opts.classification ?? "").trim().toLowerCase();
-
   if (clientType === "AZIENDA" || clientType === "BUSINESS") {
     return HELIOS_MONTHLY_ALTRO;
   }
-  if (classification === "residente") {
-    return HELIOS_MONTHLY_RESIDENTE;
-  }
-  return HELIOS_MONTHLY_ALTRO;
+  return HELIOS_MONTHLY_RESIDENTE;
 }
 
 type HeliosListinoRule = {
@@ -56,11 +51,9 @@ export function pickHeliosListinoRule(
   if (clientType === "AZIENDA") {
     if (classNorm) segmentMatchers.push(classNorm);
     segmentMatchers.push("business", "azienda", "tutti");
-  } else if (classNorm === "residente") {
-    segmentMatchers.push("residente", "privato", "domestico", "tutti");
   } else {
     if (classNorm) segmentMatchers.push(classNorm);
-    segmentMatchers.push("non residente", "altri", "business", "tutti");
+    segmentMatchers.push("residente", "privato", "domestico", "tutti");
   }
 
   for (const seg of segmentMatchers) {

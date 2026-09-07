@@ -450,8 +450,7 @@ export default async function ProvvigioniPage({
         })
       : Promise.resolve([]),
     prisma.supplier.findMany({
-      where: { active: true },
-      select: { name: true },
+      select: { name: true, active: true },
       orderBy: { name: "asc" },
     }),
     getMissingRecurringAlerts(sessionCollabFilter, recurringKind),
