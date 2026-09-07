@@ -46,6 +46,28 @@ function statusLabel(status: string): string {
   );
 }
 
+function monthYear(v: Date | string | null | undefined): Cell {
+  if (!v) return null;
+  const d = typeof v === "string" ? new Date(v) : v;
+  if (Number.isNaN(d.getTime())) return null;
+  return formatInTimeZone(d, APP_TZ, "MM/yyyy");
+}
+
+function tipoContrattoLabel(
+  recurrence: string | null | undefined,
+  recurrenceKind?: string | null,
+): string {
+  const kind = (recurrenceKind || "").toUpperCase();
+  if (kind === "M") return "Ricorrente mensile";
+  if (kind === "R") return "Ricorrente annuale";
+  if (kind === "UT") return "Una tantum";
+  const r = (recurrence || "").trim();
+  if (/mensil|^m$/i.test(r)) return "Ricorrente mensile";
+  if (/annual|^r$/i.test(r)) return "Ricorrente annuale";
+  if (/una\s*tantum|^ut$/i.test(r)) return "Una tantum";
+  return r || "Una tantum";
+}
+
 function isPaid(paymentStatus: string | null | undefined, received: number): string {
   const s = (paymentStatus ?? "").toLowerCase();
   if (s.includes("incass") || s === "paid" || s === "pagato") return "Sì";
@@ -245,6 +267,12 @@ export async function buildFullDbExcelBuffer(): Promise<{
     [
       ["00_Indice", "Catalogo", 1, "Elenco fogli di questo backup"],
       [
+        "FILE PERFETTO",
+        "Operativo",
+        contracts.length,
+        "Nominativo, POD/PDR, telefono, ingresso, tipo, fornitore, incasso, agenzia, ricorrenza, note, collaboratore, storno",
+      ],
+      [
         "01_Clienti",
         "Anagrafica",
         clients.length,
@@ -307,6 +335,57 @@ export async function buildFullDbExcelBuffer(): Promise<{
       ["—", "Generato", "—", generatedAt],
     ],
   );
+
+  addSheet(
+    workbook,
+    "FILE PERFETTO",
+    [
+      "Nominativo",
+      "POD / PDR",
+      "Telefono",
+      "Ingresso",
+      "Privato / Business",
+      "Fornitore",
+      "Mese/anno incasso",
+      "Agenzia",
+      "Tipo contratto",
+      "Note",
+      "Collaboratore",
+      "Stornato",
+    ],
+    contracts.map((c) => {
+      const stornato =
+        c.status === "STORNATO" || Boolean(c.commission?.stornoDate);
+      return [
+        cell(clientDisplayName(c.client)),
+        cell(c.podPdr || c.pod || c.pdr),
+        cell(c.client.phone),
+        cellDate(c.supplyStartDate),
+        c.client.type === "AZIENDA" ? "Business" : "Privato",
+        cell(c.supplier.name),
+        monthYear(c.collectionDate),
+        cell(c.agency),
+        tipoContrattoLabel(c.recurrence, c.recurrenceKind),
+        cell(c.notes),
+        cell(c.collaborator.name),
+        stornato ? "Sì" : "No",
+      ];
+    }),
+  );
+  const filePerfetto = workbook.getWorksheet("FILE PERFETTO");
+  if (filePerfetto) {
+    const hdr = filePerfetto.getRow(1);
+    hdr.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    hdr.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF065F46" },
+    };
+    const widths = [28, 20, 16, 12, 16, 16, 16, 16, 20, 32, 20, 10];
+    filePerfetto.columns.forEach((col, i) => {
+      col.width = widths[i] ?? 16;
+    });
+  }
 
   // ——— CLIENTI (completi) ———
   addSheet(
