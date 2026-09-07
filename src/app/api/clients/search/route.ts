@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
+import { searchTermVariants } from "@/lib/list-search";
 import type { Prisma } from "@/generated/prisma/client";
 
 function fold(s: string | null | undefined): string {
@@ -10,6 +11,7 @@ function fold(s: string | null | undefined): string {
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toLowerCase()
+    .replace(/[''\u2019\u2018\u02BC\u0060\u00B4]/g, "")
     .replace(/\s+/g, " ");
 }
 
@@ -38,15 +40,16 @@ function identityFieldsOr(
   term: string,
   mode: "insensitive",
 ): Prisma.ClientWhereInput[] {
-  return [
-    { firstName: { contains: term, mode } },
-    { lastName: { contains: term, mode } },
-    { companyName: { contains: term, mode } },
-    { fiscalCode: { contains: term, mode } },
-    { vatNumber: { contains: term, mode } },
-    { email: { contains: term, mode } },
-    { phone: { contains: term, mode } },
-  ];
+  const terms = searchTermVariants(term);
+  return terms.flatMap((t) => [
+    { firstName: { contains: t, mode } },
+    { lastName: { contains: t, mode } },
+    { companyName: { contains: t, mode } },
+    { fiscalCode: { contains: t, mode } },
+    { vatNumber: { contains: t, mode } },
+    { email: { contains: t, mode } },
+    { phone: { contains: t, mode } },
+  ]);
 }
 
 /**

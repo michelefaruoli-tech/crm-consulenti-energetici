@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
@@ -196,6 +197,7 @@ const SIMPLE_COLUMN_ORDER = [
   "recurrence",
   "stornoFlag",
   "amount",
+  "_open",
   "_del",
 ] as const;
 
@@ -763,31 +765,10 @@ export function ProvvigioniFilterTable({
       key: "clientName",
       label: "Cliente",
       getValue: (r) => String(r.clientName ?? ""),
+      editable: true,
       sortKind: "text",
-      render: (r) => {
-        const row = r as unknown as ProvvigioneRow;
-        const name = String(row.clientName ?? "").trim() || "—";
-        const contractId = String(row.contractId || row.id || "").split(":")[0];
-        const missing = Boolean(row.missingSupplyStart);
-        return (
-          <Link
-            href={`/clienti/${row.clientId}?contratto=${contractId}`}
-            className={`block truncate text-[13px] font-semibold underline-offset-2 hover:underline ${
-              missing
-                ? "text-red-700 decoration-red-400"
-                : "text-slate-900 decoration-emerald-400"
-            }`}
-            title={
-              missing
-                ? "Manca data ingresso fornitura — apri contratto"
-                : "Apri scheda contratto"
-            }
-            onClick={(e) => e.stopPropagation()}
-          >
-            {name}
-          </Link>
-        );
-      },
+      inputClassName:
+        "min-w-[11rem] text-[13px] font-semibold tracking-tight text-slate-900",
     },
     {
       key: "podPdr",
@@ -1132,6 +1113,35 @@ export function ProvvigioniFilterTable({
       editable: true,
       sortKind: "text",
     },
+    {
+      key: "_open",
+      label: "",
+      getValue: () => "",
+      render: (r) => {
+        const row = r as unknown as ProvvigioneRow;
+        const contractId = String(row.contractId || row.id || "").split(":")[0];
+        const missing = Boolean(row.missingSupplyStart);
+        return (
+          <Link
+            href={`/clienti/${row.clientId}?contratto=${contractId}`}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md ring-1 ${
+              missing
+                ? "bg-red-50 text-red-700 ring-red-200 hover:bg-red-100"
+                : "bg-slate-50 text-slate-700 ring-slate-200 hover:bg-emerald-50 hover:text-emerald-800 hover:ring-emerald-200"
+            }`}
+            title={
+              missing
+                ? "Manca data ingresso fornitura — apri scheda"
+                : "Apri scheda cliente / contratto"
+            }
+            aria-label="Apri scheda cliente"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+          </Link>
+        );
+      },
+    },
   ];
 
     if (canDelete) {
@@ -1168,6 +1178,7 @@ export function ProvvigioniFilterTable({
         stornoMonth: "w-[7rem] min-w-[7rem] max-w-[7rem]",
         stornoAmount: "w-[7rem] min-w-[7rem] max-w-[7rem]",
         notes: "w-[15rem] min-w-[15rem] max-w-[15rem]",
+        _open: "w-[2.75rem] min-w-[2.75rem] max-w-[2.75rem] text-center",
         _del: "w-[3rem] min-w-[3rem] max-w-[3rem]",
       };
       const inputs: Record<string, string> = {
@@ -1199,6 +1210,7 @@ export function ProvvigioniFilterTable({
       collectionMonth: "w-[9%]",
       notes: "w-[17%]",
       recurrence: "w-[7%]",
+      _open: "w-[4%]",
       _del: "w-[4%]",
     };
     const inputs: Record<string, string> = {
@@ -1476,8 +1488,8 @@ export function ProvvigioniFilterTable({
           Colori riga (legenda sotto): 1 da incassare · 2 rosso BLOCCA storno · 3
           verde fuori storno · 4 ciano ricorrente · 5 viola fine storno · 6 arancio
           scadenza 12 mesi.
-          Clic sul <strong>nominativo</strong> = apri contratto. Colonna{" "}
-          <strong>POD / PDR</strong> editabile (bozza gialla → Salva).
+          Cliente e <strong>POD / PDR</strong> editabili (bozza gialla → Salva).
+          Icona ↗ in fondo riga = apri scheda cliente/contratto.
           {advancedView
             ? " Campo POD rosso = manca ingresso fornitura."
             : ""}{" "}
