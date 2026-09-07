@@ -842,15 +842,48 @@ export async function bulkUpdateCommissionFieldsAction(
       return oa - ob;
     });
 
+    const uniqueIds = [
+      ...new Set(
+        ordered
+          .map((ch) => String(ch.commissionId ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const preloaded = await prisma.commission.findMany({
+      where: { id: { in: uniqueIds } },
+      include: {
+        contract: {
+          select: {
+            id: true,
+            clientId: true,
+            collaboratorId: true,
+            collectionDate: true,
+            insertionDate: true,
+            operationType: true,
+            supplyStartDate: true,
+            status: true,
+            deletedAt: true,
+            client: { select: { type: true } },
+            supplier: { select: { name: true } },
+          },
+        },
+      },
+    });
+    const commissionCache = new Map(
+      preloaded.map((row) => [row.id, row] as const),
+    );
+
     for (const ch of ordered) {
       const commissionId = String(ch.commissionId ?? "").trim();
       const field = String(ch.field ?? "").trim();
       if (!commissionId || !field) continue;
 
-      const commission = await resolveCommissionForEdit(commissionId);
+      const cached = commissionCache.get(commissionId);
+      const commission = cached ?? (await resolveCommissionForEdit(commissionId));
       if (!commission || commission.contract.deletedAt) continue;
 
       await applyCommissionField(session, commission, field, String(ch.value ?? ""));
+      commissionCache.delete(commissionId);
       count += 1;
     }
 

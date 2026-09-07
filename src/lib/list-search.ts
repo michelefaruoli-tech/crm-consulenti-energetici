@@ -1,9 +1,33 @@
 import type { Prisma } from "@/generated/prisma/client";
 
 /** Apostrofi tipografici / varianti → trattati come lo stesso segno. */
-const APOSTROPHE_RE = /[''\u2019\u2018\u02BC\u0060\u00B4]/g;
+const APOSTROPHE_RE = /['\u2019\u2018\u02BC\u0060\u00B4]/g;
 
-/** Spezza la query in pezzi (es. «Mario Rossi» → Mario, Rossi). L'apostrofo non spezza. */
+/**
+ * Prefissi italiani con apostrofo, dal più lungo.
+ * «dangelo» → D'Angelo; «dellacqua» → Dell'Acqua. Un solo tentativo.
+ */
+const IT_APOSTROPHE_PREFIXES = [
+  "DALLA",
+  "DELL",
+  "DALL",
+  "NELL",
+  "SULL",
+  "SANT",
+  "DEL",
+  "ALL",
+  "DE",
+  "D",
+  "L",
+] as const;
+
+const ins = "insensitive" as const;
+
+function contains(term: string) {
+  return { contains: term, mode: ins };
+}
+
+/** Spezza la query in pezzi. L'apostrofo non spezza. */
 function searchTokens(q: string): string[] {
   return q
     .trim()
@@ -13,8 +37,8 @@ function searchTokens(q: string): string[] {
 }
 
 /**
- * Varianti per cognomi italiani con apostrofo (D'Angelo, Dell'Acqua, …).
- * Così «dangelo», «D angelo» e «D'angelo» trovano lo stesso record.
+ * Varianti solo per nome/cognome/ragione sociale.
+ * Massimo 3 stringhe: originale, senza apostrofo, eventuale prefisso italiano.
  */
 export function searchTermVariants(term: string): string[] {
   const raw = term.trim();
@@ -22,97 +46,114 @@ export function searchTermVariants(term: string): string[] {
 
   const normalized = raw.replace(APOSTROPHE_RE, "'");
   const stripped = normalized.replace(/'/g, "");
-  const spaced = normalized.replace(/'/g, " ").replace(/\s+/g, " ").trim();
-
   const variants = new Set<string>();
-  for (const v of [raw, normalized, stripped, spaced]) {
-    if (v) variants.add(v);
-  }
+  variants.add(normalized);
+  if (stripped && stripped !== normalized) variants.add(stripped);
 
-  // Utente scrive senza apostrofo → prova inserimenti tipici (D'|L'|De'|Del'|Dell')
-  if (!APOSTROPHE_RE.test(raw) && !normalized.includes("'") && stripped.length >= 3) {
-    const s = stripped;
-    variants.add(`${s[0]}'${s.slice(1)}`);
-    if (s.length >= 4) variants.add(`${s.slice(0, 2)}'${s.slice(2)}`);
-    if (s.length >= 5) variants.add(`${s.slice(0, 3)}'${s.slice(3)}`);
-    if (s.length >= 6) variants.add(`${s.slice(0, 4)}'${s.slice(4)}`);
+  if (!normalized.includes("'") && stripped.length >= 4) {
+    const upper = stripped.toUpperCase();
+    const prefix = IT_APOSTROPHE_PREFIXES.find(
+      (p) => upper.startsWith(p) && stripped.length - p.length >= 3,
+    );
+    if (prefix) {
+      variants.add(`${stripped.slice(0, prefix.length)}'${stripped.slice(prefix.length)}`);
+    }
   }
 
   return [...variants];
 }
 
-/**
- * Condizioni OR su un singolo pezzo di testo (cliente + contratto).
- * Include note, POD, telefono, CF, indirizzo, fornitore, collaboratore, …
- */
-function contractFieldsOr(term: string): Prisma.ContractWhereInput[] {
-  const terms = searchTermVariants(term);
-  return terms.flatMap((t) => [
-    { contractNumber: { contains: t, mode: "insensitive" as const } },
-    { podPdr: { contains: t, mode: "insensitive" as const } },
-    { pod: { contains: t, mode: "insensitive" as const } },
-    { pdr: { contains: t, mode: "insensitive" as const } },
-    { notes: { contains: t, mode: "insensitive" as const } },
-    { masterNotes: { contains: t, mode: "insensitive" as const } },
-    { internalNotes: { contains: t, mode: "insensitive" as const } },
-    { workNotes: { contains: t, mode: "insensitive" as const } },
-    { koNotes: { contains: t, mode: "insensitive" as const } },
-    { koReason: { contains: t, mode: "insensitive" as const } },
-    { archiveLabel: { contains: t, mode: "insensitive" as const } },
-    { paymentStatus: { contains: t, mode: "insensitive" as const } },
-    { recurrence: { contains: t, mode: "insensitive" as const } },
-    { operationType: { contains: t, mode: "insensitive" as const } },
-    { client: { firstName: { contains: t, mode: "insensitive" as const } } },
-    { client: { lastName: { contains: t, mode: "insensitive" as const } } },
-    { client: { companyName: { contains: t, mode: "insensitive" as const } } },
-    { client: { fiscalCode: { contains: t, mode: "insensitive" as const } } },
-    { client: { vatNumber: { contains: t, mode: "insensitive" as const } } },
-    { client: { email: { contains: t, mode: "insensitive" as const } } },
-    { client: { phone: { contains: t, mode: "insensitive" as const } } },
-    { client: { address: { contains: t, mode: "insensitive" as const } } },
-    { client: { notes: { contains: t, mode: "insensitive" as const } } },
-    { supplier: { name: { contains: t, mode: "insensitive" as const } } },
-    { collaborator: { name: { contains: t, mode: "insensitive" as const } } },
+/** Codice/POD/telefono: niente varianti nome (evita esplosione OR). */
+function looksLikeCode(term: string): boolean {
+  const t = term.replace(/\s+/g, "");
+  return t.length >= 6 && /^[A-Z0-9]+$/i.test(t) && /\d/.test(t);
+}
+
+function nameFieldVariants(term: string): string[] {
+  if (looksLikeCode(term)) return [term.trim()];
+  return searchTermVariants(term);
+}
+
+function contractNameOr(term: string): Prisma.ContractWhereInput[] {
+  return nameFieldVariants(term).flatMap((t) => [
+    { client: { firstName: contains(t) } },
+    { client: { lastName: contains(t) } },
+    { client: { companyName: contains(t) } },
+    { collaborator: { name: contains(t) } },
   ]);
 }
 
+function clientNameOr(term: string): Prisma.ClientWhereInput[] {
+  return nameFieldVariants(term).flatMap((t) => [
+    { firstName: contains(t) },
+    { lastName: contains(t) },
+    { companyName: contains(t) },
+  ]);
+}
+
+/**
+ * Campi non-nome: una sola stringa (token originale).
+ * Le varianti apostrofo restano sui soli campi anagrafica.
+ */
+function contractCodeFieldsOr(term: string): Prisma.ContractWhereInput[] {
+  return [
+    { contractNumber: contains(term) },
+    { podPdr: contains(term) },
+    { pod: contains(term) },
+    { pdr: contains(term) },
+    { notes: contains(term) },
+    { masterNotes: contains(term) },
+    { internalNotes: contains(term) },
+    { workNotes: contains(term) },
+    { koNotes: contains(term) },
+    { koReason: contains(term) },
+    { archiveLabel: contains(term) },
+    { paymentStatus: contains(term) },
+    { recurrence: contains(term) },
+    { operationType: contains(term) },
+    { client: { fiscalCode: contains(term) } },
+    { client: { vatNumber: contains(term) } },
+    { client: { email: contains(term) } },
+    { client: { phone: contains(term) } },
+    { client: { address: contains(term) } },
+    { client: { notes: contains(term) } },
+    { supplier: { name: contains(term) } },
+  ];
+}
+
+function contractFieldsOr(term: string): Prisma.ContractWhereInput[] {
+  return [...contractCodeFieldsOr(term), ...contractNameOr(term)];
+}
+
 function clientFieldsOr(term: string): Prisma.ClientWhereInput[] {
-  const terms = searchTermVariants(term);
-  return terms.flatMap((t) => [
-    { firstName: { contains: t, mode: "insensitive" as const } },
-    { lastName: { contains: t, mode: "insensitive" as const } },
-    { companyName: { contains: t, mode: "insensitive" as const } },
-    { fiscalCode: { contains: t, mode: "insensitive" as const } },
-    { vatNumber: { contains: t, mode: "insensitive" as const } },
-    { email: { contains: t, mode: "insensitive" as const } },
-    { phone: { contains: t, mode: "insensitive" as const } },
-    { address: { contains: t, mode: "insensitive" as const } },
-    { notes: { contains: t, mode: "insensitive" as const } },
+  return [
+    ...clientNameOr(term),
+    { fiscalCode: contains(term) },
+    { vatNumber: contains(term) },
+    { email: contains(term) },
+    { phone: contains(term) },
+    { address: contains(term) },
+    { notes: contains(term) },
     {
       contracts: {
         some: {
           deletedAt: null,
           OR: [
-            { notes: { contains: t, mode: "insensitive" as const } },
-            { podPdr: { contains: t, mode: "insensitive" as const } },
-            { pod: { contains: t, mode: "insensitive" as const } },
-            { pdr: { contains: t, mode: "insensitive" as const } },
-            { contractNumber: { contains: t, mode: "insensitive" as const } },
-            { masterNotes: { contains: t, mode: "insensitive" as const } },
-            { internalNotes: { contains: t, mode: "insensitive" as const } },
+            { notes: contains(term) },
+            { podPdr: contains(term) },
+            { pod: contains(term) },
+            { pdr: contains(term) },
+            { contractNumber: contains(term) },
           ],
         },
       },
     },
-  ]);
+  ];
 }
 
 /**
  * Filtro testo per liste contratti: nome, cognome, CF/P.IVA, POD, telefono,
- * note (contratto e cliente), fornitore, collaboratore, n. contratto, indirizzo.
- *
- * Con più parole (es. «Mario Rossi») ogni pezzo deve matchare almeno un campo
- * (AND tra pezzi, OR tra campi).
+ * note, fornitore, collaboratore, n. contratto.
  */
 export function contractTextSearchWhere(
   q: string | null | undefined,
@@ -123,18 +164,16 @@ export function contractTextSearchWhere(
   const tokens = searchTokens(term);
   if (tokens.length === 0) return undefined;
 
-  // Un solo pezzo: OR su tutti i campi (include codice nelle note)
   if (tokens.length === 1) {
     return { OR: contractFieldsOr(tokens[0]!) };
   }
 
-  // Più pezzi: ciascuno deve trovare qualcosa (es. nome + cognome, o cognome + POD)
   return {
     AND: tokens.map((t) => ({ OR: contractFieldsOr(t) })),
   };
 }
 
-/** Filtro testo per lista anagrafiche clienti (+ note/POD dei contratti collegati). */
+/** Filtro testo per lista anagrafiche clienti. */
 export function clientTextSearchWhere(
   q: string | null | undefined,
 ): Prisma.ClientWhereInput | undefined {

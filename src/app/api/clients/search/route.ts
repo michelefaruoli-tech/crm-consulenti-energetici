@@ -40,16 +40,18 @@ function identityFieldsOr(
   term: string,
   mode: "insensitive",
 ): Prisma.ClientWhereInput[] {
-  const terms = searchTermVariants(term);
-  return terms.flatMap((t) => [
-    { firstName: { contains: t, mode } },
-    { lastName: { contains: t, mode } },
-    { companyName: { contains: t, mode } },
-    { fiscalCode: { contains: t, mode } },
-    { vatNumber: { contains: t, mode } },
-    { email: { contains: t, mode } },
-    { phone: { contains: t, mode } },
-  ]);
+  const names = searchTermVariants(term);
+  return [
+    ...names.flatMap((t) => [
+      { firstName: { contains: t, mode } },
+      { lastName: { contains: t, mode } },
+      { companyName: { contains: t, mode } },
+    ]),
+    { fiscalCode: { contains: term, mode } },
+    { vatNumber: { contains: term, mode } },
+    { email: { contains: term, mode } },
+    { phone: { contains: term, mode } },
+  ];
 }
 
 /**
