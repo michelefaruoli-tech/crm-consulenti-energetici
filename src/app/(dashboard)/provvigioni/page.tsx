@@ -31,6 +31,7 @@ import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import {
   buildProvvigioniContractWhere,
   buildProvvigioniListWhere,
+  parseProvvigioniFocus,
   recurringMonthlyWhereOr,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
@@ -127,10 +128,7 @@ export default async function ProvvigioniPage({
     /^\d{4}-\d{2}$/.test(competenceRaw)
       ? competenceRaw
       : undefined;
-  const focus: ProvvigioniListFocus | undefined =
-    focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
-      ? focusRaw
-      : undefined;
+  const focus: ProvvigioniListFocus | undefined = parseProvvigioniFocus(focusRaw);
   const vistaTab = parseProvvigioniTab(vistaRaw);
   const vista: ProvvigioniVista = parseProvvigioniVista(vistaRaw);
   const recurrenceMode = vistaToRecurrenceMode(vista);
@@ -763,6 +761,7 @@ export default async function ProvvigioniPage({
     q ? `cerca «${q}»` : null,
     focus === "da-confermare" ? "solo provvigioni da confermare" : null,
     focus === "ricorrenze-mancanti" ? "solo ricorrenze mancanti" : null,
+    focus === "fuori-storno" ? "solo fuori storno" : null,
     vistaTab === "mensile"
       ? "scheda M (mensile)"
       : vistaTab === "annuale"

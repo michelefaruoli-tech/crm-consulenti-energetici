@@ -1422,6 +1422,26 @@ export function ProvvigioniFilterTable({
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-700">Gestione</p>
             <div className="flex flex-col items-stretch gap-2">
+          <button
+            type="button"
+            disabled={pending}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+              listQuery?.focus === "fuori-storno"
+                ? "bg-emerald-700 text-white hover:bg-emerald-800"
+                : "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300 hover:bg-emerald-200"
+            }`}
+            title="Mostra solo contratti con periodo storno già scaduto"
+            onClick={() => {
+              if (!confirmLeaveDrafts()) return;
+              const nextFocus =
+                listQuery?.focus === "fuori-storno" ? undefined : "fuori-storno";
+              router.push(
+                buildPageHref("/provvigioni", baseQuery({ focus: nextFocus })),
+              );
+            }}
+          >
+            Fuori storno
+          </button>
           {canDelete ? (
             <button
               type="button"

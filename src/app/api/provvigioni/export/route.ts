@@ -5,7 +5,11 @@ import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
-import { buildProvvigioniContractWhere, buildProvvigioniListWhere } from "@/lib/provvigioni-filters";
+import {
+  buildProvvigioniContractWhere,
+  buildProvvigioniListWhere,
+  parseProvvigioniFocus,
+} from "@/lib/provvigioni-filters";
 import { formatMonthYear } from "@/lib/date-parse";
 import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
 import {
@@ -29,10 +33,7 @@ export async function GET(request: Request) {
   const q = url.searchParams.get("q");
   const vistaRaw = url.searchParams.get("vista");
   const focusRaw = url.searchParams.get("focus");
-  const focus =
-    focusRaw === "da-confermare" || focusRaw === "ricorrenze-mancanti"
-      ? focusRaw
-      : undefined;
+  const focus = parseProvvigioniFocus(focusRaw);
   const vista = parseProvvigioniVista(vistaRaw);
   const recurrenceMode = vistaToRecurrenceMode(vista);
   const canViewAll = hasPermission(session.role, "commissions.view_all");

@@ -33,7 +33,7 @@ import {
   type ProvvigioneRow,
 } from "@/lib/provvigioni-stato";
 
-export type RecurringExpandMode = "incassato" | "da-incassare" | "pagato";
+export type RecurringExpandMode = "incassato" | "da-incassare" | "pagato" | "all";
 
 const NON_RECURRING_WHERE: Prisma.ContractWhereInput = nonRecurringWhere;
 
@@ -44,17 +44,19 @@ const MONTHLY_RECURRING_WHERE: Prisma.ContractWhereInput = {
 function rateStatusesForMode(mode: RecurringExpandMode): string[] {
   if (mode === "incassato") return ["PAID"];
   if (mode === "da-incassare") return ["MISSING", "PENDING", "ERROR_UNPAID"];
-  return ["LIQUIDATED"];
+  if (mode === "pagato") return ["LIQUIDATED"];
+  return ["PAID", "MISSING", "PENDING", "ERROR_UNPAID", "LIQUIDATED", "CLOSED"];
 }
 
 function monthNoteForMode(mode: RecurringExpandMode, period: string): string {
   const label = periodLabel(period);
   if (mode === "incassato") return `Competenza ${label} · incassato, da liquidare`;
   if (mode === "da-incassare") return `Competenza ${label} · da incassare`;
-  return `Competenza ${label} · pagato al collaboratore`;
+  if (mode === "pagato") return `Competenza ${label} · pagato al collaboratore`;
+  return `Competenza ${label}`;
 }
 
-/** Espandi rate mensili quando tutti i periodi + un solo filtro stato rate-based. */
+/** Un clone per ogni mese ricorrente quando si vedono tutti i periodi. */
 export function getRecurringExpandMode(
   stato: string | undefined | null,
   viewingAllPeriods: boolean,
@@ -62,12 +64,14 @@ export function getRecurringExpandMode(
 ): RecurringExpandMode | null {
   if (!viewingAllPeriods || effectiveCompetence) return null;
   const parts = parseStatoFilter(stato);
-  if (parts.length !== 1) return null;
-  const s = parts[0]!;
-  if (s === "Incassato") return "incassato";
-  if (s === "Da incassare") return "da-incassare";
-  if (s === "Pagato") return "pagato";
-  return null;
+  if (parts.length === 1) {
+    const s = parts[0]!;
+    if (s === "Incassato") return "incassato";
+    if (s === "Da incassare") return "da-incassare";
+    if (s === "Pagato") return "pagato";
+    return null;
+  }
+  return "all";
 }
 
 export type ContractForProvvigioneRow = {

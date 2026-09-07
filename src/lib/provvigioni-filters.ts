@@ -335,7 +335,34 @@ export function buildProvvigioniContractWhere(
   };
 }
 
-export type ProvvigioniListFocus = "da-confermare" | "ricorrenze-mancanti";
+export type ProvvigioniListFocus =
+  | "da-confermare"
+  | "ricorrenze-mancanti"
+  | "fuori-storno";
+
+export function parseProvvigioniFocus(
+  raw: string | null | undefined,
+): ProvvigioniListFocus | undefined {
+  if (
+    raw === "da-confermare" ||
+    raw === "ricorrenze-mancanti" ||
+    raw === "fuori-storno"
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
+/** Contratti con periodo storno già scaduto (o 0 mesi). */
+export function fuoriStornoWhere(now = new Date()): Prisma.ContractWhereInput {
+  return {
+    status: { notIn: ["KO", "ANNULLATO", "CHIUSO", "STORNATO"] },
+    OR: [
+      { stornoEndDate: { lte: now } },
+      { supplier: { stornoMonths: 0 } },
+    ],
+  };
+}
 
 export type ProvvigioniListWhereOpts = {
   filters: ProvvigioniFilters;
@@ -370,6 +397,8 @@ export function buildProvvigioniListWhere(
         },
       ],
     };
+  } else if (opts.focus === "fuori-storno") {
+    where = { AND: [where, fuoriStornoWhere()] };
   }
 
   if (opts.applyCompetenceToList && opts.effectiveCompetence) {
