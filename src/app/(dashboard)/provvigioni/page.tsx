@@ -121,16 +121,18 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
-  const competenceAll = competenceRaw === "tutti";
+  const focus: ProvvigioniListFocus | undefined = parseProvvigioniFocus(focusRaw);
+  const vistaTab = parseProvvigioniTab(vistaRaw);
+  const vista: ProvvigioniVista = parseProvvigioniVista(vistaRaw);
+  const competenceAll =
+    competenceRaw === "tutti" ||
+    (!competenceRaw && (vista === "mensile" || vista === "annuale"));
   const competencePeriod =
     competenceRaw &&
     competenceRaw !== "tutti" &&
     /^\d{4}-\d{2}$/.test(competenceRaw)
       ? competenceRaw
       : undefined;
-  const focus: ProvvigioniListFocus | undefined = parseProvvigioniFocus(focusRaw);
-  const vistaTab = parseProvvigioniTab(vistaRaw);
-  const vista: ProvvigioniVista = parseProvvigioniVista(vistaRaw);
   const recurrenceMode = vistaToRecurrenceMode(vista);
   const recurringKind =
     focus === "ricorrenze-mancanti"
@@ -143,11 +145,8 @@ export default async function ProvvigioniPage({
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
   const reconciliationPeriod = addMonths(settledPeriod, -1);
   const showCompetencePanel = vista === "mensile" || vista === "annuale";
-  /** Mese competenza: esplicito o default su schede M/R; mai forzato dal solo filtro stato su Tutti */
-  const effectiveCompetence = competenceAll
-    ? undefined
-    : (competencePeriod ??
-      (showCompetencePanel ? reconciliationPeriod : undefined));
+  /** Mese competenza: esplicito in URL, altrimenti tutti i mesi (una riga per rata) */
+  const effectiveCompetence = competenceAll ? undefined : competencePeriod;
   const applyCompetenceToList = Boolean(effectiveCompetence);
   /** Valore URL competenza: tutti | YYYY-MM */
   const viewingAllPeriods =

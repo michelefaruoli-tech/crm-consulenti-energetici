@@ -155,7 +155,7 @@ export function getRecurringExpandMode(
   const hasDaIncassare = parts.includes("Da incassare");
   const hasPagato = parts.includes("Pagato");
   const monthCount = [hasIncassato, hasDaIncassare, hasPagato].filter(Boolean).length;
-  if (monthCount === 0) return null;
+  if (monthCount === 0) return "all";
   if (monthCount === 1 && parts.length === 1) {
     if (hasIncassato) return "incassato";
     if (hasDaIncassare) return "da-incassare";

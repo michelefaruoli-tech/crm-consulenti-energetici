@@ -6,15 +6,13 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
-  bulkMarkIncassatoCompetenceAction,
-  bulkMarkPagatoCompetenceAction,
   bulkSetRecurrenceAction,
   bulkUpdateCommissionFieldsAction,
 } from "@/lib/commission-actions";
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
-import { toPeriod, periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
+import { periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
   PROVVIGIONE_AGENCY_OPTIONS,
@@ -144,14 +142,18 @@ function FreeSuggestInput({
   );
 }
 
-function settledOptions(): string[] {
-  const now = new Date();
-  const out: string[] = [];
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    out.push(toPeriod(d));
-  }
-  return out;
+function competenceOfRow(row: ProvvigioneRow): string | undefined {
+  const fromRow = String(row.competencePeriod ?? "").trim();
+  const id = rowId(row);
+  const fromKey = id.includes(":") ? id.split(":")[1] ?? "" : "";
+  if (/^\d{4}-\d{2}$/.test(fromRow)) return fromRow;
+  if (/^\d{4}-\d{2}$/.test(fromKey)) return fromKey;
+  return undefined;
+}
+
+function meseRifLabel(row: ProvvigioneRow): string {
+  const period = competenceOfRow(row);
+  return period ? periodLabel(period) : "";
 }
 
 /** Chiave riga tabella (contratto o contratto:mese). */
@@ -193,6 +195,7 @@ const SIMPLE_COLUMN_ORDER = [
   "supplierName",
   "operationType",
   "stato",
+  "meseRif",
   "collectionMonth",
   "recurrence",
   "stornoFlag",
@@ -223,6 +226,8 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return row.operationType ?? "";
     case "stato":
       return row.stato ?? "";
+    case "meseRif":
+      return meseRifLabel(row);
     case "recurrence":
       return shortRecurrence(row.recurrence ?? "");
     case "collectionMonth":
@@ -304,7 +309,6 @@ export function ProvvigioniFilterTable({
       /* ignore */
     }
   }
-  const settleOpts = useMemo(() => settledOptions(), []);
   const agencySuggestions = useMemo(() => {
     const fromRows = rows
       .map((row) => String(row.agency ?? "").trim())
@@ -313,12 +317,6 @@ export function ProvvigioniFilterTable({
       new Set([...PROVVIGIONE_AGENCY_OPTIONS, ...fromRows]),
     ).sort((a, b) => a.localeCompare(b, "it"));
   }, [rows]);
-  const [competencePeriod, setCompetencePeriod] = useState(
-    () => listQuery?.competence ?? toPeriod(new Date()),
-  );
-  useEffect(() => {
-    if (listQuery?.competence) setCompetencePeriod(listQuery.competence);
-  }, [listQuery?.competence]);
   /** Contatore per forzare reset filtri colonna locali (ExcelFilterTable) */
   const [localFilterClearN, setLocalFilterClearN] = useState(0);
   const filterResetKey = [
@@ -503,15 +501,6 @@ export function ProvvigioniFilterTable({
       ],
     [rows, selectedKeys],
   );
-  /** ID commissione delle stesse righe (azioni gettone / incasso). */
-  const selectedCommissionIds = useMemo(
-    () =>
-      rows
-        .filter((r) => selectedKeys.has(rowId(r)))
-        .map((r) => commissionIdOf(r))
-        .filter(Boolean),
-    [rows, selectedKeys],
-  );
 
   function queueDraft(row: Record<string, unknown>, key: string, value: string) {
     const id = rowId(row);
@@ -651,14 +640,10 @@ export function ProvvigioniFilterTable({
         }
       | { ok: false; error: string }
     >,
-    options: { competencePeriod?: string } = {},
+    options: { competencePeriod?: string; monthsNote?: string } = {},
   ) {
     if (selectedCount === 0) {
       setError("Seleziona almeno una riga (checkbox a sinistra).");
-      return;
-    }
-    if (!competencePeriod) {
-      setError("Seleziona un mese di competenza.");
       return;
     }
     const collaboratorsLabel =
@@ -668,16 +653,16 @@ export function ProvvigioniFilterTable({
     const summary = [
       label,
       "",
-      `Contratti selezionati: ${selectedCount}`,
+      `Righe selezionate: ${selectedCount}`,
       `Importo totale: ${selectedAmount.toLocaleString("it-IT", {
         style: "currency",
         currency: "EUR",
       })}`,
       `Collaboratori: ${collaboratorsLabel}`,
-      options.competencePeriod
-        ? `Mese competenza: ${periodLabel(options.competencePeriod)}`
-        : competencePeriod
-          ? `Mese competenza: ${periodLabel(competencePeriod)}`
+      options.monthsNote
+        ? `Mesi competenza: ${options.monthsNote}`
+        : options.competencePeriod
+          ? `Mese competenza: ${periodLabel(options.competencePeriod)}`
           : null,
       "",
       "Confermi l'operazione?",
@@ -709,6 +694,60 @@ export function ProvvigioniFilterTable({
         setError(e instanceof Error ? e.message : "Errore azione multipla");
       }
     });
+  }
+
+  function applyBulkStato(stato: "Incassato" | "Pagato") {
+    const selected = rows.filter((r) => selectedKeys.has(rowId(r)));
+    const changes: Array<{
+      commissionId: string;
+      field: string;
+      value: string;
+      competencePeriod?: string;
+    }> = [];
+    for (const row of selected) {
+      const commissionId = commissionIdOf(row);
+      if (!commissionId) continue;
+      const competencePeriod = competenceOfRow(row);
+      changes.push({
+        commissionId,
+        field: "stato",
+        value: stato,
+        ...(competencePeriod ? { competencePeriod } : {}),
+      });
+    }
+    if (changes.length === 0) {
+      setError("Nessuna commissione sulle righe selezionate.");
+      return;
+    }
+    const periods = [
+      ...new Set(
+        changes
+          .map((c) => c.competencePeriod)
+          .filter((p): p is string => Boolean(p)),
+      ),
+    ].sort();
+    const monthsNote =
+      periods.length === 0
+        ? undefined
+        : periods.length <= 4
+          ? periods.map((p) => periodLabel(p)).join(", ")
+          : `${periods
+              .slice(0, 3)
+              .map((p) => periodLabel(p))
+              .join(", ")} + altri ${periods.length - 3}`;
+    runBulk(
+      `Segna ${stato.toLowerCase()} su ${changes.length} ${
+        changes.length === 1 ? "riga" : "righe"
+      }`,
+      async () => {
+        const fd = new FormData();
+        fd.set("changes", JSON.stringify(changes));
+        const res = await bulkUpdateCommissionFieldsAction(fd);
+        if (!res.ok) return res;
+        return { ok: true as const, count: res.count };
+      },
+      { monthsNote },
+    );
   }
 
   function applyBulkRecurrence() {
@@ -1012,6 +1051,17 @@ export function ProvvigioniFilterTable({
       },
     },
     {
+      key: "meseRif",
+      label: "Mese rif.",
+      getValue: (r) => meseRifLabel(r as ProvvigioneRow),
+      sortKind: "text",
+      render: (r) => (
+        <span className="whitespace-nowrap text-xs font-medium tabular-nums text-slate-800">
+          {meseRifLabel(r as ProvvigioneRow) || "—"}
+        </span>
+      ),
+    },
+    {
       key: "recurrence",
       label: "Tipo",
       getValue: (r) => baseCellValue(r, "recurrence"),
@@ -1189,6 +1239,7 @@ export function ProvvigioniFilterTable({
         supplyStartDate: "w-[7rem] min-w-[7rem] max-w-[7rem]",
         operationType: "w-[8rem] min-w-[8rem] max-w-[8rem]",
         stato: "w-[10rem] min-w-[10rem] max-w-[10rem]",
+        meseRif: "w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem]",
         recurrence: "w-[7rem] min-w-[7rem] max-w-[7rem]",
         collectionMonth: "w-[8rem] min-w-[8rem] max-w-[8rem]",
         stornoFlag: "w-[5rem] min-w-[5rem] max-w-[5rem]",
@@ -1223,8 +1274,9 @@ export function ProvvigioniFilterTable({
       collaboratorName: "w-[10%]",
       supplierName: "w-[11%]",
       amount: "w-[7%]",
-      stato: "w-[12%]",
-      collectionMonth: "w-[9%]",
+      stato: "w-[11%]",
+      meseRif: "w-[8%]",
+      collectionMonth: "w-[8%]",
       notes: "w-[17%]",
       recurrence: "w-[7%]",
       _open: "w-[4%]",
@@ -1287,7 +1339,8 @@ export function ProvvigioniFilterTable({
           <div>
             <p className="text-sm font-semibold text-slate-900">Azioni sulle righe</p>
             <p className="mt-0.5 text-xs text-slate-500">
-              Seleziona una o più righe, poi scegli l&apos;operazione.
+              Seleziona una o più righe, poi scegli l&apos;operazione. Incassato e
+              pagato usano il mese di riferimento di ciascuna riga.
             </p>
           </div>
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${selectedCount > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
@@ -1295,80 +1348,7 @@ export function ProvvigioniFilterTable({
           </span>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="text-[11px] text-slate-600">
-                Mese di competenza
-                <select
-                  className="mt-0.5 block min-w-[9rem] rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"
-                  value={competencePeriod}
-                  onChange={(e) => {
-                    const period = e.target.value;
-                    setCompetencePeriod(period);
-                    if (!period) return;
-                    if (!confirmLeaveDrafts()) return;
-                    router.push(
-                      buildPageHref("/provvigioni", {
-                        ...baseQuery({ competence: period }),
-                        page: undefined,
-                      }),
-                    );
-                  }}
-                >
-                  {settleOpts.map((p) => (
-                    <option key={p} value={p}>
-                      {periodLabel(p)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={pending || !competencePeriod}
-                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-                onClick={() =>
-                  runBulk(
-                    `Segna incassato · ${periodLabel(competencePeriod)}`,
-                    async () => {
-                      const fd = new FormData();
-                      fd.set("commissionIds", selectedCommissionIds.join(","));
-                      fd.set("competencePeriod", competencePeriod);
-                      return bulkMarkIncassatoCompetenceAction(fd);
-                    },
-                    { competencePeriod },
-                  )
-                }
-                title="Incasso dal fornitore: data incasso = mese di competenza"
-              >
-                Segna incassato
-              </button>
-
-              {canConfirm ? (
-                <button
-                  type="button"
-                  disabled={pending || !competencePeriod}
-                  className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-900 disabled:opacity-50"
-                  onClick={() =>
-                    runBulk(
-                      `Segna pagato · ${periodLabel(competencePeriod)}`,
-                      async () => {
-                        const fd = new FormData();
-                        fd.set("commissionIds", selectedCommissionIds.join(","));
-                        fd.set("competencePeriod", competencePeriod);
-                        return bulkMarkPagatoCompetenceAction(fd);
-                      },
-                      { competencePeriod },
-                    )
-                  }
-                  title="Liquidazione collaboratore per il mese di competenza scelto"
-                >
-                  Segna pagato
-                </button>
-              ) : null}
-            </div>
-          </div>
-
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
           <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-indigo-900">
               Categoria UT / M / R
@@ -1439,6 +1419,26 @@ export function ProvvigioniFilterTable({
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-700">Gestione</p>
             <div className="flex flex-col items-stretch gap-2">
+          <button
+            type="button"
+            disabled={pending || selectedCount === 0}
+            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+            title="Segna Incassato su tutte le righe selezionate, ciascuna nel proprio mese di riferimento"
+            onClick={() => applyBulkStato("Incassato")}
+          >
+            Segna incassato
+          </button>
+          {canConfirm ? (
+            <button
+              type="button"
+              disabled={pending || selectedCount === 0}
+              className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-900 disabled:opacity-50"
+              title="Segna Pagato su tutte le righe selezionate, ciascuna nel proprio mese di riferimento"
+              onClick={() => applyBulkStato("Pagato")}
+            >
+              Segna pagato
+            </button>
+          ) : null}
           <button
             type="button"
             disabled={pending}
