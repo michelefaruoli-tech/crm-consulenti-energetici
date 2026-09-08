@@ -28,12 +28,43 @@ function contains(term: string) {
 }
 
 /** Spezza la query in pezzi. L'apostrofo non spezza. */
+/** «carlo di vizzino» non deve richiedere il token «di» su ogni campo. */
+const SEARCH_STOPWORDS = new Set([
+  "di",
+  "del",
+  "della",
+  "dello",
+  "dei",
+  "degli",
+  "delle",
+  "e",
+  "a",
+  "da",
+  "in",
+  "su",
+  "il",
+  "lo",
+  "la",
+  "i",
+  "gli",
+  "le",
+  "un",
+  "uno",
+  "una",
+  "per",
+  "con",
+  "al",
+  "dal",
+]);
+
 function searchTokens(q: string): string[] {
-  return q
+  const raw = q
     .trim()
     .split(/[\s,;|/]+/)
     .map((t) => t.trim())
     .filter((t) => t.length >= 1);
+  const meaningful = raw.filter((t) => !SEARCH_STOPWORDS.has(t.toLowerCase()));
+  return meaningful.length > 0 ? meaningful : raw;
 }
 
 /**

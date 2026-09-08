@@ -75,12 +75,11 @@ export function simplifiedProvvigioneStato(
   if (["KO", "ANNULLATO", "CHIUSO"].includes(status)) return "KO / Cessato";
   // Recuperato: solo se lo stato è Stornato (Storno Sì da solo = ancora da applicare)
   if (status === "STORNATO") return "Stornato";
-  // Inserito ma non contrattualizzato: priorità su fornitura/incasso
   if (status === "DA_CONTROLLARE") return "Da controllare";
-  if (opts?.inFornitura === false) return "Da incassare";
-  // Liquidazione collaboratore: deve avere priorità su "Incassato"
+  if (status === "IN_ATTESA_PAGAMENTO") return "Da incassare";
   if (status === "PROVVIGIONE_LIQUIDATA") return "Pagato";
   if (hasCollectionDate) return "Incassato";
+  if (opts?.inFornitura === false) return "Da incassare";
   return "Da incassare";
 }
 

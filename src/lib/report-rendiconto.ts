@@ -17,12 +17,23 @@ export type RendicontoIncassatoSource = {
   contractNumber: string;
   collectionDate: Date | null;
   insertionDate: Date;
+  podPdr?: string | null;
+  pod?: string | null;
+  pdr?: string | null;
   collaborator: { name: string };
   supplier: { name: string };
   client: Parameters<typeof clientDisplayName>[0] & { type?: string };
   commission: { received: unknown; expected: unknown } | null;
   recurrence: string | null;
 };
+
+export function reportPodPdr(source: {
+  podPdr?: string | null;
+  pod?: string | null;
+  pdr?: string | null;
+}): string {
+  return (source.podPdr || source.pod || source.pdr || "").trim();
+}
 
 /**
  * Importo «Incassato» nel Report = stesso gettone della colonna Gettone in Provvigioni
@@ -45,6 +56,7 @@ export type RendicontoLine = {
   month: string;
   contractNumber: string;
   clientName: string;
+  podPdr: string;
   supplierName: string;
   collaboratorName: string;
   amount: number;
@@ -130,6 +142,11 @@ export function buildRendiconto(params: {
   skipRecurring?: boolean;
   /** Se true (solo stato Stornato), non elenca i contratti come Incassato */
   onlyStornato?: boolean;
+  /**
+   * Da incassare: le rate mancanti entrano nei subtotali mensili
+   * (stesso elenco di Provvigioni), non solo in coda.
+   */
+  inlineRecurring?: boolean;
 }): RendicontoSummary {
   const lines: RendicontoLine[] = [];
 
@@ -144,6 +161,7 @@ export function buildRendiconto(params: {
         month,
         contractNumber: c.contractNumber,
         clientName: clientDisplayName(c.client),
+        podPdr: reportPodPdr(c),
         supplierName: c.supplier.name,
         collaboratorName: c.collaborator.name,
         amount: reportIncassatoAmount(c.commission, {
@@ -155,12 +173,29 @@ export function buildRendiconto(params: {
     }
   }
 
+  if (!params.skipRecurring && params.inlineRecurring) {
+    for (const r of params.recurringRows) {
+      lines.push({
+        kind: "incassato",
+        month: r.period,
+        contractNumber: r.contractNumber,
+        clientName: r.clientName,
+        podPdr: r.podPdr ?? "",
+        supplierName: r.supplierName,
+        collaboratorName: r.collaboratorName,
+        amount: r.amount,
+        dateLabel: r.period,
+      });
+    }
+  }
+
   for (const s of params.stornoRows) {
     lines.push({
       kind: "storno",
       month: s.period,
       contractNumber: s.contractNumber,
       clientName: s.clientName,
+      podPdr: s.podPdr ?? "",
       supplierName: s.supplierName,
       collaboratorName: s.collaboratorName,
       amount: s.amount,
@@ -168,13 +203,15 @@ export function buildRendiconto(params: {
     });
   }
 
-  const ricorrentiGrouped: RendicontoLine[] = params.skipRecurring
-    ? []
-    : groupReportRecurringByContract(params.recurringRows).map((g) => ({
+  const ricorrentiGrouped: RendicontoLine[] =
+    params.skipRecurring || params.inlineRecurring
+      ? []
+      : groupReportRecurringByContract(params.recurringRows).map((g) => ({
         kind: "ricorrente" as const,
         month: g.periods[0] ?? "",
         contractNumber: g.contractNumber,
         clientName: g.clientName,
+        podPdr: g.podPdr ?? "",
         supplierName: g.supplierName,
         collaboratorName: g.collaboratorName,
         amount: g.amount,

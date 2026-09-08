@@ -32,6 +32,7 @@ import {
   recentMonthOptions,
   reportDateRange,
   reportHasStato,
+  reportIncludesRecurring,
   reportIncludesStornos,
   reportPeriodUsesCollectionDate,
   reportRecurringCompetenceOnly,
@@ -155,6 +156,7 @@ export default async function ReportPage({
     supplierId,
     visibility,
     competenceOnly: reportRecurringCompetenceOnly(stato),
+    stato,
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 
@@ -198,10 +200,7 @@ export default async function ReportPage({
     (s, c) => s + Number(c.commission?.paid ?? 0),
     0,
   );
-  const includeRecurring =
-    reportHasStato(stati, "Incassato") ||
-    reportHasStato(stati, "Pagato") ||
-    reportHasStato(stati, "Tutti");
+  const includeRecurring = reportIncludesRecurring(stati);
   const totalReceived =
     totalReceivedOneShot +
     (includeRecurring ? recurringTotals.amount : 0) +
@@ -293,6 +292,7 @@ export default async function ReportPage({
       };
       cur.recurring += r.amount;
       cur.received += r.amount;
+      cur.count += 1;
       byCollab.set(r.collaboratorId, cur);
     }
   }
@@ -583,6 +583,7 @@ export default async function ReportPage({
               <thead className="bg-rose-50 text-left text-rose-800">
                 <tr>
                   <th className="px-3 py-2">Cliente</th>
+                  <th className="px-3 py-2">POD/PDR</th>
                   <th className="px-3 py-2">Fornitore</th>
                   <th className="px-3 py-2">Collaboratore</th>
                   <th className="px-3 py-2">Mese storno</th>
@@ -593,6 +594,7 @@ export default async function ReportPage({
                 {stornoRows.map((s) => (
                   <tr key={s.commissionId} className="border-t border-rose-100">
                     <td className="px-3 py-2 font-medium">{s.clientName}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{s.podPdr || "—"}</td>
                     <td className="px-3 py-2">{s.supplierName}</td>
                     <td className="px-3 py-2">{s.collaboratorName}</td>
                     <td className="px-3 py-2">
@@ -606,7 +608,7 @@ export default async function ReportPage({
               </tbody>
               <tfoot>
                 <tr className="border-t border-rose-200 bg-rose-50 font-semibold">
-                  <td className="px-3 py-2" colSpan={4}>
+                  <td className="px-3 py-2" colSpan={5}>
                     Totale storni
                   </td>
                   <td className="px-3 py-2 text-rose-800">

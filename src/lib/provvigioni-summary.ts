@@ -62,6 +62,7 @@ async function summaryForStato(
         ctx.activeListWhere,
         expandMode,
         competenceForAmount,
+        stato,
       ),
     };
   }
@@ -79,9 +80,9 @@ async function summaryForStato(
 
   const [count, amount] = await Promise.all([
     expandMode
-      ? countExpandedListRows(where, expandMode)
+      ? countExpandedListRows(where, expandMode, stato)
       : prisma.contract.count({ where }),
-    sumExpandedAmountForStato(where, expandMode, competenceForAmount),
+    sumExpandedAmountForStato(where, expandMode, competenceForAmount, stato),
   ]);
   return { count, amount };
 }

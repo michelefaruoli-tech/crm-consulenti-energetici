@@ -24,6 +24,7 @@ export type ReportStornoRow = {
   collaboratorName: string;
   supplierName: string;
   clientName: string;
+  podPdr: string;
   /** Mese storno YYYY-MM */
   period: string;
 };
@@ -90,6 +91,9 @@ export async function loadReportStornos(params: {
         select: {
           id: true,
           contractNumber: true,
+          podPdr: true,
+          pod: true,
+          pdr: true,
           collaboratorId: true,
           collaborator: { select: { name: true } },
           supplier: { select: { name: true } },
@@ -122,6 +126,7 @@ export async function loadReportStornos(params: {
         collaboratorName: r.contract.collaborator.name,
         supplierName: r.contract.supplier.name,
         clientName: clientDisplayName(r.contract.client),
+        podPdr: (r.contract.podPdr || r.contract.pod || r.contract.pdr || "").trim(),
         period: toPeriodKey(r.stornoDate!),
       };
     });

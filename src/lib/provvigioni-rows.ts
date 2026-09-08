@@ -41,11 +41,96 @@ const MONTHLY_RECURRING_WHERE: Prisma.ContractWhereInput = {
   OR: recurringMonthlyWhereOr,
 };
 
-function rateStatusesForMode(mode: RecurringExpandMode): string[] {
+/** Niente rate del filtro → mostra il contratto come riga unica (UT / R / In pagamento). */
+function withoutMatchingRates(
+  extra: Prisma.ContractWhereInput,
+  rateStatuses: string[],
+): Prisma.ContractWhereInput {
+  return {
+    ...extra,
+    ...(rateStatuses.length > 0
+      ? {
+          NOT: {
+            recurringMonths: {
+              some: { status: { in: rateStatuses } },
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+function expandedUnitWhere(
+  contractWhere: Prisma.ContractWhereInput,
+  expandMode: RecurringExpandMode,
+  rateStatuses: string[],
+): Prisma.ContractWhereInput {
+  const ut: Prisma.ContractWhereInput = {
+    AND: [contractWhere, NON_RECURRING_WHERE],
+  };
+  const annual: Prisma.ContractWhereInput = {
+    AND: [
+      contractWhere,
+      withoutMatchingRates({ recurrenceKind: "R" }, rateStatuses),
+    ],
+  };
+  const unitOrs: Prisma.ContractWhereInput[] = [ut, annual];
+  if (expandMode === "da-incassare" || expandMode === "all") {
+    unitOrs.push({
+      AND: [
+        contractWhere,
+        withoutMatchingRates(
+          { status: "IN_ATTESA_PAGAMENTO", recurrenceKind: "M" },
+          rateStatuses,
+        ),
+      ],
+    });
+  }
+  return { OR: unitOrs };
+}
+
+/** Stati rata da mostrare in base al filtro colonna Stato. */
+export function rateStatusesForStatoFilter(stato?: string | null): string[] {
+  const parts = parseStatoFilter(stato);
+  if (parts.length === 0 || parts.includes("Tutti")) {
+    return ["PAID", "MISSING", "PENDING", "ERROR_UNPAID", "LIQUIDATED", "CLOSED"];
+  }
+  const statuses: string[] = [];
+  if (parts.includes("Incassato")) statuses.push("PAID");
+  if (parts.includes("Da incassare")) {
+    statuses.push("MISSING", "PENDING", "ERROR_UNPAID");
+  }
+  if (parts.includes("Pagato")) statuses.push("LIQUIDATED");
+  return [...new Set(statuses)];
+}
+
+function rateStatusesForMode(
+  mode: RecurringExpandMode,
+  stato?: string | null,
+): string[] {
   if (mode === "incassato") return ["PAID"];
   if (mode === "da-incassare") return ["MISSING", "PENDING", "ERROR_UNPAID"];
   if (mode === "pagato") return ["LIQUIDATED"];
-  return ["PAID", "MISSING", "PENDING", "ERROR_UNPAID", "LIQUIDATED", "CLOSED"];
+  return rateStatusesForStatoFilter(stato);
+}
+
+/** La riga visibile deve coincidere con il filtro Stato (niente «Da incassare» in Incassato). */
+export function rowMatchesStatoFilter(
+  row: ProvvigioneRow,
+  stato?: string | null,
+): boolean {
+  const parts = parseStatoFilter(stato);
+  if (parts.length === 0 || parts.includes("Tutti")) return true;
+  return parts.some((p) => {
+    if (p === "Stornato") {
+      return (
+        row.stato === "Stornato" ||
+        (row.stornoFlag === "Sì" &&
+          (row.stato === "Incassato" || row.stato === "Pagato"))
+      );
+    }
+    return row.stato === p;
+  });
 }
 
 function monthNoteForMode(mode: RecurringExpandMode, period: string): string {
@@ -64,12 +149,22 @@ export function getRecurringExpandMode(
 ): RecurringExpandMode | null {
   if (!viewingAllPeriods || effectiveCompetence) return null;
   const parts = parseStatoFilter(stato);
-  if (parts.length === 1) {
-    const s = parts[0]!;
-    if (s === "Incassato") return "incassato";
-    if (s === "Da incassare") return "da-incassare";
-    if (s === "Pagato") return "pagato";
-    return null;
+  if (parts.length === 0 || parts.includes("Tutti")) return "all";
+
+  const hasIncassato = parts.includes("Incassato");
+  const hasDaIncassare = parts.includes("Da incassare");
+  const hasPagato = parts.includes("Pagato");
+  const monthCount = [hasIncassato, hasDaIncassare, hasPagato].filter(Boolean).length;
+  if (monthCount === 0) return null;
+  if (monthCount === 1 && parts.length === 1) {
+    if (hasIncassato) return "incassato";
+    if (hasDaIncassare) return "da-incassare";
+    if (hasPagato) return "pagato";
+  }
+  if (monthCount === 1) {
+    if (hasIncassato) return "incassato";
+    if (hasDaIncassare) return "da-incassare";
+    if (hasPagato) return "pagato";
   }
   return "all";
 }
@@ -125,6 +220,8 @@ export type BuildProvvigioneRowsOpts = {
   latestMap: Map<string, boolean>;
   earlyMap: Map<string, boolean>;
   now?: Date;
+  /** Filtro stato URL, per espandere solo le rate coerenti (Incassato ≠ Mancante). */
+  statoFilter?: string | null;
 };
 
 function monthAmount(
@@ -178,11 +275,15 @@ function buildSingleRow(
       )
     : (contract.recurringMonths ?? []).some((m) => m.status === "PAID");
 
-  const hasDate =
-    expandStato === "Incassato" ||
-    expandStato === "Pagato" ||
-    Boolean(effectiveCollection) ||
-    paidRecurringForCompetence;
+  const inPagamento =
+    !monthOverride && contract.status === "IN_ATTESA_PAGAMENTO";
+
+  const hasDate = inPagamento
+    ? false
+    : expandStato === "Incassato" ||
+      expandStato === "Pagato" ||
+      Boolean(effectiveCollection) ||
+      paidRecurringForCompetence;
 
   const paidLabel =
     expandStato === "Pagato"
@@ -324,10 +425,12 @@ export function expandContractsToProvvigioneRows(
 ): ProvvigioneRow[] {
   const mode = opts.expandMode;
   if (!mode) {
-    return contracts.map((c) => buildSingleRow(c, opts));
+    return contracts
+      .map((c) => buildSingleRow(c, opts))
+      .filter((row) => rowMatchesStatoFilter(row, opts.statoFilter));
   }
 
-  const statuses = rateStatusesForMode(mode);
+  const statuses = rateStatusesForMode(mode, opts.statoFilter);
   const rows: ProvvigioneRow[] = [];
 
   for (const contract of contracts) {
@@ -349,9 +452,17 @@ export function expandContractsToProvvigioneRows(
         }),
       );
     }
+
+    if (
+      months.length === 0 &&
+      contract.status === "IN_ATTESA_PAGAMENTO" &&
+      (mode === "da-incassare" || mode === "all")
+    ) {
+      rows.push(buildSingleRow(contract, opts));
+    }
   }
 
-  return rows;
+  return rows.filter((row) => rowMatchesStatoFilter(row, opts.statoFilter));
 }
 
 export function buildStornoMaps(contracts: ContractForProvvigioneRow[]): {
@@ -389,10 +500,13 @@ export function buildStornoMaps(contracts: ContractForProvvigioneRow[]): {
 async function countRecurringRates(
   contractWhere: Prisma.ContractWhereInput,
   mode: RecurringExpandMode,
+  stato?: string | null,
 ): Promise<number> {
+  const statuses = rateStatusesForMode(mode, stato);
+  if (statuses.length === 0) return 0;
   return prisma.recurringMonth.count({
     where: {
-      status: { in: rateStatusesForMode(mode) },
+      status: { in: statuses },
       contract: {
         AND: [contractWhere, MONTHLY_RECURRING_WHERE],
       },
@@ -402,11 +516,12 @@ async function countRecurringRates(
 
 async function countNonRecurringContracts(
   contractWhere: Prisma.ContractWhereInput,
+  expandMode: RecurringExpandMode,
+  stato?: string | null,
 ): Promise<number> {
+  const statuses = rateStatusesForMode(expandMode, stato);
   return prisma.contract.count({
-    where: {
-      AND: [contractWhere, NON_RECURRING_WHERE],
-    },
+    where: expandedUnitWhere(contractWhere, expandMode, statuses),
   });
 }
 
@@ -414,13 +529,14 @@ async function countNonRecurringContracts(
 export async function countExpandedListRows(
   contractWhere: Prisma.ContractWhereInput,
   expandMode: RecurringExpandMode | null,
+  stato?: string | null,
 ): Promise<number> {
   if (!expandMode) {
     return prisma.contract.count({ where: contractWhere });
   }
   const [rateCount, utCount] = await Promise.all([
-    countRecurringRates(contractWhere, expandMode),
-    countNonRecurringContracts(contractWhere),
+    countRecurringRates(contractWhere, expandMode, stato),
+    countNonRecurringContracts(contractWhere, expandMode, stato),
   ]);
   return rateCount + utCount;
 }
@@ -451,6 +567,7 @@ export async function sumExpandedAmountForStato(
   contractWhere: Prisma.ContractWhereInput,
   expandMode: RecurringExpandMode | null,
   competencePeriod: string | null,
+  stato?: string | null,
 ): Promise<number> {
   if (!expandMode) {
     const contracts = await prisma.contract.findMany({
@@ -489,7 +606,27 @@ export async function sumExpandedAmountForStato(
     );
   }
 
-  const statuses = rateStatusesForMode(expandMode);
+  const statuses = rateStatusesForMode(expandMode, stato);
+  if (statuses.length === 0) {
+    const utContracts = await prisma.contract.findMany({
+      where: expandedUnitWhere(contractWhere, expandMode, statuses),
+      select: {
+        client: { select: { type: true } },
+        supplier: { select: { name: true } },
+        commission: { select: { expected: true } },
+      },
+    });
+    return utContracts.reduce(
+      (sum, c) =>
+        sum +
+        effectiveGettone({
+          expected: Number(c.commission?.expected ?? 0),
+          clientType: c.client.type,
+          supplierName: c.supplier.name,
+        }),
+      0,
+    );
+  }
   const [rateAgg, fallbackRates, utContracts] = await Promise.all([
     prisma.recurringMonth.aggregate({
       where: {
@@ -521,9 +658,7 @@ export async function sumExpandedAmountForStato(
       take: 5000,
     }),
     prisma.contract.findMany({
-      where: {
-        AND: [contractWhere, NON_RECURRING_WHERE],
-      },
+      where: expandedUnitWhere(contractWhere, expandMode, statuses),
       select: {
         client: { select: { type: true } },
         supplier: { select: { name: true } },
@@ -562,7 +697,7 @@ export async function countExpandedForStatoCard(
   if (!mode) {
     return prisma.contract.count({ where: contractWhere });
   }
-  return countExpandedListRows(contractWhere, mode);
+  return countExpandedListRows(contractWhere, mode, stato);
 }
 
 /** Contratti leggeri per mappe storno (senza caricare tutte le rate). */
@@ -683,17 +818,22 @@ export async function fetchExpandedProvvigionePage(args: {
   rows: ProvvigioneRow[];
   contracts: ContractForProvvigioneRow[];
 }> {
-  const statuses = rateStatusesForMode(args.expandMode);
+  const statuses = rateStatusesForMode(args.expandMode, args.buildOpts.statoFilter);
   const skip = paginationSkip(args.page, args.pageSize);
   const take = args.pageSize;
 
-  const utWhere: Prisma.ContractWhereInput = {
-    AND: [args.contractWhere, NON_RECURRING_WHERE],
-  };
-  const rateWhere: Prisma.RecurringMonthWhereInput = {
-    status: { in: statuses },
-    contract: { AND: [args.contractWhere, MONTHLY_RECURRING_WHERE] },
-  };
+  const utWhere: Prisma.ContractWhereInput = expandedUnitWhere(
+    args.contractWhere,
+    args.expandMode,
+    statuses,
+  );
+  const rateWhere: Prisma.RecurringMonthWhereInput | null =
+    statuses.length === 0
+      ? null
+      : {
+          status: { in: statuses },
+          contract: { AND: [args.contractWhere, MONTHLY_RECURRING_WHERE] },
+        };
 
   type PageItem =
     | { kind: "ut"; contract: ContractForProvvigioneRow }
@@ -719,7 +859,7 @@ export async function fetchExpandedProvvigionePage(args: {
       items.push({ kind: "ut", contract: contract as ContractForProvvigioneRow });
     }
     const remaining = take - utTake;
-    if (remaining > 0) {
+    if (remaining > 0 && rateWhere) {
       const rates = await prisma.recurringMonth.findMany({
         where: rateWhere,
         orderBy: [{ period: "desc" }, { contractId: "asc" }],
@@ -743,7 +883,7 @@ export async function fetchExpandedProvvigionePage(args: {
         });
       }
     }
-  } else {
+  } else if (rateWhere) {
     const rateSkip = skip - utCount;
     const rates = await prisma.recurringMonth.findMany({
       where: rateWhere,
@@ -780,15 +920,17 @@ export async function fetchExpandedProvvigionePage(args: {
     earlyMap: stornoMaps.earlyMap,
   };
 
-  const rows: ProvvigioneRow[] = items.map((item) =>
-    item.kind === "ut"
-      ? buildSingleRow(item.contract, buildOpts)
-      : buildSingleRow(item.contract, buildOpts, {
-          period: item.rate.period,
-          status: item.rate.status,
-          amount: monthAmount(item.rate, item.contract),
-        }),
-  );
+  const rows: ProvvigioneRow[] = items
+    .map((item) =>
+      item.kind === "ut"
+        ? buildSingleRow(item.contract, buildOpts)
+        : buildSingleRow(item.contract, buildOpts, {
+            period: item.rate.period,
+            status: item.rate.status,
+            amount: monthAmount(item.rate, item.contract),
+          }),
+    )
+    .filter((row) => rowMatchesStatoFilter(row, args.buildOpts.statoFilter));
 
   const contracts = [
     ...new Map(items.map((i) => [i.contract.id, i.contract])).values(),

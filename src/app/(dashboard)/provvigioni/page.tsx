@@ -275,7 +275,7 @@ export default async function ProvvigioniPage({
     effectiveCompetence,
   );
   const total = expandMode
-    ? await countExpandedListRows(contractWhere, expandMode)
+    ? await countExpandedListRows(contractWhere, expandMode, stato)
     : await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
@@ -505,6 +505,7 @@ export default async function ProvvigioniPage({
     latestMap: new Map<string, boolean>(),
     earlyMap: new Map<string, boolean>(),
     now: new Date(),
+    statoFilter: stato,
   };
   let prebuiltExpandedRows: ProvvigioneRow[] | null = null;
 
@@ -562,23 +563,8 @@ export default async function ProvvigioniPage({
     }
 
     const hasDate = Boolean(c.collectionDate) && inFornitura;
-    // NON riscrivere KO/CHIUSO → Incassato solo perché c’è collectionDate.
-    // Solo se già in fornitura.
-    if (hasDate && c.status === "IN_ATTESA_PAGAMENTO") {
-      (c as { status: string }).status = "PAGATO_DAL_FORNITORE";
-      (c as { paymentStatus: string | null }).paymentStatus = "Incassato";
-      alignJobs.push(
-        prisma.contract
-          .update({
-            where: { id: c.id },
-            data: {
-              status: "PAGATO_DAL_FORNITORE",
-              paymentStatus: "Incassato",
-            },
-          })
-          .catch(() => null),
-      );
-    }
+    // «In pagamento» resta Da incassare: il Master lo usa finché il fornitore
+    // non ha davvero liquidato. Non promuovere a Pagato dal fornitore.
     if (c.client.type === "PRIVATO" && c.commission) {
       const target = defaultGettonePrivato(c.supplier.name);
       const current = Number(c.commission.expected ?? 0);
@@ -802,6 +788,7 @@ export default async function ProvvigioniPage({
     q,
     focus,
     stato,
+    ...(vistaTab !== "tutti" ? { vista: vistaTab } : {}),
     ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
   };
 

@@ -17,6 +17,7 @@ import {
   buildReportContractWhere,
   formatMonthsLabel,
   reportHasStato,
+  reportIncludesRecurring,
   reportIncludesStornos,
   reportPeriodUsesCollectionDate,
   reportRecurringCompetenceOnly,
@@ -60,10 +61,7 @@ export async function GET(req: NextRequest) {
   });
 
   const includeStornos = reportIncludesStornos(stati);
-  const includeRecurring =
-    reportHasStato(stati, "Incassato") ||
-    reportHasStato(stati, "Pagato") ||
-    reportHasStato(stati, "Tutti");
+  const includeRecurring = reportIncludesRecurring(stati);
   const onlyStornato =
     stati.length > 0 && stati.every((s) => s === "Stornato");
 
@@ -76,6 +74,7 @@ export async function GET(req: NextRequest) {
         supplierId,
         visibility,
         competenceOnly: reportRecurringCompetenceOnly(stato),
+        stato,
       })
     : [];
 
@@ -102,6 +101,7 @@ export async function GET(req: NextRequest) {
     recurringRows,
     skipRecurring: !includeRecurring,
     onlyStornato,
+    inlineRecurring: reportHasStato(stati, "Da incassare"),
   });
 
   const extras = parseReportExtras((k) => sp.get(k));
@@ -226,8 +226,14 @@ export async function GET(req: NextRequest) {
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(17, 94, 89);
+    const mainLabel = reportHasStato(stati, "Da incassare")
+      && !reportHasStato(stati, "Incassato")
+      && !reportHasStato(stati, "Pagato")
+      && !reportHasStato(stati, "Tutti")
+      ? "Da incassare per fornitore"
+      : "Incassato per fornitore";
     doc.text(
-      `Incassato per fornitore (${block.countIncassato}) - ${formatEuro(block.subIncassato)}`,
+      `${mainLabel} (${block.countIncassato}) - ${formatEuro(block.subIncassato)}`,
       14,
       y,
     );
@@ -237,8 +243,8 @@ export async function GET(req: NextRequest) {
     if (block.incassatoBySupplier.length === 0) {
       autoTable(doc, {
         startY: y,
-        head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
-        body: [["-", "Nessuna riga", "", "", "", ""]],
+        head: [["N. contratto", "Cliente", "POD/PDR", "Fornitore", "Collab.", "Data", "Importo"]],
+        body: [["-", "Nessuna riga", "", "", "", "", ""]],
         styles: { fontSize: 7 },
         headStyles: { fillColor: [20, 184, 166] },
         margin: { left: 14, right: 14 },
@@ -262,10 +268,11 @@ export async function GET(req: NextRequest) {
         y += 2;
         autoTable(doc, {
           startY: y,
-          head: [["N. contratto", "Cliente", "Collab.", "Data", "Importo"]],
+          head: [["N. contratto", "Cliente", "POD/PDR", "Collab.", "Data", "Importo"]],
           body: supplier.lines.map((l) => [
             l.contractNumber,
             l.clientName,
+            l.podPdr || "—",
             l.collaboratorName,
             l.dateLabel,
             formatEuro(l.amount),
@@ -283,6 +290,7 @@ export async function GET(req: NextRequest) {
               supplier.supplierName,
               "",
               "",
+              "",
               formatEuro(supplier.subtotal),
             ],
           ],
@@ -295,7 +303,7 @@ export async function GET(req: NextRequest) {
           },
           didParseCell: (data) => {
             // Colonna Importo: positivi verde, negativi rosso
-            if (data.column.index !== 4) return;
+            if (data.column.index !== 5) return;
             if (data.section === "body") {
               const amount = supplier.lines[data.row.index]?.amount ?? 0;
               data.cell.styles.textColor =
@@ -326,13 +334,14 @@ export async function GET(req: NextRequest) {
 
     autoTable(doc, {
       startY: y,
-      head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
+      head: [["N. contratto", "Cliente", "POD/PDR", "Fornitore", "Collab.", "Data", "Importo"]],
       body:
         block.storni.length === 0
-          ? [["-", "Nessuno storno da recuperare", "", "", "", ""]]
+          ? [["-", "Nessuno storno da recuperare", "", "", "", "", ""]]
           : block.storni.map((l) => [
               l.contractNumber,
               l.clientName,
+              l.podPdr || "—",
               l.supplierName,
               l.collaboratorName,
               l.dateLabel,
@@ -346,7 +355,7 @@ export async function GET(req: NextRequest) {
       },
       margin: { left: 14, right: 14 },
       didParseCell: (data) => {
-        if (data.section === "body" && data.column.index === 5) {
+        if (data.section === "body" && data.column.index === 6) {
           data.cell.styles.textColor = [185, 28, 28];
           data.cell.styles.fontStyle = "bold";
         }
@@ -384,10 +393,11 @@ export async function GET(req: NextRequest) {
     y += 2;
     autoTable(doc, {
       startY: y,
-      head: [["N. contratto", "Cliente", "Fornitore", "Collab.", "Mesi pagati", "Importo"]],
+      head: [["N. contratto", "Cliente", "POD/PDR", "Fornitore", "Collab.", "Mesi pagati", "Importo"]],
       body: rendiconto.ricorrentiGrouped.map((l) => [
         l.contractNumber,
         l.clientName,
+        l.podPdr || "—",
         l.supplierName,
         l.collaboratorName,
         l.dateLabel,
@@ -406,6 +416,7 @@ export async function GET(req: NextRequest) {
           "",
           "",
           "",
+          "",
           `${rendiconto.countRicorrenti} contratti`,
           formatEuro(rendiconto.totRicorrenti),
         ],
@@ -417,7 +428,7 @@ export async function GET(req: NextRequest) {
         fontSize: 8,
       },
       didParseCell: (data) => {
-        if (data.section !== "body" || data.column.index !== 5) return;
+        if (data.section !== "body" || data.column.index !== 6) return;
         const amount = rendiconto.ricorrentiGrouped[data.row.index]?.amount ?? 0;
         data.cell.styles.textColor =
           amount < 0 ? [185, 28, 28] : [4, 120, 87];

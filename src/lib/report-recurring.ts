@@ -5,7 +5,11 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { parseFilterList, resolveReportPeriod } from "@/lib/report-filters";
+import {
+  parseFilterList,
+  reportRecurringStatusWhere,
+  resolveReportPeriod,
+} from "@/lib/report-filters";
 import { REPORT_MONTH_LABELS } from "@/lib/report-month";
 
 export type ReportRecurringRow = {
@@ -124,7 +128,7 @@ function periodsInRange(from: string, to: string, month?: string | null): string
 }
 
 /**
- * Rate PAID nel periodo Report:
+ * Rate ricorrenti nel periodo Report:
  * - competenza (`period`) nel range, oppure
  * - mese bonifico (`settledPeriod`) nel range
  *
@@ -143,6 +147,8 @@ export async function loadReportRecurringPaid(params: {
    * Evita rate vecchie (es. 2025-05) incluse solo perché il bonifico è a luglio.
    */
   competenceOnly?: boolean;
+  /** Stato report: Incassato → PAID, Pagato → LIQUIDATED */
+  stato?: string | null;
 }): Promise<ReportRecurringRow[]> {
   const period = resolveReportPeriod(params);
   const periods = periodsInRange(period.from, period.to, period.month);
@@ -159,7 +165,7 @@ export async function loadReportRecurringPaid(params: {
 
   const rows = await prisma.recurringMonth.findMany({
     where: {
-      status: "PAID",
+      ...reportRecurringStatusWhere(params.stato),
       ...periodWhere,
       contract: {
         AND: [
@@ -185,6 +191,8 @@ export async function loadReportRecurringPaid(params: {
           id: true,
           contractNumber: true,
           podPdr: true,
+          pod: true,
+          pdr: true,
           collaboratorId: true,
           collaborator: { select: { name: true } },
           supplier: { select: { name: true } },
@@ -217,7 +225,7 @@ export async function loadReportRecurringPaid(params: {
       amount: Number(m.amount ?? 0),
       paidAt: m.paidAt,
       contractNumber: m.contract.contractNumber,
-      podPdr: m.contract.podPdr,
+      podPdr: (m.contract.podPdr || m.contract.pod || m.contract.pdr || "").trim(),
       collaboratorId: m.contract.collaboratorId,
       collaboratorName: m.contract.collaborator.name,
       supplierName: m.contract.supplier.name,

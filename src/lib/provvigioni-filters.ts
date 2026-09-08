@@ -142,12 +142,32 @@ function provvigioneStatoWhereOne(
     return { status: { equals: "DA_CONTROLLARE" } };
   }
   if (s === "Stornato") {
-    // Da applicare: Storno Sì, gettone non ancora recuperato.
-    // Recuperato (status STORNATO) esce dalla lista.
+    // Da applicare: Storno Sì, gettone non ancora recuperato, già incassato.
+    // Mai incassato non è uno storno. Recuperato (STORNATO) esce dalla lista.
     return {
       AND: [
         { commission: { stornoDate: { not: null } } },
         { status: { not: "STORNATO" } },
+        {
+          OR: [
+            {
+              AND: [
+                nonRecurringWhere,
+                { collectionDate: { not: null } },
+              ],
+            },
+            {
+              AND: [
+                { OR: recurringWhereOr },
+                {
+                  recurringMonths: {
+                    some: { status: { in: ["PAID", "LIQUIDATED"] } },
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     };
   }
@@ -155,6 +175,7 @@ function provvigioneStatoWhereOne(
     const competence = opts?.competencePeriod?.trim();
     const excludedStatus = [
       "PROVVIGIONE_LIQUIDATA",
+      "IN_ATTESA_PAGAMENTO",
       "DA_CONTROLLARE",
       "STORNATO",
       ...KO_STATUSES,
@@ -175,7 +196,10 @@ function provvigioneStatoWhereOne(
           ],
         },
         {
-          recurringMonths: { some: recurringPaid },
+          AND: [
+            { OR: recurringWhereOr },
+            { recurringMonths: { some: recurringPaid } },
+          ],
         },
       ],
     };
@@ -189,9 +213,11 @@ function provvigioneStatoWhereOne(
     return {
       status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
       OR: [
+        { status: "IN_ATTESA_PAGAMENTO" },
         {
           AND: [
             nonRecurringWhere,
+            { status: { not: "PROVVIGIONE_LIQUIDATA" } },
             {
               OR: [
                 { collectionDate: null },
@@ -202,7 +228,10 @@ function provvigioneStatoWhereOne(
           ],
         },
         {
-          recurringMonths: { some: missingRate },
+          AND: [
+            { OR: recurringWhereOr },
+            { recurringMonths: { some: missingRate } },
+          ],
         },
       ],
     };
@@ -211,17 +240,19 @@ function provvigioneStatoWhereOne(
     const competence = opts?.competencePeriod?.trim();
     return {
       OR: [
+        { status: { equals: "PROVVIGIONE_LIQUIDATA" } },
         {
-          status: { equals: "PROVVIGIONE_LIQUIDATA" },
-          supplyStartDate: { lte: today },
-        },
-        {
-          recurringMonths: {
-            some: {
-              status: "LIQUIDATED",
-              ...(competence ? { period: competence } : {}),
+          AND: [
+            { OR: recurringWhereOr },
+            {
+              recurringMonths: {
+                some: {
+                  status: "LIQUIDATED",
+                  ...(competence ? { period: competence } : {}),
+                },
+              },
             },
-          },
+          ],
         },
       ],
     };
@@ -321,7 +352,13 @@ export function buildProvvigioniContractWhere(
   if (recurrenceMode === "only") {
     and.push({ OR: recurringWhereOr });
   } else if (recurrenceMode === "monthly") {
-    and.push({ OR: recurringMonthlyWhereOr });
+    const monthly = { OR: recurringMonthlyWhereOr };
+    // In pagamento deve comparire in Da incassare anche se il contratto è R/UT.
+    and.push(
+      statoParts.includes("Da incassare")
+        ? { OR: [monthly, { status: "IN_ATTESA_PAGAMENTO" }] }
+        : monthly,
+    );
   } else if (recurrenceMode === "annual") {
     and.push({ OR: recurringAnnualWhereOr });
   } else if (recurrenceMode === "exclude") {
@@ -422,27 +459,43 @@ export function provvigioniCompetenceWhere(
   stato?: string | null,
 ): Prisma.ContractWhereInput {
   const stati = parseStatoFilter(stato);
-  if (stati.length === 1 && stati[0] === "Incassato") {
-    return {
-      recurringMonths: {
-        some: { period, status: "PAID" },
-      },
-    };
+  const monthOrs: Prisma.ContractWhereInput[] = [];
+  if (stati.includes("Incassato")) {
+    monthOrs.push({
+      recurringMonths: { some: { period, status: "PAID" } },
+    });
   }
-  if (stati.length === 1 && stati[0] === "Pagato") {
-    return { recurringMonths: { some: { period, status: "LIQUIDATED" } } };
+  if (stati.includes("Pagato")) {
+    monthOrs.push({
+      recurringMonths: { some: { period, status: "LIQUIDATED" } },
+    });
   }
-  if (stati.length === 1 && stati[0] === "Da incassare") {
-    return {
+  if (stati.includes("Da incassare")) {
+    monthOrs.push({
       recurringMonths: {
         some: {
           period,
           status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
         },
       },
-    };
+    });
+    monthOrs.push({ status: "IN_ATTESA_PAGAMENTO" });
   }
-  return { recurringMonths: { some: { period, status: { not: "CLOSED" } } } };
+  if (stati.includes("Stornato") && monthOrs.length === 0) {
+    monthOrs.push({
+      recurringMonths: {
+        some: { period, status: { in: ["PAID", "LIQUIDATED"] } },
+      },
+    });
+  }
+  if (monthOrs.length === 1) return monthOrs[0]!;
+  if (monthOrs.length > 1) return { OR: monthOrs };
+  return {
+    OR: [
+      { recurringMonths: { some: { period, status: { not: "CLOSED" } } } },
+      { status: "IN_ATTESA_PAGAMENTO" },
+    ],
+  };
 }
 
 export type ProvvigioniTotals = {

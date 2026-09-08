@@ -91,6 +91,17 @@ export function reportIncludesStornos(stato: string | string[]): boolean {
   return list.includes("Stornato");
 }
 
+/** Rate ricorrenti nel Report: Incassato / Pagato / Da incassare / Tutti. */
+export function reportIncludesRecurring(stato: string | string[]): boolean {
+  const list = Array.isArray(stato) ? stato : resolveReportStati(stato);
+  if (list.includes("Tutti")) return true;
+  return (
+    list.includes("Incassato") ||
+    list.includes("Pagato") ||
+    list.includes("Da incassare")
+  );
+}
+
 /**
  * Intervallo date in Europe/Rome (allineato alla colonna Incasso MM/AAAA).
  * Evita che su Vercel (UTC) un 01/06 Roma finisca fuori dal mese.
@@ -130,7 +141,37 @@ export function reportPeriodUsesCollectionDate(stato: string): boolean {
  */
 export function reportRecurringCompetenceOnly(stato: string): boolean {
   const stati = resolveReportStati(stato);
-  return stati.some((s) => s === "Incassato" || s === "Pagato");
+  return stati.some(
+    (s) => s === "Incassato" || s === "Pagato" || s === "Da incassare",
+  );
+}
+
+/**
+ * Incassato = rate PAID (fornitore ha pagato, da liquidare).
+ * Pagato = rate LIQUIDATED (già versate al collaboratore).
+ * Tutti / mix = entrambe.
+ */
+export function reportRecurringStatusWhere(
+  stato?: string | null,
+): Prisma.RecurringMonthWhereInput {
+  const stati = resolveReportStati(stato);
+  const statuses: Array<
+    "PAID" | "LIQUIDATED" | "MISSING" | "PENDING" | "ERROR_UNPAID"
+  > = [];
+  if (stati.includes("Tutti") || stati.includes("Incassato")) {
+    statuses.push("PAID");
+  }
+  if (stati.includes("Tutti") || stati.includes("Pagato")) {
+    statuses.push("LIQUIDATED");
+  }
+  if (stati.includes("Da incassare")) {
+    statuses.push("MISSING", "PENDING", "ERROR_UNPAID");
+  }
+  if (statuses.length === 0) {
+    return { status: "PAID" };
+  }
+  if (statuses.length === 1) return { status: statuses[0]! };
+  return { status: { in: statuses } };
 }
 
 export function reportPeriodUsesStornoDate(stato: string): boolean {

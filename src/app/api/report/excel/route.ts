@@ -24,6 +24,7 @@ import {
   buildReportContractWhere,
   formatMonthsLabel,
   reportHasStato,
+  reportIncludesRecurring,
   reportIncludesStornos,
   reportPeriodUsesCollectionDate,
   reportPeriodUsesStornoDate,
@@ -130,14 +131,12 @@ export async function GET(req: NextRequest) {
     supplierId,
     visibility,
     competenceOnly: reportRecurringCompetenceOnly(stato),
+    stato,
   });
   const recurringTotals = sumReportRecurring(recurringRows);
 
   const includeStornos = reportIncludesStornos(stati);
-  const includeRecurring =
-    reportHasStato(stati, "Incassato") ||
-    reportHasStato(stati, "Pagato") ||
-    reportHasStato(stati, "Tutti");
+  const includeRecurring = reportIncludesRecurring(stati);
   const onlyStornato =
     stati.length > 0 && stati.every((s) => s === "Stornato");
 
@@ -165,6 +164,7 @@ export async function GET(req: NextRequest) {
     recurringRows: includeRecurring ? recurringRows : [],
     skipRecurring: !includeRecurring,
     onlyStornato,
+    inlineRecurring: reportHasStato(stati, "Da incassare"),
   });
 
   const extras = parseReportExtras((k) => sp.get(k));
@@ -199,7 +199,7 @@ export async function GET(req: NextRequest) {
     "",
   ]);
   titleRow.font = { bold: true, size: 16, color: { argb: "FF0F172A" } };
-  rend.mergeCells(1, 1, 1, 7);
+  rend.mergeCells(1, 1, 1, 8);
 
   rend.addRow([`Periodo: ${periodLabelText}`]);
   rend.addRow([`Stato filtro: ${stato}`]);
@@ -267,12 +267,13 @@ export async function GET(req: NextRequest) {
     "",
   ]);
   styleSection(detailTitle, "FF334155", "FFFFFFFF");
-  rend.mergeCells(detailTitle.number, 1, detailTitle.number, 7);
+  rend.mergeCells(detailTitle.number, 1, detailTitle.number, 8);
 
   const detailHeader = rend.addRow([
     "Sezione",
     "N. contratto",
     "Cliente",
+    "POD/PDR",
     "Fornitore",
     "Collaboratore",
     "Data",
@@ -290,19 +291,34 @@ export async function GET(req: NextRequest) {
         "",
         "",
         "",
+        "",
       ]);
       styleSection(monthTitle, "FFE0E7FF", "FF312E81");
-      rend.mergeCells(monthTitle.number, 1, monthTitle.number, 7);
+      rend.mergeCells(monthTitle.number, 1, monthTitle.number, 8);
     }
 
     // Incassato — un blocco per fornitore (senza totale generico)
     if (block.incassatoBySupplier.length === 0) {
-      rend.addRow(["Incassato", "(nessuna riga)", "", "", "", "", ""]);
+      rend.addRow([
+        reportHasStato(stati, "Da incassare") &&
+        !reportHasStato(stati, "Incassato") &&
+        !reportHasStato(stati, "Tutti")
+          ? "Da incassare"
+          : "Incassato",
+        "(nessuna riga)",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ]);
     } else {
       for (const supplier of block.incassatoBySupplier) {
         const supTitle = rend.addRow([
           `Fornitore: ${supplier.supplierName}`,
           `${supplier.count} contratti`,
+          "",
           "",
           "",
           "",
@@ -315,12 +331,13 @@ export async function GET(req: NextRequest) {
             "Incassato",
             line.contractNumber,
             line.clientName,
+            line.podPdr || "",
             line.supplierName,
             line.collaboratorName,
             line.dateLabel,
             line.amount,
           ]);
-          styleAmountCell(r.getCell(7), line.amount);
+          styleAmountCell(r.getCell(8), line.amount);
         }
         const subSup = rend.addRow([
           `Subtotale ${supplier.supplierName}`,
@@ -329,10 +346,11 @@ export async function GET(req: NextRequest) {
           "",
           "",
           "",
+          "",
           supplier.subtotal,
         ]);
         styleSubtotal(subSup);
-        subSup.getCell(7).font = {
+        subSup.getCell(8).font = {
           bold: true,
           color: {
             argb: supplier.subtotal < 0 ? "FFFECACA" : "FFA7F3D0",
@@ -342,22 +360,23 @@ export async function GET(req: NextRequest) {
     }
 
     if (includeStornos) {
-    const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", ""]);
+    const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", "", ""]);
     styleSection(stoTitle, "FFFFE4E6", "FF9F1239");
     if (block.storni.length === 0) {
-      rend.addRow(["", "(nessuno storno da recuperare)", "", "", "", "", ""]);
+      rend.addRow(["", "(nessuno storno da recuperare)", "", "", "", "", "", ""]);
     } else {
       for (const line of block.storni) {
         const r = rend.addRow([
           "Storno",
           line.contractNumber,
           line.clientName,
+          line.podPdr || "",
           line.supplierName,
           line.collaboratorName,
           line.dateLabel,
           line.amount,
         ]);
-        r.getCell(7).font = { color: { argb: "FFB91C1C" }, bold: true };
+        r.getCell(8).font = { color: { argb: "FFB91C1C" }, bold: true };
       }
     }
     const subSto = rend.addRow([
@@ -367,10 +386,11 @@ export async function GET(req: NextRequest) {
       "",
       "",
       "",
+      "",
       block.subStorni,
     ]);
     styleSubtotal(subSto, "FF9F1239");
-    subSto.getCell(7).font = { bold: true, color: { argb: "FFFECACA" } };
+    subSto.getCell(8).font = { bold: true, color: { argb: "FFFECACA" } };
     }
 
     if (rendiconto.months.length > 1) {
@@ -381,10 +401,11 @@ export async function GET(req: NextRequest) {
         "",
         "",
         "",
+        "",
         block.subNetto,
       ]);
       styleSubtotal(subNet, "FFB45309");
-      subNet.getCell(7).font = {
+      subNet.getCell(8).font = {
         bold: true,
         color: { argb: block.subNetto < 0 ? "FFFECACA" : "FFFEF3C7" },
       };
@@ -401,6 +422,7 @@ export async function GET(req: NextRequest) {
       "",
       "",
       "",
+      "",
       rendiconto.totRicorrenti,
     ]);
     styleSection(ricTitle, "FF6B21A8", "FFFFFFFF");
@@ -409,12 +431,13 @@ export async function GET(req: NextRequest) {
         "Ricorrente",
         line.contractNumber,
         line.clientName,
+        line.podPdr || "",
         line.supplierName,
         line.collaboratorName,
         line.dateLabel,
         line.amount,
       ]);
-      styleAmountCell(r.getCell(7), line.amount);
+      styleAmountCell(r.getCell(8), line.amount);
     }
     const subRic = rend.addRow([
       "Somma ricorrenti",
@@ -423,10 +446,11 @@ export async function GET(req: NextRequest) {
       "",
       "",
       "",
+      "",
       rendiconto.totRicorrenti,
     ]);
     styleSubtotal(subRic, "FF6B21A8");
-    subRic.getCell(7).font = {
+    subRic.getCell(8).font = {
       bold: true,
       color: { argb: "FFE9D5FF" },
     };
@@ -442,17 +466,18 @@ export async function GET(req: NextRequest) {
     "",
     "",
     "",
+    "",
     grandNetto,
   ]);
   styleSubtotal(finalTot, "FF065F46");
-  finalTot.getCell(7).font = {
+  finalTot.getCell(8).font = {
     bold: true,
     size: 13,
     color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
   };
 
   // Formato numeri colonna importo
-  rend.getColumn(7).numFmt = '#,##0.00';
+  rend.getColumn(8).numFmt = '#,##0.00';
 
   // ─── Foglio 2: Contratti (dettaglio classico) ───
   const sheet = workbook.addWorksheet("Contratti");
@@ -461,6 +486,7 @@ export async function GET(req: NextRequest) {
     { header: "Data inserimento", key: "insertion", width: 14 },
     { header: "Data incasso", key: "collection", width: 14 },
     { header: "Cliente", key: "client", width: 28 },
+    { header: "POD/PDR", key: "podPdr", width: 22 },
     { header: "Fornitore", key: "supplier", width: 20 },
     { header: "Collaboratore", key: "collaborator", width: 20 },
     { header: "Stato pratica", key: "status", width: 24 },
@@ -487,6 +513,7 @@ export async function GET(req: NextRequest) {
         ? contract.collectionDate.toISOString().slice(0, 10)
         : "",
       client: clientDisplayName(contract.client),
+      podPdr: (contract.podPdr || contract.pod || contract.pdr || "").trim(),
       supplier: contract.supplier.name,
       collaborator: contract.collaborator.name,
       status: CONTRACT_STATUS_LABELS[contract.status],
@@ -540,6 +567,7 @@ export async function GET(req: NextRequest) {
   const sheet3 = workbook.addWorksheet("Storni");
   sheet3.columns = [
     { header: "Cliente", key: "client", width: 28 },
+    { header: "POD/PDR", key: "podPdr", width: 22 },
     { header: "Fornitore", key: "supplier", width: 18 },
     { header: "Collaboratore", key: "collaborator", width: 18 },
     { header: "Mese storno", key: "period", width: 12 },
@@ -551,6 +579,7 @@ export async function GET(req: NextRequest) {
   for (const s of stornoRows) {
     const row = sheet3.addRow({
       client: s.clientName,
+      podPdr: s.podPdr || "",
       supplier: s.supplierName,
       collaborator: s.collaboratorName,
       period: s.period,
