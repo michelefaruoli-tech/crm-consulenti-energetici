@@ -57,7 +57,7 @@ export const CONTRACT_STATUS_LABELS: Record<AppContractStatus, string> = {
   ERRORE_INVIO: "Errore invio",
   IN_LAVORAZIONE: "In lavorazione",
   ATTIVATO: "Attivato",
-  IN_ATTESA_PAGAMENTO: "In pagamento",
+  IN_ATTESA_PAGAMENTO: "Da incassare",
   PAGATO_DAL_FORNITORE: "Pagato dal fornitore",
   PROVVIGIONE_LIQUIDATA: "Provvigione liquidata",
   STORNATO: "Stornato",

@@ -35,6 +35,16 @@ export function reportPodPdr(source: {
   return (source.podPdr || source.pod || source.pdr || "").trim();
 }
 
+/** Cliente con POD/PDR nella stessa colonna, solo se presente. */
+export function reportClienteLabel(
+  clientName: string,
+  podPdr?: string | null,
+): string {
+  const name = clientName.trim() || "—";
+  const pod = (podPdr || "").trim();
+  return pod ? `${name} · ${pod}` : name;
+}
+
 /**
  * Importo «Incassato» nel Report = stesso gettone della colonna Gettone in Provvigioni
  * (`expected`, o default fornitore se expected è 0).

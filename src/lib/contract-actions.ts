@@ -125,6 +125,14 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       where: { id: contractId },
       data: {
         status,
+        ...(status === "IN_ATTESA_PAGAMENTO"
+          ? {
+              paymentStatus: "Da incassare",
+              collectionDate: null,
+              workCompletedAt: new Date(),
+              workStatus: "IN_ATTESA_PAGAMENTO",
+            }
+          : {}),
         ...(status === "KO" || status === "ANNULLATO"
           ? { koReason: closureReason, koNotes: closureNotes || null }
           : {}),
@@ -159,6 +167,7 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     revalidatePath("/");
     revalidatePath("/contratti");
     revalidatePath("/lavorazione");
+    revalidatePath("/provvigioni");
     revalidatePath(`/contratti/${contractId}`);
     revalidatePath(`/lavorazione/${contractId}`);
   } else if (field === "notes") {

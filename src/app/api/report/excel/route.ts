@@ -15,7 +15,7 @@ import {
   loadReportStornos,
   sumReportStornos,
 } from "@/lib/report-stornos";
-import { buildRendiconto } from "@/lib/report-rendiconto";
+import { buildRendiconto, reportClienteLabel } from "@/lib/report-rendiconto";
 import {
   parseReportExtras,
   sumReportExtras,
@@ -264,16 +264,13 @@ export async function GET(req: NextRequest) {
     "",
     "",
     "",
-    "",
   ]);
   styleSection(detailTitle, "FF334155", "FFFFFFFF");
-  rend.mergeCells(detailTitle.number, 1, detailTitle.number, 8);
+  rend.mergeCells(detailTitle.number, 1, detailTitle.number, 6);
 
   const detailHeader = rend.addRow([
     "Sezione",
-    "N. contratto",
     "Cliente",
-    "POD/PDR",
     "Fornitore",
     "Collaboratore",
     "Data",
@@ -290,11 +287,9 @@ export async function GET(req: NextRequest) {
         "",
         "",
         "",
-        "",
-        "",
       ]);
       styleSection(monthTitle, "FFE0E7FF", "FF312E81");
-      rend.mergeCells(monthTitle.number, 1, monthTitle.number, 8);
+      rend.mergeCells(monthTitle.number, 1, monthTitle.number, 6);
     }
 
     // Incassato — un blocco per fornitore (senza totale generico)
@@ -310,8 +305,6 @@ export async function GET(req: NextRequest) {
         "",
         "",
         "",
-        "",
-        "",
       ]);
     } else {
       for (const supplier of block.incassatoBySupplier) {
@@ -321,23 +314,19 @@ export async function GET(req: NextRequest) {
           "",
           "",
           "",
-          "",
-          "",
           supplier.subtotal,
         ]);
         styleSection(supTitle, "FF0F766E", "FFFFFFFF");
         for (const line of supplier.lines) {
           const r = rend.addRow([
             "Incassato",
-            line.contractNumber,
-            line.clientName,
-            line.podPdr || "",
+            reportClienteLabel(line.clientName, line.podPdr),
             line.supplierName,
             line.collaboratorName,
             line.dateLabel,
             line.amount,
           ]);
-          styleAmountCell(r.getCell(8), line.amount);
+          styleAmountCell(r.getCell(6), line.amount);
         }
         const subSup = rend.addRow([
           `Subtotale ${supplier.supplierName}`,
@@ -345,12 +334,10 @@ export async function GET(req: NextRequest) {
           "",
           "",
           "",
-          "",
-          "",
           supplier.subtotal,
         ]);
         styleSubtotal(subSup);
-        subSup.getCell(8).font = {
+        subSup.getCell(6).font = {
           bold: true,
           color: {
             argb: supplier.subtotal < 0 ? "FFFECACA" : "FFA7F3D0",
@@ -360,23 +347,21 @@ export async function GET(req: NextRequest) {
     }
 
     if (includeStornos) {
-    const stoTitle = rend.addRow(["STORNI", "", "", "", "", "", "", ""]);
+    const stoTitle = rend.addRow(["STORNI", "", "", "", "", ""]);
     styleSection(stoTitle, "FFFFE4E6", "FF9F1239");
     if (block.storni.length === 0) {
-      rend.addRow(["", "(nessuno storno da recuperare)", "", "", "", "", "", ""]);
+      rend.addRow(["", "(nessuno storno da recuperare)", "", "", "", ""]);
     } else {
       for (const line of block.storni) {
         const r = rend.addRow([
           "Storno",
-          line.contractNumber,
-          line.clientName,
-          line.podPdr || "",
+          reportClienteLabel(line.clientName, line.podPdr),
           line.supplierName,
           line.collaboratorName,
           line.dateLabel,
           line.amount,
         ]);
-        r.getCell(8).font = { color: { argb: "FFB91C1C" }, bold: true };
+        r.getCell(6).font = { color: { argb: "FFB91C1C" }, bold: true };
       }
     }
     const subSto = rend.addRow([
@@ -385,12 +370,10 @@ export async function GET(req: NextRequest) {
       "",
       "",
       "",
-      "",
-      "",
       block.subStorni,
     ]);
     styleSubtotal(subSto, "FF9F1239");
-    subSto.getCell(8).font = { bold: true, color: { argb: "FFFECACA" } };
+    subSto.getCell(6).font = { bold: true, color: { argb: "FFFECACA" } };
     }
 
     if (rendiconto.months.length > 1) {
@@ -400,12 +383,10 @@ export async function GET(req: NextRequest) {
         "",
         "",
         "",
-        "",
-        "",
         block.subNetto,
       ]);
       styleSubtotal(subNet, "FFB45309");
-      subNet.getCell(8).font = {
+      subNet.getCell(6).font = {
         bold: true,
         color: { argb: block.subNetto < 0 ? "FFFECACA" : "FFFEF3C7" },
       };
@@ -421,23 +402,19 @@ export async function GET(req: NextRequest) {
       "",
       "",
       "",
-      "",
-      "",
       rendiconto.totRicorrenti,
     ]);
     styleSection(ricTitle, "FF6B21A8", "FFFFFFFF");
     for (const line of rendiconto.ricorrentiGrouped) {
       const r = rend.addRow([
         "Ricorrente",
-        line.contractNumber,
-        line.clientName,
-        line.podPdr || "",
+        reportClienteLabel(line.clientName, line.podPdr),
         line.supplierName,
         line.collaboratorName,
         line.dateLabel,
         line.amount,
       ]);
-      styleAmountCell(r.getCell(8), line.amount);
+      styleAmountCell(r.getCell(6), line.amount);
     }
     const subRic = rend.addRow([
       "Somma ricorrenti",
@@ -445,12 +422,10 @@ export async function GET(req: NextRequest) {
       "",
       "",
       "",
-      "",
-      "",
       rendiconto.totRicorrenti,
     ]);
     styleSubtotal(subRic, "FF6B21A8");
-    subRic.getCell(8).font = {
+    subRic.getCell(6).font = {
       bold: true,
       color: { argb: "FFE9D5FF" },
     };
@@ -465,19 +440,17 @@ export async function GET(req: NextRequest) {
     "",
     "",
     "",
-    "",
-    "",
     grandNetto,
   ]);
   styleSubtotal(finalTot, "FF065F46");
-  finalTot.getCell(8).font = {
+  finalTot.getCell(6).font = {
     bold: true,
     size: 13,
     color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
   };
 
   // Formato numeri colonna importo
-  rend.getColumn(8).numFmt = '#,##0.00';
+  rend.getColumn(6).numFmt = '#,##0.00';
 
   // ─── Foglio 2: Contratti (dettaglio classico) ───
   const sheet = workbook.addWorksheet("Contratti");

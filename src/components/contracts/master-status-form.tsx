@@ -12,7 +12,7 @@ import {
 
 /**
  * Form esito lavorazione Master.
- * Tre scelte: In pagamento · Richiesta integrazione · KO
+ * Tre scelte: Da incassare · Richiesta integrazione · KO
  * (+ opzione «In lavorazione» per rimettere in coda).
  */
 export function MasterStatusForm({
@@ -80,8 +80,8 @@ export function MasterStatusForm({
 
       {status === "IN_ATTESA_PAGAMENTO" ? (
         <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-900">
-          <strong>In pagamento</strong>: la pratica è ok. Il gettone e i pagamenti
-          si gestiscono in Provvigioni.
+          <strong>Da incassare</strong>: la pratica è ok e passa subito in
+          Provvigioni (stato Da incassare).
         </div>
       ) : null}
 

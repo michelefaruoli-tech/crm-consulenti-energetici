@@ -28,7 +28,7 @@ function statusLabel(status: string): string {
 
 /**
  * Email all’agente/collaboratore quando Admin/Backoffice cambia lo stato
- * da In lavorazione → In pagamento / Richiesta integrazione / KO.
+ * da In lavorazione → Da incassare / Richiesta integrazione / KO.
  * Non blocca il flusso se SMTP fallisce.
  */
 export async function notifyCollaboratorStatusChange(opts: {
@@ -119,7 +119,7 @@ export async function notifyCollaboratorStatusChange(opts: {
     } else if (opts.toStatus === "IN_ATTESA_PAGAMENTO") {
       lines.push(
         "",
-        "La pratica è in pagamento: il fornitore risulta in fase di liquidazione della provvigione.",
+        "La pratica è da incassare: il gettone è in Provvigioni in attesa del pagamento del fornitore.",
       );
     } else if (opts.toStatus === "KO") {
       lines.push("", "La pratica è stata chiusa come KO.");

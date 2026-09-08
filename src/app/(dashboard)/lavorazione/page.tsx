@@ -171,13 +171,12 @@ export default async function LavorazionePage({
             </>
           ) : (
             <>
-              Solo pratiche con stato «In lavorazione». I KO non compaiono qui:
-              aprili dalla scheda rossa sotto. Pagamenti e attivazioni si gestiscono
-              in{" "}
-              <Link href="/provvigioni" className="text-emerald-700 underline">
+              Solo pratiche con stato «In lavorazione». L’esito{" "}
+              <strong>Da incassare</strong> le porta in{" "}
+              <Link href="/provvigioni?stato=Da%20incassare" className="text-emerald-700 underline">
                 Provvigioni
               </Link>
-              .
+              . I KO non compaiono qui: aprili dalla scheda rossa sotto.
             </>
           )}
         </p>

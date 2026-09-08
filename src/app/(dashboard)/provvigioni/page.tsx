@@ -537,7 +537,7 @@ export default async function ProvvigioniPage({
     if (
       c.collectionDate &&
       !inFornitura &&
-      !["KO", "ANNULLATO", "CHIUSO", "DA_CONTROLLARE", "STORNATO"].includes(c.status)
+      !["KO", "ANNULLATO", "CHIUSO", "DA_CONTROLLARE", "STORNATO", "PROVVIGIONE_LIQUIDATA"].includes(c.status)
     ) {
       const prevStatus = c.status;
       (c as { collectionDate: Date | null }).collectionDate = null;

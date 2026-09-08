@@ -578,15 +578,32 @@ export function ProvvigioniFilterTable({
       return;
     }
 
-    const changes: Array<{ commissionId: string; field: string; value: string }> = [];
+    const changes: Array<{
+      commissionId: string;
+      field: string;
+      value: string;
+      competencePeriod?: string;
+    }> = [];
     for (const [id, cells] of Object.entries(drafts)) {
       const base = rows.find((r) => rowId(r) === id);
       const commissionId = base ? commissionIdOf(base) : id;
       if (!commissionId) continue;
+      const fromRow = String((base as ProvvigioneRow | undefined)?.competencePeriod ?? "");
+      const fromKey = id.includes(":") ? id.split(":")[1] ?? "" : "";
+      const competencePeriod = /^\d{4}-\d{2}$/.test(fromRow)
+        ? fromRow
+        : /^\d{4}-\d{2}$/.test(fromKey)
+          ? fromKey
+          : undefined;
       for (const [colKey, value] of Object.entries(cells)) {
         const field = FIELD_MAP[colKey];
         if (!field) continue;
-        changes.push({ commissionId, field, value });
+        changes.push({
+          commissionId,
+          field,
+          value,
+          ...(competencePeriod ? { competencePeriod } : {}),
+        });
       }
     }
 

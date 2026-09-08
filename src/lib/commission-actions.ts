@@ -27,6 +27,7 @@ import {
   isRecurringMonthly,
   normalizeRecurrence,
   recurrenceWriteData,
+  toPeriod,
   type RecurrenceKind,
 } from "@/lib/recurring";
 import { contractVisibilityWhere } from "@/lib/user-scope";
@@ -53,30 +54,85 @@ type CommissionWithContract = {
     operationType: string | null;
     supplyStartDate: Date | null;
     status: string;
+    recurrence: string | null;
     deletedAt: Date | null;
     client: { type: string };
     supplier: { name: string };
   };
 };
 
+const CONTRACT_SELECT_FOR_EDIT = {
+  id: true,
+  clientId: true,
+  collaboratorId: true,
+  collectionDate: true,
+  insertionDate: true,
+  operationType: true,
+  supplyStartDate: true,
+  status: true,
+  recurrence: true,
+  deletedAt: true,
+  client: { select: { type: true } },
+  supplier: { select: { name: true } },
+} as const;
+
+async function applyRecurringMonthStato(args: {
+  contractId: string;
+  period: string;
+  kind: "pagato" | "incassato" | "da-incassare";
+}): Promise<void> {
+  const status =
+    args.kind === "pagato"
+      ? "LIQUIDATED"
+      : args.kind === "incassato"
+        ? "PAID"
+        : "MISSING";
+  const existing = await prisma.recurringMonth.findUnique({
+    where: {
+      contractId_period: {
+        contractId: args.contractId,
+        period: args.period,
+      },
+    },
+  });
+  const paidAt =
+    status === "MISSING" ? null : (existing?.paidAt ?? new Date());
+  const settledPeriod =
+    status === "LIQUIDATED"
+      ? args.period
+      : status === "MISSING"
+        ? null
+        : (existing?.settledPeriod ?? null);
+  if (existing) {
+    await prisma.recurringMonth.update({
+      where: { id: existing.id },
+      data: {
+        status,
+        paidAt,
+        settledPeriod,
+        note: existing.note ?? "Stato da tabella Provvigioni",
+      },
+    });
+    return;
+  }
+  await prisma.recurringMonth.create({
+    data: {
+      contractId: args.contractId,
+      period: args.period,
+      status,
+      paidAt,
+      settledPeriod,
+      note: "Stato da tabella Provvigioni",
+    },
+  });
+}
+
 async function loadCommission(commissionId: string) {
   return prisma.commission.findUnique({
     where: { id: commissionId },
     include: {
       contract: {
-        select: {
-          id: true,
-          clientId: true,
-          collaboratorId: true,
-          collectionDate: true,
-          insertionDate: true,
-          operationType: true,
-          supplyStartDate: true,
-          status: true,
-          deletedAt: true,
-          client: { select: { type: true } },
-          supplier: { select: { name: true } },
-        },
+        select: CONTRACT_SELECT_FOR_EDIT,
       },
     },
   });
@@ -89,17 +145,7 @@ async function resolveCommissionForEdit(commissionOrContractId: string) {
   const contract = await prisma.contract.findUnique({
     where: { id: commissionOrContractId },
     select: {
-      id: true,
-      clientId: true,
-      collaboratorId: true,
-      collectionDate: true,
-      insertionDate: true,
-      operationType: true,
-      supplyStartDate: true,
-      status: true,
-      deletedAt: true,
-      client: { select: { type: true } },
-      supplier: { select: { name: true } },
+      ...CONTRACT_SELECT_FOR_EDIT,
       commission: true,
     },
   });
@@ -130,6 +176,7 @@ async function applyCommissionField(
   commission: CommissionWithContract,
   field: string,
   value: string,
+  opts?: { competencePeriod?: string | null },
 ): Promise<void> {
   const canAll = hasPermission(session.role, "commissions.view_all");
   if (!canAll && commission.contract.collaboratorId !== session.id) {
@@ -441,9 +488,49 @@ async function applyCommissionField(
   } else if (field === "stato") {
     const raw = value.trim().toLowerCase();
     const contractId = commission.contractId;
+    const periodRaw = opts?.competencePeriod?.trim() ?? "";
+    const period = /^\d{4}-\d{2}$/.test(periodRaw) ? periodRaw : "";
+    const monthly = isRecurringMonthly(commission.contract.recurrence);
     const wasTerminal = ["KO", "ANNULLATO", "CHIUSO"].includes(
       commission.contract.status,
     );
+    if (monthly && !/ko|cessat|annull|chius|controll|^storn/.test(raw)) {
+      const kind = /pagat/.test(raw)
+        ? "pagato"
+        : /incass/.test(raw) && !/da\s*incass/.test(raw)
+          ? "incassato"
+          : "da-incassare";
+      const periods: string[] = [];
+      if (period) {
+        periods.push(period);
+      } else {
+        const existing = await prisma.recurringMonth.findMany({
+          where: {
+            contractId,
+            status: { not: "CLOSED" },
+            period: { lte: toPeriod(new Date()) },
+          },
+          select: { period: true },
+        });
+        periods.push(...existing.map((m) => m.period));
+      }
+      for (const p of periods) {
+        await applyRecurringMonthStato({ contractId, period: p, kind });
+      }
+      await writeAuditLog({
+        userId: session.id,
+        action: "UPDATE",
+        entity: "Contract",
+        entityId: contractId,
+        details: {
+          field: "stato",
+          to: value.trim(),
+          periods,
+          source: "provvigioni_table",
+        },
+      });
+      return;
+    }
     if (/ko|cessat|annull|chius/.test(raw)) {
       const wasPaid = Boolean(commission.contract.collectionDate);
       await prisma.contract.update({
@@ -781,7 +868,7 @@ export async function updateCommissionFieldAction(formData: FormData): Promise<v
 
 /**
  * Salva insieme molte modifiche cella (bozze dalla tabella Provvigioni).
- * Payload JSON: [{ commissionId, field, value }, ...] — max 500.
+ * Payload JSON: [{ commissionId, field, value, competencePeriod? }, ...] — max 2000.
  */
 export async function bulkUpdateCommissionFieldsAction(
   formData: FormData,
@@ -789,12 +876,18 @@ export async function bulkUpdateCommissionFieldsAction(
   try {
     const session = await requireSession();
     const raw = String(formData.get("changes") ?? "[]");
-    let changes: Array<{ commissionId: string; field: string; value: string }>;
+    let changes: Array<{
+      commissionId: string;
+      field: string;
+      value: string;
+      competencePeriod?: string;
+    }>;
     try {
       changes = JSON.parse(raw) as Array<{
         commissionId: string;
         field: string;
         value: string;
+        competencePeriod?: string;
       }>;
     } catch {
       return { ok: false, error: "Dati modifiche non validi" };
@@ -803,8 +896,8 @@ export async function bulkUpdateCommissionFieldsAction(
     if (!Array.isArray(changes) || changes.length === 0) {
       return { ok: false, error: "Nessuna modifica da salvare" };
     }
-    if (changes.length > 500) {
-      return { ok: false, error: "Troppe modifiche (max 500). Salva a gruppi." };
+    if (changes.length > 2000) {
+      return { ok: false, error: "Troppe modifiche (max 2000). Salva a gruppi." };
     }
 
     let count = 0;
@@ -836,19 +929,7 @@ export async function bulkUpdateCommissionFieldsAction(
       where: { id: { in: uniqueIds } },
       include: {
         contract: {
-          select: {
-            id: true,
-            clientId: true,
-            collaboratorId: true,
-            collectionDate: true,
-            insertionDate: true,
-            operationType: true,
-            supplyStartDate: true,
-            status: true,
-            deletedAt: true,
-            client: { select: { type: true } },
-            supplier: { select: { name: true } },
-          },
+          select: CONTRACT_SELECT_FOR_EDIT,
         },
       },
     });
@@ -865,7 +946,13 @@ export async function bulkUpdateCommissionFieldsAction(
       const commission = cached ?? (await resolveCommissionForEdit(commissionId));
       if (!commission || commission.contract.deletedAt) continue;
 
-      await applyCommissionField(session, commission, field, String(ch.value ?? ""));
+      await applyCommissionField(
+        session,
+        commission,
+        field,
+        String(ch.value ?? ""),
+        { competencePeriod: String(ch.competencePeriod ?? "").trim() || null },
+      );
       commissionCache.delete(commissionId);
       count += 1;
     }

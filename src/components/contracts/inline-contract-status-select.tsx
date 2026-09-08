@@ -29,7 +29,7 @@ const DASHBOARD_STATUSES: AppContractStatus[] = [
 /**
  * Tendina per cambiare lo stato del contratto senza aprire la scheda.
  * - mode "dashboard": stati principali del CRM
- * - mode "master": solo flusso In lavorazione / In pagamento / Integrazione / KO
+ * - mode "master": solo flusso In lavorazione / Da incassare / Integrazione / KO
  */
 export function InlineContractStatusSelect({
   contractId,

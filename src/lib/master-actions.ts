@@ -104,6 +104,8 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
   }
   if (toStatus === "IN_ATTESA_PAGAMENTO") {
     updateData.workCompletedAt = new Date();
+    updateData.paymentStatus = "Da incassare";
+    updateData.collectionDate = null;
     if (expectedPaymentAmount != null) updateData.expectedPaymentAmount = expectedPaymentAmount;
     if (expectedPaymentDate) updateData.expectedPaymentDate = new Date(expectedPaymentDate);
   }
@@ -184,6 +186,7 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
   revalidatePath("/lavorazione");
   revalidatePath(`/lavorazione/${contractId}`);
   revalidatePath(`/contratti/${contractId}`);
+  revalidatePath("/provvigioni");
   revalidatePath("/");
   redirect(`/lavorazione/${contractId}?ok=1`);
 }

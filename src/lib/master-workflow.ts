@@ -2,7 +2,7 @@ import type { AppContractStatus } from "@/lib/constants";
 
 /**
  * Stati operativi Master (dopo invio pratica).
- * Flusso: In lavorazione → In pagamento | Richiesta integrazione | KO
+ * Flusso: In lavorazione → Da incassare | Richiesta integrazione | KO
  */
 export const MASTER_WORKFLOW_STATUSES = [
   "IN_LAVORAZIONE",
@@ -15,7 +15,7 @@ export type MasterWorkflowStatus = (typeof MASTER_WORKFLOW_STATUSES)[number];
 
 export const MASTER_STATUS_LABELS: Record<MasterWorkflowStatus, string> = {
   IN_LAVORAZIONE: "In lavorazione",
-  IN_ATTESA_PAGAMENTO: "In pagamento",
+  IN_ATTESA_PAGAMENTO: "Da incassare",
   DOCUMENTAZIONE_INCOMPLETA: "Richiesta integrazione",
   KO: "KO",
 };
@@ -112,7 +112,7 @@ export function validateMasterTransition(opts: {
   if (!canTransitionMasterStatus(opts.from, opts.to, opts.allowAdminOverride)) {
     errors.push(
       `Transizione non consentita: ${opts.from} → ${opts.to}. ` +
-        `Esiti: In pagamento · Richiesta integrazione · KO.`,
+        `Esiti: Da incassare · Richiesta integrazione · KO.`,
     );
   }
   if (opts.to === "KO") {

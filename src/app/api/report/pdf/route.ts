@@ -8,7 +8,11 @@ import {
   loadReportRecurringPaid,
 } from "@/lib/report-recurring";
 import { loadReportStornos } from "@/lib/report-stornos";
-import { buildRendiconto, formatEuro } from "@/lib/report-rendiconto";
+import {
+  buildRendiconto,
+  formatEuro,
+  reportClienteLabel,
+} from "@/lib/report-rendiconto";
 import {
   parseReportExtras,
   sumReportExtras,
@@ -243,8 +247,8 @@ export async function GET(req: NextRequest) {
     if (block.incassatoBySupplier.length === 0) {
       autoTable(doc, {
         startY: y,
-        head: [["N. contratto", "Cliente", "POD/PDR", "Fornitore", "Collab.", "Data", "Importo"]],
-        body: [["-", "Nessuna riga", "", "", "", "", ""]],
+        head: [["Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
+        body: [["Nessuna riga", "", "", "", ""]],
         styles: { fontSize: 7 },
         headStyles: { fillColor: [20, 184, 166] },
         margin: { left: 14, right: 14 },
@@ -268,16 +272,15 @@ export async function GET(req: NextRequest) {
         y += 2;
         autoTable(doc, {
           startY: y,
-          head: [["N. contratto", "Cliente", "POD/PDR", "Collab.", "Data", "Importo"]],
+          head: [["Cliente", "Collab.", "Data", "Importo"]],
           body: supplier.lines.map((l) => [
-            l.contractNumber,
-            l.clientName,
-            l.podPdr || "—",
+            reportClienteLabel(l.clientName, l.podPdr),
             l.collaboratorName,
             l.dateLabel,
             formatEuro(l.amount),
           ]),
           styles: { fontSize: 7, textColor: [15, 23, 42] },
+          columnStyles: { 0: { cellWidth: 90 } },
           headStyles: {
             fillColor: [15, 118, 110],
             textColor: [255, 255, 255],
@@ -288,8 +291,6 @@ export async function GET(req: NextRequest) {
             [
               "Subtotale",
               supplier.supplierName,
-              "",
-              "",
               "",
               formatEuro(supplier.subtotal),
             ],
@@ -303,7 +304,7 @@ export async function GET(req: NextRequest) {
           },
           didParseCell: (data) => {
             // Colonna Importo: positivi verde, negativi rosso
-            if (data.column.index !== 5) return;
+            if (data.column.index !== 3) return;
             if (data.section === "body") {
               const amount = supplier.lines[data.row.index]?.amount ?? 0;
               data.cell.styles.textColor =
@@ -334,20 +335,19 @@ export async function GET(req: NextRequest) {
 
     autoTable(doc, {
       startY: y,
-      head: [["N. contratto", "Cliente", "POD/PDR", "Fornitore", "Collab.", "Data", "Importo"]],
+      head: [["Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
       body:
         block.storni.length === 0
-          ? [["-", "Nessuno storno da recuperare", "", "", "", "", ""]]
+          ? [["Nessuno storno da recuperare", "", "", "", ""]]
           : block.storni.map((l) => [
-              l.contractNumber,
-              l.clientName,
-              l.podPdr || "—",
+              reportClienteLabel(l.clientName, l.podPdr),
               l.supplierName,
               l.collaboratorName,
               l.dateLabel,
               formatEuro(l.amount),
             ]),
       styles: { fontSize: 7, textColor: [15, 23, 42] },
+      columnStyles: { 0: { cellWidth: 70 } },
       headStyles: {
         fillColor: [153, 27, 27],
         textColor: [255, 255, 255],
@@ -355,7 +355,7 @@ export async function GET(req: NextRequest) {
       },
       margin: { left: 14, right: 14 },
       didParseCell: (data) => {
-        if (data.section === "body" && data.column.index === 6) {
+        if (data.section === "body" && data.column.index === 4) {
           data.cell.styles.textColor = [185, 28, 28];
           data.cell.styles.fontStyle = "bold";
         }
@@ -393,17 +393,16 @@ export async function GET(req: NextRequest) {
     y += 2;
     autoTable(doc, {
       startY: y,
-      head: [["N. contratto", "Cliente", "POD/PDR", "Fornitore", "Collab.", "Mesi pagati", "Importo"]],
+      head: [["Cliente", "Fornitore", "Collab.", "Mesi pagati", "Importo"]],
       body: rendiconto.ricorrentiGrouped.map((l) => [
-        l.contractNumber,
-        l.clientName,
-        l.podPdr || "—",
+        reportClienteLabel(l.clientName, l.podPdr),
         l.supplierName,
         l.collaboratorName,
         l.dateLabel,
         formatEuro(l.amount),
       ]),
       styles: { fontSize: 7, textColor: [15, 23, 42] },
+      columnStyles: { 0: { cellWidth: 70 } },
       headStyles: {
         fillColor: [88, 28, 135],
         textColor: [255, 255, 255],
@@ -413,8 +412,6 @@ export async function GET(req: NextRequest) {
       foot: [
         [
           "Somma ricorrenti",
-          "",
-          "",
           "",
           "",
           `${rendiconto.countRicorrenti} contratti`,
@@ -428,7 +425,7 @@ export async function GET(req: NextRequest) {
         fontSize: 8,
       },
       didParseCell: (data) => {
-        if (data.section !== "body" || data.column.index !== 6) return;
+        if (data.section !== "body" || data.column.index !== 4) return;
         const amount = rendiconto.ricorrentiGrouped[data.row.index]?.amount ?? 0;
         data.cell.styles.textColor =
           amount < 0 ? [185, 28, 28] : [4, 120, 87];
