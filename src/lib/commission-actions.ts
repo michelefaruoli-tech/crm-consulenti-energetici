@@ -709,7 +709,6 @@ async function applyCommissionField(
       data: { collaboratorId: user.id },
     });
   } else if (field === "supplierName") {
-    if (!canAll) throw new Error("Solo Admin/Segreteria possono cambiare fornitore");
     const raw = value.trim();
     if (!raw) throw new Error("Fornitore vuoto");
     let supplier = await prisma.supplier.findFirst({
@@ -717,6 +716,9 @@ async function applyCommissionField(
       select: { id: true },
     });
     if (!supplier) {
+      if (!canAll && !hasPermission(session.role, "suppliers.manage")) {
+        throw new Error("Fornitore non in elenco. Scegli un nome esistente.");
+      }
       const baseCode = raw
         .toUpperCase()
         .normalize("NFD")

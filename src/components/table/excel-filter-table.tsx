@@ -3,6 +3,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 
+/** Sfondo/testo su tutte le celle; bordo sinistro solo sulla prima. */
+function splitRowChrome(cls: string | undefined): { surface: string; accent: string } {
+  if (!cls) return { surface: "", accent: "" };
+  const accent: string[] = [];
+  const surface: string[] = [];
+  for (const token of cls.split(/\s+/).filter(Boolean)) {
+    if (token === "border-l-4" || token.startsWith("border-l-")) {
+      accent.push(token);
+    } else {
+      surface.push(token);
+    }
+  }
+  return { surface: surface.join(" "), accent: accent.join(" ") };
+}
+
 export type FilterColumn = {
   key: string;
   label: string;
@@ -483,7 +498,7 @@ export function ExcelFilterTable({
       >
       <table
         className={cn(
-          "text-left",
+          "border-separate border-spacing-0 text-left",
           fitWidth
             ? "w-full min-w-0 table-fixed text-xs"
             : dense
@@ -744,19 +759,22 @@ export function ExcelFilterTable({
           ) : (
             filtered.map((row) => {
               const key = rowKey(row);
+              const selected = Boolean(selection?.selectedKeys.has(key));
+              const { surface: rowSurface, accent: rowAccent } = splitRowChrome(
+                getRowClassName?.(row),
+              );
+              const rowBox =
+                "border-b border-slate-300 border-t border-slate-200";
               return (
               <tr
                 key={key}
                 className={cn(
-                  "border-t border-slate-100 transition-colors",
+                  "transition-colors",
                   onRowClick &&
                     (getRowClassName
                       ? "cursor-pointer hover:brightness-[0.97]"
                       : "cursor-pointer hover:bg-slate-50"),
-                  getRowClassName?.(row),
-                  // Selezione dopo getRowClassName + !important: deve vincere su storno/gettone
-                  selection?.selectedKeys.has(key) &&
-                    "!bg-emerald-200 ring-2 ring-inset ring-emerald-600 shadow-[inset_6px_0_0_0_#059669]",
+                  selected && "shadow-[inset_6px_0_0_0_#059669]",
                 )}
                 onClick={() => onRowClick?.(row)}
               >
@@ -765,6 +783,11 @@ export function ExcelFilterTable({
                     className={cn(
                       dense ? "px-1.5 py-1" : "px-3 py-2",
                       fitWidth && "w-8",
+                      rowBox,
+                      "border-l border-slate-300",
+                      rowSurface,
+                      rowAccent,
+                      selected && "!bg-emerald-200",
                     )}
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -776,7 +799,7 @@ export function ExcelFilterTable({
                     />
                   </td>
                 ) : null}
-                {columns.map((col) => {
+                {columns.map((col, colIndex) => {
                   const baseVal =
                     col.getValue(row) === "(vuoto)" ? "" : col.getValue(row);
                   const displayVal = draftMode && getDraftValue
@@ -785,12 +808,20 @@ export function ExcelFilterTable({
                   const dirty =
                     draftMode && isDraftDirty ? isDraftDirty(row, col.key) : false;
                   const cellKey = `${key}-${col.key}`;
+                  const isFirstData = !selection && colIndex === 0;
+                  const isLast = colIndex === columns.length - 1;
                   return (
                   <td
                     key={col.key}
                     className={cn(
                       dense ? "px-1.5 py-1" : "px-3 py-2",
+                      rowBox,
+                      isFirstData && "border-l border-slate-300",
+                      isLast && "border-r border-slate-300",
+                      rowSurface,
+                      isFirstData && rowAccent,
                       dirty && "bg-amber-50",
+                      selected && "!bg-emerald-200",
                       col.colClassName,
                       fitWidth && "overflow-hidden",
                     )}

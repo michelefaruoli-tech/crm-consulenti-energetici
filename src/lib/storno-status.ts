@@ -199,7 +199,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "in_storno",
       label: "BLOCCA — ricambio in periodo storno",
-      rowClassName: `border-l-4 border-red-700 bg-red-200 ${ROW_TEXT}`,
+      rowClassName: `border-l-4 border-l-red-700 bg-red-200 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
       warnOnEdit: true,
@@ -212,7 +212,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "manca_ingresso",
       label: "Manca data ingresso fornitura",
-      rowClassName: `border-l-4 border-red-600 bg-white ${ROW_TEXT_ALERT}`,
+      rowClassName: `border-l-4 border-l-red-600 bg-white ${ROW_TEXT_ALERT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: false,
       warnOnEdit: true,
@@ -226,24 +226,11 @@ export function resolveStornoInfo(input: {
     return {
       kind: "da_pagare",
       label: "Da incassare (non ancora in fornitura)",
-      rowClassName: `border-l-4 border-amber-500 bg-amber-100 ${ROW_TEXT}`,
+      rowClassName: `border-l-4 border-l-amber-500 bg-amber-100 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
       missingSupplyStart: false,
-    };
-  }
-
-  // 4 — Ricorrente a vita (sempre distinguibile)
-  if (isRecurring(input.recurrence)) {
-    return {
-      kind: "ricorrente",
-      label: "Ricorrente a vita",
-      rowClassName: `border-l-4 border-cyan-600 bg-cyan-100 ${ROW_TEXT}`,
-      stornoEndDate: stornoEnd,
-      isFuoriStorno: true,
-      warnOnEdit: false,
-      missingSupplyStart: missingSupply,
     };
   }
 
@@ -252,7 +239,7 @@ export function resolveStornoInfo(input: {
     return {
       kind: "da_pagare",
       label: "Da incassare",
-      rowClassName: `border-l-4 border-amber-500 bg-amber-100 ${ROW_TEXT}`,
+      rowClassName: `border-l-4 border-l-amber-500 bg-amber-100 ${ROW_TEXT}`,
       stornoEndDate: stornoEnd,
       isFuoriStorno: true,
       warnOnEdit: false,
@@ -271,7 +258,7 @@ export function resolveStornoInfo(input: {
         return {
           kind: "in_scadenza",
           label: "Prossimo fine storno (~1 mese)",
-          rowClassName: `border-l-4 border-violet-600 bg-violet-100 ${ROW_TEXT_ALERT}`,
+          rowClassName: `border-l-4 border-l-violet-600 bg-violet-100 ${ROW_TEXT_ALERT}`,
           stornoEndDate: stornoEnd,
           isFuoriStorno: false,
           warnOnEdit: true,
@@ -282,7 +269,7 @@ export function resolveStornoInfo(input: {
       return {
         kind: "in_storno",
         label: "BLOCCA — storno non terminato",
-        rowClassName: `border-l-4 border-red-700 bg-red-200 ${ROW_TEXT}`,
+        rowClassName: `border-l-4 border-l-red-700 bg-red-200 ${ROW_TEXT}`,
         stornoEndDate: stornoEnd,
         isFuoriStorno: false,
         warnOnEdit: true,
@@ -299,7 +286,7 @@ export function resolveStornoInfo(input: {
       return {
         kind: "scaduto",
         label: "Contratto scaduto (12 mesi)",
-        rowClassName: `border-l-4 border-orange-600 bg-orange-200 ${ROW_TEXT_ALERT}`,
+        rowClassName: `border-l-4 border-l-orange-600 bg-orange-200 ${ROW_TEXT_ALERT}`,
         stornoEndDate: stornoEnd,
         isFuoriStorno: true,
         warnOnEdit: true,
@@ -310,7 +297,7 @@ export function resolveStornoInfo(input: {
       return {
         kind: "scadenza_contratto",
         label: "Prossimo scadenza contratto (~1 mese)",
-        rowClassName: `border-l-4 border-orange-500 bg-orange-100 ${ROW_TEXT_ALERT}`,
+        rowClassName: `border-l-4 border-l-orange-500 bg-orange-100 ${ROW_TEXT_ALERT}`,
         stornoEndDate: stornoEnd,
         isFuoriStorno: true,
         warnOnEdit: true,
@@ -319,11 +306,24 @@ export function resolveStornoInfo(input: {
     }
   }
 
+  // 4 — Ricorrente a vita (solo se già fuori storno / non da incassare)
+  if (isRecurring(input.recurrence)) {
+    return {
+      kind: "ricorrente",
+      label: "Ricorrente a vita",
+      rowClassName: `border-l-4 border-l-cyan-600 bg-cyan-100 ${ROW_TEXT}`,
+      stornoEndDate: stornoEnd,
+      isFuoriStorno: true,
+      warnOnEdit: false,
+      missingSupplyStart: missingSupply,
+    };
+  }
+
   // 3 — Fuori storno (verde smeraldo, diverso dal rosso)
   return {
     kind: "fuori_storno",
     label: input.stornoMonths === 0 ? "Fuori storno (0 mesi)" : "Fuori storno",
-    rowClassName: `border-l-4 border-emerald-600 bg-emerald-100 ${ROW_TEXT}`,
+    rowClassName: `border-l-4 border-l-emerald-600 bg-emerald-100 ${ROW_TEXT}`,
     stornoEndDate: stornoEnd ?? (input.stornoMonths === 0 ? input.supplyStartDate ?? null : null),
     isFuoriStorno: true,
     warnOnEdit: false,

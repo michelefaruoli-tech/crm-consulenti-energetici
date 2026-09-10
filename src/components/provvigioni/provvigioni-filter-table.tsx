@@ -82,7 +82,7 @@ function FreeSuggestInput({
     <div className="relative min-w-0">
       <input
         className={`w-full rounded border px-1 py-1 text-xs ${
-          dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+          dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
         } ${className ?? ""}`}
         value={value}
         placeholder={placeholder}
@@ -196,6 +196,7 @@ const SIMPLE_COLUMN_ORDER = [
   "operationType",
   "stato",
   "meseRif",
+  "supplyStartDate",
   "collectionMonth",
   "recurrence",
   "stornoFlag",
@@ -819,7 +820,7 @@ export function ProvvigioniFilterTable({
     const cols: FilterColumn[] = [
     {
       key: "clientName",
-      label: "Cliente",
+      label: "Nominativo",
       getValue: (r) => String(r.clientName ?? ""),
       editable: true,
       sortKind: "text",
@@ -843,7 +844,7 @@ export function ProvvigioniFilterTable({
                 ? "border-amber-400 bg-amber-50"
                 : missing
                   ? "border-red-300 bg-red-50 text-red-800"
-                  : "border-slate-200 bg-white"
+                  : "border-slate-200 bg-transparent"
             }`}
             value={current}
             placeholder="POD / PDR…"
@@ -873,7 +874,7 @@ export function ProvvigioniFilterTable({
         return (
           <select
             className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
             }`}
             value={full}
             title={full}
@@ -951,7 +952,7 @@ export function ProvvigioniFilterTable({
         return (
           <input
             className={`max-w-[4.5rem] rounded border px-1 py-1 text-right text-xs tabular-nums ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
             }`}
             value={current}
             inputMode="decimal"
@@ -999,7 +1000,7 @@ export function ProvvigioniFilterTable({
         return (
           <select
             className={`max-w-[9.5rem] rounded border px-1 py-1 text-xs ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
             }`}
             value={value}
             title="Tipo operazione: Switch, Voltura, Cessazione…"
@@ -1030,7 +1031,7 @@ export function ProvvigioniFilterTable({
         return (
           <select
             className={`max-w-[9.5rem] rounded border px-1 py-1 text-xs ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
             }`}
             value={
               options.includes(current as (typeof options)[number])
@@ -1075,7 +1076,7 @@ export function ProvvigioniFilterTable({
         return (
           <select
             className={`max-w-[7.5rem] rounded border px-1 py-1 text-xs font-semibold ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
             }`}
             value={value}
             title="UT = gettone · M = mensile · R = annuale (12 mesi)"
@@ -1121,7 +1122,7 @@ export function ProvvigioniFilterTable({
         return (
           <select
             className={`max-w-[4.5rem] rounded border px-1 py-1 text-xs ${
-              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+              dirty ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-transparent"
             }`}
             value={current === "Sì" ? "Sì" : "No"}
             title="Storno Sì = da applicare. Poi metti stato Stornato quando il gettone è recuperato: esce dalla lista."
@@ -1274,8 +1275,9 @@ export function ProvvigioniFilterTable({
       collaboratorName: "w-[10%]",
       supplierName: "w-[11%]",
       amount: "w-[7%]",
-      stato: "w-[11%]",
-      meseRif: "w-[8%]",
+      stato: "w-[10%]",
+      meseRif: "w-[7%]",
+      supplyStartDate: "w-[8%]",
       collectionMonth: "w-[8%]",
       notes: "w-[17%]",
       recurrence: "w-[7%]",
@@ -1287,6 +1289,7 @@ export function ProvvigioniFilterTable({
         "min-w-0 w-full truncate text-[12px] font-semibold tracking-tight text-slate-900",
       amount: "max-w-full w-full text-right tabular-nums",
       collectionMonth: "max-w-full w-full tabular-nums",
+      supplyStartDate: "max-w-full w-full tabular-nums",
       notes: "min-w-0 w-full truncate",
       supplierName: "min-w-0 w-full truncate",
     };
@@ -1515,9 +1518,8 @@ export function ProvvigioniFilterTable({
             </>
           ) : (
             <>
-              Vista <strong>semplificata</strong>: tutte le colonne essenziali in una
-              schermata (Cliente · Collab. · Fornitore · Gettone · Stato · Data
-              incasso · Note · Tipo). Stato <strong>Da controllare</strong> = inserito
+              Vista <strong>semplificata</strong>: colonne essenziali in una
+              schermata (Nominativo · Collab. · Fornitore · date · Stato · Tipo). Stato <strong>Da controllare</strong> = inserito
               ma non ancora contrattualizzato
               {canDelete ? " · ×" : ""}.{" "}
             </>
@@ -1525,7 +1527,8 @@ export function ProvvigioniFilterTable({
           Colori riga (legenda sotto): 1 da incassare · 2 rosso BLOCCA storno · 3
           verde fuori storno · 4 ciano ricorrente · 5 viola fine storno · 6 arancio
           scadenza 12 mesi.
-          Cliente e <strong>POD / PDR</strong> editabili (bozza gialla → Salva).
+          Nominativo, fornitore e date (inizio fornitura e incasso) sono
+          modificabili anche dai collaboratori (bozza gialla → Salva).
           Icona ↗ in fondo riga = apri scheda cliente/contratto.
           {advancedView
             ? " Campo POD rosso = manca ingresso fornitura."
