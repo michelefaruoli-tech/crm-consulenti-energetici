@@ -36,28 +36,37 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
   const note = String(formData.get("note") ?? "") || null;
   const koReason = String(formData.get("koReason") ?? "") || undefined;
   const koOtherText = String(formData.get("koOtherText") ?? "") || undefined;
-  const koNotes = String(formData.get("koNotes") ?? "") || undefined;
+  const koNotes =
+    String(formData.get("koNotes") ?? "").trim() ||
+    String(formData.get("agentNotes") ?? "").trim() ||
+    undefined;
   const activationDate = String(formData.get("activationDate") ?? "") || undefined;
   const paymentDate = String(formData.get("paymentDate") ?? "") || undefined;
   const paymentConfirmed = formData.get("paymentConfirmed") === "on";
   const expectedPaymentAmount = num(formData.get("expectedPaymentAmount"));
   const expectedPaymentDate = String(formData.get("expectedPaymentDate") ?? "") || undefined;
   const paymentAmount = num(formData.get("paymentAmount"));
-  const workNotes = String(formData.get("workNotes") ?? "") || null;
+  const agentNotes =
+    String(formData.get("agentNotes") ?? "").trim() ||
+    String(formData.get("workNotes") ?? "").trim() ||
+    null;
+  const workNotes = agentNotes;
   const integrationNotes =
-    String(formData.get("integrationNotes") ?? "").trim() || undefined;
+    String(formData.get("integrationNotes") ?? "").trim() ||
+    (toStatus === "DOCUMENTAZIONE_INCOMPLETA" ? agentNotes ?? undefined : undefined);
 
   const contract = await prisma.contract.findUnique({ where: { id: contractId } });
   if (!contract || contract.deletedAt) {
     redirect("/lavorazione?error=not_found");
   }
 
-  const isAdmin =
+  const canChangeStatus =
     hasPermission(session.role, "contracts.change_status") ||
     hasPermission(session.role, "contracts.edit_all");
-  if (!isAdmin) {
+  if (!canChangeStatus) {
     redirect(`/lavorazione/${contractId}?error=permesso`);
   }
+  const isAdmin = hasPermission(session.role, "contracts.edit_all");
   if (!(await userCanAccessContract(session, contract))) {
     redirect(`/lavorazione/${contractId}?error=permesso`);
   }
@@ -65,17 +74,57 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     redirect(`/lavorazione/${contractId}?error=non_master`);
   }
 
+  const statusUnchanged = contract.status === toStatus;
+
+  // Solo aggiornamento note (stesso stato): salva senza transizione
+  if (statusUnchanged) {
+    if (!agentNotes?.trim() && !workNotes) {
+      redirect(
+        `/lavorazione/${contractId}?error=${encodeURIComponent(
+          "Inserisci le note oppure cambia lo stato",
+        )}`,
+      );
+    }
+    await prisma.contract.update({
+      where: { id: contractId },
+      data: {
+        workNotes: agentNotes,
+        notes: agentNotes,
+      },
+    });
+    revalidatePath("/lavorazione");
+    revalidatePath(`/lavorazione/${contractId}`);
+    revalidatePath(`/contratti/${contractId}`);
+    redirect(`/lavorazione/${contractId}?ok=1`);
+  }
+
+  if (
+    (toStatus === "IN_ATTESA_PAGAMENTO" ||
+      toStatus === "DOCUMENTAZIONE_INCOMPLETA" ||
+      toStatus === "KO") &&
+    !agentNotes?.trim()
+  ) {
+    redirect(
+      `/lavorazione/${contractId}?error=${encodeURIComponent(
+        "Inserisci le note per l’agente prima di salvare",
+      )}`,
+    );
+  }
+
   const errors = validateMasterTransition({
     from: contract.status,
     to: toStatus,
     allowAdminOverride: isAdmin && formData.get("forceOverride") === "on",
     koReason,
-    koNotes: toStatus === "DOCUMENTAZIONE_INCOMPLETA" ? integrationNotes ?? koNotes : koNotes,
+    koNotes:
+      toStatus === "DOCUMENTAZIONE_INCOMPLETA"
+        ? integrationNotes ?? koNotes ?? agentNotes ?? undefined
+        : koNotes ?? agentNotes ?? undefined,
     koOtherText,
     activationDate,
     paymentDate,
     paymentConfirmed,
-    integrationNotes,
+    integrationNotes: integrationNotes ?? agentNotes ?? undefined,
   });
   if (errors.length) {
     redirect(
@@ -92,6 +141,8 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     status: toStatus,
     workStatus: toStatus,
     workNotes,
+    // Note visibili sulla pratica e inviate all’agente
+    ...(agentNotes ? { notes: agentNotes } : {}),
   };
 
   // Legacy: Completato / Attivato (UI rimossa, resta compatibilità)
@@ -131,7 +182,7 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
         fromStatus: contract.status,
         toStatus,
         changedById: session.id,
-        note,
+        note: agentNotes ?? note,
         changeReason: `Cambio stato Master: ${contract.status} → ${toStatus}`,
         koReason: toStatus === "KO" ? resolvedKo : null,
         expectedPaymentAmount:
@@ -168,19 +219,21 @@ export async function updateMasterWorkflowAction(formData: FormData): Promise<vo
     );
   }
 
-  // Avvisa l’agente (non blocca se SMTP fallisce)
+  // Avvisa l’agente con le note (non blocca se SMTP fallisce)
+  const detailForAgent =
+    toStatus === "KO"
+      ? [agentNotes, resolvedKo !== "ALTRO" ? resolvedKo : null]
+          .filter(Boolean)
+          .join(" — ") || agentNotes
+      : agentNotes ?? note;
+
   await notifyCollaboratorStatusChange({
     contractId,
     fromStatus: contract.status,
     toStatus,
     changedByName: session.name,
-    note,
-    detailNotes:
-      toStatus === "DOCUMENTAZIONE_INCOMPLETA"
-        ? integrationNotes ?? koNotes ?? workNotes
-        : toStatus === "KO"
-          ? [resolvedKo, koNotes].filter(Boolean).join(" — ")
-          : workNotes ?? note,
+    note: agentNotes ?? note,
+    detailNotes: detailForAgent,
   });
 
   revalidatePath("/lavorazione");

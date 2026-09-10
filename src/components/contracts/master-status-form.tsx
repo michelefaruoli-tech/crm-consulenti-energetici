@@ -11,17 +11,18 @@ import {
 } from "@/lib/master-workflow";
 
 /**
- * Form esito lavorazione Master.
- * Tre scelte: Da incassare · Richiesta integrazione · KO
- * (+ opzione «In lavorazione» per rimettere in coda).
+ * Form esito lavorazione Back Office / Master.
+ * Cambia stato + note per l’agente → Salva → email automatica all’agente.
  */
 export function MasterStatusForm({
   contractId,
   currentStatus,
+  initialNotes,
   action,
 }: {
   contractId: string;
   currentStatus: string;
+  initialNotes?: string | null;
   action: (formData: FormData) => Promise<void>;
 }) {
   const initial =
@@ -33,15 +34,34 @@ export function MasterStatusForm({
       : "IN_LAVORAZIONE";
 
   const [status, setStatus] = useState(initial);
+  const [agentNotes, setAgentNotes] = useState(initialNotes ?? "");
   const [koReason, setKoReason] = useState("");
+
+  const statusChanging = status !== currentStatus;
+  const needsAgentNotes =
+    status === "IN_ATTESA_PAGAMENTO" ||
+    status === "DOCUMENTAZIONE_INCOMPLETA" ||
+    status === "KO";
 
   return (
     <form
       action={action}
       onSubmit={(e) => {
+        if (needsAgentNotes && !agentNotes.trim()) {
+          e.preventDefault();
+          alert(
+            "Inserisci le note per l’agente (es. «contratto inserito, far firmare al cliente»).",
+          );
+          return;
+        }
         const label =
           MASTER_STATUS_LABELS[status as MasterWorkflowStatus] ?? status;
-        if (!confirm(`Confermi il passaggio a «${label}»?`)) {
+        if (
+          statusChanging &&
+          !confirm(
+            `Confermi il passaggio a «${label}»?\nAll’agente arriverà un’email con le note.`,
+          )
+        ) {
           e.preventDefault();
         }
       }}
@@ -49,56 +69,55 @@ export function MasterStatusForm({
     >
       <input type="hidden" name="contractId" value={contractId} />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Esito lavorazione">
-          <Select
-            name="status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="IN_LAVORAZIONE">
-              {MASTER_STATUS_LABELS.IN_LAVORAZIONE}
+      <Field label="Stato">
+        <Select
+          name="status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
+          <option value="IN_LAVORAZIONE">
+            {MASTER_STATUS_LABELS.IN_LAVORAZIONE}
+          </option>
+          {MASTER_OUTCOME_STATUSES.map((st) => (
+            <option key={st} value={st}>
+              {MASTER_STATUS_LABELS[st]}
             </option>
-            {MASTER_OUTCOME_STATUSES.map((st) => (
-              <option key={st} value={st}>
-                {MASTER_STATUS_LABELS[st]}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Note di lavorazione">
-          <Textarea name="workNotes" rows={2} placeholder="Annotazioni interne" />
-        </Field>
-        <Field label="Nota storico">
-          <Input name="note" placeholder="Motivo del cambiamento" />
-        </Field>
-        <label className="flex items-end gap-2 pb-2 text-sm text-slate-600">
-          <input type="checkbox" name="forceOverride" />
-          Override admin (correzione stato)
-        </label>
-      </div>
+          ))}
+        </Select>
+      </Field>
+
+      <Field
+        label={
+          needsAgentNotes
+            ? "Note per l’agente (inviate via email) *"
+            : "Note per l’agente"
+        }
+      >
+        <Textarea
+          name="agentNotes"
+          rows={3}
+          value={agentNotes}
+          onChange={(e) => setAgentNotes(e.target.value)}
+          required={needsAgentNotes}
+          placeholder="Es. contratto inserito, far firmare al cliente"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Con «Salva», se lo stato cambia, l’agente riceve un’email: oggetto = cliente +
+          fornitore, corpo = queste note.
+        </p>
+      </Field>
 
       {status === "IN_ATTESA_PAGAMENTO" ? (
         <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 text-sm text-emerald-900">
-          <strong>Da incassare</strong>: la pratica è ok e passa subito in
-          Provvigioni (stato Da incassare).
+          <strong>Da incassare</strong>: la pratica passa in Provvigioni. L’agente riceve
+          le note (es. far firmare il contratto).
         </div>
       ) : null}
 
       {status === "DOCUMENTAZIONE_INCOMPLETA" ? (
-        <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
-          <p className="text-sm text-amber-950">
-            <strong>Richiesta integrazione</strong>: indica cosa manca al
-            collaboratore.
-          </p>
-          <Field label="Dati / documenti mancanti *">
-            <Textarea
-              name="integrationNotes"
-              rows={3}
-              required
-              placeholder="Es. manca CI retro, POD illegibile, IBAN non valido…"
-            />
-          </Field>
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-950">
+          <strong>Richiesta integrazione</strong>: nelle note indica cosa manca (CI,
+          POD, IBAN…).
         </div>
       ) : null}
 
@@ -122,16 +141,16 @@ export function MasterStatusForm({
           <Field label="Dettaglio Altro">
             <Input name="koOtherText" placeholder="Solo se motivo = Altro" />
           </Field>
-          <div className="sm:col-span-2">
-            <Field label="Note KO *">
-              <Textarea name="koNotes" rows={3} required />
-            </Field>
-          </div>
         </div>
       ) : null}
 
+      <label className="flex items-center gap-2 text-sm text-slate-600">
+        <input type="checkbox" name="forceOverride" />
+        Override admin (correzione stato)
+      </label>
+
       <Button type="submit" className="w-full sm:w-auto">
-        Salva esito
+        Salva
       </Button>
     </form>
   );

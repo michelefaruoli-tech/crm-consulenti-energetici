@@ -123,7 +123,7 @@ export function validateMasterTransition(opts: {
     if (!opts.koNotes?.trim()) errors.push("Note sul KO obbligatorie");
   }
   if (opts.to === "DOCUMENTAZIONE_INCOMPLETA" && !opts.integrationNotes?.trim() && !opts.koNotes?.trim()) {
-    errors.push("Indica quali dati integrativi mancano");
+    errors.push("Indica nelle note cosa manca all’agente");
   }
   return errors;
 }

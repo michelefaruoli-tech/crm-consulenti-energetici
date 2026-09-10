@@ -26,10 +26,17 @@ const DASHBOARD_STATUSES: AppContractStatus[] = [
   "CHIUSO",
 ];
 
+const AGENT_NOTIFY_STATUSES = new Set([
+  "IN_ATTESA_PAGAMENTO",
+  "DOCUMENTAZIONE_INCOMPLETA",
+  "KO",
+]);
+
 /**
  * Tendina per cambiare lo stato del contratto senza aprire la scheda.
  * - mode "dashboard": stati principali del CRM
  * - mode "master": solo flusso In lavorazione / Da incassare / Integrazione / KO
+ *   (con note + Salva → email all’agente)
  */
 export function InlineContractStatusSelect({
   contractId,
@@ -50,6 +57,8 @@ export function InlineContractStatusSelect({
   const [closureDate, setClosureDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [closureReason, setClosureReason] = useState("");
   const [closureNotes, setClosureNotes] = useState("");
+  const [pendingMasterStatus, setPendingMasterStatus] = useState<string | null>(null);
+  const [agentNotes, setAgentNotes] = useState("");
 
   const options: { value: string; label: string }[] =
     mode === "master"
@@ -74,22 +83,7 @@ export function InlineContractStatusSelect({
     });
   }
 
-  function onChange(next: string) {
-    if (next === status) return;
-    if (["CHIUSO", "KO", "ANNULLATO"].includes(next)) {
-      setTerminalStatus(next);
-      setClosureDate(format(new Date(), "yyyy-MM-dd"));
-      setClosureReason("");
-      setClosureNotes("");
-      return;
-    }
-    const label =
-      options.find((o) => o.value === next)?.label ??
-      CONTRACT_STATUS_LABELS[next as AppContractStatus] ??
-      next;
-    if (!window.confirm(`Cambiare lo stato in «${label}»?`)) {
-      return;
-    }
+  function applyStatus(next: string, notes?: string, extra?: Record<string, string>) {
     setError(null);
     setValue(next);
     start(async () => {
@@ -98,12 +92,68 @@ export function InlineContractStatusSelect({
         fd.set("contractId", contractId);
         fd.set("field", "status");
         fd.set("value", next);
+        if (notes?.trim()) fd.set("agentNotes", notes.trim());
+        if (extra) {
+          for (const [k, v] of Object.entries(extra)) fd.set(k, v);
+        }
         await updateContractFieldAction(fd);
         router.refresh();
       } catch (e) {
         setValue(status);
         setError(e instanceof Error ? e.message : "Errore cambio stato");
       }
+    });
+  }
+
+  function onChange(next: string) {
+    if (next === status) return;
+
+    // In lista Master: note + Salva obbligatori per esiti (email all’agente)
+    if (mode === "master" && AGENT_NOTIFY_STATUSES.has(next)) {
+      setPendingMasterStatus(next);
+      setAgentNotes("");
+      setError(null);
+      return;
+    }
+
+    if (["CHIUSO", "KO", "ANNULLATO"].includes(next) && mode !== "master") {
+      setTerminalStatus(next);
+      setClosureDate(format(new Date(), "yyyy-MM-dd"));
+      setClosureReason("");
+      setClosureNotes("");
+      return;
+    }
+
+    // KO da master mode senza passare da AGENT_NOTIFY? già gestito sopra
+    if (next === "KO" && mode === "master") {
+      setPendingMasterStatus(next);
+      setAgentNotes("");
+      return;
+    }
+
+    const label =
+      options.find((o) => o.value === next)?.label ??
+      CONTRACT_STATUS_LABELS[next as AppContractStatus] ??
+      next;
+    if (!window.confirm(`Cambiare lo stato in «${label}»?`)) {
+      return;
+    }
+    applyStatus(next);
+  }
+
+  function confirmMasterWithNotes() {
+    if (!pendingMasterStatus) return;
+    if (!agentNotes.trim()) {
+      setError("Inserisci le note per l’agente");
+      return;
+    }
+    const next = pendingMasterStatus;
+    const notes = agentNotes.trim();
+    setPendingMasterStatus(null);
+    applyStatus(next, notes, {
+      closureDate: format(new Date(), "yyyy-MM-dd"),
+      closureReason: next === "KO" ? "Esito Back Office" : "",
+      closureNotes: notes,
     });
   }
 
@@ -114,25 +164,19 @@ export function InlineContractStatusSelect({
     }
     const next = terminalStatus;
     setError(null);
-    setValue(next);
     setTerminalStatus(null);
-    start(async () => {
-      try {
-        const fd = new FormData();
-        fd.set("contractId", contractId);
-        fd.set("field", "status");
-        fd.set("value", next);
-        fd.set("closureDate", closureDate);
-        fd.set("closureReason", closureReason.trim());
-        fd.set("closureNotes", closureNotes.trim());
-        await updateContractFieldAction(fd);
-        router.refresh();
-      } catch (e) {
-        setValue(status);
-        setError(e instanceof Error ? e.message : "Errore cambio stato");
-      }
+    applyStatus(next, closureNotes, {
+      closureDate,
+      closureReason: closureReason.trim(),
+      closureNotes: closureNotes.trim(),
     });
   }
+
+  const pendingLabel =
+    pendingMasterStatus != null
+      ? MASTER_STATUS_LABELS[pendingMasterStatus as MasterWorkflowStatus] ??
+        pendingMasterStatus
+      : "";
 
   return (
     <div className={cn("min-w-[9.5rem]", className)} onClick={(e) => e.stopPropagation()}>
@@ -143,7 +187,7 @@ export function InlineContractStatusSelect({
         )}
         value={pending ? value : status}
         disabled={pending}
-        title="Cambia stato senza aprire la scheda"
+        title="Cambia stato"
         onChange={(e) => onChange(e.target.value)}
       >
         {options.map((o) => (
@@ -153,6 +197,57 @@ export function InlineContractStatusSelect({
         ))}
       </select>
       {error ? <p className="mt-0.5 text-[10px] text-red-600">{error}</p> : null}
+
+      {pendingMasterStatus ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <h2 className="text-lg font-bold text-slate-950">
+              Salva stato: {pendingLabel}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Scrivi le note per l’agente (arriveranno via email: oggetto cliente +
+              fornitore, corpo = note).
+            </p>
+            <label className="mt-4 block text-sm font-semibold text-slate-800">
+              Note per l’agente *
+              <textarea
+                value={agentNotes}
+                onChange={(e) => setAgentNotes(e.target.value)}
+                rows={4}
+                placeholder="Es. contratto inserito, far firmare al cliente"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal"
+                autoFocus
+              />
+            </label>
+            {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingMasterStatus(null);
+                  setValue(status);
+                  setError(null);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={confirmMasterWithNotes}
+                disabled={pending}
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+              >
+                Salva
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {terminalStatus ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={(e) => e.stopPropagation()}>
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
@@ -171,7 +266,7 @@ export function InlineContractStatusSelect({
               <input value={closureReason} onChange={(e) => setClosureReason(e.target.value)} placeholder="Es. cessazione, ripensamento, pratica respinta" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
             </label>
             <label className="mt-3 block text-sm font-semibold text-slate-800">
-              Note facoltative
+              Note (inviate all’agente se KO)
               <textarea value={closureNotes} onChange={(e) => setClosureNotes(e.target.value)} rows={3} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
             </label>
             <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">

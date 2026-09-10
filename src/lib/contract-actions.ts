@@ -115,9 +115,23 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     const closureDateRaw = String(formData.get("closureDate") ?? "").trim();
     const closureReason = String(formData.get("closureReason") ?? "").trim();
     const closureNotes = String(formData.get("closureNotes") ?? "").trim();
+    const agentNotes = String(formData.get("agentNotes") ?? "").trim() || closureNotes;
+    const notifyStatuses = ["IN_ATTESA_PAGAMENTO", "DOCUMENTAZIONE_INCOMPLETA", "KO"];
+    if (notifyStatuses.includes(status) && status !== contract.status && !agentNotes) {
+      throw new Error("Inserisci le note per l’agente prima di salvare");
+    }
     const closureDate = terminal ? parseFlexibleDate(closureDateRaw) : null;
     if (terminal && !closureDate) throw new Error("Data chiusura obbligatoria");
-    if (terminal && !closureReason) throw new Error("Motivo chiusura obbligatorio");
+    if (terminal && !closureReason && status !== "KO") {
+      throw new Error("Motivo chiusura obbligatorio");
+    }
+    // KO da lista Master: motivo di default se non passato
+    const resolvedClosureReason =
+      closureReason ||
+      (status === "KO" ? "Esito Back Office" : "");
+    if (terminal && !resolvedClosureReason) {
+      throw new Error("Motivo chiusura obbligatorio");
+    }
     const fromStatus = contract.status;
     const leavingTerminal =
       ["CHIUSO", "KO", "ANNULLATO"].includes(fromStatus) && !terminal;
@@ -125,6 +139,9 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       where: { id: contractId },
       data: {
         status,
+        ...(agentNotes
+          ? { notes: agentNotes, workNotes: agentNotes }
+          : {}),
         ...(status === "IN_ATTESA_PAGAMENTO"
           ? {
               paymentStatus: "Da incassare",
@@ -133,8 +150,17 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
               workStatus: "IN_ATTESA_PAGAMENTO",
             }
           : {}),
+        ...(status === "DOCUMENTAZIONE_INCOMPLETA"
+          ? {
+              workStatus: "DOCUMENTAZIONE_INCOMPLETA",
+              koNotes: agentNotes || null,
+            }
+          : {}),
         ...(status === "KO" || status === "ANNULLATO"
-          ? { koReason: closureReason, koNotes: closureNotes || null }
+          ? {
+              koReason: resolvedClosureReason,
+              koNotes: agentNotes || closureNotes || null,
+            }
           : {}),
         ...(leavingTerminal || contract.isHistorical
           ? reactivateContractFields()
@@ -148,9 +174,10 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
         toStatus: status,
         changedById: session.id,
         changedAt: closureDate ?? new Date(),
-        note: closureNotes || "Modifica da elenco",
-        changeReason: closureReason || null,
-        koReason: status === "KO" || status === "ANNULLATO" ? closureReason : null,
+        note: agentNotes || closureNotes || "Modifica da elenco",
+        changeReason: resolvedClosureReason || null,
+        koReason:
+          status === "KO" || status === "ANNULLATO" ? resolvedClosureReason : null,
       },
     });
     if (terminal) {
@@ -162,7 +189,8 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       fromStatus,
       toStatus: status,
       changedByName: session.name,
-      note: closureNotes || closureReason || "Modifica da elenco",
+      note: agentNotes || closureNotes || closureReason || null,
+      detailNotes: agentNotes || closureNotes || null,
     });
     revalidatePath("/");
     revalidatePath("/contratti");

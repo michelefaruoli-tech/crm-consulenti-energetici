@@ -59,12 +59,14 @@ export default async function LavorazioneSchedaPage({
   }
 
   const isAdmin = hasPermission(session.role, "contracts.edit_all");
+  const canChangeStatus = hasPermission(session.role, "contracts.change_status");
   const canWorkScoped = hasPermission(session.role, "contracts.work_scoped");
   const canEdit =
     isAdmin ||
     canWorkScoped ||
     (hasPermission(session.role, "contracts.edit_own") &&
       session.id === contract.collaboratorId);
+  const canSetOutcome = isAdmin || canChangeStatus;
 
   const editData = {
     id: contract.id,
@@ -241,9 +243,13 @@ export default async function LavorazioneSchedaPage({
 
       <LavorazioneEditForm data={editData} canEdit={canEdit} />
 
-      {isAdmin ? (
+      {canSetOutcome ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 font-semibold text-slate-900">Area operativa</h2>
+          <p className="mb-3 text-sm text-slate-500">
+            Cambia lo stato, inserisci le note per l’agente e clicca{" "}
+            <strong>Salva</strong>. L’agente riceve un’email automatica con le note.
+          </p>
           <p className="mb-3 text-sm text-slate-500">
             Stato attuale:{" "}
             <strong>
@@ -255,12 +261,13 @@ export default async function LavorazioneSchedaPage({
           <MasterStatusForm
             contractId={contract.id}
             currentStatus={contract.status}
+            initialNotes={contract.notes || contract.workNotes}
             action={updateMasterWorkflowAction}
           />
         </section>
       ) : (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm text-sm text-slate-600">
-          Solo l&apos;amministratore/Master può cambiare lo stato operativo. Puoi
+          Solo Back Office / Admin può cambiare lo stato operativo. Puoi
           consultare e modificare i dati sopra, e vedere lo storico sotto.
         </section>
       )}
