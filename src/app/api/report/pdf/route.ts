@@ -100,10 +100,10 @@ export async function GET(req: NextRequest) {
       : `${period.from} - ${period.to}`;
 
   const rendiconto = buildRendiconto({
-    contracts,
+    contracts: onlyStornato ? [] : contracts,
     stornoRows,
-    recurringRows,
-    skipRecurring: !includeRecurring,
+    recurringRows: includeRecurring && !onlyStornato ? recurringRows : [],
+    skipRecurring: !includeRecurring || onlyStornato,
     onlyStornato,
     inlineRecurring: reportHasStato(stati, "Da incassare"),
   });

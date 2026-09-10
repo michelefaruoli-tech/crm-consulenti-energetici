@@ -85,15 +85,13 @@ export function reportHasStato(
   return list.includes(needle);
 }
 
-/** Storni (importo negativo) in Incassato/Pagato/Tutti e nella scheda Stornato. */
+/** Sezione storni: solo con filtro «Stornato» (o Tutti). Non in Incassato/Pagato:
+ * lo storno è un clawback di un gettone già pagato in passato — non va
+ * rimescolato come seconda riga positiva/negativa sullo stesso report Incassato. */
 export function reportIncludesStornos(stato: string | string[]): boolean {
   const list = Array.isArray(stato) ? stato : resolveReportStati(stato);
   if (list.includes("Tutti")) return true;
-  return (
-    list.includes("Stornato") ||
-    list.includes("Incassato") ||
-    list.includes("Pagato")
-  );
+  return list.includes("Stornato");
 }
 
 /** Rate ricorrenti nel Report: Incassato / Pagato / Da incassare / Tutti. */
@@ -300,11 +298,11 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":
-      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni del mese (data storno) entrano come importo negativo.";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni (clawback) non entrano qui: usa il filtro «Stornato».";
     case "Pagato":
-      return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori. Storni del mese in detrazione.";
+      return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori.";
     case "Stornato":
-      return "Periodo = data storno. Include da recuperare e già recuperati (es. Uccellatori, Davanzo).";
+      return "Periodo = data storno. Solo importi negativi (da recuperare o già recuperati). Nessun gettone positivo.";
     case "KO / Cessato":
       return "Periodo = data inserimento. Pratiche KO / annullate / chiuse.";
     default:

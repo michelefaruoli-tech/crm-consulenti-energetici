@@ -176,23 +176,29 @@ export default async function ReportPage({
   const onlyStornato =
     stati.length > 0 && stati.every((s) => s === "Stornato");
 
+  // Con solo «Stornato»: niente gettoni positivi (già pagati in passato).
+  // Solo clawback negativo — poi in Provvigioni passi a KO/Cessato e archivi.
+  const contractsForTotals = onlyStornato ? [] : contracts;
+
   // Una tantum + R annuali orfani (collectionDate senza rate).
   // I mensili e gli R già presenti nelle rate restano solo in RecurringMonth.
   const recurringContractNumbers = new Set(
     recurringRows.map((r) => r.contractNumber),
   );
-  const oneShot = contracts.filter((c) => {
+  const oneShot = contractsForTotals.filter((c) => {
     if (isRecurringMonthly(c.recurrence)) return false;
     if (isRecurringAnnual(c.recurrence)) {
       return Boolean(c.collectionDate) && !recurringContractNumbers.has(c.contractNumber);
     }
     return true;
   });
-  const totalContracts = contracts.length;
-  const totalExpected = oneShot.reduce(
-    (s, c) => s + Number(c.commission?.expected ?? 0),
-    0,
-  );
+  const totalContracts = onlyStornato ? stornoTotals.count : contracts.length;
+  const totalExpected = onlyStornato
+    ? 0
+    : oneShot.reduce(
+        (s, c) => s + Number(c.commission?.expected ?? 0),
+        0,
+      );
   const totalReceivedOneShot = onlyStornato
     ? 0
     : oneShot.reduce(
@@ -204,10 +210,12 @@ export default async function ReportPage({
           }),
         0,
       );
-  const totalPaid = oneShot.reduce(
-    (s, c) => s + Number(c.commission?.paid ?? 0),
-    0,
-  );
+  const totalPaid = onlyStornato
+    ? 0
+    : oneShot.reduce(
+        (s, c) => s + Number(c.commission?.paid ?? 0),
+        0,
+      );
   const includeRecurring = reportIncludesRecurring(stati);
   const totalReceived =
     totalReceivedOneShot +
@@ -345,8 +353,9 @@ export default async function ReportPage({
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
           Il mese segue la colonna <strong>Incasso</strong> di Provvigioni (es. 06/2026 →
-          Giugno). Gli <strong>storni</strong> del mese (importo negativo) si sommano al
-          totale Incassato e detraggono le provvigioni.
+          Giugno). Con filtro <strong>Stornato</strong> vedi solo i clawback negativi
+          (gettone già pagato in passato); poi in Provvigioni puoi passare a KO/Cessato
+          e archiviare.
         </p>
       </div>
 
@@ -464,7 +473,9 @@ export default async function ReportPage({
         </div>
         {includeStornos ? (
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
-          <p className="text-sm text-rose-700">Storni da recuperare</p>
+          <p className="text-sm text-rose-700">
+            {onlyStornato ? "Storni (solo negativi)" : "Storni"}
+          </p>
           <p className="mt-2 text-3xl font-bold text-rose-900">
             {stornoTotals.count}
           </p>
@@ -577,11 +588,11 @@ export default async function ReportPage({
       {includeStornos ? (
       <section className="rounded-xl border border-rose-200 bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-semibold text-slate-900">
-          Storni da recuperare ({stornoTotals.count})
+          Storni ({stornoTotals.count})
         </h2>
         <p className="mb-4 text-sm text-slate-500">
-          Solo gettoni con Storno Sì non ancora recuperati. Quando lo stato è
-          Stornato spariscono da qui.
+          Solo importi negativi sul mese della data storno (gettone già pagato in
+          passato). Poi in Provvigioni: stato KO/Cessato e archivia.
         </p>
         {stornoRows.length === 0 ? (
           <p className="text-sm text-slate-500">Nessuno storno nel periodo selezionato.</p>

@@ -159,10 +159,10 @@ export async function GET(req: NextRequest) {
       : `${period.from} – ${period.to}`;
 
   const rendiconto = buildRendiconto({
-    contracts,
+    contracts: onlyStornato ? [] : contracts,
     stornoRows,
-    recurringRows: includeRecurring ? recurringRows : [],
-    skipRecurring: !includeRecurring,
+    recurringRows: includeRecurring && !onlyStornato ? recurringRows : [],
+    skipRecurring: !includeRecurring || onlyStornato,
     onlyStornato,
     inlineRecurring: reportHasStato(stati, "Da incassare"),
   });
@@ -292,7 +292,8 @@ export async function GET(req: NextRequest) {
       rend.mergeCells(monthTitle.number, 1, monthTitle.number, 6);
     }
 
-    // Incassato — un blocco per fornitore (senza totale generico)
+    // Incassato — un blocco per fornitore (saltato se solo Stornato)
+    if (!onlyStornato) {
     if (block.incassatoBySupplier.length === 0) {
       rend.addRow([
         reportHasStato(stati, "Da incassare") &&
@@ -345,12 +346,13 @@ export async function GET(req: NextRequest) {
         };
       }
     }
+    }
 
     if (includeStornos) {
-    const stoTitle = rend.addRow(["STORNI", "", "", "", "", ""]);
+    const stoTitle = rend.addRow(["STORNI (solo importi negativi)", "", "", "", "", ""]);
     styleSection(stoTitle, "FFFFE4E6", "FF9F1239");
     if (block.storni.length === 0) {
-      rend.addRow(["", "(nessuno storno da recuperare)", "", "", "", ""]);
+      rend.addRow(["", "(nessuno storno nel periodo)", "", "", "", ""]);
     } else {
       for (const line of block.storni) {
         const r = rend.addRow([
@@ -472,40 +474,62 @@ export async function GET(req: NextRequest) {
   ];
   styleHeader(sheet.getRow(1), "FF334155");
 
-  for (const contract of contracts) {
-    const stornoAmt =
-      contract.commission?.stornoAmount != null
-        ? Number(contract.commission.stornoAmount)
-        : 0;
-    sheet.addRow({
-      number: contract.contractNumber,
-      insertion: contract.insertionDate
-        ? contract.insertionDate.toISOString().slice(0, 10)
-        : "",
-      collection: contract.collectionDate
-        ? contract.collectionDate.toISOString().slice(0, 10)
-        : "",
-      client: clientDisplayName(contract.client),
-      podPdr: (contract.podPdr || contract.pod || contract.pdr || "").trim(),
-      supplier: contract.supplier.name,
-      collaborator: contract.collaborator.name,
-      status: CONTRACT_STATUS_LABELS[contract.status],
-      statoProv: simplifiedProvvigioneStato(
-        contract.status,
-        Boolean(contract.collectionDate),
-        {
-          inFornitura: isInFornitura(contract.supplyStartDate),
-          hasStorno: Boolean(contract.commission?.stornoDate),
-        },
-      ),
-      expected: Number(contract.commission?.expected ?? 0),
-      received: Number(contract.commission?.received ?? 0),
-      paid: Number(contract.commission?.paid ?? 0),
-      storno: stornoAmt,
-      stornoDate: contract.commission?.stornoDate
-        ? contract.commission.stornoDate.toISOString().slice(0, 10)
-        : "",
-    });
+  if (onlyStornato) {
+    // Solo clawback negativo: niente gettone positivo (già pagato in passato).
+    for (const s of stornoRows) {
+      sheet.addRow({
+        number: s.contractNumber,
+        insertion: "",
+        collection: "",
+        client: s.clientName,
+        podPdr: s.podPdr || "",
+        supplier: s.supplierName,
+        collaborator: s.collaboratorName,
+        status: "STORNATO",
+        statoProv: "Stornato",
+        expected: 0,
+        received: 0,
+        paid: 0,
+        storno: s.amount,
+        stornoDate: s.stornoDate.toISOString().slice(0, 10),
+      });
+    }
+  } else {
+    for (const contract of contracts) {
+      const stornoAmt =
+        contract.commission?.stornoAmount != null
+          ? Number(contract.commission.stornoAmount)
+          : 0;
+      sheet.addRow({
+        number: contract.contractNumber,
+        insertion: contract.insertionDate
+          ? contract.insertionDate.toISOString().slice(0, 10)
+          : "",
+        collection: contract.collectionDate
+          ? contract.collectionDate.toISOString().slice(0, 10)
+          : "",
+        client: clientDisplayName(contract.client),
+        podPdr: (contract.podPdr || contract.pod || contract.pdr || "").trim(),
+        supplier: contract.supplier.name,
+        collaborator: contract.collaborator.name,
+        status: CONTRACT_STATUS_LABELS[contract.status],
+        statoProv: simplifiedProvvigioneStato(
+          contract.status,
+          Boolean(contract.collectionDate),
+          {
+            inFornitura: isInFornitura(contract.supplyStartDate),
+            hasStorno: Boolean(contract.commission?.stornoDate),
+          },
+        ),
+        expected: Number(contract.commission?.expected ?? 0),
+        received: Number(contract.commission?.received ?? 0),
+        paid: Number(contract.commission?.paid ?? 0),
+        storno: stornoAmt,
+        stornoDate: contract.commission?.stornoDate
+          ? contract.commission.stornoDate.toISOString().slice(0, 10)
+          : "",
+      });
+    }
   }
 
   // ─── Foglio 3: Rate ricorrenti ───
