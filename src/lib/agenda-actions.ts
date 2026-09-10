@@ -13,7 +13,7 @@ export type AgendaItemDto = {
   notes: string | null;
   type: AgendaItemType;
   priority: AgendaPriority;
-  scheduledAt: string;
+  scheduledAt: string | null;
   allDay: boolean;
   completed: boolean;
   alertAt: string | null;
@@ -39,7 +39,7 @@ function toDto(
     notes: string | null;
     type: AgendaItemType;
     priority: AgendaPriority;
-    scheduledAt: Date;
+    scheduledAt: Date | null;
     allDay: boolean;
     completed: boolean;
     alertAt: Date | null;
@@ -64,7 +64,7 @@ function toDto(
     notes: item.notes,
     type: item.type,
     priority: item.priority,
-    scheduledAt: item.scheduledAt.toISOString(),
+    scheduledAt: item.scheduledAt?.toISOString() ?? null,
     allDay: item.allDay,
     completed: item.completed,
     alertAt: item.alertAt?.toISOString() ?? null,
@@ -117,11 +117,14 @@ export async function listPendingTasksAction(): Promise<
     const items = await prisma.agendaItem.findMany({
       where: {
         userId: session.id,
-        type: "TASK",
         completed: false,
+        OR: [{ type: "TASK" }, { scheduledAt: null }],
       },
       include: itemInclude,
-      orderBy: [{ scheduledAt: "asc" }, { priority: "desc" }],
+      orderBy: [
+        { scheduledAt: { sort: "asc", nulls: "first" } },
+        { priority: "desc" },
+      ],
       take: 200,
     });
 
@@ -145,11 +148,14 @@ export async function createAgendaItemAction(
     const type = (clean(formData.get("type")) ?? "TASK") as AgendaItemType;
     const priority = (clean(formData.get("priority")) ?? "MEDIUM") as AgendaPriority;
     const dateYmd = clean(formData.get("date"));
-    if (!dateYmd) return { ok: false, error: "Data obbligatoria" };
+    const noDate = formData.get("noDate") === "on" || formData.get("noDate") === "true" || !dateYmd;
+    if (type === "APPOINTMENT" && !dateYmd) {
+      return { ok: false, error: "Per un appuntamento serve la data" };
+    }
 
-    const allDay = formData.get("allDay") === "on" || formData.get("allDay") === "true";
+    const allDay = noDate || formData.get("allDay") === "on" || formData.get("allDay") === "true";
     const timeHm = allDay ? null : clean(formData.get("time"));
-    const scheduledAt = parseRomeDateTime(dateYmd, timeHm);
+    const scheduledAt = dateYmd && !noDate ? parseRomeDateTime(dateYmd, timeHm) : null;
 
     let alertAt: Date | null = null;
     const alertDate = clean(formData.get("alertDate"));
@@ -203,11 +209,14 @@ export async function updateAgendaItemAction(
     const type = (clean(formData.get("type")) ?? existing.type) as AgendaItemType;
     const priority = (clean(formData.get("priority")) ?? existing.priority) as AgendaPriority;
     const dateYmd = clean(formData.get("date"));
-    if (!dateYmd) return { ok: false, error: "Data obbligatoria" };
+    const noDate = formData.get("noDate") === "on" || formData.get("noDate") === "true" || !dateYmd;
+    if (type === "APPOINTMENT" && !dateYmd) {
+      return { ok: false, error: "Per un appuntamento serve la data" };
+    }
 
-    const allDay = formData.get("allDay") === "on" || formData.get("allDay") === "true";
+    const allDay = noDate || formData.get("allDay") === "on" || formData.get("allDay") === "true";
     const timeHm = allDay ? null : clean(formData.get("time"));
-    const scheduledAt = parseRomeDateTime(dateYmd, timeHm);
+    const scheduledAt = dateYmd && !noDate ? parseRomeDateTime(dateYmd, timeHm) : null;
 
     let alertAt: Date | null = null;
     const alertDate = clean(formData.get("alertDate"));

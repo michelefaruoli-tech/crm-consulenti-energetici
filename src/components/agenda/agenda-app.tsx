@@ -64,19 +64,21 @@ function toRomeTime(iso: string): string {
 }
 
 function formatItemWhen(item: AgendaItemDto): string {
+  if (!item.scheduledAt) return "Senza data";
   const date = formatInTimeZone(item.scheduledAt, APP_TZ, "EEE d MMM", { locale: it });
   if (item.allDay) return date;
   return `${date} · ${toRomeTime(item.scheduledAt)}`;
 }
 
-function emptyForm(dateYmd: string): FormState {
+function emptyForm(dateYmd: string, noDate = false): FormState {
   return {
     id: null,
     title: "",
     notes: "",
     type: "TASK",
     priority: "MEDIUM",
-    date: dateYmd,
+    noDate,
+    date: noDate ? "" : dateYmd,
     time: "09:00",
     allDay: true,
     alertDate: "",
@@ -91,6 +93,7 @@ type FormState = {
   notes: string;
   type: "APPOINTMENT" | "TASK";
   priority: "LOW" | "MEDIUM" | "HIGH";
+  noDate: boolean;
   date: string;
   time: string;
   allDay: boolean;
@@ -100,15 +103,17 @@ type FormState = {
 };
 
 function itemToForm(item: AgendaItemDto): FormState {
+  const noDate = !item.scheduledAt;
   return {
     id: item.id,
     title: item.title,
     notes: item.notes ?? "",
     type: item.type,
     priority: item.priority,
-    date: toRomeDate(item.scheduledAt),
-    time: item.allDay ? "09:00" : toRomeTime(item.scheduledAt),
-    allDay: item.allDay,
+    noDate,
+    date: item.scheduledAt ? toRomeDate(item.scheduledAt) : "",
+    time: !item.scheduledAt || item.allDay ? "09:00" : toRomeTime(item.scheduledAt),
+    allDay: item.allDay || noDate,
     alertDate: item.alertAt ? toRomeDate(item.alertAt) : "",
     alertTime: item.alertAt ? toRomeTime(item.alertAt) : "09:00",
     hasAlert: Boolean(item.alertAt),
@@ -209,7 +214,7 @@ export function AgendaApp({
 
         if (Notification.permission === "granted") {
           new Notification(`Promemoria: ${item.title}`, {
-            body: item.notes ?? formatItemWhen(item),
+            body: item.notes ?? (item.scheduledAt ? formatItemWhen(item) : "Nota"),
             tag: item.id,
           });
         }
@@ -227,9 +232,9 @@ export function AgendaApp({
     }
   };
 
-  const openCreate = (dateYmd?: string) => {
+  const openCreate = (dateYmd?: string, noDate = false) => {
     setError(null);
-    setForm(emptyForm(dateYmd ?? selectedDate));
+    setForm(emptyForm(dateYmd ?? selectedDate, noDate || view === "tasks"));
     setFormOpen(true);
   };
 
@@ -247,8 +252,12 @@ export function AgendaApp({
     fd.set("notes", form.notes);
     fd.set("type", form.type);
     fd.set("priority", form.priority);
-    fd.set("date", form.date);
-    if (!form.allDay) fd.set("time", form.time);
+    if (form.noDate || !form.date) {
+      fd.set("noDate", "true");
+    } else {
+      fd.set("date", form.date);
+    }
+    if (!form.allDay && !form.noDate) fd.set("time", form.time);
     if (form.allDay) fd.set("allDay", "true");
     if (form.hasAlert && form.alertDate) {
       fd.set("alertDate", form.alertDate);
@@ -297,14 +306,20 @@ export function AgendaApp({
     });
   };
 
-  const todayItems = items.filter((i) => toRomeDate(i.scheduledAt) === selectedDate);
-  const sortedToday = [...todayItems].sort(
-    (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime(),
+  const todayItems = items.filter(
+    (i) => i.scheduledAt && toRomeDate(i.scheduledAt) === selectedDate,
   );
+  const sortedToday = [...todayItems].sort((a, b) => {
+    const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : 0;
+    const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : 0;
+    return aTime - bTime;
+  });
+  const undatedNotes = tasks.filter((i) => !i.scheduledAt);
 
   const itemsByDay = useMemo(() => {
     const map = new Map<string, AgendaItemDto[]>();
     for (const item of items) {
+      if (!item.scheduledAt) continue;
       const key = toRomeDate(item.scheduledAt);
       const list = map.get(key) ?? [];
       list.push(item);
@@ -450,6 +465,28 @@ export function AgendaApp({
             onEdit={openEdit}
             pending={pending}
           />
+
+          {undatedNotes.length > 0 ? (
+            <div className="mt-6">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-700">Note senza data</h2>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-emerald-700"
+                  onClick={() => openCreate(undefined, true)}
+                >
+                  + Nota
+                </button>
+              </div>
+              <AgendaItemList
+                items={undatedNotes}
+                emptyLabel="Nessuna nota"
+                onToggle={toggleComplete}
+                onEdit={openEdit}
+                pending={pending}
+              />
+            </div>
+          ) : null}
         </>
       ) : null}
 
@@ -523,7 +560,7 @@ export function AgendaApp({
                           )}
                         >
                           <p className="truncate font-medium">{item.title}</p>
-                          {!item.allDay ? (
+                          {item.scheduledAt && !item.allDay ? (
                             <p className="text-slate-500">{toRomeTime(item.scheduledAt)}</p>
                           ) : null}
                         </button>
@@ -543,14 +580,23 @@ export function AgendaApp({
       ) : null}
 
       {view === "tasks" ? (
-        <AgendaItemList
-          items={tasks}
-          emptyLabel="Nessuna attività in sospeso"
-          onToggle={toggleComplete}
-          onEdit={openEdit}
-          pending={pending}
-          showDate
-        />
+        <>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm text-slate-500">Cose da fare e note, anche senza data</p>
+            <Button type="button" size="sm" onClick={() => openCreate(undefined, true)}>
+              <StickyNote className="mr-1.5 h-4 w-4" />
+              Nota
+            </Button>
+          </div>
+          <AgendaItemList
+            items={tasks}
+            emptyLabel="Nessuna attività o nota in sospeso"
+            onToggle={toggleComplete}
+            onEdit={openEdit}
+            pending={pending}
+            showDate
+          />
+        </>
       ) : null}
 
       <button
@@ -567,7 +613,11 @@ export function AgendaApp({
           <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:rounded-2xl sm:p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-900">
-                {form.id ? "Modifica" : "Nuovo impegno"}
+                {form.id
+                  ? "Modifica"
+                  : form.noDate
+                    ? "Nuova nota"
+                    : "Nuovo impegno"}
               </h2>
               <button
                 type="button"
@@ -587,7 +637,7 @@ export function AgendaApp({
                 <Input
                   value={form.title}
                   onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                  placeholder="Es. Richiamare cliente, visita in sede..."
+                  placeholder="Es. Richiamare cliente, idea, visita in sede..."
                   autoFocus
                 />
               </Field>
@@ -601,11 +651,16 @@ export function AgendaApp({
                       setForm((f) => ({
                         ...f,
                         type,
+                        noDate: type === "APPOINTMENT" ? false : f.noDate,
+                        date:
+                          type === "APPOINTMENT" && !f.date
+                            ? selectedDate
+                            : f.date,
                         allDay: type === "TASK" ? f.allDay : false,
                       }));
                     }}
                   >
-                    <option value="TASK">Da fare</option>
+                    <option value="TASK">Da fare / nota</option>
                     <option value="APPOINTMENT">Appuntamento</option>
                   </Select>
                 </Field>
@@ -626,33 +681,55 @@ export function AgendaApp({
                 </Field>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Data">
-                  <Input
-                    type="date"
-                    value={form.date}
-                    onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Ora">
-                  <Input
-                    type="time"
-                    value={form.time}
-                    disabled={form.allDay}
-                    onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
-                  />
-                </Field>
-              </div>
-
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"
-                  checked={form.allDay}
-                  onChange={(e) => setForm((f) => ({ ...f, allDay: e.target.checked }))}
+                  checked={form.noDate}
+                  disabled={form.type === "APPOINTMENT"}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      noDate: e.target.checked,
+                      date: e.target.checked ? "" : f.date || selectedDate,
+                      allDay: e.target.checked ? true : f.allDay,
+                    }))
+                  }
                   className="h-4 w-4 rounded border-slate-300"
                 />
-                Tutto il giorno / senza orario preciso
+                Senza data (solo nota / appunto)
               </label>
+
+              {!form.noDate ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Data">
+                      <Input
+                        type="date"
+                        value={form.date}
+                        onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Ora">
+                      <Input
+                        type="time"
+                        value={form.time}
+                        disabled={form.allDay}
+                        onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.allDay}
+                      onChange={(e) => setForm((f) => ({ ...f, allDay: e.target.checked }))}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Tutto il giorno / senza orario preciso
+                  </label>
+                </>
+              ) : null}
 
               <Field label="Note">
                 <Textarea
@@ -799,11 +876,21 @@ function AgendaItemList({
                 {PRIORITY_LABELS[item.priority]}
               </span>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                {item.type === "APPOINTMENT" ? "Appuntamento" : "Da fare"}
+                {item.type === "APPOINTMENT"
+                  ? "Appuntamento"
+                  : item.scheduledAt
+                    ? "Da fare"
+                    : "Nota"}
               </span>
             </div>
             <p className="mt-0.5 text-sm text-slate-500">
-              {showDate ? formatItemWhen(item) : item.allDay ? "Tutto il giorno" : toRomeTime(item.scheduledAt)}
+              {showDate
+                ? formatItemWhen(item)
+                : !item.scheduledAt
+                  ? "Senza data"
+                  : item.allDay
+                    ? "Tutto il giorno"
+                    : toRomeTime(item.scheduledAt)}
             </p>
             {item.notes ? (
               <p className="mt-1 line-clamp-2 text-sm text-slate-600">{item.notes}</p>
