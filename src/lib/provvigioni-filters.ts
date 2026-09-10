@@ -142,27 +142,41 @@ function provvigioneStatoWhereOne(
     return { status: { equals: "DA_CONTROLLARE" } };
   }
   if (s === "Stornato") {
-    // Da applicare: Storno Sì, gettone non ancora recuperato, già incassato.
-    // Mai incassato non è uno storno. Recuperato (STORNATO) esce dalla lista.
+    // Da recuperare (Storno Sì) + già recuperati (status STORNATO).
+    // Senza il ramo recuperati, Uccellatori/Davanzo spariscono dal Report.
     return {
-      AND: [
-        { commission: { stornoDate: { not: null } } },
-        { status: { not: "STORNATO" } },
+      commission: {
+        stornoDate: { not: null },
+        stornoAmount: { not: null },
+      },
+      OR: [
+        { status: "STORNATO" },
         {
-          OR: [
+          AND: [
+            { status: { notIn: ["STORNATO", "DA_CONTROLLARE", ...KO_STATUSES] } },
             {
-              AND: [
-                nonRecurringWhere,
-                { collectionDate: { not: null } },
-              ],
-            },
-            {
-              AND: [
-                { OR: recurringWhereOr },
+              OR: [
                 {
-                  recurringMonths: {
-                    some: { status: { in: ["PAID", "LIQUIDATED"] } },
-                  },
+                  AND: [
+                    nonRecurringWhere,
+                    { collectionDate: { not: null } },
+                  ],
+                },
+                {
+                  AND: [
+                    { OR: recurringWhereOr },
+                    {
+                      recurringMonths: {
+                        some: { status: { in: ["PAID", "LIQUIDATED"] } },
+                      },
+                    },
+                  ],
+                },
+                {
+                  AND: [
+                    { OR: recurringAnnualWhereOr },
+                    { collectionDate: { not: null } },
+                  ],
                 },
               ],
             },

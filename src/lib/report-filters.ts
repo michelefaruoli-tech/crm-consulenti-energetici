@@ -85,10 +85,15 @@ export function reportHasStato(
   return list.includes(needle);
 }
 
-/** Sezione storni nel Report solo se «Stornato» è selezionato esplicitamente. */
+/** Storni (importo negativo) in Incassato/Pagato/Tutti e nella scheda Stornato. */
 export function reportIncludesStornos(stato: string | string[]): boolean {
   const list = Array.isArray(stato) ? stato : resolveReportStati(stato);
-  return list.includes("Stornato");
+  if (list.includes("Tutti")) return true;
+  return (
+    list.includes("Stornato") ||
+    list.includes("Incassato") ||
+    list.includes("Pagato")
+  );
 }
 
 /** Rate ricorrenti nel Report: Incassato / Pagato / Da incassare / Tutti. */
@@ -187,8 +192,10 @@ function dateWhereForStato(
 ): Prisma.ContractWhereInput {
   if (stato === "Stornato") {
     return {
-      status: { not: "STORNATO" },
-      commission: { stornoDate: { gte: dateFrom, lte: dateTo } },
+      commission: {
+        stornoDate: { gte: dateFrom, lte: dateTo },
+        stornoAmount: { not: null },
+      },
     };
   }
   if (
@@ -293,11 +300,11 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
     case "Incassato":
-      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni compaiono solo se selezioni anche «Stornato».";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni del mese (data storno) entrano come importo negativo.";
     case "Pagato":
-      return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori.";
+      return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori. Storni del mese in detrazione.";
     case "Stornato":
-      return "Solo storni ancora da recuperare (Storno Sì, stato non ancora Stornato). Il gettone già recuperato non compare.";
+      return "Periodo = data storno. Include da recuperare e già recuperati (es. Uccellatori, Davanzo).";
     case "KO / Cessato":
       return "Periodo = data inserimento. Pratiche KO / annullate / chiuse.";
     default:
