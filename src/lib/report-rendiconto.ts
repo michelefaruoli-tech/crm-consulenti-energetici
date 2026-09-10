@@ -10,7 +10,7 @@ import {
   type ReportRecurringRow,
 } from "@/lib/report-recurring";
 import type { ReportStornoRow } from "@/lib/report-stornos";
-import { isRecurring } from "@/lib/recurring";
+import { isRecurringAnnual, isRecurringMonthly } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
 
 export type RendicontoIncassatoSource = {
@@ -161,9 +161,20 @@ export function buildRendiconto(params: {
   const lines: RendicontoLine[] = [];
 
   if (!params.onlyStornato) {
+    /** Contratti già presenti come rate → non riduplicare nel blocco Incassato. */
+    const recurringContractNumbers = new Set(
+      params.recurringRows.map((r) => r.contractNumber),
+    );
     for (const c of params.contracts) {
-      // Le rate R sono già nel foglio ricorrenti: evita doppio conteggio
-      if (isRecurring(c.recurrence)) continue;
+      // Mensili: solo via rate. Annuali orfani (collectionDate, senza rate) restano qui.
+      if (isRecurringMonthly(c.recurrence)) continue;
+      if (
+        isRecurringAnnual(c.recurrence) &&
+        recurringContractNumbers.has(c.contractNumber)
+      ) {
+        continue;
+      }
+      if (isRecurringAnnual(c.recurrence) && !c.collectionDate) continue;
       const base = c.collectionDate ?? c.insertionDate;
       const month = monthKeyFromDate(new Date(base));
       lines.push({

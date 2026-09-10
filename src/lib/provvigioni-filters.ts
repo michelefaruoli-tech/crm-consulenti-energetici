@@ -185,16 +185,30 @@ function provvigioneStatoWhereOne(
       status: "PAID",
       ...(competence ? { period: competence } : {}),
     };
+    /**
+     * UT + R orfani: Incassato = collectionDate (come in tabella).
+     * I R annuali spesso hanno gettone già incassato senza rate RecurringMonth
+     * (la prima rata nasce solo a +12 mesi): senza questo ramo spariscono
+     * da Incassato/report (es. Motta sotto Laforgia).
+     */
+    const collectedLikeUt: Prisma.ContractWhereInput = {
+      AND: [
+        {
+          OR: [nonRecurringWhere, ...recurringAnnualWhereOr],
+        },
+        { collectionDate: { not: null } },
+        {
+          OR: [
+            { supplyStartDate: { lte: today } },
+            { supplyStartDate: null },
+          ],
+        },
+      ],
+    };
     return {
       status: { notIn: [...excludedStatus] },
       OR: [
-        {
-          AND: [
-            nonRecurringWhere,
-            { collectionDate: { not: null } },
-            { supplyStartDate: { lte: today } },
-          ],
-        },
+        collectedLikeUt,
         {
           AND: [
             { OR: recurringWhereOr },

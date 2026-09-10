@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { getMasterEmail } from "@/lib/mail";
-import { isRecurring } from "@/lib/recurring";
+import { isRecurringAnnual, isRecurringMonthly } from "@/lib/recurring";
 import {
   loadReportRecurringPaid,
   sumReportRecurring,
@@ -176,10 +176,18 @@ export default async function ReportPage({
   const onlyStornato =
     stati.length > 0 && stati.every((s) => s === "Stornato");
 
-  // Una tantum: evita di contare due volte i contratti R (già in RecurringMonth)
-  // Con «Stornato» i contratti arrivano già filtrati per data storno: non sommare received,
-  // solo gli importi storno (negativi).
-  const oneShot = contracts.filter((c) => !isRecurring(c.recurrence));
+  // Una tantum + R annuali orfani (collectionDate senza rate).
+  // I mensili e gli R già presenti nelle rate restano solo in RecurringMonth.
+  const recurringContractNumbers = new Set(
+    recurringRows.map((r) => r.contractNumber),
+  );
+  const oneShot = contracts.filter((c) => {
+    if (isRecurringMonthly(c.recurrence)) return false;
+    if (isRecurringAnnual(c.recurrence)) {
+      return Boolean(c.collectionDate) && !recurringContractNumbers.has(c.contractNumber);
+    }
+    return true;
+  });
   const totalContracts = contracts.length;
   const totalExpected = oneShot.reduce(
     (s, c) => s + Number(c.commission?.expected ?? 0),
