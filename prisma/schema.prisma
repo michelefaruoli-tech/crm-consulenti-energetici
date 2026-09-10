@@ -511,7 +511,7 @@ model ContractEmailLog {
   toEmail      String
   subject      String
   status       String
-  /// MASTER_NEW | MASTER_RESEND | DAILY_REPORT | PASSWORD_RESET | OTHER
+  /// MASTER_NEW | MASTER_RESEND | DAILY_REPORT | STALE_LAVORAZIONE_48H | AGENT_STATUS_NOTES | OTHER
   emailType    String   @default("MASTER_NEW")
   error        String?
   attempts     Int      @default(1)
@@ -632,7 +632,7 @@ model AgendaItem {
   notes       String?
   type        AgendaItemType @default(TASK)
   priority    AgendaPriority @default(MEDIUM)
-  scheduledAt DateTime
+  scheduledAt DateTime?
   allDay      Boolean        @default(false)
   completed   Boolean        @default(false)
   alertAt     DateTime?
