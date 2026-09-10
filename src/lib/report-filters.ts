@@ -52,6 +52,7 @@ export {
   recentMonthOptions,
   currentMonthValue,
   resolveReportPeriod,
+  resolveIncassatoMonths,
 } from "@/lib/report-month";
 
 export { parseFilterList, formatFilterList };

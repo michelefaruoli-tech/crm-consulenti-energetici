@@ -126,3 +126,34 @@ export function resolveReportPeriod(params: {
   const range = monthToDateRange(cur)!;
   return { ...range, month: cur, months: [cur] };
 }
+
+/** Elenco mesi YYYY-MM da from/to (inclusi), se `months` del periodo è vuoto. */
+export function monthsBetweenInclusive(fromYmd: string, toYmd: string): string[] {
+  const start = fromYmd.slice(0, 7);
+  const end = toYmd.slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(start) || !/^\d{4}-\d{2}$/.test(end)) return [];
+  const out: string[] = [];
+  let [y, m] = start.split("-").map(Number) as [number, number];
+  const [ey, em] = end.split("-").map(Number) as [number, number];
+  for (let i = 0; i < 240; i++) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    out.push(key);
+    if (y === ey && m === em) break;
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}
+
+/** Mesi ammessi per le righe Incassato del rendiconto. */
+export function resolveIncassatoMonths(period: {
+  from: string;
+  to: string;
+  months: string[];
+}): string[] {
+  if (period.months.length > 0) return period.months;
+  return monthsBetweenInclusive(period.from, period.to);
+}

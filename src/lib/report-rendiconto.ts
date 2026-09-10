@@ -17,6 +17,7 @@ export type RendicontoIncassatoSource = {
   contractNumber: string;
   collectionDate: Date | null;
   insertionDate: Date;
+  status?: string | null;
   podPdr?: string | null;
   pod?: string | null;
   pdr?: string | null;
@@ -157,8 +158,22 @@ export function buildRendiconto(params: {
    * (stesso elenco di Provvigioni), non solo in coda.
    */
   inlineRecurring?: boolean;
+  /**
+   * Mesi YYYY-MM ammessi per le righe Incassato (periodo filtro).
+   * Evita che Incassato|Stornato a settembre ripeschi Maggio/Agosto
+   * (collectionDate storica) insieme allo storno negativo.
+   */
+  incassatoMonths?: string[] | null;
 }): RendicontoSummary {
   const lines: RendicontoLine[] = [];
+  const allowedIncassato =
+    params.incassatoMonths && params.incassatoMonths.length > 0
+      ? new Set(params.incassatoMonths)
+      : null;
+  /** Contratti già in storno nel report: non ridarli come gettone positivo. */
+  const stornoContractNumbers = new Set(
+    params.stornoRows.map((r) => r.contractNumber),
+  );
 
   if (!params.onlyStornato) {
     /** Contratti già presenti come rate → non riduplicare nel blocco Incassato. */
@@ -175,8 +190,12 @@ export function buildRendiconto(params: {
         continue;
       }
       if (isRecurringAnnual(c.recurrence) && !c.collectionDate) continue;
+      // Recuperato / in clawback: solo riga storno negativa, mai +gettone.
+      if (c.status === "STORNATO") continue;
+      if (stornoContractNumbers.has(c.contractNumber)) continue;
       const base = c.collectionDate ?? c.insertionDate;
       const month = monthKeyFromDate(new Date(base));
+      if (allowedIncassato && !allowedIncassato.has(month)) continue;
       lines.push({
         kind: "incassato",
         month,

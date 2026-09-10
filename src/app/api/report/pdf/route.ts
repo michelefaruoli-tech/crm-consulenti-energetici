@@ -26,6 +26,7 @@ import {
   reportPeriodUsesCollectionDate,
   reportRecurringCompetenceOnly,
   resolveReportPeriod,
+  resolveIncassatoMonths,
   resolveReportStati,
   resolveReportStato,
 } from "@/lib/report-filters";
@@ -98,6 +99,7 @@ export async function GET(req: NextRequest) {
     period.months.length > 0
       ? formatMonthsLabel(period.months)
       : `${period.from} - ${period.to}`;
+  const incassatoMonths = resolveIncassatoMonths(period);
 
   const rendiconto = buildRendiconto({
     contracts: onlyStornato ? [] : contracts,
@@ -106,6 +108,7 @@ export async function GET(req: NextRequest) {
     skipRecurring: !includeRecurring || onlyStornato,
     onlyStornato,
     inlineRecurring: reportHasStato(stati, "Da incassare"),
+    incassatoMonths,
   });
 
   const extras = parseReportExtras((k) => sp.get(k));
@@ -338,7 +341,7 @@ export async function GET(req: NextRequest) {
       head: [["Cliente", "Fornitore", "Collab.", "Data", "Importo"]],
       body:
         block.storni.length === 0
-          ? [["Nessuno storno da recuperare", "", "", "", ""]]
+          ? [["Nessuno storno nel periodo", "", "", "", ""]]
           : block.storni.map((l) => [
               reportClienteLabel(l.clientName, l.podPdr),
               l.supplierName,

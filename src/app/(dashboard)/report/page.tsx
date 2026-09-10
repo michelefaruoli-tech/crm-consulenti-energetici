@@ -38,6 +38,7 @@ import {
   reportRecurringCompetenceOnly,
   reportStatoHint,
   resolveReportPeriod,
+  resolveIncassatoMonths,
   resolveReportStati,
   resolveReportStato,
 } from "@/lib/report-filters";
@@ -178,6 +179,10 @@ export default async function ReportPage({
 
   // Con solo «Stornato»: niente gettoni positivi (già pagati in passato).
   // Solo clawback negativo — poi in Provvigioni passi a KO/Cessato e archivi.
+  const incassatoMonths = new Set(resolveIncassatoMonths(period));
+  const stornoContractNumbers = new Set(
+    stornoRows.map((r) => r.contractNumber),
+  );
   const contractsForTotals = onlyStornato ? [] : contracts;
 
   // Una tantum + R annuali orfani (collectionDate senza rate).
@@ -186,13 +191,25 @@ export default async function ReportPage({
     recurringRows.map((r) => r.contractNumber),
   );
   const oneShot = contractsForTotals.filter((c) => {
+    if (c.status === "STORNATO") return false;
+    if (stornoContractNumbers.has(c.contractNumber)) return false;
     if (isRecurringMonthly(c.recurrence)) return false;
     if (isRecurringAnnual(c.recurrence)) {
-      return Boolean(c.collectionDate) && !recurringContractNumbers.has(c.contractNumber);
+      if (!c.collectionDate || recurringContractNumbers.has(c.contractNumber)) {
+        return false;
+      }
     }
+    const base = c.collectionDate ?? c.insertionDate;
+    const key = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`;
+    if (incassatoMonths.size > 0 && !incassatoMonths.has(key)) return false;
     return true;
   });
-  const totalContracts = onlyStornato ? stornoTotals.count : contracts.length;
+  const includeRecurring = reportIncludesRecurring(stati);
+  const totalContracts = onlyStornato
+    ? stornoTotals.count
+    : oneShot.length +
+      (includeRecurring ? recurringTotals.count : 0) +
+      (includeStornos ? stornoTotals.count : 0);
   const totalExpected = onlyStornato
     ? 0
     : oneShot.reduce(
@@ -216,7 +233,6 @@ export default async function ReportPage({
         (s, c) => s + Number(c.commission?.paid ?? 0),
         0,
       );
-  const includeRecurring = reportIncludesRecurring(stati);
   const totalReceived =
     totalReceivedOneShot +
     (includeRecurring ? recurringTotals.amount : 0) +
