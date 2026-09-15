@@ -22,6 +22,10 @@ import {
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
+import {
+  isPeriodInRecurringWindow,
+  recurringWindow,
+} from "@/lib/recurring-window";
 import { recurrenceWriteData } from "@/lib/recurring";
 import { repairMonthlySwitchArchives } from "@/lib/contract-pod-archive";
 
@@ -407,6 +411,13 @@ export async function applyHeliosProvvigioniAction(
           supplyStartDate: true,
           insertionDate: true,
           operationType: true,
+          expiryDate: true,
+          statusHistory: {
+            where: { toStatus: "CHIUSO" },
+            select: { changedAt: true },
+            orderBy: { changedAt: "desc" },
+            take: 1,
+          },
         },
       });
       const supply =
@@ -415,10 +426,10 @@ export async function applyHeliosProvvigioniAction(
           contract?.insertionDate ?? new Date(),
           contract?.operationType,
         );
-      const canIncassare = canMarkIncassatoForCompetencePeriod(
-        supply,
-        rowPeriod,
-      );
+      const canIncassare =
+        canMarkIncassatoForCompetencePeriod(supply, rowPeriod) &&
+        (!contract ||
+          isPeriodInRecurringWindow(recurringWindow(contract), rowPeriod));
       if (!canIncassare) {
         skippedCollected++;
         continue;

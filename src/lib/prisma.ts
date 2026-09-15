@@ -39,8 +39,38 @@ function createPrismaClient() {
   });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function getPrismaClient(): PrismaClient {
+  const existing = globalForPrisma.prisma;
+  if (existing) return existing;
+  const created = createPrismaClient();
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = created;
+  } else {
+    productionClient = created;
+  }
+  return created;
 }
+
+let productionClient: PrismaClient | undefined;
+
+/**
+ * Client inizializzato alla prima query, non all'import del modulo.
+ *
+ * `next build` valuta i moduli di ogni route nella fase «Collecting page data»
+ * senza eseguire query: con l'inizializzazione immediata bastava l'assenza di
+ * DATABASE_URL per far fallire il build di una route che importa questo file.
+ * Con l'inizializzazione differita l'import è sempre sicuro e l'errore di
+ * configurazione resta esplicito, ma arriva alla prima query reale.
+ */
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = productionClient ?? getPrismaClient();
+    // Il receiver è il client, non il proxy: i getter interni di Prisma non
+    // devono rientrare da questo handler
+    const value = Reflect.get(client, property, client);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+  has(_target, property) {
+    return property in (productionClient ?? getPrismaClient());
+  },
+});

@@ -9,7 +9,12 @@ import {
   recurrenceWriteData,
   toPeriod,
 } from "@/lib/recurring";
-import { computeSupplyStartDate } from "@/lib/supply-dates";
+import {
+  isDisposableRecurringMonth,
+  isPeriodInRecurringWindow,
+  recurringWindow,
+  type RecurringWindow,
+} from "@/lib/recurring-window";
 import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
@@ -25,34 +30,87 @@ const PRESERVED_STATUSES = new Set([
 const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura";
 const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
 
-/** Giorno prima della chiusura (es. fornitura nuova 1/10 → ultimo giorno Helios 30/09). */
-function dayBefore(date: Date): Date {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  d.setDate(d.getDate() - 1);
-  return d;
-}
-
-/** Ultimo mese di competenza: oggi, oppure il mese prima della data di chiusura. */
-function lastBillablePeriod(now: Date, expiryDate: Date | null | undefined): string {
+/** Ultimo mese generabile: oggi, oppure l'ultimo mese della finestra se precedente. */
+function lastGeneratedPeriod(window: RecurringWindow, now: Date): string {
   const nowPeriod = toPeriod(now);
-  if (!expiryDate) return nowPeriod;
-  const last = toPeriod(dayBefore(expiryDate));
-  return last < nowPeriod ? last : nowPeriod;
+  if (window.end && window.end < nowPeriod) return window.end;
+  return nowPeriod;
 }
 
-function earlierPeriod(a: string | null, b: string | null): string | null {
-  if (!a) return b;
-  if (!b) return a;
-  return a < b ? a : b;
+/** Elimina in blocco le rate fuori intervallo (deleteMany è ok su Neon HTTP). */
+async function deleteRecurringMonthsByIds(ids: string[]): Promise<void> {
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    await prisma.recurringMonth.deleteMany({
+      where: { id: { in: ids.slice(offset, offset + 100) } },
+    });
+  }
+}
+
+/**
+ * Il mese di competenza è ammesso per questo contratto?
+ * Guardia da usare prima di creare una rata da azioni manuali o import.
+ */
+export async function isPeriodAllowedForContract(
+  contractId: string,
+  period: string,
+): Promise<boolean> {
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: {
+      insertionDate: true,
+      supplyStartDate: true,
+      operationType: true,
+      status: true,
+      expiryDate: true,
+      statusHistory: {
+        where: { toStatus: "CHIUSO" },
+        select: { changedAt: true },
+        orderBy: { changedAt: "desc" },
+        take: 1,
+      },
+    },
+  });
+  if (!contract) return false;
+  return isPeriodInRecurringWindow(recurringWindow(contract), period);
+}
+
+/**
+ * Rimuove le rate del contratto fuori dall'intervallo di competenza.
+ * Le rate incassate / pagate / segnalate a mano non vengono toccate:
+ * finiscono nel conteggio `manualReview` e restano visibili.
+ */
+async function purgeOutOfWindowMonths(
+  contractId: string,
+  window: RecurringWindow,
+): Promise<{ deleted: number; manualReview: number }> {
+  const rows = await prisma.recurringMonth.findMany({
+    where: {
+      contractId,
+      OR: [
+        { period: { lt: window.start } },
+        ...(window.end ? [{ period: { gt: window.end } }] : []),
+      ],
+    },
+    select: { id: true, period: true, status: true, paidAt: true, settledPeriod: true },
+  });
+
+  const toDelete = rows.filter(isDisposableRecurringMonth).map((row) => row.id);
+  await deleteRecurringMonthsByIds(toDelete);
+
+  return { deleted: toDelete.length, manualReview: rows.length - toDelete.length };
 }
 
 /**
  * Controllo globale dei limiti temporali delle ricorrenze già presenti.
  * Corregge dati storici senza rigenerare ogni rata di ogni contratto.
+ *
+ * Le rate fuori intervallo senza valore economico vengono eliminate; quelle
+ * incassate/pagate/segnalate restano e sono contate in `manualReview`.
  */
 export async function reconcileAllRecurringBounds(): Promise<{
   checked: number;
   excluded: number;
+  manualReview: number;
 }> {
   const contracts = await prisma.contract.findMany({
     where: {
@@ -74,61 +132,47 @@ export async function reconcileAllRecurringBounds(): Promise<{
         take: 1,
       },
       recurringMonths: {
-        where: { status: { not: "CLOSED" } },
-        select: { id: true, period: true },
+        select: {
+          id: true,
+          period: true,
+          status: true,
+          paidAt: true,
+          settledPeriod: true,
+        },
       },
     },
   });
 
-  const invalid: Array<{ id: string; note: string }> = [];
+  const toDelete: string[] = [];
+  let manualReview = 0;
   for (const contract of contracts) {
-    const start = toPeriod(
-      contract.supplyStartDate ??
-        computeSupplyStartDate(contract.insertionDate, contract.operationType),
-    );
-    const endFromClosed =
-      contract.status === "CHIUSO" && contract.statusHistory[0]
-        ? toPeriod(contract.statusHistory[0].changedAt)
-        : null;
-    const endFromExpiry = contract.expiryDate
-      ? toPeriod(dayBefore(contract.expiryDate))
-      : null;
-    const end = earlierPeriod(endFromClosed, endFromExpiry);
+    const window = recurringWindow(contract);
     for (const installment of contract.recurringMonths) {
-      if (installment.period < start) {
-        invalid.push({ id: installment.id, note: AUTO_CLOSED_BEFORE_START });
-      } else if (end && installment.period > end) {
-        invalid.push({ id: installment.id, note: AUTO_CLOSED_AFTER_END });
+      if (isPeriodInRecurringWindow(window, installment.period)) continue;
+      if (isDisposableRecurringMonth(installment)) {
+        toDelete.push(installment.id);
+      } else {
+        manualReview++;
       }
     }
   }
 
-  // Aggiornamenti puntuali: affidabili anche tramite il proxy DB di produzione.
-  for (let offset = 0; offset < invalid.length; offset += 25) {
-    await Promise.all(
-      invalid.slice(offset, offset + 25).map((row) =>
-        prisma.recurringMonth.update({
-          where: { id: row.id },
-          data: {
-            status: "CLOSED",
-            paidAt: null,
-            settledPeriod: null,
-            note: row.note,
-          },
-        }),
-      ),
-    );
-  }
+  await deleteRecurringMonthsByIds(toDelete);
 
-  return { checked: contracts.length, excluded: invalid.length };
+  return {
+    checked: contracts.length,
+    excluded: toDelete.length,
+    manualReview,
+  };
 }
 
 /**
- * Per contratti ricorrenti mensili (M): genera mesi da inizio fornitura → oggi
- * (o fino al giorno prima della chiusura, se c’è expiryDate).
+ * Per contratti ricorrenti mensili (M): genera i mesi dell'intervallo di
+ * fornitura (mese di ingresso incluso) fino a oggi o al mese di chiusura.
  * Per contratti ricorrenti annuali (R): genera solo le scadenze a +12 mesi
  * dall’ultimo pagamento (o dall’ingresso se mai pagato).
  *
+ * Le rate fuori intervallo vengono rimosse (vedi `purgeOutOfWindowMonths`).
  * Stati PAID / LIQUIDATED / CLOSED / ERROR_UNPAID non vengono sovrascritti.
  */
 export async function syncRecurringMonthsForContract(contractId: string): Promise<void> {
@@ -165,29 +209,14 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
 
   if (!isRecurring(contract.recurrence)) return;
 
-  const startDate =
-    contract.supplyStartDate ??
-    computeSupplyStartDate(contract.insertionDate, contract.operationType);
-  const start = toPeriod(startDate);
   const nowDate = new Date();
   const now = toPeriod(nowDate);
+  const window = recurringWindow(contract, nowDate);
+  const start = window.start;
 
-  // Elimina dai conteggi qualsiasi rata precedente all'effettivo ingresso.
-  const beforeSupply = await prisma.recurringMonth.findMany({
-    where: { contractId, period: { lt: start } },
-    select: { id: true },
-  });
-  for (const row of beforeSupply) {
-    await prisma.recurringMonth.update({
-      where: { id: row.id },
-      data: {
-        status: "CLOSED",
-        paidAt: null,
-        settledPeriod: null,
-        note: AUTO_CLOSED_BEFORE_START,
-      },
-    });
-  }
+  // Rate fuori intervallo (prima dell'ingresso o dopo la chiusura): via.
+  // Restano solo quelle con valore economico, da decidere a mano.
+  await purgeOutOfWindowMonths(contractId, window);
 
   // Pratica fallita: chiudi mesi aperti e non generarne di nuovi.
   if (contract.status === "ANNULLATO" || contract.status === "KO") {
@@ -204,38 +233,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  const closedPeriod =
-    contract.status === "CHIUSO"
-      ? toPeriod(contract.statusHistory[0]?.changedAt ?? nowDate)
-      : null;
-  const expiryPeriod = contract.expiryDate
-    ? toPeriod(dayBefore(contract.expiryDate))
-    : null;
-  const lastAllowed = earlierPeriod(closedPeriod, expiryPeriod);
-  const lastPeriod =
-    lastAllowed && lastAllowed < now ? lastAllowed : lastBillablePeriod(nowDate, contract.expiryDate);
-
-  if (lastAllowed) {
-    const afterClosure = await prisma.recurringMonth.findMany({
-      where: {
-        contractId,
-        period: { gt: lastAllowed },
-        status: { in: ["PENDING", "MISSING"] },
-      },
-      select: { id: true },
-    });
-    for (const row of afterClosure) {
-      await prisma.recurringMonth.update({
-        where: { id: row.id },
-        data: {
-          status: "CLOSED",
-          paidAt: null,
-          settledPeriod: null,
-          note: AUTO_CLOSED_AFTER_END,
-        },
-      });
-    }
-  }
+  const lastPeriod = lastGeneratedPeriod(window, nowDate);
 
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
@@ -365,12 +363,23 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
         take: 1,
       },
       recurringMonths: {
-        select: { id: true, period: true, status: true, amount: true, note: true },
+        select: {
+          id: true,
+          period: true,
+          status: true,
+          amount: true,
+          note: true,
+          paidAt: true,
+          settledPeriod: true,
+        },
       },
     },
   });
 
-  const now = toPeriod(new Date());
+  const nowDate = new Date();
+  const now = toPeriod(nowDate);
+  const outOfWindow: string[] = [];
+  let manualReview = 0;
   const creates: Array<{
     contractId: string;
     period: string;
@@ -386,6 +395,14 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   const annualIds: string[] = [];
 
   for (const contract of contracts) {
+    // Le rate fuori intervallo vanno rimosse anche per annuali / pratiche KO.
+    const window = recurringWindow(contract, nowDate);
+    for (const row of contract.recurringMonths) {
+      if (isPeriodInRecurringWindow(window, row.period)) continue;
+      if (isDisposableRecurringMonth(row)) outOfWindow.push(row.id);
+      else manualReview++;
+    }
+
     if (isRecurringAnnual(contract.recurrence)) {
       annualIds.push(contract.id);
       continue;
@@ -393,22 +410,8 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     if (!isRecurringMonthly(contract.recurrence)) continue;
     if (contract.status === "ANNULLATO" || contract.status === "KO") continue;
 
-    const start = toPeriod(
-      contract.supplyStartDate ??
-        computeSupplyStartDate(contract.insertionDate, contract.operationType),
-    );
-    const closedPeriod =
-      contract.status === "CHIUSO" && contract.statusHistory[0]
-        ? toPeriod(contract.statusHistory[0].changedAt)
-        : null;
-    const expiryPeriod = contract.expiryDate
-      ? toPeriod(dayBefore(contract.expiryDate))
-      : null;
-    const lastAllowed = earlierPeriod(closedPeriod, expiryPeriod);
-    const lastPeriod =
-      lastAllowed && lastAllowed < now
-        ? lastAllowed
-        : lastBillablePeriod(new Date(), contract.expiryDate);
+    const start = window.start;
+    const lastPeriod = lastGeneratedPeriod(window, nowDate);
     const amount = Number(contract.commission?.expected ?? 0) || null;
     const existing = new Map(contract.recurringMonths.map((row) => [row.period, row]));
 
@@ -433,6 +436,8 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       }
     }
   }
+
+  await deleteRecurringMonthsByIds(outOfWindow);
 
   // Creazioni sequenziali: il proxy DB può rifiutare upsert concorrenti in massa.
   for (const row of creates) {
@@ -473,6 +478,8 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     monthlyCreated: creates.length,
     monthlyUpdated: updates.length,
     annualChecked: annualIds.length,
+    outOfWindowDeleted: outOfWindow.length,
+    outOfWindowManualReview: manualReview,
   });
   return contracts.length;
 }
@@ -516,6 +523,7 @@ export async function getMissingRecurringAlerts(
           operationType: true,
           supplyStartDate: true,
           status: true,
+          expiryDate: true,
           statusHistory: {
             where: { toStatus: "CHIUSO" },
             select: { changedAt: true },
@@ -539,21 +547,9 @@ export async function getMissingRecurringAlerts(
     orderBy: [{ period: "asc" }],
     take: 1000,
   });
-  return rows.filter((row) => {
-    const start = toPeriod(
-      row.contract.supplyStartDate ??
-        computeSupplyStartDate(
-          row.contract.insertionDate,
-          row.contract.operationType,
-        ),
-    );
-    if (row.period < start) return false;
-    const closedAt =
-      row.contract.status === "CHIUSO"
-        ? row.contract.statusHistory[0]?.changedAt
-        : null;
-    return !closedAt || row.period <= toPeriod(closedAt);
-  });
+  return rows.filter((row) =>
+    isPeriodInRecurringWindow(recurringWindow(row.contract), row.period),
+  );
 }
 
 /** Mesi già incassati dal fornitore ma non ancora liquidati al collaboratore. */
