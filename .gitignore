@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Template senza valori reali, citato dal README
+!.env.example
 
 # vercel
 .vercel

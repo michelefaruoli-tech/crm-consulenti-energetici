@@ -21,6 +21,7 @@ import {
   PlusCircle,
   HardDrive,
   ShieldAlert,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -57,6 +58,13 @@ const NAV_ITEMS: Array<{
     roles: ["ADMIN", "SEGRETERIA"],
   },
   { href: "/provvigioni", label: "Provvigioni", icon: Coins, roles: "all" },
+  {
+    href: "/provvigioni/liquidazioni",
+    label: "Liquidazioni",
+    icon: Receipt,
+    // I rendiconti contengono i dati di tutti i collaboratori
+    roles: ["ADMIN", "SEGRETERIA"],
+  },
   {
     href: "/report",
     label: "Report",

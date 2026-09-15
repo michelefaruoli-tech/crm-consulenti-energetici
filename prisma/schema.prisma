@@ -100,6 +100,15 @@ model User {
   /// Dove questo utente compare nello scope di un backoffice / area manager
   scopedByBackoffices UserCollaboratorScope[] @relation("ScopedCollaborator")
   agendaItems          AgendaItem[]
+  /// Import provvigioni e ciclo di liquidazione
+  importTemplatesCreated ImportTemplate[]   @relation("ImportTemplateCreatedBy")
+  payoutRunsCreated      PayoutRun[]        @relation("PayoutRunCreatedBy")
+  payoutBatchesUploaded  PayoutBatch[]      @relation("PayoutBatchUploadedBy")
+  payoutRows             PayoutRow[]        @relation("PayoutRowCollaborator")
+  payoutAdjustments      PayoutAdjustment[] @relation("PayoutAdjustmentCollaborator")
+  payoutAdjustmentsCreated PayoutAdjustment[] @relation("PayoutAdjustmentCreatedBy")
+  payoutReportRunsCreated  PayoutReportRun[]  @relation("PayoutReportRunCreatedBy")
+  payoutReportItems        PayoutReportItem[] @relation("PayoutReportItemCollaborator")
 }
 
 model Client {
@@ -172,6 +181,7 @@ model Supplier {
   commissionRules CommissionRule[]
   contracts       Contract[]
   userScopes      UserSupplierScope[]
+  payoutSources   PayoutSource[]
 }
 
 /// Scope fornitori per utente (Backoffice Enel vede solo Enel, ecc.)
@@ -380,6 +390,8 @@ model Contract {
   commission    Commission?
   recurringMonths RecurringMonth[]
   emailLogs     ContractEmailLog[]
+  payoutRows       PayoutRow[]
+  payoutAdjustments PayoutAdjustment[]
 
   @@index([status])
   @@index([collaboratorId])
@@ -646,4 +658,339 @@ model AgendaItem {
   @@index([userId, scheduledAt])
   @@index([userId, completed])
   @@index([alertAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Import provvigioni da fonti eterogenee e ciclo di liquidazione.
+// Il formato dei file vive qui (ImportTemplate), non nel codice: nuova fonte =
+// nuova mappatura da interfaccia, senza deploy.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tipo di fonte da cui arriva il rendiconto
+enum PayoutSourceKind {
+  /// Rendiconto diretto di un fornitore
+  SUPPLIER_STATEMENT
+  /// Documento di pagamento / invito a fatturare di un master o agenzia
+  MASTER_STATEMENT
+  /// Comparatore o marketplace: più fornitori nello stesso file
+  MARKETPLACE
+  OTHER
+}
+
+enum PayoutFileKind {
+  XLSX
+  CSV
+}
+
+/// Stato del ciclo di liquidazione
+enum PayoutRunStatus {
+  /// Aperto: accoglie file, rettifiche e rigenerazioni
+  DRAFT
+  /// Almeno un file applicato ai contratti
+  APPLIED
+  /// Applicazione annullata
+  REVERTED
+  /// Chiuso: nessuna ulteriore modifica attesa
+  CLOSED
+}
+
+enum PayoutBatchStatus {
+  PARSED
+  APPLIED
+  PARTIALLY_APPLIED
+  REVERTED
+  FAILED
+}
+
+enum PayoutRowMatch {
+  /// Contratto trovato, non ancora applicato
+  MATCHED
+  /// Più candidati o punteggio sotto soglia: mai applicata in automatico
+  AMBIGUOUS
+  /// Nessun contratto: possibile contratto mai inserito a sistema
+  UNMATCHED
+  /// Esclusa dall'utente
+  IGNORED
+  APPLIED
+  ERROR
+}
+
+/// Incassato dal fornitore ≠ liquidato al collaboratore: due eventi distinti
+enum PayoutMarkMode {
+  INCASSATO
+  LIQUIDATO
+}
+
+enum PayoutAdjustmentKind {
+  /// Voce aggiuntiva a favore del collaboratore
+  EXTRA
+  /// Storno a carico del collaboratore (importo negativo)
+  STORNO
+  /// Acconto già versato, da sottrarre dal netto (importo negativo)
+  ACCONTO
+  /// Correzione di un importo importato
+  RETTIFICA
+}
+
+enum PayoutReportStatus {
+  PENDING
+  GENERATING
+  READY
+  PARTIAL
+  FAILED
+}
+
+enum PayoutReportDelivery {
+  PENDING
+  /// Invio avviato: se resta qui, va verificato a mano (nessuna transazione)
+  SENDING
+  SENT
+  ERROR
+  SKIPPED
+}
+
+/// Fonte logica dei rendiconti (fornitore, master, comparatore)
+model PayoutSource {
+  id         String           @id @default(cuid())
+  name       String
+  kind       PayoutSourceKind @default(SUPPLIER_STATEMENT)
+  /// Null per le fonti che mescolano più fornitori nello stesso file
+  supplierId String?
+  supplier   Supplier?        @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  active     Boolean          @default(true)
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  templates ImportTemplate[]
+  batches   PayoutBatch[]
+
+  @@unique([name])
+  @@index([active])
+}
+
+/// Mappatura colonne riusabile e versionata: il cuore della generalizzazione
+model ImportTemplate {
+  id       String         @id @default(cuid())
+  sourceId String
+  source   PayoutSource   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  name     String
+  fileKind PayoutFileKind @default(XLSX)
+  /// Chiave del preset di codice da cui deriva (es. vendite_dirette): permette di
+  /// partire dalle mappature note senza costruirle da zero
+  builtinKey String?
+  /// Scelta dei fogli: { mode: exact|regex|all, value, skip: [] }
+  sheetMatchJson String?
+  /// 0 = rilevamento automatico nelle prime righe
+  headerRow      Int     @default(1)
+  /// Mappa campo → lettera colonna o intestazione: { "pod": "Cod.Ute.", "amount": "L" }
+  columnMapJson  String
+  /// Separatore decimale, inversione di segno per foglio, colonne da sommare
+  numberFormatJson String?
+  /// it | it_dash | us | excel | month_abbr | yyyymm
+  dateFormat     String?
+  /// Regole di esclusione riga: stop al primo totale, colonne obbligatorie, …
+  skipRowRulesJson String?
+  version     Int      @default(1)
+  active      Boolean  @default(true)
+  createdById String?
+  createdBy   User?    @relation("ImportTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  batches PayoutBatch[]
+
+  @@index([sourceId, active])
+}
+
+/// Ciclo di liquidazione: traccia persistente, riapribile e modificabile
+model PayoutRun {
+  id String @id @default(cuid())
+  /// Mese di rendiconto YYYY-MM, allineato a RecurringMonth.settledPeriod
+  period      String
+  label       String
+  status      PayoutRunStatus @default(DRAFT)
+  markMode    PayoutMarkMode  @default(INCASSATO)
+  notes       String?
+  createdById String
+  createdBy   User            @relation("PayoutRunCreatedBy", fields: [createdById], references: [id])
+  appliedById String?
+  appliedAt   DateTime?
+  /// Marcatura «liquidato al collaboratore», passo successivo e distinto
+  liquidatedAt DateTime?
+  closedAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  batches     PayoutBatch[]
+  adjustments PayoutAdjustment[]
+  reportRuns  PayoutReportRun[]
+
+  @@unique([period, label])
+  @@index([status])
+  @@index([period])
+}
+
+/// Un file di rendiconto importato dentro un ciclo
+model PayoutBatch {
+  id         String          @id @default(cuid())
+  runId      String
+  run        PayoutRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceId   String
+  source     PayoutSource    @relation(fields: [sourceId], references: [id])
+  templateId String?
+  template   ImportTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  filename   String
+  /// SHA256 del contenuto: impedisce di importare due volte lo stesso file
+  sha256     String            @unique
+  fileSize   Int
+  status     PayoutBatchStatus @default(PARSED)
+  totalRows     Int @default(0)
+  matchedRows   Int @default(0)
+  ambiguousRows Int @default(0)
+  unmatchedRows Int @default(0)
+  appliedRows   Int @default(0)
+  /// Somma degli importi delle righe lette
+  computedTotal Decimal? @db.Decimal(12, 2)
+  /// Totale dichiarato dal file (riga/foglio di riepilogo): serve alla quadratura
+  declaredTotal Decimal? @db.Decimal(12, 2)
+  error        String?
+  uploadedById String
+  uploadedBy   User      @relation("PayoutBatchUploadedBy", fields: [uploadedById], references: [id])
+  appliedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  rows PayoutRow[]
+
+  @@index([runId])
+  @@index([status])
+}
+
+/// Riga del file con esito del matching e stato precedente per l'annullamento
+model PayoutRow {
+  id        String      @id @default(cuid())
+  batchId   String
+  batch     PayoutBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  sheetName String      @default("")
+  rowIndex  Int
+  /// Riga originale come letta: audit e revisione senza riaprire il file
+  rawJson   String
+
+  podRaw          String?
+  /// POD/PDR normalizzato usato per il match
+  podKey          String?
+  clientNameRaw   String?
+  fiscalCodeRaw   String?
+  /// Fornitore indicato nel file (le fonti marketplace ne mescolano diversi)
+  supplierHint    String?
+  /// Collaboratore indicato nel file: indizio, non verità
+  collaboratorHint String?
+  amount          Decimal? @db.Decimal(12, 2)
+  /// Mese di competenza dedotto YYYY-MM
+  period          String?
+
+  matchStatus PayoutRowMatch @default(UNMATCHED)
+  matchScore  Int?
+  /// pod_exact | pdr_zero_fill | fiscal_code | pod_masked_suffix | name_period
+  matchReason String?
+  contractId  String?
+  contract    Contract?      @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  /// Collaboratore derivato dal contratto trovato, non dal file
+  collaboratorId String?
+  collaborator   User?       @relation("PayoutRowCollaborator", fields: [collaboratorId], references: [id], onDelete: SetNull)
+  /// Rata effettivamente aggiornata
+  recurringMonthId String?
+  /// Stato precedente di contratto, rata e provvigione: rende annullabile l'applicazione
+  previousStateJson String?
+  /// Candidati in caso di ambiguità, per la scelta manuale
+  candidateIdsJson  String?
+  appliedAt    DateTime?
+  resolvedById String?
+  resolvedAt   DateTime?
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([batchId, sheetName, rowIndex])
+  @@index([batchId, matchStatus])
+  @@index([podKey])
+  @@index([collaboratorId])
+  @@index([contractId])
+}
+
+/// Rettifica manuale: distinta dai dati importati, non li sovrascrive
+model PayoutAdjustment {
+  id             String               @id @default(cuid())
+  runId          String
+  run            PayoutRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  collaboratorId String
+  collaborator   User                 @relation("PayoutAdjustmentCollaborator", fields: [collaboratorId], references: [id])
+  kind           PayoutAdjustmentKind
+  /// Importo con segno: positivo somma, negativo sottrae.
+  /// ACCONTO e STORNO sono sempre negativi (l'acconto è già stato versato).
+  amount         Decimal              @db.Decimal(12, 2)
+  /// Motivo della rettifica: obbligatorio per non ripetere gli script correttivi
+  note           String
+  contractId     String?
+  contract       Contract?            @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  createdById    String
+  createdBy      User                 @relation("PayoutAdjustmentCreatedBy", fields: [createdById], references: [id])
+  updatedById    String?
+  /// Annullamento non distruttivo: la voce resta visibile con il suo motivo
+  voidedAt       DateTime?
+  voidedById     String?
+  voidReason     String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([runId, collaboratorId])
+  @@index([runId, voidedAt])
+}
+
+/// Esecuzione di generazione report, versionata a ogni rigenerazione
+model PayoutReportRun {
+  id      String    @id @default(cuid())
+  runId   String
+  run     PayoutRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3… si incrementa a ogni rigenerazione
+  version Int
+  status  PayoutReportStatus @default(PENDING)
+  /// Motivo della rigenerazione
+  reason      String?
+  createdById String
+  createdBy   User      @relation("PayoutReportRunCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items PayoutReportItem[]
+
+  @@unique([runId, version])
+  @@index([status])
+}
+
+/// Report di un collaboratore in una versione: snapshot dei totali + stato invio
+model PayoutReportItem {
+  id             String          @id @default(cuid())
+  reportRunId    String
+  reportRun      PayoutReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade)
+  collaboratorId String
+  collaborator   User            @relation("PayoutReportItemCollaborator", fields: [collaboratorId], references: [id])
+  /// Totali congelati: il documento si rigenera identico anche dopo nuove rettifiche
+  importedTotal    Decimal @db.Decimal(12, 2) @default(0)
+  adjustmentsTotal Decimal @db.Decimal(12, 2) @default(0)
+  netTotal         Decimal @db.Decimal(12, 2) @default(0)
+  rowCount         Int     @default(0)
+  /// Righe e rettifiche congelate: sostituisce il salvataggio del file
+  snapshotJson     String
+  delivery  PayoutReportDelivery @default(PENDING)
+  toEmail   String?
+  attempts  Int       @default(0)
+  lastError String?
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([reportRunId, collaboratorId])
+  @@index([delivery])
 }

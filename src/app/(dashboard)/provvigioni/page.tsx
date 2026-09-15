@@ -830,6 +830,13 @@ export default async function ProvvigioniPage({
               </Button>
             </Link>
           ) : null}
+          {hasPermission(session.role, "commissions.edit_gettone") ? (
+            <Link href="/provvigioni/liquidazioni">
+              <Button type="button" variant="secondary">
+                Liquidazioni
+              </Button>
+            </Link>
+          ) : null}
           {canExport ? (
             <a href={exportHref}>
               <Button variant="secondary">Scarica Excel</Button>
