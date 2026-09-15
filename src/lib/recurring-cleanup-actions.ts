@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import {
-  CLEANUP_APPLY_BATCH,
+  CLEANUP_APPLY_MONTH_BATCH,
   CLEANUP_SCAN_BATCH,
   cleanupRecurringOutOfRange,
   scanRecurringOutOfRange,
@@ -25,7 +25,13 @@ export type RecurringCleanupScanResult =
   | { ok: false; error: string };
 
 export type RecurringCleanupApplyResult =
-  | { ok: true; deleted: number; manualReview: number; contracts: number }
+  | {
+      ok: true;
+      deleted: number;
+      manualReview: number;
+      contracts: number;
+      monthIds: string[];
+    }
   | { ok: false; error: string };
 
 /** Stessa autorizzazione delle altre manutenzioni dati (solo Admin). */
@@ -67,38 +73,39 @@ export async function scanRecurringCleanupAction(input?: {
 }
 
 /**
- * Applica la bonifica a un lotto di contratti (max `CLEANUP_APPLY_BATCH`).
- * L'intervallo viene ricalcolato lato server: gli id di rata inviati dal
- * client non vengono usati per cancellare.
+ * Applica la bonifica a un lotto di rate selezionate (max
+ * `CLEANUP_APPLY_MONTH_BATCH`). L'intervallo viene ricalcolato lato server e
+ * ogni id deve risultare rimovibile; rate protette o assenti vengono rifiutate.
  */
 export async function applyRecurringCleanupAction(input: {
-  contractIds: string[];
+  monthIds: string[];
 }): Promise<RecurringCleanupApplyResult> {
   try {
     const session = await requireCleanupSession();
-    const ids = [...new Set(input.contractIds ?? [])].filter(Boolean);
+    const ids = [...new Set(input.monthIds ?? [])].filter(Boolean);
     if (ids.length === 0) {
-      return { ok: false, error: "Nessun contratto da bonificare" };
+      return { ok: false, error: "Nessuna rata selezionata da rimuovere" };
     }
-    if (ids.length > CLEANUP_APPLY_BATCH) {
+    if (ids.length > CLEANUP_APPLY_MONTH_BATCH) {
       return {
         ok: false,
-        error: `Massimo ${CLEANUP_APPLY_BATCH} contratti per lotto`,
+        error: `Massimo ${CLEANUP_APPLY_MONTH_BATCH} rate per lotto`,
       };
     }
 
-    const result = await cleanupRecurringOutOfRange(ids);
+    const result = await cleanupRecurringOutOfRange([], { onlyMonthIds: ids });
 
     if (result.deleted > 0) {
       await writeAuditLog({
         userId: session.id,
         action: "DELETE",
         entity: "RecurringMonth",
-        entityId: ids[0] ?? null,
+        entityId: result.monthIds[0] ?? null,
         details: {
           source: "bonifica_mesi_ricorrenti",
-          contracts: ids,
+          selected: ids.length,
           deleted: result.deleted,
+          monthIds: result.monthIds,
           manualReview: result.manualReview,
         },
       });

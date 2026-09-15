@@ -21,8 +21,10 @@ import {
 
 /** Contratti esaminati per ogni giro di analisi (limite durata su Vercel). */
 export const CLEANUP_SCAN_BATCH = 150;
-/** Contratti bonificati per ogni chiamata di applicazione. */
+/** Contratti bonificati per ogni chiamata di applicazione (CLI / tutto il contratto). */
 export const CLEANUP_APPLY_BATCH = 50;
+/** Rate selezionate per ogni chiamata di applicazione dal pannello CRM. */
+export const CLEANUP_APPLY_MONTH_BATCH = 100;
 
 const DELETE_CHUNK = 100;
 
@@ -39,6 +41,7 @@ export type OutOfWindowMonth = {
 export type ContractCleanupFinding = {
   contractId: string;
   label: string;
+  collaboratorName: string;
   windowLabel: string;
   /** Rate rimovibili: nessun incasso, nessuna liquidazione. */
   removable: OutOfWindowMonth[];
@@ -65,6 +68,7 @@ const CONTRACT_SELECT = {
   status: true,
   expiryDate: true,
   supplier: { select: { name: true } },
+  collaborator: { select: { name: true } },
   client: {
     select: {
       type: true,
@@ -101,6 +105,7 @@ type ContractWithMonths = {
   status: string | null;
   expiryDate: Date | null;
   supplier: { name: string } | null;
+  collaborator: { name: string } | null;
   client: {
     type: string;
     companyName: string | null;
@@ -156,6 +161,7 @@ export function findOutOfWindowMonths(
   return {
     contractId: contract.id,
     label: contractLabel(contract),
+    collaboratorName: contract.collaborator?.name ?? "—",
     windowLabel: `${periodLabel(window.start)} → ${
       window.end ? periodLabel(window.end) : "aperto"
     }`,
@@ -214,17 +220,117 @@ export async function scanRecurringOutOfRange(opts?: {
   };
 }
 
+export type RecurringCleanupApplyResult = {
+  deleted: number;
+  manualReview: number;
+  contracts: number;
+  monthIds: string[];
+};
+
+/**
+ * Ricalcola l'intervallo e restituisce solo gli id di rata effettivamente
+ * rimovibili tra quelli richiesti. Rifiuta se un id non esiste, non è fuori
+ * intervallo o è protetto (incassato / pagato / segnalato).
+ */
+export function validateRemovableMonthIds(
+  contracts: ContractWithMonths[],
+  requestedIds: string[],
+  now: Date = new Date(),
+): string[] {
+  const unique = [...new Set(requestedIds.filter(Boolean))];
+  if (unique.length === 0) return [];
+
+  const removableById = new Map<string, string>();
+  for (const contract of contracts) {
+    const finding = findOutOfWindowMonths(contract, now);
+    if (!finding) continue;
+    for (const row of finding.removable) {
+      removableById.set(row.id, contract.id);
+    }
+  }
+
+  const validated: string[] = [];
+  for (const id of unique) {
+    if (!removableById.has(id)) {
+      throw new Error(
+        "Una o più rate selezionate non sono rimovibili: aggiorna l'anteprima e riprova",
+      );
+    }
+    validated.push(id);
+  }
+
+  return validated;
+}
+
+function collectRemovableIdsFromContracts(
+  contracts: ContractWithMonths[],
+  now: Date,
+): { ids: string[]; manualReview: number } {
+  const ids: string[] = [];
+  let manualReview = 0;
+  for (const contract of contracts) {
+    const finding = findOutOfWindowMonths(contract, now);
+    if (!finding) continue;
+    ids.push(...finding.removable.map((row) => row.id));
+    manualReview += finding.manual.length;
+  }
+  return { ids, manualReview };
+}
+
+async function deleteRecurringMonthIds(ids: string[]): Promise<number> {
+  let deleted = 0;
+  for (let offset = 0; offset < ids.length; offset += DELETE_CHUNK) {
+    const res = await prisma.recurringMonth.deleteMany({
+      where: { id: { in: ids.slice(offset, offset + DELETE_CHUNK) } },
+    });
+    deleted += res.count;
+  }
+  return deleted;
+}
+
 /**
  * Applica la bonifica ai contratti indicati: ricalcola l'intervallo sul
- * momento (niente fiducia negli id arrivati dal client) ed elimina solo le
- * rate fuori intervallo prive di valore economico.
- * Idempotente: rieseguirla sugli stessi contratti non rimuove altro.
+ * momento ed elimina solo le rate fuori intervallo prive di valore economico.
+ * Con `onlyMonthIds` elimina solo le rate validate (pannello CRM).
+ * Idempotente: rieseguirla sugli stessi input non rimuove altro.
  */
 export async function cleanupRecurringOutOfRange(
   contractIds: string[],
-): Promise<{ deleted: number; manualReview: number; contracts: number }> {
+  opts?: { onlyMonthIds?: string[] },
+): Promise<RecurringCleanupApplyResult> {
+  const onlyMonthIds = opts?.onlyMonthIds?.filter(Boolean) ?? [];
+  const now = new Date();
+
+  if (onlyMonthIds.length > 0) {
+    const months = await prisma.recurringMonth.findMany({
+      where: { id: { in: onlyMonthIds } },
+      select: { id: true, contractId: true },
+    });
+    if (months.length !== new Set(onlyMonthIds).size) {
+      throw new Error(
+        "Una o più rate selezionate non esistono più: aggiorna l'anteprima e riprova",
+      );
+    }
+
+    const contractIdSet = new Set(months.map((m) => m.contractId));
+    const contracts = (await prisma.contract.findMany({
+      where: { id: { in: [...contractIdSet] }, deletedAt: null },
+      select: CONTRACT_SELECT,
+    })) as ContractWithMonths[];
+
+    const validated = validateRemovableMonthIds(contracts, onlyMonthIds, now);
+    const deleted = await deleteRecurringMonthIds(validated);
+
+    return {
+      deleted,
+      manualReview: 0,
+      contracts: contractIdSet.size,
+      monthIds: validated,
+    };
+  }
+
   if (contractIds.length === 0) {
-    return { deleted: 0, manualReview: 0, contracts: 0 };
+    return { deleted: 0, manualReview: 0, contracts: 0, monthIds: [] };
   }
 
   const contracts = (await prisma.contract.findMany({
@@ -232,25 +338,13 @@ export async function cleanupRecurringOutOfRange(
     select: CONTRACT_SELECT,
   })) as ContractWithMonths[];
 
-  const now = new Date();
-  const ids: string[] = [];
-  let manualReview = 0;
+  const { ids, manualReview } = collectRemovableIdsFromContracts(contracts, now);
+  const deleted = await deleteRecurringMonthIds(ids);
 
-  for (const contract of contracts) {
-    const finding = findOutOfWindowMonths(contract, now);
-    if (!finding) continue;
-    ids.push(...finding.removable.map((row) => row.id));
-    manualReview += finding.manual.length;
-  }
-
-  let deleted = 0;
-  // Niente transazioni con l'adapter Neon HTTP: deleteMany a lotti.
-  for (let offset = 0; offset < ids.length; offset += DELETE_CHUNK) {
-    const res = await prisma.recurringMonth.deleteMany({
-      where: { id: { in: ids.slice(offset, offset + DELETE_CHUNK) } },
-    });
-    deleted += res.count;
-  }
-
-  return { deleted, manualReview, contracts: contracts.length };
+  return {
+    deleted,
+    manualReview,
+    contracts: contracts.length,
+    monthIds: ids,
+  };
 }
