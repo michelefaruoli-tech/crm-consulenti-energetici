@@ -3,21 +3,11 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { contractVisibilityWhere } from "@/lib/user-scope";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
-import {
-  buildProvvigioniContractWhere,
-  buildProvvigioniListWhere,
-  parseProvvigioniFocus,
-} from "@/lib/provvigioni-filters";
+import { resolveProvvigioniQuery } from "@/lib/provvigioni-query";
 import { formatMonthYear } from "@/lib/date-parse";
-import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
-import {
-  parseProvvigioniVista,
-  vistaToRecurrenceMode,
-} from "@/lib/provvigioni-competence";
-import type { Prisma } from "@/generated/prisma/client";
+import { periodLabel } from "@/lib/recurring";
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -26,57 +16,19 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const collab = url.searchParams.get("collab");
-  const settledPeriod = url.searchParams.get("settled")?.trim() || "";
-  const supplier = url.searchParams.get("supplier");
-  const stato = url.searchParams.get("stato");
-  const tipologia = url.searchParams.get("tipologia");
-  const q = url.searchParams.get("q");
-  const vistaRaw = url.searchParams.get("vista");
-  const focusRaw = url.searchParams.get("focus");
-  const focus = parseProvvigioniFocus(focusRaw);
-  const vista = parseProvvigioniVista(vistaRaw);
-  const recurrenceMode = vistaToRecurrenceMode(vista);
-  const canViewAll = hasPermission(session.role, "commissions.view_all");
-  const competenceRaw = url.searchParams.get("competence")?.trim() || "";
-  const competenceAll = competenceRaw === "tutti";
-  const competencePeriod =
-    competenceRaw &&
-    competenceRaw !== "tutti" &&
-    /^\d{4}-\d{2}$/.test(competenceRaw)
-      ? competenceRaw
-      : undefined;
-  const settled =
-    settledPeriod && /^\d{4}-\d{2}$/.test(settledPeriod)
-      ? settledPeriod
-      : toPeriod(new Date());
-  const showCompetencePanel = vista === "mensile" || vista === "annuale";
-  const effectiveCompetence = competenceAll
-    ? undefined
-    : (competencePeriod ??
-      (showCompetencePanel ? addMonths(settled, -1) : undefined));
-  const applyCompetenceToList = Boolean(effectiveCompetence);
-
-  // Scope fornitore/team: identico alla pagina Provvigioni
-  const visibility = await contractVisibilityWhere(session);
-
-  const contractWhere = buildProvvigioniListWhere({
-    filters: {
-      canViewAll,
-      sessionUserId: session.id,
-      visibility,
-      collab,
-      supplier,
-      stato,
-      tipologia,
-      q,
-      recurrenceMode,
-      competencePeriod: effectiveCompetence,
-    },
-    focus,
-    effectiveCompetence,
-    applyCompetenceToList,
+  const sp: Record<string, string> = {};
+  url.searchParams.forEach((value, key) => {
+    sp[key] = value;
   });
+
+  // Stessa query della pagina: filtri di colonna, stato, competenza e perimetro
+  // di visibilità del ruolo. L'export è per contratto, quindi i filtri di rata
+  // valgono come «il contratto ha una rata che corrisponde».
+  const query = await resolveProvvigioniQuery(session, sp, { flatten: true });
+  const contractWhere = query.contractWhere;
+  const collab = query.collabFilter ?? null;
+  /** Mese rendiconto richiesto: vuoto = nessun filtro sul foglio rendiconto. */
+  const settledPeriod = sp.settled?.trim() ?? "";
 
   const contracts = await prisma.contract.findMany({
     where: contractWhere,

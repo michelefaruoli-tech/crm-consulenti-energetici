@@ -8,6 +8,11 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { contractTextSearchWhere } from "@/lib/list-search";
+import {
+  FILTER_LIST_SEP,
+  formatFilterList,
+  parseFilterList,
+} from "@/lib/filter-list";
 import { toPeriod } from "@/lib/recurring";
 
 export type ProvvigioniFilters = {
@@ -34,6 +39,12 @@ export type ProvvigioniFilters = {
   recurrenceMode?: "exclude" | "only" | "all" | "monthly" | "annual" | null;
   /** Scope backoffice / collaboratore (AND aggiuntivo) */
   visibility?: Prisma.ContractWhereInput | null;
+  /**
+   * Filtri di colonna (agenzia, tipo operazione, mese rif., gettone…) già
+   * tradotti in clausole Prisma da `buildColumnFilterWhere`: qui entra la parte
+   * valida per ogni riga, quelle per rata/riga unità le usa `provvigioni-rows`.
+   */
+  columnWhere?: Prisma.ContractWhereInput[] | null;
   /** Mese competenza YYYY-MM — allinea filtro Incassato/Pagato alle rate mensili */
   competencePeriod?: string | null;
 };
@@ -69,24 +80,13 @@ export const nonRecurringWhere: Prisma.ContractWhereInput = {
 
 const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
-/** Separatore URL per filtri multipli (es. Da+incassare|Incassato). */
-export const FILTER_LIST_SEP = "|";
+export {
+  FILTER_LIST_SEP,
+  formatFilterList,
+  parseFilterList,
+} from "@/lib/filter-list";
 /** @deprecated usa FILTER_LIST_SEP */
 export const STATO_FILTER_SEP = FILTER_LIST_SEP;
-
-export function parseFilterList(raw: string | null | undefined): string[] {
-  if (!raw?.trim()) return [];
-  return raw
-    .split(FILTER_LIST_SEP)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-export function formatFilterList(values: string[]): string | null {
-  const cleaned = values.map((s) => s.trim()).filter(Boolean);
-  if (cleaned.length === 0) return null;
-  return cleaned.join(FILTER_LIST_SEP);
-}
 
 export function parseStatoFilter(raw: string | null | undefined): string[] {
   return parseFilterList(raw);
@@ -342,6 +342,10 @@ export function buildProvvigioniContractWhere(
 
   if (f.visibility && Object.keys(f.visibility).length > 0) {
     and.push(f.visibility);
+  }
+
+  for (const columnWhere of f.columnWhere ?? []) {
+    and.push(columnWhere);
   }
 
   if (supplierNames.length === 1) {

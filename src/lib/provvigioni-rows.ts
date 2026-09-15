@@ -41,10 +41,25 @@ const MONTHLY_RECURRING_WHERE: Prisma.ContractWhereInput = {
   OR: recurringMonthlyWhereOr,
 };
 
+/**
+ * Filtri di colonna che non valgono per tutte le righe:
+ * `unitOnly` solo per le righe contratto, `rate` solo per le rate mensili.
+ * `excludeUnitRows` serve ai filtri su dati che esistono solo sulle rate
+ * (es. «Mese rif.»): in quel caso le righe contratto non possono corrispondere.
+ */
+export type ProvvigioniRowFilterScope = {
+  unitOnly?: Prisma.ContractWhereInput[];
+  rate?: Prisma.RecurringMonthWhereInput[];
+  excludeUnitRows?: boolean;
+};
+
+const NO_ROW_WHERE: Prisma.ContractWhereInput = { id: "__nessuna_riga__" };
+
 /** Niente rate del filtro → mostra il contratto come riga unica (UT / R / In pagamento). */
 function withoutMatchingRates(
   extra: Prisma.ContractWhereInput,
   rateStatuses: string[],
+  rateExtra: Prisma.RecurringMonthWhereInput[],
 ): Prisma.ContractWhereInput {
   return {
     ...extra,
@@ -52,7 +67,7 @@ function withoutMatchingRates(
       ? {
           NOT: {
             recurringMonths: {
-              some: { status: { in: rateStatuses } },
+              some: { AND: [{ status: { in: rateStatuses } }, ...rateExtra] },
             },
           },
         }
@@ -64,29 +79,51 @@ function expandedUnitWhere(
   contractWhere: Prisma.ContractWhereInput,
   expandMode: RecurringExpandMode,
   rateStatuses: string[],
+  scope?: ProvvigioniRowFilterScope,
 ): Prisma.ContractWhereInput {
+  if (scope?.excludeUnitRows) return NO_ROW_WHERE;
+  const rateExtra = scope?.rate ?? [];
+  const unitExtra = scope?.unitOnly ?? [];
+  const base: Prisma.ContractWhereInput[] = [contractWhere, ...unitExtra];
   const ut: Prisma.ContractWhereInput = {
-    AND: [contractWhere, NON_RECURRING_WHERE],
+    AND: [...base, NON_RECURRING_WHERE],
   };
   const annual: Prisma.ContractWhereInput = {
     AND: [
-      contractWhere,
-      withoutMatchingRates({ recurrenceKind: "R" }, rateStatuses),
+      ...base,
+      withoutMatchingRates({ recurrenceKind: "R" }, rateStatuses, rateExtra),
     ],
   };
   const unitOrs: Prisma.ContractWhereInput[] = [ut, annual];
   if (expandMode === "da-incassare" || expandMode === "all") {
     unitOrs.push({
       AND: [
-        contractWhere,
+        ...base,
         withoutMatchingRates(
           { status: "IN_ATTESA_PAGAMENTO", recurrenceKind: "M" },
           rateStatuses,
+          rateExtra,
         ),
       ],
     });
   }
   return { OR: unitOrs };
+}
+
+/** Where rate mensili della lista espansa, con i filtri di colonna applicati. */
+function expandedRateWhere(
+  contractWhere: Prisma.ContractWhereInput,
+  statuses: string[],
+  scope?: ProvvigioniRowFilterScope,
+): Prisma.RecurringMonthWhereInput | null {
+  if (statuses.length === 0) return null;
+  return {
+    AND: [
+      { status: { in: statuses } },
+      ...(scope?.rate ?? []),
+      { contract: { AND: [contractWhere, MONTHLY_RECURRING_WHERE] } },
+    ],
+  };
 }
 
 /** Stati rata da mostrare in base al filtro colonna Stato. */
@@ -501,27 +538,23 @@ async function countRecurringRates(
   contractWhere: Prisma.ContractWhereInput,
   mode: RecurringExpandMode,
   stato?: string | null,
+  scope?: ProvvigioniRowFilterScope,
 ): Promise<number> {
   const statuses = rateStatusesForMode(mode, stato);
-  if (statuses.length === 0) return 0;
-  return prisma.recurringMonth.count({
-    where: {
-      status: { in: statuses },
-      contract: {
-        AND: [contractWhere, MONTHLY_RECURRING_WHERE],
-      },
-    },
-  });
+  const where = expandedRateWhere(contractWhere, statuses, scope);
+  if (!where) return 0;
+  return prisma.recurringMonth.count({ where });
 }
 
 async function countNonRecurringContracts(
   contractWhere: Prisma.ContractWhereInput,
   expandMode: RecurringExpandMode,
   stato?: string | null,
+  scope?: ProvvigioniRowFilterScope,
 ): Promise<number> {
   const statuses = rateStatusesForMode(expandMode, stato);
   return prisma.contract.count({
-    where: expandedUnitWhere(contractWhere, expandMode, statuses),
+    where: expandedUnitWhere(contractWhere, expandMode, statuses, scope),
   });
 }
 
@@ -530,13 +563,14 @@ export async function countExpandedListRows(
   contractWhere: Prisma.ContractWhereInput,
   expandMode: RecurringExpandMode | null,
   stato?: string | null,
+  scope?: ProvvigioniRowFilterScope,
 ): Promise<number> {
   if (!expandMode) {
     return prisma.contract.count({ where: contractWhere });
   }
   const [rateCount, utCount] = await Promise.all([
-    countRecurringRates(contractWhere, expandMode, stato),
-    countNonRecurringContracts(contractWhere, expandMode, stato),
+    countRecurringRates(contractWhere, expandMode, stato, scope),
+    countNonRecurringContracts(contractWhere, expandMode, stato, scope),
   ]);
   return rateCount + utCount;
 }
@@ -568,6 +602,7 @@ export async function sumExpandedAmountForStato(
   expandMode: RecurringExpandMode | null,
   competencePeriod: string | null,
   stato?: string | null,
+  scope?: ProvvigioniRowFilterScope,
 ): Promise<number> {
   if (!expandMode) {
     const contracts = await prisma.contract.findMany({
@@ -609,7 +644,7 @@ export async function sumExpandedAmountForStato(
   const statuses = rateStatusesForMode(expandMode, stato);
   if (statuses.length === 0) {
     const utContracts = await prisma.contract.findMany({
-      where: expandedUnitWhere(contractWhere, expandMode, statuses),
+      where: expandedUnitWhere(contractWhere, expandMode, statuses, scope),
       select: {
         client: { select: { type: true } },
         supplier: { select: { name: true } },
@@ -627,24 +662,20 @@ export async function sumExpandedAmountForStato(
       0,
     );
   }
+  const baseRateWhere = expandedRateWhere(contractWhere, statuses, scope) ?? {};
   const [rateAgg, fallbackRates, utContracts] = await Promise.all([
     prisma.recurringMonth.aggregate({
       where: {
-        status: { in: statuses },
-        contract: {
-          AND: [contractWhere, MONTHLY_RECURRING_WHERE],
-        },
-        amount: { gt: 0 },
+        AND: [baseRateWhere, { amount: { gt: 0 } }],
       },
       _sum: { amount: true },
     }),
     prisma.recurringMonth.findMany({
       where: {
-        status: { in: statuses },
-        contract: {
-          AND: [contractWhere, MONTHLY_RECURRING_WHERE],
-        },
-        OR: [{ amount: null }, { amount: { lte: 0 } }],
+        AND: [
+          baseRateWhere,
+          { OR: [{ amount: null }, { amount: { lte: 0 } }] },
+        ],
       },
       select: {
         contract: {
@@ -658,7 +689,7 @@ export async function sumExpandedAmountForStato(
       take: 5000,
     }),
     prisma.contract.findMany({
-      where: expandedUnitWhere(contractWhere, expandMode, statuses),
+      where: expandedUnitWhere(contractWhere, expandMode, statuses, scope),
       select: {
         client: { select: { type: true } },
         supplier: { select: { name: true } },
@@ -692,12 +723,13 @@ export async function countExpandedForStatoCard(
   stato: "Incassato" | "Da incassare" | "Pagato",
   viewingAllPeriods: boolean,
   effectiveCompetence: string | undefined,
+  scope?: ProvvigioniRowFilterScope,
 ): Promise<number> {
   const mode = getRecurringExpandMode(stato, viewingAllPeriods, effectiveCompetence);
   if (!mode) {
     return prisma.contract.count({ where: contractWhere });
   }
-  return countExpandedListRows(contractWhere, mode, stato);
+  return countExpandedListRows(contractWhere, mode, stato, scope);
 }
 
 /** Contratti leggeri per mappe storno (senza caricare tutte le rate). */
@@ -814,6 +846,7 @@ export async function fetchExpandedProvvigionePage(args: {
   contractSelect: Prisma.ContractSelect;
   buildOpts: BuildProvvigioneRowsOpts;
   orderBy: Prisma.ContractOrderByWithRelationInput[];
+  scope?: ProvvigioniRowFilterScope;
 }): Promise<{
   rows: ProvvigioneRow[];
   contracts: ContractForProvvigioneRow[];
@@ -826,14 +859,13 @@ export async function fetchExpandedProvvigionePage(args: {
     args.contractWhere,
     args.expandMode,
     statuses,
+    args.scope,
   );
-  const rateWhere: Prisma.RecurringMonthWhereInput | null =
-    statuses.length === 0
-      ? null
-      : {
-          status: { in: statuses },
-          contract: { AND: [args.contractWhere, MONTHLY_RECURRING_WHERE] },
-        };
+  const rateWhere: Prisma.RecurringMonthWhereInput | null = expandedRateWhere(
+    args.contractWhere,
+    statuses,
+    args.scope,
+  );
 
   type PageItem =
     | { kind: "ut"; contract: ContractForProvvigioneRow }
