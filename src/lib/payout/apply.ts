@@ -43,6 +43,8 @@ export type PayoutPreviousState = {
     received: number;
     accrued: number;
     paid: number;
+    stornoDate: string | null;
+    stornoAmount: number | null;
   } | null;
   /** Voce di liquidazione creata da questa riga, da rimuovere in annullamento */
   commissionEntryId?: string;
@@ -96,7 +98,15 @@ export async function applyPayoutRowMark(params: {
       insertionDate: true,
       operationType: true,
       commission: {
-        select: { id: true, expected: true, received: true, accrued: true, paid: true },
+        select: {
+          id: true,
+          expected: true,
+          received: true,
+          accrued: true,
+          paid: true,
+          stornoDate: true,
+          stornoAmount: true,
+        },
       },
     },
   });
@@ -115,6 +125,11 @@ export async function applyPayoutRowMark(params: {
           received: numberOrZero(contract.commission.received),
           accrued: numberOrZero(contract.commission.accrued),
           paid: numberOrZero(contract.commission.paid),
+          stornoDate: isoOrNull(contract.commission.stornoDate),
+          stornoAmount:
+            contract.commission.stornoAmount == null
+              ? null
+              : numberOrZero(contract.commission.stornoAmount),
         }
       : null,
   };
@@ -123,6 +138,31 @@ export async function applyPayoutRowMark(params: {
   const collectionDate = periodToDate(params.period);
   const expected = numberOrZero(contract.commission?.expected);
   const amount = params.amount ?? expected;
+
+  /*
+   * Riga di importo negativo: è uno storno del fornitore, non un incasso.
+   * Va scritta con la semantica di clawback già in uso (`applyCommissionField`),
+   * senza sovrascrivere l'incassato con un numero negativo.
+   */
+  if (amount < 0) {
+    if (contract.status === "STORNATO") {
+      return { ok: false, reason: "Contratto già stornato" };
+    }
+    if (contract.commission) {
+      await prisma.commission.update({
+        where: { id: contract.commission.id },
+        data: {
+          stornoDate: contract.commission.stornoDate ?? new Date(),
+          stornoAmount: -Math.abs(amount),
+        },
+      });
+    }
+    await prisma.contract.update({
+      where: { id: contract.id },
+      data: { status: "STORNATO", paymentStatus: "Stornato" },
+    });
+    return { ok: true, recurringMonthId: null, previousState };
+  }
 
   if (recurring) {
     // Il fornitore non può aver pagato un mese precedente all'ingresso in fornitura
@@ -343,6 +383,10 @@ export async function revertPayoutRowMark(params: {
         received: prev.commission.received,
         accrued: prev.commission.accrued,
         paid: prev.commission.paid,
+        stornoDate: prev.commission.stornoDate
+          ? new Date(prev.commission.stornoDate)
+          : null,
+        stornoAmount: prev.commission.stornoAmount,
       },
     });
   }

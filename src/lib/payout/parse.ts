@@ -35,6 +35,10 @@ const HEADER_SCAN_ROWS = 12;
 /** Tetto di sicurezza: nessun rendiconto reale supera questo numero di righe. */
 const MAX_DATA_ROWS = 20000;
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function normalizeHeader(text: string): string {
   return text
     .toLowerCase()
@@ -504,11 +508,14 @@ export async function parsePayoutWorkbook(
     };
   }
 
+  const declaredTotal = readDeclaredTotal(workbook, config, totalRowAmounts);
   return {
     ok: true,
     rows,
-    computedTotal: rows.reduce((sum, r) => sum + (r.amount ?? 0), 0),
-    declaredTotal: readDeclaredTotal(workbook, config, totalRowAmounts),
+    // Arrotondato all'origine: la somma di decimali binari produce code come
+    // 47.400000000000006, che falserebbe il confronto di quadratura
+    computedTotal: round2(rows.reduce((sum, r) => sum + (r.amount ?? 0), 0)),
+    declaredTotal: declaredTotal == null ? null : round2(declaredTotal),
     sheetsRead,
     skipped,
   };

@@ -11,6 +11,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
+import { normalizePodKey } from "@/lib/storno-status";
 import { pickHeliosContractForPeriod } from "@/lib/helios-provvigioni-shared";
 import {
   fuzzyPersonKey,
@@ -254,12 +255,22 @@ export function matchPayoutRow(
   index: PayoutContractIndex,
 ): PayoutMatchOutcome {
   // 1-2. POD/PDR esatto, poi PDR con zero iniziale ripristinato
-  for (const [position, key] of row.podKeys.entries()) {
+  for (const key of row.podKeys) {
     const found = index.byPod.get(key);
     if (!found?.length) continue;
-    const reason: PayoutMatchReason =
-      position === 0 ? "pod_exact" : "pdr_zero_fill";
-    const outcome = resolve(found, reason, row, false);
+    // L'etichetta dice come è avvenuto il match: «esatto» solo se il valore nel
+    // file corrisponde davvero a quello sul contratto, senza normalizzazioni
+    const exact = found.some((c) =>
+      [c.podPdr, c.pod, c.pdr].some(
+        (raw) => raw != null && normalizePodKey(raw) === key,
+      ),
+    );
+    const outcome = resolve(
+      found,
+      exact ? "pod_exact" : "pdr_zero_fill",
+      row,
+      false,
+    );
     if (outcome) return outcome;
   }
 
