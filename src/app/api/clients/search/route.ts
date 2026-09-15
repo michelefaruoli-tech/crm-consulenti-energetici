@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { searchTermVariants } from "@/lib/list-search";
+import { clientVisibilityWhere } from "@/lib/user-scope";
 import type { Prisma } from "@/generated/prisma/client";
 
 function fold(s: string | null | undefined): string {
@@ -175,10 +176,13 @@ export async function GET(request: Request) {
   const q = (searchParams.get("q") ?? "").trim();
   const id = (searchParams.get("id") ?? "").trim();
 
+  // Solo clienti nel perimetro dell'utente (creati da lui o con un suo contratto)
+  const visibility = await clientVisibilityWhere(session);
+
   // Carica un cliente completo per id (precompilazione form)
   if (id) {
     const c = await prisma.client.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, ...visibility },
     });
     if (!c) return NextResponse.json({ item: null }, { status: 404 });
     const { label, sublabel } = clientLabel(c);
@@ -216,7 +220,20 @@ export async function GET(request: Request) {
 
   // Prendi più righe del necessario, poi ordina per pertinenza e deduplica
   const clients = await prisma.client.findMany({
-    where: buildWhere(q),
+    where: { AND: [buildWhere(q), visibility] },
+    // Solo i campi che servono a identificare la persona in elenco:
+    // l'anagrafica completa si carica con ?id= dopo la selezione
+    select: {
+      id: true,
+      type: true,
+      firstName: true,
+      lastName: true,
+      companyName: true,
+      fiscalCode: true,
+      vatNumber: true,
+      phone: true,
+      updatedAt: true,
+    },
     take: 80,
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { updatedAt: "desc" }],
   });
@@ -247,20 +264,6 @@ export async function GET(request: Request) {
         fiscalCode: c.fiscalCode,
         vatNumber: c.vatNumber,
         phone: c.phone,
-        email: c.email,
-        pec: c.pec,
-        iban: c.iban,
-        street: c.street ?? c.address,
-        streetNumber: c.streetNumber,
-        zipCode: c.zipCode,
-        city: c.city,
-        province: c.province,
-        region: c.region,
-        legalFirstName: c.legalFirstName,
-        legalLastName: c.legalLastName,
-        legalFiscalCode: c.legalFiscalCode,
-        sdiCode: c.sdiCode,
-        classification: c.classification,
       };
     }),
   });

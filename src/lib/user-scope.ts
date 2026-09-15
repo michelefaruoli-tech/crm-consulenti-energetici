@@ -146,6 +146,29 @@ export async function contractVisibilityWhere(session: {
   return contractWhereFromScope(await loadUserVisibilityScope(session));
 }
 
+/**
+ * Filtro Prisma clienti coerente con lo scope contratti:
+ * clienti creati da te oppure con almeno un contratto nel tuo perimetro.
+ * Stessa regola già usata dalla pagina Clienti, estesa a fornitori/team.
+ */
+export async function clientVisibilityWhere(session: {
+  id: string;
+  role: Role;
+}): Promise<Prisma.ClientWhereInput> {
+  const scope = await loadUserVisibilityScope(session);
+  if (scope.kind === "all") return {};
+  return {
+    OR: [
+      { createdById: session.id },
+      {
+        contracts: {
+          some: { deletedAt: null, ...contractWhereFromScope(scope) },
+        },
+      },
+    ],
+  };
+}
+
 export async function userCanAccessContract(
   session: { id: string; role: Role },
   contract: { collaboratorId: string; supplierId: string },

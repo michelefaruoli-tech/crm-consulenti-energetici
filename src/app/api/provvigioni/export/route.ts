@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { contractVisibilityWhere } from "@/lib/user-scope";
 import { clientDisplayName } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
 import {
@@ -56,10 +57,14 @@ export async function GET(request: Request) {
       (showCompetencePanel ? addMonths(settled, -1) : undefined));
   const applyCompetenceToList = Boolean(effectiveCompetence);
 
+  // Scope fornitore/team: identico alla pagina Provvigioni
+  const visibility = await contractVisibilityWhere(session);
+
   const contractWhere = buildProvvigioniListWhere({
     filters: {
       canViewAll,
       sessionUserId: session.id,
+      visibility,
       collab,
       supplier,
       stato,

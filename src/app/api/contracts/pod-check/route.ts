@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
+import { contractVisibilityWhere } from "@/lib/user-scope";
 import { normalizePodKey } from "@/lib/storno-status";
 
 export async function GET(request: Request) {
@@ -12,8 +13,12 @@ export async function GET(request: Request) {
   const key = normalizePodKey(value);
   if (key.length < 6) return NextResponse.json({ matches: [] });
 
+  // Solo contratti nel perimetro dell'utente: il POD di altri non è enumerabile
+  const visibility = await contractVisibilityWhere(session);
+
   const rows = await prisma.contract.findMany({
     where: {
+      AND: [visibility],
       deletedAt: null,
       OR: [
         { pod: { in: [value, key], mode: "insensitive" } },

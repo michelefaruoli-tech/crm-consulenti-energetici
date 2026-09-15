@@ -6,6 +6,7 @@ import { getMasterEmail, sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import {
   formatEmailList,
   getLavorazioneNotifyEmails,
+  userCanAccessContract,
 } from "@/lib/user-scope";
 import { buildContractNotificationBody } from "@/lib/contract-notification-email";
 import { createHash } from "node:crypto";
@@ -141,7 +142,6 @@ export async function POST(
     if (!contract) {
       return NextResponse.json({ success: false, message: "Contratto non trovato" }, { status: 404 });
     }
-    const { userCanAccessContract } = await import("@/lib/user-scope");
     if (!(await userCanAccessContract(session, contract))) {
       return NextResponse.json({ success: false, message: "Permesso negato" }, { status: 403 });
     }
@@ -294,6 +294,9 @@ export async function PUT(
     });
     if (!contract) {
       return NextResponse.json({ success: false, message: "Contratto non trovato" }, { status: 404 });
+    }
+    if (!(await userCanAccessContract(session, contract))) {
+      return NextResponse.json({ success: false, message: "Permesso negato" }, { status: 403 });
     }
 
     const docsWithContent = contract.documents.filter((d) => d.contentBase64);
