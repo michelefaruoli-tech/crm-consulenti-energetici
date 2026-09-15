@@ -95,8 +95,21 @@ export function expandDualServiceLines(
   const expanded: ContractServiceLine[] = [];
   for (const line of services) {
     if (line.service === "DUAL") {
-      expanded.push({ ...line, id: `${line.id}-luce`, service: "LUCE" });
-      expanded.push({ ...line, id: `${line.id}-gas`, service: "GAS" });
+      expanded.push({
+        ...line,
+        id: `${line.id}-luce`,
+        service: "LUCE",
+        pdr: undefined,
+        annualSmc: undefined,
+      });
+      expanded.push({
+        ...line,
+        id: `${line.id}-gas`,
+        service: "GAS",
+        pod: undefined,
+        annualKwh: undefined,
+        powerKw: undefined,
+      });
     } else {
       expanded.push(line);
     }

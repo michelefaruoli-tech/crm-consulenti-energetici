@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getMasterEmail, sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import { clientDisplayName } from "@/lib/utils";
 import { formatRomeDateTime } from "@/lib/timezone";
+import { serviceIdentifierLines } from "@/lib/contract-service-identifier";
 
 function adminNotifyEmail(): string {
   return (
@@ -30,6 +31,7 @@ export async function notifyAdminNewContracts(opts: {
       select: {
         id: true,
         contractNumber: true,
+        utilityType: true,
         podPdr: true,
         pod: true,
         pdr: true,
@@ -63,7 +65,9 @@ export async function notifyAdminNewContracts(opts: {
       `Totale in questo avviso: ${contracts.length}`,
       "",
       ...contracts.map((c, i) => {
-        const pod = c.podPdr || c.pod || c.pdr || "—";
+        const ident = serviceIdentifierLines(c);
+        const identText =
+          ident.length >= 2 ? `${ident[0]} ${ident[1]}` : "POD/PDR —";
         const paid = c.collectionDate ? "Incassato" : c.paymentStatus || "Da incassare";
         const gettone =
           c.commission?.expected != null
@@ -71,7 +75,7 @@ export async function notifyAdminNewContracts(opts: {
             : "—";
         return [
           `${i + 1}. ${clientDisplayName(c.client)}`,
-          `   N. ${c.contractNumber} · ${c.supplier.name} · POD ${pod}`,
+          `   N. ${c.contractNumber} · ${c.supplier.name} · ${identText}`,
           `   Collab. ${c.collaborator.name} · ${paid} · gettone ${gettone}`,
         ].join("\n");
       }),

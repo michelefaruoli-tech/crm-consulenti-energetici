@@ -1,6 +1,7 @@
 import "server-only";
 import { clientDisplayName } from "@/lib/utils";
 import { operationTypeLabel } from "@/lib/provvigioni-stato";
+import { serviceIdentifierLines } from "@/lib/contract-service-identifier";
 
 type ClientLike = {
   type: string;
@@ -183,8 +184,6 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
     fallback: contract.supplyAddress ?? contract.client.supplyAddress,
   });
   const utility = (contract.utilityType || `SERVIZIO ${index + 1}`).toUpperCase();
-  const identifier = contract.pod || contract.pdr || contract.podPdr;
-  const identifierLabel = contract.pdr || contract.utilityType === "GAS" ? "PDR" : "POD";
   const iban = contract.contractIban || contract.client.iban;
 
   return compactLines(
@@ -193,8 +192,7 @@ function serviceBlock(contract: ContractLike, index: number, total: number): str
     "INDIRIZZO FORNITURA",
     supply,
     "",
-    identifierLabel,
-    identifier,
+    ...serviceIdentifierLines(contract),
     "",
     "METODO DI PAGAMENTO",
     contract.paymentMethod,
