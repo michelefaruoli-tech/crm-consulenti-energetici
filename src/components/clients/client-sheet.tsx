@@ -22,6 +22,9 @@ import {
   type AppRole,
 } from "@/lib/constants";
 import { resolveUtilityDisplay } from "@/lib/utility-display";
+import { ContractAttachmentsManager } from "@/components/contracts/contract-attachments-manager";
+import { SendBackofficePanel } from "@/components/contracts/send-backoffice-panel";
+import type { ContractAttachmentRow } from "@/components/contracts/contract-attachments-manager";
 
 const SERVICE_VALUE_SET = new Set<string>(SERVICE_OPTIONS.map((o) => o.value));
 
@@ -121,6 +124,9 @@ export type ClientSheetContract = {
   parentContractId?: string | null;
   emailStatus?: string | null;
   createdAt?: string | null;
+  sendToMaster?: boolean;
+  assignedToMaster?: boolean;
+  documents?: ContractAttachmentRow[];
 };
 
 export type ClientSheetSupplier = { id: string; name: string; code: string };
@@ -777,7 +783,8 @@ export function ClientSheet({
                 Scheda contratto · {selected.contractNumber}
               </h2>
               <p className="text-xs text-slate-500">
-                Tre blocchi: Operazione · Fornitura · Fornitore (come in Nuovo contratto)
+                Rivedi anagrafica, fornitura, fornitore, allega i documenti e invia al
+                back office di {selected.supplierName}.
               </p>
             </div>
 
@@ -1381,39 +1388,18 @@ export function ClientSheet({
               </Button>
             </form>
 
-            {/* Barra azioni in fondo: reinvio email Master + back office fornitore */}
-            <div className="mt-6 space-y-3 rounded-2xl border-4 border-emerald-600 bg-emerald-50 p-4 shadow-md sm:p-5">
-              <h3 className="text-lg font-black uppercase tracking-wide text-emerald-950">
-                Reinvia email al BACK OFFICE
-              </h3>
-              <p className="text-sm text-emerald-900">
-                Invia di nuovo l&apos;email completa (anagrafica + blocchi servizio + allegati) a{" "}
-                <strong>Master</strong> e ai <strong>back office</strong> del fornitore (stesse
-                regole di sempre: Enel → Giuseppe + Stefania, Edison → Mada, ecc.).
-                {siblingContractIds(selected.id).length > 1
-                  ? ` Verranno inclusi anche i ${siblingContractIds(selected.id).length} contratti collegati (es. Luce + Gas).`
-                  : ""}
-              </p>
-              {msg ? (
-                <p className="rounded-lg bg-white px-3 py-2 text-sm text-emerald-800">{msg}</p>
-              ) : null}
-              {err ? (
-                <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{err}</p>
-              ) : null}
-              <Button
-                type="button"
-                size="lg"
-                className="min-h-14 w-full bg-emerald-700 text-base font-bold uppercase tracking-wide text-white hover:bg-emerald-800 sm:w-auto sm:min-w-[16rem]"
-                disabled={pending}
-                onClick={() => sendBackofficeEmail(selected.id)}
-              >
-                {pending && sendingEmailId === selected.id
-                  ? "Invio in corso…"
-                  : siblingContractIds(selected.id).length > 1
-                    ? `Reinvia email (${siblingContractIds(selected.id).length} contratti)`
-                    : "Reinvia email al BACK OFFICE"}
-              </Button>
-            </div>
+            <ContractAttachmentsManager
+              contractId={selected.id}
+              documents={selected.documents ?? []}
+              canUpload={canEditSelected}
+            />
+
+            <SendBackofficePanel
+              contractIds={siblingContractIds(selected.id)}
+              supplierName={selected.supplierName}
+              attachmentCount={selected.documents?.length ?? 0}
+              alreadyQueued={Boolean(selected.sendToMaster || selected.assignedToMaster)}
+            />
           </section>
         </>
       ) : selected ? (

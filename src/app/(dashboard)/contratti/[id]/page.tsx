@@ -26,6 +26,8 @@ import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { ContractEconomicSummary } from "@/components/contracts/contract-economic-summary";
 import { isRecurring } from "@/lib/recurring";
+import { ContractAttachmentsManager } from "@/components/contracts/contract-attachments-manager";
+import { SendBackofficePanel } from "@/components/contracts/send-backoffice-panel";
 
 export default async function ContrattoDetailPage({
   params,
@@ -58,6 +60,11 @@ export default async function ContrattoDetailPage({
         orderBy: { changedAt: "desc" },
         take: 20,
       },
+      documents: {
+        where: { deletedAt: null },
+        select: { id: true, filename: true, docType: true, size: true },
+        orderBy: { uploadedAt: "desc" },
+      },
     },
   });
 
@@ -80,6 +87,17 @@ export default async function ContrattoDetailPage({
     hasPermission(session.role, "contracts.edit_all") ||
     contract.collaboratorId === session.id;
   const canLiquidate = hasPermission(session.role, "commissions.view_all");
+
+  const rootId = contract.parentContractId || contract.id;
+  const siblingRows = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      OR: [{ id: rootId }, { parentContractId: rootId }],
+    },
+    select: { id: true },
+  });
+  const siblingIds = siblingRows.map((r) => r.id);
+  if (!siblingIds.includes(contract.id)) siblingIds.unshift(contract.id);
   const expected = Number(contract.commission?.expected ?? 0);
   const accrued = Number(contract.commission?.accrued ?? 0);
   const received = Number(contract.commission?.received ?? 0);
@@ -149,7 +167,7 @@ export default async function ContrattoDetailPage({
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href={`/clienti/${contract.clientId}?contratto=${contract.id}`}>
-            <Button variant="secondary">Scheda cliente (3 blocchi)</Button>
+            <Button>Rivedi e completa (dati + allegati)</Button>
           </Link>
           <Link href="/contratti">
             <Button variant="secondary">Torna all&apos;elenco</Button>
@@ -402,6 +420,22 @@ export default async function ContrattoDetailPage({
             </div>
           </form>
         </section>
+      ) : null}
+
+      {canEditContract ? (
+        <div className="space-y-4">
+          <ContractAttachmentsManager
+            contractId={contract.id}
+            documents={contract.documents}
+            canUpload
+          />
+          <SendBackofficePanel
+            contractIds={siblingIds}
+            supplierName={contract.supplier.name}
+            attachmentCount={contract.documents.length}
+            alreadyQueued={Boolean(contract.sendToMaster || contract.assignedToMaster)}
+          />
+        </div>
       ) : null}
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

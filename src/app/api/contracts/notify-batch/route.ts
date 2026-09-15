@@ -7,6 +7,7 @@ import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import {
   formatEmailList,
   getLavorazioneNotifyEmails,
+  userCanAccessContract,
 } from "@/lib/user-scope";
 import { buildBatchContractNotificationBody } from "@/lib/contract-notification-email";
 import {
@@ -14,6 +15,7 @@ import {
   emailInlineMaxBytes,
 } from "@/lib/attachment-config";
 import { writeAuditLog } from "@/lib/audit";
+import { enqueueContractsForBackoffice } from "@/lib/enqueue-backoffice";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -72,6 +74,20 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
+
+    for (const c of contracts) {
+      if (!(await userCanAccessContract(session, c))) {
+        return NextResponse.json(
+          { success: false, emailSent: false, message: "Permesso negato su uno dei contratti" },
+          { status: 403 },
+        );
+      }
+    }
+
+    await enqueueContractsForBackoffice({
+      contractIds: contracts.map((c) => c.id),
+      userId: session.id,
+    });
 
     // Copia allegati dal contratto più ricco agli altri senza documenti (evita perdita Luce/Gas)
     const richest = [...contracts].sort(

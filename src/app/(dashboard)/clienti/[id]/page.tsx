@@ -42,6 +42,11 @@ export default async function ClienteDetailPage({
           supplier: true,
           collaborator: { select: { id: true, name: true } },
           commission: true,
+          documents: {
+            where: { deletedAt: null },
+            select: { id: true, filename: true, docType: true, size: true },
+            orderBy: { uploadedAt: "desc" },
+          },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       },
@@ -232,6 +237,14 @@ export default async function ClienteDetailPage({
     parentContractId: c.parentContractId,
     emailStatus: c.emailStatus,
     createdAt: c.createdAt.toISOString(),
+    sendToMaster: c.sendToMaster,
+    assignedToMaster: c.assignedToMaster,
+    documents: c.documents.map((d) => ({
+      id: d.id,
+      filename: d.filename,
+      docType: d.docType,
+      size: d.size,
+    })),
   };
   });
 

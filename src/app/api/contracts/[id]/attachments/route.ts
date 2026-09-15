@@ -126,7 +126,9 @@ export async function POST(
     if (
       !hasPermission(session.role, "contracts.create") &&
       !hasPermission(session.role, "contracts.edit_all") &&
-      !hasPermission(session.role, "contracts.edit_own")
+      !hasPermission(session.role, "contracts.edit_own") &&
+      !hasPermission(session.role, "contracts.work_scoped") &&
+      !hasPermission(session.role, "documents.manage")
     ) {
       return NextResponse.json({ success: false, message: "Permesso negato" }, { status: 403 });
     }
@@ -134,10 +136,14 @@ export async function POST(
     const { id } = await context.params;
     const contract = await prisma.contract.findUnique({
       where: { id },
-      select: { id: true, clientId: true, collaboratorId: true },
+      select: { id: true, clientId: true, collaboratorId: true, supplierId: true },
     });
     if (!contract) {
       return NextResponse.json({ success: false, message: "Contratto non trovato" }, { status: 404 });
+    }
+    const { userCanAccessContract } = await import("@/lib/user-scope");
+    if (!(await userCanAccessContract(session, contract))) {
+      return NextResponse.json({ success: false, message: "Permesso negato" }, { status: 403 });
     }
 
     const contentType = request.headers.get("content-type") || "";
