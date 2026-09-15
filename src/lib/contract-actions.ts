@@ -26,8 +26,25 @@ function statusFromLabel(value: string): AppContractStatus | null {
   return found ?? null;
 }
 
-export async function updateContractFieldAction(formData: FormData): Promise<void> {
-  const session = await requireSession();
+function publicActionError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : "Salvataggio non riuscito";
+  if (msg.includes("HTTP mode") || msg.includes("Transaction")) {
+    return "Errore database. Riprova tra qualche secondo.";
+  }
+  return msg.slice(0, 220);
+}
+
+type Session = Awaited<ReturnType<typeof requireSession>>;
+
+async function applyContractFieldUpdate(
+  formData: FormData,
+  options?: { skipRevalidate?: boolean; session?: Session },
+): Promise<void> {
+  const session = options?.session ?? (await requireSession());
+  const skipRevalidate = options?.skipRevalidate === true;
+  const revalidate = (path: string) => {
+    if (!skipRevalidate) revalidatePath(path);
+  };
   const contractId = String(formData.get("contractId") ?? "");
   const field = String(formData.get("field") ?? "");
   const value = String(formData.get("value") ?? "");
@@ -192,12 +209,12 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
       note: agentNotes || closureNotes || closureReason || null,
       detailNotes: agentNotes || closureNotes || null,
     });
-    revalidatePath("/");
-    revalidatePath("/contratti");
-    revalidatePath("/lavorazione");
-    revalidatePath("/provvigioni");
-    revalidatePath(`/contratti/${contractId}`);
-    revalidatePath(`/lavorazione/${contractId}`);
+    revalidate("/");
+    revalidate("/contratti");
+    revalidate("/lavorazione");
+    revalidate("/provvigioni");
+    revalidate(`/contratti/${contractId}`);
+    revalidate(`/lavorazione/${contractId}`);
   } else if (field === "notes") {
     await prisma.contract.update({
       where: { id: contractId },
@@ -251,8 +268,84 @@ export async function updateContractFieldAction(formData: FormData): Promise<voi
     throw new Error("Campo non modificabile");
   }
 
-  revalidatePath("/contratti");
-  revalidatePath(`/contratti/${contractId}`);
-  revalidatePath("/");
-  revalidatePath("/archivio");
+  revalidate("/contratti");
+  revalidate(`/contratti/${contractId}`);
+  revalidate("/");
+  revalidate("/archivio");
+}
+
+export async function updateContractFieldAction(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await applyContractFieldUpdate(formData);
+    return { ok: true };
+  } catch (e) {
+    console.error("[updateContractFieldAction]", e);
+    return { ok: false, error: publicActionError(e) };
+  }
+}
+
+const BULK_STATUS_LIMIT = 50;
+
+/** Aggiorna più stati in una sola richiesta (dashboard elenco lavorazioni). */
+export async function updateContractStatusesBulkAction(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string; updated: number }> {
+  let updated = 0;
+  try {
+    const session = await requireSession();
+    const ids = formData.getAll("contractId").map((v) => String(v).trim());
+    const statuses = formData.getAll("status").map((v) => String(v).trim());
+    if (ids.length === 0) return { ok: false, error: "Nessuna modifica da salvare", updated: 0 };
+    if (ids.length !== statuses.length) {
+      return { ok: false, error: "Dati non validi", updated: 0 };
+    }
+    if (ids.length > BULK_STATUS_LIMIT) {
+      return {
+        ok: false,
+        error: `Massimo ${BULK_STATUS_LIMIT} pratiche per salvataggio`,
+        updated: 0,
+      };
+    }
+
+    const agentNotes = String(formData.get("agentNotes") ?? "").trim();
+    const closureDate = String(formData.get("closureDate") ?? "").trim();
+    const closureReason = String(formData.get("closureReason") ?? "").trim();
+    const closureNotes = String(formData.get("closureNotes") ?? "").trim();
+
+    for (let i = 0; i < ids.length; i++) {
+      const contractId = ids[i];
+      const value = statuses[i];
+      if (!contractId || !value) {
+        return { ok: false, error: "Dati non validi", updated };
+      }
+      const fd = new FormData();
+      fd.set("contractId", contractId);
+      fd.set("field", "status");
+      fd.set("value", value);
+      if (agentNotes) fd.set("agentNotes", agentNotes);
+      if (closureDate) fd.set("closureDate", closureDate);
+      if (closureReason) fd.set("closureReason", closureReason);
+      if (closureNotes) fd.set("closureNotes", closureNotes);
+      await applyContractFieldUpdate(fd, { skipRevalidate: true, session });
+      updated += 1;
+    }
+
+    revalidatePath("/");
+    revalidatePath("/contratti");
+    revalidatePath("/lavorazione");
+    revalidatePath("/provvigioni");
+    revalidatePath("/archivio");
+    return { ok: true, updated };
+  } catch (e) {
+    console.error("[updateContractStatusesBulkAction]", e);
+    if (updated > 0) {
+      revalidatePath("/");
+      revalidatePath("/lavorazione");
+      revalidatePath("/contratti");
+      revalidatePath("/provvigioni");
+    }
+    return { ok: false, error: publicActionError(e), updated };
+  }
 }

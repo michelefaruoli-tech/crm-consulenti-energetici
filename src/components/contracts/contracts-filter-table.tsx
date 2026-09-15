@@ -94,7 +94,8 @@ export function ContractsFilterTable({
           fd.set("contractId", p.contractId);
           fd.set("field", p.field);
           fd.set("value", p.value);
-          await updateContractFieldAction(fd);
+          const res = await updateContractFieldAction(fd);
+          if (!res.ok) throw new Error(res.error ?? "Errore di salvataggio");
         }
         setPending([]);
         setMessage("Modifiche salvate");

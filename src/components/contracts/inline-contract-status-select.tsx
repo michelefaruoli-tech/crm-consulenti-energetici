@@ -96,7 +96,8 @@ export function InlineContractStatusSelect({
         if (extra) {
           for (const [k, v] of Object.entries(extra)) fd.set(k, v);
         }
-        await updateContractFieldAction(fd);
+        const res = await updateContractFieldAction(fd);
+        if (!res.ok) throw new Error(res.error ?? "Errore cambio stato");
         router.refresh();
       } catch (e) {
         setValue(status);
