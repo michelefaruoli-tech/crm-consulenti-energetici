@@ -142,6 +142,8 @@ export function NuovoContrattoForm({
     supplyStartDate: string | null;
     archived: boolean;
   }>>([]);
+  /** POD già in archivio su un contratto fuori dal tuo perimetro (nessun dettaglio) */
+  const [podOutsideScope, setPodOutsideScope] = useState(false);
   const [attachments, setAttachments] = useState<
     {
       id: string;
@@ -197,6 +199,7 @@ export function NuovoContrattoForm({
     const timer = window.setTimeout(async () => {
       if (podValues.length === 0) {
         setPodMatches([]);
+        setPodOutsideScope(false);
         return;
       }
       try {
@@ -205,14 +208,25 @@ export function NuovoContrattoForm({
             const response = await fetch(`/api/contracts/pod-check?value=${encodeURIComponent(value)}`, {
               signal: controller.signal,
             });
-            if (!response.ok) return [];
-            const json = (await response.json()) as { matches?: typeof podMatches };
-            return json.matches ?? [];
+            if (!response.ok) return { matches: [], existsOutsideScope: false };
+            const json = (await response.json()) as {
+              matches?: typeof podMatches;
+              existsOutsideScope?: boolean;
+            };
+            return {
+              matches: json.matches ?? [],
+              existsOutsideScope: Boolean(json.existsOutsideScope),
+            };
           }),
         );
-        setPodMatches([...new Map(results.flat().map((row) => [row.id, row])).values()]);
+        const rows = results.flatMap((r) => r.matches);
+        setPodMatches([...new Map(rows.map((row) => [row.id, row])).values()]);
+        setPodOutsideScope(results.some((r) => r.existsOutsideScope));
       } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) setPodMatches([]);
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setPodMatches([]);
+          setPodOutsideScope(false);
+        }
       }
     }, 450);
     return () => {
@@ -1182,21 +1196,31 @@ export function NuovoContrattoForm({
           </p>
         ) : null}
 
-        {podMatches.length > 0 ? (
+        {podMatches.length > 0 || podOutsideScope ? (
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
             <p className="font-semibold">POD/PDR già in archivio: ricontrattualizzazione</p>
-            <ul className="mt-2 space-y-1">
-              {podMatches.map((match) => (
-                <li key={match.id} className="flex flex-wrap justify-between gap-2">
-                  <span>
-                    {match.client} · {match.supplier} · {match.status}
-                  </span>
-                  <a href={`/contratti/${match.id}`} target="_blank" className="font-semibold text-sky-700 hover:underline">
-                    Apri
-                  </a>
-                </li>
-              ))}
-            </ul>
+            {podMatches.length > 0 ? (
+              <ul className="mt-2 space-y-1">
+                {podMatches.map((match) => (
+                  <li key={match.id} className="flex flex-wrap justify-between gap-2">
+                    <span>
+                      {match.client} · {match.supplier} · {match.status}
+                    </span>
+                    <a href={`/contratti/${match.id}`} target="_blank" className="font-semibold text-sky-700 hover:underline">
+                      Apri
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {podOutsideScope ? (
+              <p className="mt-2">
+                Questo POD/PDR risulta già presente in archivio su un contratto
+                fuori dal tuo perimetro: non puoi vederne i dettagli. Se stai
+                inserendo una ricontrattualizzazione procedi, altrimenti chiedi
+                conferma al back office prima di salvare.
+              </p>
+            ) : null}
           </div>
         ) : null}
         {supplyStartBeforeRegistration ? (
