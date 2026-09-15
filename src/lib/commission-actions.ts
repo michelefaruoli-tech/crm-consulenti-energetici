@@ -11,7 +11,10 @@ import {
 import { prisma } from "@/lib/prisma";
 import { defaultCommissionExpected } from "@/lib/commission";
 import { parseFlexibleDate } from "@/lib/date-parse";
-import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
+import {
+  isPeriodAllowedForContract,
+  syncRecurringMonthsForContract,
+} from "@/lib/recurring-sync";
 import {
   effectiveGettone,
   operationTypeFromLabel,
@@ -115,6 +118,8 @@ async function applyRecurringMonthStato(args: {
     });
     return;
   }
+  // Niente rate fuori dall'intervallo di fornitura del contratto.
+  if (!(await isPeriodAllowedForContract(args.contractId, args.period))) return;
   await prisma.recurringMonth.create({
     data: {
       contractId: args.contractId,
@@ -1207,6 +1212,10 @@ export async function bulkMarkIncassatoCompetenceAction(
         },
       });
       if (existing?.status === "LIQUIDATED") continue;
+      // Mese fuori dall'intervallo di fornitura: non creare la rata.
+      if (!existing && !(await isPeriodAllowedForContract(r.contractId, period))) {
+        continue;
+      }
 
       const amount = existing?.amount ?? r.expected;
       if (existing) {
@@ -1345,6 +1354,11 @@ export async function bulkMarkPagatoCompetenceAction(
       });
       const amount =
         Number(month?.amount ?? commission?.expected ?? r.expected ?? 0) || 0;
+
+      // Mese fuori dall'intervallo di fornitura: non creare la rata.
+      if (!month && !(await isPeriodAllowedForContract(r.contractId, period))) {
+        continue;
+      }
 
       if (month) {
         if (month.status !== "LIQUIDATED") {
