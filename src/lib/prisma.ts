@@ -39,8 +39,25 @@ function createPrismaClient() {
   });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+/**
+ * Il client viene creato alla prima query, non all'import del modulo.
+ * Durante `next build` (fase «Collecting page data») le route vengono importate
+ * senza variabili d'ambiente: costruirlo subito farebbe fallire il build.
+ */
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient();
+  }
+  return globalForPrisma.prisma;
 }
+
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = getPrismaClient() as unknown as Record<
+      string | symbol,
+      unknown
+    >;
+    const value = client[property];
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
