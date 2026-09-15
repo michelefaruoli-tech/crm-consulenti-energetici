@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/stale-lavorazione",
-      "schedule": "20 * * * *"
+      "schedule": "20 7 * * *"
     }
   ]
 }
