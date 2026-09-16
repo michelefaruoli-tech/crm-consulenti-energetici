@@ -9,8 +9,10 @@
 import {
   isDisposableRecurringMonth,
   isPeriodInRecurringWindow,
+  lastGeneratedPeriod,
   recurringWindow,
 } from "../src/lib/recurring-window";
+import { HELIOS_RECURRING_GENERATION_LAG_MONTHS } from "../src/lib/helios-contract-rules";
 
 type Case = {
   name: string;
@@ -167,3 +169,35 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log("✅ Regola intervallo rate ricorrenti: tutte le verifiche superate.");
+
+console.log("\n• Helios: ultimo mese generabile = mese corrente − lag competenza");
+const heliosWindow = recurringWindow(
+  { ...base, supplyStartDate: new Date(2026, 0, 1) },
+  new Date(2026, 8, 15),
+);
+check(
+  "settembre 2026, lag 2 → luglio",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
+  "2026-07",
+);
+check(
+  "ottobre 2026, lag 2 → agosto",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 9, 10), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
+  "2026-08",
+);
+check(
+  "novembre 2026, lag 2 → settembre",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 10, 5), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
+  "2026-09",
+);
+check(
+  "senza lag → mese corrente",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), 0),
+  "2026-09",
+);
+
+if (failures > 0) {
+  console.error(`❌ ${failures} verifiche fallite (inclusi test Helios).`);
+  process.exit(1);
+}
+console.log("✅ Test Helios lag generazione: ok.");

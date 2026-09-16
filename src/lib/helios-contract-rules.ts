@@ -3,6 +3,19 @@ import { canonicalSupplierName } from "@/lib/supplier-names";
 export const HELIOS_MONTHLY_RESIDENTE = 4;
 export const HELIOS_MONTHLY_ALTRO = 6;
 
+/**
+ * Helios paga nel mese corrente la mensilità di competenza di N mesi prima
+ * (es. a settembre paga luglio → ultimo mese generabile a settembre = luglio).
+ */
+export const HELIOS_RECURRING_GENERATION_LAG_MONTHS = 2;
+
+/** Ritardo generazione rate ricorrenti per fornitore (0 = mese calendario corrente). */
+export function recurringGenerationLagMonths(
+  supplierName: string | null | undefined,
+): number {
+  return isHeliosSupplier(supplierName) ? HELIOS_RECURRING_GENERATION_LAG_MONTHS : 0;
+}
+
 /** Fornitore Helios (nome canonico o variante). */
 export function isHeliosSupplier(name: string | null | undefined): boolean {
   const raw = String(name ?? "").trim();
