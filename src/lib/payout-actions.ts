@@ -51,7 +51,15 @@ import type {
   ParsedPayoutRow,
   PayoutTemplateConfig,
 } from "@/lib/payout/types";
+import {
+  BULK_HISTORICAL_PERIOD_LIMIT,
+  BULK_SKIP_REASON_LABEL,
+  buildBulkHistoricalPlan,
+  type BulkHistoricalExclusionMode,
+} from "@/lib/payout/bulk-historical";
+import type { PayoutMarkMode } from "@/lib/payout/apply";
 import type {
+  BulkHistoricalPreviewResult,
   PayoutActionError,
   PayoutBatchProgress,
   PayoutPreviewResult,
@@ -60,6 +68,7 @@ import type {
 } from "@/lib/payout/view-types";
 
 export type {
+  BulkHistoricalPreviewResult,
   PayoutActionError,
   PayoutBatchProgress,
   PayoutPreviewResult,
@@ -95,6 +104,82 @@ function errorMessage(e: unknown, fallback: string): string {
 /** L'import e la liquidazione sono operazioni di Master. */
 function canManagePayout(role: Parameters<typeof hasPermission>[0]): boolean {
   return hasPermission(role, "commissions.edit_gettone");
+}
+
+/** Marcatura massiva storica: solo amministratore. */
+function canBulkHistorical(role: Parameters<typeof hasPermission>[0]): boolean {
+  return role === "ADMIN";
+}
+
+const BULK_HISTORICAL_PREVIEW_SAMPLE = 80;
+const BULK_HISTORICAL_SKIPPED_SAMPLE = 40;
+
+type BulkHistoricalParams = {
+  periodLimit: string;
+  markMode: PayoutMarkMode;
+  exclusionMode: BulkHistoricalExclusionMode;
+};
+
+function readBulkHistoricalParams(
+  formData: FormData,
+): BulkHistoricalParams | PayoutActionError {
+  const periodLimit =
+    String(formData.get("periodLimit") ?? BULK_HISTORICAL_PERIOD_LIMIT).trim();
+  if (!PERIOD_RE.test(periodLimit)) {
+    return fail("Mese limite non valido (formato YYYY-MM)");
+  }
+  const markRaw = String(formData.get("markMode") ?? "LIQUIDATO").trim();
+  const markMode: PayoutMarkMode =
+    markRaw === "INCASSATO" ? "INCASSATO" : "LIQUIDATO";
+  const exclRaw = String(formData.get("exclusionMode") ?? "ACTIVE_ONLY").trim();
+  const exclusionMode: BulkHistoricalExclusionMode =
+    exclRaw === "TOTAL" ? "TOTAL" : "ACTIVE_ONLY";
+  return { periodLimit, markMode, exclusionMode };
+}
+
+function planToPreview(
+  plan: import("@/lib/payout/bulk-historical").BulkHistoricalPlan,
+): BulkHistoricalPreviewResult {
+  return {
+    ok: true,
+    supplierName: plan.supplierName,
+    periodLimit: plan.periodLimit,
+    markMode: plan.markMode,
+    exclusionMode: plan.exclusionMode,
+    excludedCollaboratorPatterns: plan.excludedCollaboratorPatterns,
+    runLabel: plan.runLabel,
+    signature: plan.signature,
+    summary: plan.summary,
+    byCollaborator: plan.byCollaborator,
+    byMonth: plan.byMonth,
+    skippedByReason: plan.skippedByReason.map((s) => ({
+      reason: s.reason,
+      label: BULK_SKIP_REASON_LABEL[s.reason],
+      count: s.count,
+    })),
+    sampleRows: plan.toApply.slice(0, BULK_HISTORICAL_PREVIEW_SAMPLE).map(
+      (r) => ({
+        contractNumber: r.contractNumber,
+        clientName: r.clientName,
+        collaboratorName: r.collaboratorName,
+        period: r.period,
+        amount: r.amount,
+        outsideSupplyWindow: r.outsideSupplyWindow,
+      }),
+    ),
+    sampleSkipped: plan.skipped
+      .slice(0, BULK_HISTORICAL_SKIPPED_SAMPLE)
+      .map((s) => ({
+        contractNumber: s.contractNumber,
+        collaboratorName: s.collaboratorName,
+        period: s.period,
+        reason: BULK_SKIP_REASON_LABEL[s.reason],
+        detail: s.detail,
+      })),
+    truncated:
+      plan.toApply.length > BULK_HISTORICAL_PREVIEW_SAMPLE ||
+      plan.skipped.length > BULK_HISTORICAL_SKIPPED_SAMPLE,
+  };
 }
 
 function canReadPayout(role: Parameters<typeof hasPermission>[0]): boolean {
@@ -1705,5 +1790,203 @@ export async function loadPayoutRowCandidatesAction(
   } catch (e) {
     console.error("[loadPayoutRowCandidatesAction]", e);
     return fail(errorMessage(e, "Lettura dei candidati non riuscita"));
+  }
+}
+
+/**
+ * Anteprima della marcatura massiva Helios: nessuna scrittura.
+ * Parametri: periodLimit, markMode (INCASSATO|LIQUIDATO), exclusionMode (TOTAL|ACTIVE_ONLY).
+ */
+export async function previewBulkHistoricalHeliosAction(
+  formData: FormData,
+): Promise<BulkHistoricalPreviewResult | PayoutActionError> {
+  try {
+    const session = await requireSession();
+    if (!canBulkHistorical(session.role)) {
+      return fail("Solo l'amministratore può eseguire la marcatura massiva");
+    }
+
+    const params = readBulkHistoricalParams(formData);
+    if ("ok" in params) return params;
+
+    const built = await buildBulkHistoricalPlan({
+      periodLimit: params.periodLimit,
+      markMode: params.markMode,
+      exclusionMode: params.exclusionMode,
+    });
+    if (!built.ok) return fail(built.error);
+
+    return planToPreview(built.plan);
+  } catch (e) {
+    console.error("[previewBulkHistoricalHeliosAction]", e);
+    return fail(errorMessage(e, "Anteprima non riuscita"));
+  }
+}
+
+/**
+ * Crea il batch tracciato (PayoutRun + PayoutBatch + PayoutRow) dalla marcatura
+ * massiva. Idempotente sulla firma dei parametri: un secondo invio riprende il
+ * batch esistente. L'applicazione effettiva avviene con applyPayoutBatchAction.
+ */
+export async function createBulkHistoricalHeliosBatchAction(
+  formData: FormData,
+): Promise<
+  | {
+      ok: true;
+      runId: string;
+      batchId: string;
+      totalRows: number;
+      matchedRows: number;
+      existing: boolean;
+    }
+  | PayoutActionError
+> {
+  try {
+    const session = await requireSession();
+    if (!canBulkHistorical(session.role)) {
+      return fail("Solo l'amministratore può eseguire la marcatura massiva");
+    }
+
+    const params = readBulkHistoricalParams(formData);
+    if ("ok" in params) return params;
+
+    const built = await buildBulkHistoricalPlan({
+      periodLimit: params.periodLimit,
+      markMode: params.markMode,
+      exclusionMode: params.exclusionMode,
+    });
+    if (!built.ok) return fail(built.error);
+
+    const plan = built.plan;
+    if (plan.toApply.length === 0) {
+      return fail("Nessuna rata da applicare con i parametri scelti");
+    }
+
+    const existingBatch = await prisma.payoutBatch.findUnique({
+      where: { sha256: plan.signature },
+      select: { id: true, runId: true, totalRows: true, matchedRows: true },
+    });
+    if (existingBatch) {
+      return {
+        ok: true,
+        runId: existingBatch.runId,
+        batchId: existingBatch.id,
+        totalRows: existingBatch.totalRows,
+        matchedRows: existingBatch.matchedRows,
+        existing: true,
+      };
+    }
+
+    const supplier = await prisma.supplier.findFirst({
+      where: {
+        name: { equals: plan.supplierName, mode: "insensitive" },
+      },
+      select: { id: true },
+    });
+    if (!supplier) return fail("Fornitore non trovato");
+
+    const sourceId = await ensureSource({
+      name: `${plan.supplierName} — marcatura massiva`,
+      kind: "SUPPLIER_STATEMENT",
+    });
+
+    const run = await prisma.payoutRun.upsert({
+      where: {
+        period_label: { period: plan.periodLimit, label: plan.runLabel },
+      },
+      update: { markMode: plan.markMode },
+      create: {
+        period: plan.periodLimit,
+        label: plan.runLabel,
+        markMode: plan.markMode,
+        createdById: session.id,
+        notes: `Marcatura massiva · esclusione ${plan.exclusionMode} · ${plan.excludedCollaboratorPatterns.join(", ")}`,
+      },
+      select: { id: true, status: true },
+    });
+    if (run.status === "CLOSED") {
+      return fail("La liquidazione collegata è chiusa: riaprila prima di procedere");
+    }
+
+    const computedTotal = round2(
+      plan.toApply.reduce((sum, r) => sum + (r.amount ?? 0), 0),
+    );
+
+    const batch = await prisma.payoutBatch.create({
+      data: {
+        runId: run.id,
+        sourceId,
+        filename: `${plan.runLabel}.bulk`,
+        sha256: plan.signature,
+        fileSize: 0,
+        status: "PARSED",
+        totalRows: plan.toApply.length,
+        matchedRows: plan.toApply.length,
+        ambiguousRows: 0,
+        unmatchedRows: 0,
+        computedTotal,
+        uploadedById: session.id,
+      },
+      select: { id: true },
+    });
+
+    await mapWithConcurrency(plan.toApply, INSERT_CONCURRENCY, async (row, idx) => {
+      await prisma.payoutRow.create({
+        data: {
+          batchId: batch.id,
+          sheetName: "bulk",
+          rowIndex: idx,
+          rawJson: JSON.stringify({
+            kind: "bulk-historical",
+            contractId: row.contractId,
+            period: row.period,
+            amount: row.amount,
+            outsideSupplyWindow: row.outsideSupplyWindow,
+          }),
+          podRaw: null,
+          clientNameRaw: row.clientName,
+          amount: row.amount,
+          period: row.period,
+          matchStatus: "MATCHED",
+          matchScore: 100,
+          matchReason: "bulk_historical",
+          contractId: row.contractId,
+          collaboratorId: row.collaboratorId,
+          note: row.outsideSupplyWindow
+            ? "Fuori finestra fornitura — verificare bonifica mesi"
+            : null,
+        },
+      });
+    });
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "CREATE",
+      entity: "PayoutBatch",
+      entityId: batch.id,
+      details: {
+        source: "bulk_historical_helios",
+        periodLimit: plan.periodLimit,
+        markMode: plan.markMode,
+        exclusionMode: plan.exclusionMode,
+        rateCount: plan.toApply.length,
+        contractCount: plan.summary.contractCount,
+        totalAmount: computedTotal,
+        outsideWindowCount: plan.summary.outsideWindowCount,
+      },
+    });
+
+    revalidatePath("/provvigioni/liquidazioni");
+    return {
+      ok: true,
+      runId: run.id,
+      batchId: batch.id,
+      totalRows: plan.toApply.length,
+      matchedRows: plan.toApply.length,
+      existing: false,
+    };
+  } catch (e) {
+    console.error("[createBulkHistoricalHeliosBatchAction]", e);
+    return fail(errorMessage(e, "Creazione batch non riuscita"));
   }
 }

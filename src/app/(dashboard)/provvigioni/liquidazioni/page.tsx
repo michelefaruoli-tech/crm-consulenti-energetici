@@ -7,6 +7,7 @@ import { periodLabel } from "@/lib/recurring";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { listBuiltinTemplates } from "@/lib/payout/templates";
 import { PayoutImportPanel } from "@/components/provvigioni/payout-import-panel";
+import { PayoutBulkHistoricalPanel } from "@/components/provvigioni/payout-bulk-historical-panel";
 import { Card, CardTitle } from "@/components/ui/card";
 
 const RUN_STATUS_LABEL: Record<string, string> = {
@@ -64,6 +65,18 @@ export default async function LiquidazioniPage() {
           rettifiche manuali e rigenerare i report.
         </p>
       </div>
+
+      {session.role === "ADMIN" ? (
+        <Card>
+          <CardTitle>Marcatura massiva storico Helios</CardTitle>
+          <p className="mt-1 mb-4 text-sm text-slate-600">
+            Chiude in una sola operazione i mesi arretrati fino a giugno 2026,
+            con anteprima obbligatoria e tracciabilità nel ciclo di liquidazione.
+            L&apos;applicazione è annullabile e idempotente.
+          </p>
+          <PayoutBulkHistoricalPanel />
+        </Card>
+      ) : null}
 
       <Card>
         <CardTitle>Nuovo import</CardTitle>

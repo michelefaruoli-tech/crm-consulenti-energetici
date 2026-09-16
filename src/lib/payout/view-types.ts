@@ -87,3 +87,60 @@ export type PayoutBatchProgress = {
   skipped: number;
   errors: number;
 };
+
+export type BulkHistoricalExclusionMode = "TOTAL" | "ACTIVE_ONLY";
+export type BulkHistoricalMarkMode = "INCASSATO" | "LIQUIDATO";
+
+export const BULK_HISTORICAL_PERIOD_LIMIT = "2026-06";
+
+export type BulkHistoricalPreviewResult = {
+  ok: true;
+  supplierName: string;
+  periodLimit: string;
+  markMode: BulkHistoricalMarkMode;
+  exclusionMode: BulkHistoricalExclusionMode;
+  excludedCollaboratorPatterns: string[];
+  runLabel: string;
+  signature: string;
+  summary: {
+    contractCount: number;
+    rateCount: number;
+    totalAmount: number;
+    outsideWindowCount: number;
+    skippedCount: number;
+  };
+  byCollaborator: Array<{
+    collaboratorName: string;
+    contractCount: number;
+    rateCount: number;
+    total: number;
+  }>;
+  byMonth: Array<{
+    period: string;
+    rateCount: number;
+    total: number;
+  }>;
+  skippedByReason: Array<{
+    reason: string;
+    label: string;
+    count: number;
+  }>;
+  /** Campione di rate da applicare (anteprima troncata su dataset grandi) */
+  sampleRows: Array<{
+    contractNumber: string;
+    clientName: string;
+    collaboratorName: string;
+    period: string;
+    amount: number | null;
+    outsideSupplyWindow: boolean;
+  }>;
+  /** Campione di casi saltati */
+  sampleSkipped: Array<{
+    contractNumber: string;
+    collaboratorName: string;
+    period: string;
+    reason: string;
+    detail?: string;
+  }>;
+  truncated: boolean;
+};
