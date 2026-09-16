@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
+
+const FILTER_MENU_WIDTH_PX = 240;
+const FILTER_MENU_MAX_HEIGHT_PX = 288;
 
 /** Sfondo/testo su tutte le celle; bordo sinistro solo sulla prima. */
 function splitRowChrome(cls: string | undefined): { surface: string; accent: string } {
@@ -136,6 +140,12 @@ export function ExcelFilterTable({
   fitWidth = false,
 }: Props) {
   const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [filterMenuPos, setFilterMenuPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const filterPopoverRef = useRef<HTMLDivElement>(null);
+  const filterTriggerRef = useRef<HTMLElement | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
   /** Bozza multi-selezione filtri server (prima di «Applica») */
   const [draftServerFilter, setDraftServerFilter] = useState<
@@ -176,12 +186,38 @@ export function ExcelFilterTable({
   );
   const loadOptions = serverColumnFilter?.loadOptions;
 
+  const closeColumnFilter = useCallback(() => {
+    setOpenFilter(null);
+    setFilterMenuPos(null);
+    filterTriggerRef.current = null;
+  }, []);
+
+  function computeFilterMenuPos(anchor: HTMLElement) {
+    const rect = anchor.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + 4;
+    if (left + FILTER_MENU_WIDTH_PX > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - FILTER_MENU_WIDTH_PX - 8);
+    }
+    if (top + FILTER_MENU_MAX_HEIGHT_PX > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - FILTER_MENU_MAX_HEIGHT_PX - 4);
+    }
+    return { top, left };
+  }
+
   /**
    * Apertura menu filtro: i valori arrivano dal database (tutte le righe che
    * rispettano gli altri filtri), non dalle righe caricate in pagina.
+   * Il menu è in portal (fixed) per non essere tagliato da overflow-x della tabella.
    */
-  function openColumnFilter(columnKey: string) {
-    setOpenFilter((current) => (current === columnKey ? null : columnKey));
+  function openColumnFilter(columnKey: string, anchor: HTMLElement) {
+    if (openFilter === columnKey) {
+      closeColumnFilter();
+      return;
+    }
+    filterTriggerRef.current = anchor;
+    setFilterMenuPos(computeFilterMenuPos(anchor));
+    setOpenFilter(columnKey);
     if (!loadOptions) return;
     if (!serverFilterKeys.has(columnKey)) return;
     if (textServerKeys.has(columnKey)) return;
@@ -200,14 +236,40 @@ export function ExcelFilterTable({
   // Cambio collaboratore / pagina → mostra di nuovo tutte le righe caricate (fino a 100)
   useEffect(() => {
     setSelected({});
-    setOpenFilter(null);
+    closeColumnFilter();
     setDraftServerFilter({});
     setRemoteOptions({});
     setOptionSearch({});
     setTextDraft({});
     setSortKey(null);
     setSortDir("asc");
-  }, [resetKey]);
+  }, [resetKey, closeColumnFilter]);
+
+  useEffect(() => {
+    if (!openFilter) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as Node;
+      if (filterPopoverRef.current?.contains(target)) return;
+      if (filterTriggerRef.current?.contains(target)) return;
+      closeColumnFilter();
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [openFilter, closeColumnFilter]);
+
+  useEffect(() => {
+    if (!openFilter) return;
+    const onDismiss = () => closeColumnFilter();
+    const scrollEl = scrollRef.current;
+    scrollEl?.addEventListener("scroll", onDismiss, { passive: true });
+    window.addEventListener("scroll", onDismiss, { passive: true });
+    window.addEventListener("resize", onDismiss);
+    return () => {
+      scrollEl?.removeEventListener("scroll", onDismiss);
+      window.removeEventListener("scroll", onDismiss);
+      window.removeEventListener("resize", onDismiss);
+    };
+  }, [openFilter, closeColumnFilter]);
 
   // Apri filtro multi: copia i valori attivi dall’URL nella bozza
   useEffect(() => {
@@ -490,7 +552,273 @@ export function ExcelFilterTable({
     sticky.scrollLeft = main.scrollLeft;
   }, [showFixedHScroll, scrollWidth]);
 
-  const showHScrollChrome = fitWidth && needsHScroll;
+  const showHScrollChrome = needsHScroll;
+
+  const activeFilterCol = openFilter
+    ? columns.find((c) => c.key === openFilter)
+    : null;
+
+  function renderColumnFilterMenu(col: FilterColumn) {
+    if (!filterMenuPos) return null;
+    const isTextFilter = textServerKeys.has(col.key);
+
+    return (
+      <div
+        ref={filterPopoverRef}
+        role="dialog"
+        aria-label={`Filtro ${col.label}`}
+        className="fixed z-[100] flex w-60 max-h-[min(18rem,calc(100vh-1rem))] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+        style={{ top: filterMenuPos.top, left: filterMenuPos.left }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {isTextFilter && serverColumnFilter ? (
+          <div className="space-y-2 p-2">
+            <p className="text-[10px] leading-snug text-slate-500">
+              Cerca su tutto il database: mostra le righe che contengono il testo.
+            </p>
+            <input
+              autoFocus
+              className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+              placeholder={`Contiene… (${col.label})`}
+              value={
+                textDraft[col.key] ??
+                serverColumnFilter.activeText?.[col.key] ??
+                ""
+              }
+              onChange={(e) =>
+                setTextDraft((prev) => ({
+                  ...prev,
+                  [col.key]: e.target.value,
+                }))
+              }
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                serverColumnFilter.onTextFilter?.(
+                  col.key,
+                  (textDraft[col.key] ?? "").trim(),
+                );
+                closeColumnFilter();
+              }}
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                onClick={() => {
+                  serverColumnFilter.onTextFilter?.(
+                    col.key,
+                    (
+                      textDraft[col.key] ??
+                      serverColumnFilter.activeText?.[col.key] ??
+                      ""
+                    ).trim(),
+                  );
+                  closeColumnFilter();
+                }}
+              >
+                Applica
+              </button>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+                onClick={() => {
+                  setTextDraft((prev) => ({
+                    ...prev,
+                    [col.key]: "",
+                  }));
+                  serverColumnFilter.onTextFilter?.(col.key, "");
+                  closeColumnFilter();
+                }}
+              >
+                Pulisci
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="shrink-0 space-y-2 p-2 pb-1">
+              {serverFilterKeys.has(col.key) ? (
+                <p className="text-[10px] leading-snug text-slate-500">
+                  {multiSelectServerKeys.has(col.key)
+                    ? "Valori presi da tutto il database (con gli altri filtri attivi). Spunta e premi Applica."
+                    : "Questo filtro vale su tutto il database, non solo su questa pagina."}
+                </p>
+              ) : null}
+              {(optionsByColumn[col.key]?.length ?? 0) > 12 ? (
+                <input
+                  className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                  placeholder="Cerca nell'elenco…"
+                  value={optionSearch[col.key] ?? ""}
+                  onChange={(e) =>
+                    setOptionSearch((prev) => ({
+                      ...prev,
+                      [col.key]: e.target.value,
+                    }))
+                  }
+                />
+              ) : null}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  className="text-emerald-700"
+                  onClick={() => {
+                    if (serverFilterKeys.has(col.key) && serverColumnFilter) {
+                      if (multiSelectServerKeys.has(col.key)) {
+                        setDraftServerFilter((prev) => ({
+                          ...prev,
+                          [col.key]: new Set(optionsByColumn[col.key] ?? []),
+                        }));
+                        return;
+                      }
+                      serverColumnFilter.onFilter(col.key, []);
+                      closeColumnFilter();
+                      return;
+                    }
+                    selectAll(col.key);
+                  }}
+                >
+                  Tutti
+                </button>
+                <button
+                  type="button"
+                  className="text-slate-500"
+                  onClick={() => {
+                    if (serverFilterKeys.has(col.key) && serverColumnFilter) {
+                      if (multiSelectServerKeys.has(col.key)) {
+                        setDraftServerFilter((prev) => ({
+                          ...prev,
+                          [col.key]: new Set(),
+                        }));
+                        return;
+                      }
+                      serverColumnFilter.onFilter(col.key, []);
+                      closeColumnFilter();
+                      return;
+                    }
+                    clearCol(col.key);
+                  }}
+                >
+                  Nessuno
+                </button>
+              </div>
+            </div>
+            <div className="min-h-[4.5rem] flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
+              {optionsLoading === col.key ? (
+                <p className="px-1 py-2 text-xs text-slate-500">
+                  Carico i valori dal database…
+                </p>
+              ) : null}
+              {(optionsByColumn[col.key] ?? [])
+                .filter((opt) => {
+                  const search = (optionSearch[col.key] ?? "").trim();
+                  if (!search) return true;
+                  return optionLabelOf(col.key, opt)
+                    .toLowerCase()
+                    .includes(search.toLowerCase());
+                })
+                .map((opt) => {
+                  const isServerCol = serverFilterKeys.has(col.key);
+                  const isMulti = multiSelectServerKeys.has(col.key);
+                  const isActive = (selected[col.key]?.size ?? 0) > 0;
+                  const serverChecked =
+                    serverColumnFilter?.activeValues?.[col.key]?.includes(opt) ??
+                    false;
+                  const draftChecked =
+                    draftServerFilter[col.key]?.has(opt) ?? false;
+                  const checked = isServerCol
+                    ? isMulti
+                      ? draftChecked
+                      : serverChecked
+                    : isActive
+                      ? selected[col.key].has(opt)
+                      : true;
+                  return (
+                    <label
+                      key={opt}
+                      className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        className="shrink-0"
+                        checked={checked}
+                        onChange={() => {
+                          if (isServerCol && serverColumnFilter) {
+                            if (isMulti) {
+                              setDraftServerFilter((prev) => {
+                                const cur = new Set(
+                                  prev[col.key] ??
+                                    serverColumnFilter.activeValues?.[col.key] ??
+                                    [],
+                                );
+                                if (cur.has(opt)) cur.delete(opt);
+                                else cur.add(opt);
+                                return { ...prev, [col.key]: cur };
+                              });
+                              return;
+                            }
+                            if (serverChecked) {
+                              serverColumnFilter.onFilter(col.key, []);
+                            } else {
+                              serverColumnFilter.onFilter(col.key, [opt]);
+                            }
+                            closeColumnFilter();
+                            return;
+                          }
+                          if (!isActive) {
+                            setSelected((prev) => ({
+                              ...prev,
+                              [col.key]: new Set([opt]),
+                            }));
+                          } else {
+                            toggleValue(col.key, opt);
+                          }
+                        }}
+                      />
+                      <span className="min-w-0 break-words text-xs">
+                        {optionLabelOf(col.key, opt)}
+                      </span>
+                    </label>
+                  );
+                })}
+            </div>
+            {serverFilterKeys.has(col.key) &&
+            multiSelectServerKeys.has(col.key) &&
+            serverColumnFilter ? (
+              <div className="shrink-0 flex gap-2 border-t border-slate-100 bg-white p-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                  onClick={() => {
+                    const vals = [...(draftServerFilter[col.key] ?? new Set())];
+                    const allOpts = optionsByColumn[col.key] ?? [];
+                    const apply =
+                      vals.length === 0 ||
+                      (allOpts.length > 0 && vals.length === allOpts.length)
+                        ? []
+                        : vals;
+                    serverColumnFilter.onFilter(col.key, apply);
+                    closeColumnFilter();
+                  }}
+                >
+                  Applica
+                  {(draftServerFilter[col.key]?.size ?? 0) > 0
+                    ? ` (${draftServerFilter[col.key]!.size})`
+                    : ""}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+                  onClick={closeColumnFilter}
+                >
+                  Chiudi
+                </button>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -558,7 +886,7 @@ export function ExcelFilterTable({
               : "min-w-[1200px] text-sm",
         )}
       >
-        <thead className="bg-slate-100 text-slate-800">
+        <thead className="sticky top-0 z-20 bg-slate-100 text-slate-800 shadow-[0_1px_0_0_rgb(226,232,240)]">
           <tr>
             {selection ? (
               <th
@@ -593,15 +921,15 @@ export function ExcelFilterTable({
                 <th
                   key={col.key}
                   className={cn(
-                    "relative align-bottom whitespace-nowrap",
+                    "relative align-bottom overflow-visible whitespace-nowrap",
                     dense ? "px-1.5 py-1.5" : "px-3 py-2",
                     col.colClassName,
                   )}
                 >
-                  <div className="flex items-center gap-1">
+                  <div className="flex min-w-0 items-center gap-0.5">
                     <button
                       type="button"
-                      className="font-semibold text-slate-800 hover:text-slate-950"
+                      className="min-w-0 truncate font-semibold text-slate-800 hover:text-slate-950"
                       onClick={() => toggleSort(col.key)}
                       title={
                         isServerCol
@@ -625,268 +953,17 @@ export function ExcelFilterTable({
                     <button
                       type="button"
                       className={cn(
-                        "rounded px-1 text-xs",
+                        "shrink-0 rounded px-1 text-xs",
                         active ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700",
+                        openFilter === col.key && "ring-2 ring-emerald-500",
                       )}
-                      onClick={() => openColumnFilter(col.key)}
+                      onClick={(e) => openColumnFilter(col.key, e.currentTarget)}
                       title="Filtro"
+                      aria-expanded={openFilter === col.key}
                     >
                       ▾
                     </button>
                   </div>
-                  {openFilter === col.key ? (
-                    <div className="absolute left-0 top-full z-20 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-                      {serverFilterKeys.has(col.key) ? (
-                        <p className="mb-2 text-[10px] leading-snug text-slate-500">
-                          {textServerKeys.has(col.key)
-                            ? "Cerca su tutto il database: mostra le righe che contengono il testo."
-                            : multiSelectServerKeys.has(col.key)
-                              ? "Valori presi da tutto il database (con gli altri filtri attivi). Spunta e premi Applica."
-                              : "Questo filtro vale su tutto il database, non solo su questa pagina."}
-                        </p>
-                      ) : null}
-                      {textServerKeys.has(col.key) && serverColumnFilter ? (
-                        <div className="space-y-2">
-                          <input
-                            autoFocus
-                            className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
-                            placeholder={`Contiene… (${col.label})`}
-                            value={
-                              textDraft[col.key] ??
-                              serverColumnFilter.activeText?.[col.key] ??
-                              ""
-                            }
-                            onChange={(e) =>
-                              setTextDraft((prev) => ({
-                                ...prev,
-                                [col.key]: e.target.value,
-                              }))
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key !== "Enter") return;
-                              serverColumnFilter.onTextFilter?.(
-                                col.key,
-                                (textDraft[col.key] ?? "").trim(),
-                              );
-                              setOpenFilter(null);
-                            }}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              className="flex-1 rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
-                              onClick={() => {
-                                serverColumnFilter.onTextFilter?.(
-                                  col.key,
-                                  (
-                                    textDraft[col.key] ??
-                                    serverColumnFilter.activeText?.[col.key] ??
-                                    ""
-                                  ).trim(),
-                                );
-                                setOpenFilter(null);
-                              }}
-                            >
-                              Applica
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-md px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
-                              onClick={() => {
-                                setTextDraft((prev) => ({
-                                  ...prev,
-                                  [col.key]: "",
-                                }));
-                                serverColumnFilter.onTextFilter?.(col.key, "");
-                                setOpenFilter(null);
-                              }}
-                            >
-                              Pulisci
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                      {textServerKeys.has(col.key) ? null : (
-                        <>
-                      {optionsLoading === col.key ? (
-                        <p className="px-1 py-2 text-xs text-slate-500">
-                          Carico i valori dal database…
-                        </p>
-                      ) : null}
-                      {(optionsByColumn[col.key]?.length ?? 0) > 12 ? (
-                        <input
-                          className="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"
-                          placeholder="Cerca nell'elenco…"
-                          value={optionSearch[col.key] ?? ""}
-                          onChange={(e) =>
-                            setOptionSearch((prev) => ({
-                              ...prev,
-                              [col.key]: e.target.value,
-                            }))
-                          }
-                        />
-                      ) : null}
-                      <div className="mb-2 flex flex-wrap gap-2 text-xs">
-                        <button
-                          type="button"
-                          className="text-emerald-700"
-                          onClick={() => {
-                            if (serverFilterKeys.has(col.key) && serverColumnFilter) {
-                              if (multiSelectServerKeys.has(col.key)) {
-                                setDraftServerFilter((prev) => ({
-                                  ...prev,
-                                  [col.key]: new Set(
-                                    optionsByColumn[col.key] ?? [],
-                                  ),
-                                }));
-                                return;
-                              }
-                              serverColumnFilter.onFilter(col.key, []);
-                              setOpenFilter(null);
-                              return;
-                            }
-                            selectAll(col.key);
-                          }}
-                        >
-                          Tutti
-                        </button>
-                        <button
-                          type="button"
-                          className="text-slate-500"
-                          onClick={() => {
-                            if (serverFilterKeys.has(col.key) && serverColumnFilter) {
-                              if (multiSelectServerKeys.has(col.key)) {
-                                setDraftServerFilter((prev) => ({
-                                  ...prev,
-                                  [col.key]: new Set(),
-                                }));
-                                return;
-                              }
-                              serverColumnFilter.onFilter(col.key, []);
-                              setOpenFilter(null);
-                              return;
-                            }
-                            clearCol(col.key);
-                          }}
-                        >
-                          Nessuno
-                        </button>
-                      </div>
-                      {(optionsByColumn[col.key] ?? [])
-                        .filter((opt) => {
-                          const search = (optionSearch[col.key] ?? "").trim();
-                          if (!search) return true;
-                          return optionLabelOf(col.key, opt)
-                            .toLowerCase()
-                            .includes(search.toLowerCase());
-                        })
-                        .map((opt) => {
-                        const isServerCol = serverFilterKeys.has(col.key);
-                        const isMulti = multiSelectServerKeys.has(col.key);
-                        const isActive = (selected[col.key]?.size ?? 0) > 0;
-                        const serverChecked =
-                          serverColumnFilter?.activeValues?.[col.key]?.includes(
-                            opt,
-                          ) ?? false;
-                        const draftChecked =
-                          draftServerFilter[col.key]?.has(opt) ?? false;
-                        const checked = isServerCol
-                          ? isMulti
-                            ? draftChecked
-                            : serverChecked
-                          : isActive
-                            ? selected[col.key].has(opt)
-                            : true;
-                        return (
-                          <label
-                            key={opt}
-                            className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                if (isServerCol && serverColumnFilter) {
-                                  if (isMulti) {
-                                    setDraftServerFilter((prev) => {
-                                      const cur = new Set(
-                                        prev[col.key] ??
-                                          serverColumnFilter.activeValues?.[
-                                            col.key
-                                          ] ??
-                                          [],
-                                      );
-                                      if (cur.has(opt)) cur.delete(opt);
-                                      else cur.add(opt);
-                                      return { ...prev, [col.key]: cur };
-                                    });
-                                    return;
-                                  }
-                                  if (serverChecked) {
-                                    serverColumnFilter.onFilter(col.key, []);
-                                  } else {
-                                    serverColumnFilter.onFilter(col.key, [opt]);
-                                  }
-                                  setOpenFilter(null);
-                                  return;
-                                }
-                                if (!isActive) {
-                                  setSelected((prev) => ({
-                                    ...prev,
-                                    [col.key]: new Set([opt]),
-                                  }));
-                                } else {
-                                  toggleValue(col.key, opt);
-                                }
-                              }}
-                            />
-                            <span className="truncate">
-                              {optionLabelOf(col.key, opt)}
-                            </span>
-                          </label>
-                        );
-                      })}
-                      {serverFilterKeys.has(col.key) &&
-                      multiSelectServerKeys.has(col.key) &&
-                      serverColumnFilter ? (
-                        <div className="sticky bottom-0 mt-2 flex gap-2 border-t border-slate-100 bg-white pt-2">
-                          <button
-                            type="button"
-                            className="flex-1 rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
-                            onClick={() => {
-                              const vals = [
-                                ...(draftServerFilter[col.key] ?? new Set()),
-                              ];
-                              const allOpts = optionsByColumn[col.key] ?? [];
-                              // Tutte le opzioni spuntate = nessun filtro (come «Tutti»)
-                              const apply =
-                                vals.length === 0 ||
-                                (allOpts.length > 0 &&
-                                  vals.length === allOpts.length)
-                                  ? []
-                                  : vals;
-                              serverColumnFilter.onFilter(col.key, apply);
-                              setOpenFilter(null);
-                            }}
-                          >
-                            Applica
-                            {(draftServerFilter[col.key]?.size ?? 0) > 0
-                              ? ` (${draftServerFilter[col.key]!.size})`
-                              : ""}
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-md px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
-                            onClick={() => setOpenFilter(null)}
-                          >
-                            Chiudi
-                          </button>
-                        </div>
-                      ) : null}
-                        </>
-                      )}
-                    </div>
-                  ) : null}
                 </th>
               );
             })}
@@ -1067,6 +1144,13 @@ export function ExcelFilterTable({
             : ""}
         </p>
       </div>
+
+      {activeFilterCol && filterMenuPos
+        ? createPortal(
+            renderColumnFilterMenu(activeFilterCol),
+            document.body,
+          )
+        : null}
     </div>
   );
 }

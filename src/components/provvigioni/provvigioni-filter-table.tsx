@@ -1360,20 +1360,22 @@ export function ProvvigioniFilterTable({
       }));
     }
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
-    /** Larghezze per stare tutte in una schermata (vista semplificata) */
+    /** Larghezze minime leggibili; scroll orizzontale se servono tutte le colonne */
     const widths: Record<string, string> = {
-      clientName: "w-[22%]",
-      collaboratorName: "w-[10%]",
-      supplierName: "w-[11%]",
-      amount: "w-[7%]",
-      stato: "w-[10%]",
-      meseRif: "w-[7%]",
-      supplyStartDate: "w-[8%]",
-      collectionMonth: "w-[8%]",
-      notes: "w-[17%]",
-      recurrence: "w-[7%]",
-      _open: "w-[4%]",
-      _del: "w-[4%]",
+      clientName: "w-[11rem] min-w-[11rem]",
+      podPdr: "w-[9rem] min-w-[9rem]",
+      collaboratorName: "w-[7rem] min-w-[7rem]",
+      supplierName: "w-[7.5rem] min-w-[7.5rem]",
+      operationType: "w-[7rem] min-w-[7rem]",
+      stato: "w-[8.5rem] min-w-[8.5rem]",
+      meseRif: "w-[6.5rem] min-w-[6.5rem]",
+      supplyStartDate: "w-[7rem] min-w-[7rem]",
+      collectionMonth: "w-[7.5rem] min-w-[7.5rem]",
+      recurrence: "w-[5.5rem] min-w-[5.5rem]",
+      stornoFlag: "w-[5rem] min-w-[5rem]",
+      amount: "w-[5.5rem] min-w-[5.5rem] text-right",
+      _open: "w-[2.75rem] min-w-[2.75rem] text-center",
+      _del: "w-[3rem] min-w-[3rem]",
     };
     const inputs: Record<string, string> = {
       clientName:
@@ -1609,8 +1611,9 @@ export function ProvvigioniFilterTable({
             </>
           ) : (
             <>
-              Vista <strong>semplificata</strong>: colonne essenziali in una
-              schermata (Nominativo · Collab. · Fornitore · date · Stato · Tipo). Stato <strong>Da controllare</strong> = inserito
+              Vista <strong>semplificata</strong>: colonne essenziali (Nominativo ·
+              Collab. · Fornitore · date · Stato · Tipo). Scorri in orizzontale se
+              serve. Stato <strong>Da controllare</strong> = inserito
               ma non ancora contrattualizzato
               {canDelete ? " · ×" : ""}.{" "}
             </>
@@ -1671,7 +1674,7 @@ export function ProvvigioniFilterTable({
       </div>
       <ExcelFilterTable
         dense
-        fitWidth={!advancedView}
+        fitWidth={false}
         rows={rows as unknown as Record<string, unknown>[]}
         columns={columns}
         rowKey={(r) => rowId(r)}
