@@ -21,6 +21,7 @@ import {
   type HeliosImportPreviewRow,
   type HeliosImportPreviewResult,
 } from "@/lib/helios-provvigioni-shared";
+import { friendlyNeonHttpError } from "@/lib/neon-http-errors";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import {
   isPeriodInRecurringWindow,
@@ -308,10 +309,7 @@ export async function previewHeliosProvvigioniAction(
     console.error("[previewHeliosProvvigioniAction]", e);
     return {
       ok: false,
-      error:
-        e instanceof Error
-          ? e.message.slice(0, 200)
-          : "Anteprima Helios non riuscita",
+      error: friendlyNeonHttpError(e, "Anteprima Helios non riuscita"),
     };
   }
 }
@@ -529,10 +527,7 @@ export async function applyHeliosProvvigioniAction(
     console.error("[applyHeliosProvvigioniAction]", e);
     return {
       ok: false,
-      error:
-        e instanceof Error
-          ? e.message.slice(0, 200)
-          : "Import Helios non riuscito",
+      error: friendlyNeonHttpError(e, "Import Helios non riuscito"),
     };
   }
 }

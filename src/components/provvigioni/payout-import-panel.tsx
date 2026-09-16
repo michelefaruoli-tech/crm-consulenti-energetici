@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   applyPayoutBatchAction,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/payout-actions";
 import {
   PAYOUT_PREVIEW_STATUS_LABEL,
+  payoutPreviewRowKey,
   type PayoutPreviewResult,
 } from "@/lib/payout/view-types";
 import { periodLabel, toPeriod } from "@/lib/recurring";
@@ -73,12 +74,42 @@ export function PayoutImportPanel({
   const [details, setDetails] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<PayoutPreviewResult | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [progress, setProgress] = useState<string | null>(null);
 
   const selectedTemplate = templates.find((t) => t.key === templateKey);
 
+  useEffect(() => {
+    if (!preview) {
+      setSelectedKeys(new Set());
+      return;
+    }
+    setSelectedKeys(new Set(preview.rows.map((row) => payoutPreviewRowKey(row))));
+  }, [preview]);
+
+  const selectedWillApply = useMemo(() => {
+    if (!preview) return 0;
+    return preview.rows.filter(
+      (row) =>
+        row.status === "will_apply" &&
+        selectedKeys.has(payoutPreviewRowKey(row)),
+    ).length;
+  }, [preview, selectedKeys]);
+
+  const selectedApplicableTotal = useMemo(() => {
+    if (!preview) return 0;
+    return preview.rows
+      .filter(
+        (row) =>
+          row.status === "will_apply" &&
+          selectedKeys.has(payoutPreviewRowKey(row)),
+      )
+      .reduce((sum, row) => sum + (row.amount ?? 0), 0);
+  }, [preview, selectedKeys]);
+
   function reset() {
     setPreview(null);
+    setSelectedKeys(new Set());
     setError(null);
     setDetails([]);
     setMessage(null);
@@ -104,6 +135,9 @@ export function PayoutImportPanel({
     fd.set("settledPeriod", settledPeriod);
     fd.set("fallbackPeriod", fallbackPeriod);
     if (runLabel.trim()) fd.set("runLabel", runLabel.trim());
+    if (selectedKeys.size > 0) {
+      fd.set("selectedRowKeys", JSON.stringify([...selectedKeys]));
+    }
     return fd;
   }
 
@@ -129,13 +163,22 @@ export function PayoutImportPanel({
   /** Import + applicazione a lotti: nessuna richiesta lunga, avanzamento visibile. */
   function runImportAndApply() {
     if (!preview) return;
+    if (selectedWillApply === 0) {
+      setError("Seleziona almeno una riga da applicare (checkbox a sinistra).");
+      return;
+    }
     const confirmed = window.confirm(
       [
-        `Applicare ${preview.summary.willApply} righe per ${formatCurrency(preview.applicableTotal)}?`,
+        `Applicare ${selectedWillApply} righe selezionate per ${formatCurrency(selectedApplicableTotal)}?`,
+        preview.summary.willApply > selectedWillApply
+          ? `${preview.summary.willApply - selectedWillApply} righe applicabili restano escluse.`
+          : null,
         "",
         `Le ${preview.summary.ambiguous} righe da confermare e le ${preview.summary.unmatched} non trovate NON verranno applicate.`,
         "L'operazione resta annullabile dalla scheda della liquidazione.",
-      ].join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
     if (!confirmed) return;
 
@@ -267,7 +310,7 @@ export function PayoutImportPanel({
         </Button>
         <Button
           onClick={runImportAndApply}
-          disabled={pending || !preview || preview.summary.willApply === 0}
+          disabled={pending || !preview || selectedWillApply === 0}
         >
           {pending && preview ? "Applicazione…" : "Importa e applica"}
         </Button>
@@ -304,6 +347,11 @@ export function PayoutImportPanel({
               tone="emerald"
             />
             <Stat
+              label="Selezionate"
+              value={String(selectedWillApply)}
+              tone="emerald"
+            />
+            <Stat
               label="Da confermare"
               value={String(preview.summary.ambiguous)}
               tone="amber"
@@ -318,11 +366,16 @@ export function PayoutImportPanel({
               value={String(preview.summary.alreadyApplied)}
             />
             <Stat
-              label="Totale applicabile"
-              value={formatCurrency(preview.applicableTotal)}
+              label="Totale selezionato"
+              value={formatCurrency(selectedApplicableTotal)}
               tone="emerald"
             />
           </div>
+
+          <p className="text-xs text-slate-600">
+            Deseleziona le righe da escludere dall&apos;applicazione (checkbox a
+            sinistra). Per default tutte le righe in anteprima sono selezionate.
+          </p>
 
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
             <p className="text-slate-700">
@@ -387,6 +440,9 @@ export function PayoutImportPanel({
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
+                  <th className="px-3 py-2">
+                    <span className="sr-only">Includi</span>
+                  </th>
                   <th className="px-3 py-2">Riga</th>
                   <th className="px-3 py-2">POD/PDR</th>
                   <th className="px-3 py-2">Cliente nel file</th>
@@ -397,11 +453,29 @@ export function PayoutImportPanel({
                 </tr>
               </thead>
               <tbody>
-                {preview.rows.map((row) => (
+                {preview.rows.map((row) => {
+                  const key = payoutPreviewRowKey(row);
+                  const checked = selectedKeys.has(key);
+                  return (
                   <tr
-                    key={`${row.sheetName}-${row.rowIndex}`}
-                    className="border-t border-slate-100"
+                    key={key}
+                    className={`border-t border-slate-100 ${!checked ? "opacity-60" : ""}`}
                   >
+                    <td className="px-3 py-2 align-top">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        aria-label={`Includi riga ${row.sheetName}:${row.rowIndex}`}
+                        onChange={(e) => {
+                          setSelectedKeys((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(key);
+                            else next.delete(key);
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
                     <td className="px-3 py-2 text-xs text-slate-500">
                       {row.sheetName}:{row.rowIndex}
                     </td>
@@ -441,7 +515,8 @@ export function PayoutImportPanel({
                       ) : null}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

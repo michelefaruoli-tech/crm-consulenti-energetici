@@ -21,6 +21,14 @@ export const PAYOUT_PREVIEW_STATUS_LABEL: Record<
   no_amount: "Importo assente",
 };
 
+/** Chiave stabile di una riga in anteprima (sheet + indice Excel). */
+export function payoutPreviewRowKey(row: {
+  sheetName: string;
+  rowIndex: number;
+}): string {
+  return `${row.sheetName}:${row.rowIndex}`;
+}
+
 export type PayoutPreviewRow = {
   sheetName: string;
   rowIndex: number;

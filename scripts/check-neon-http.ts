@@ -15,10 +15,22 @@
  *
  * Uso: npx tsx scripts/check-neon-http.ts
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const SRC = join(process.cwd(), "src");
+
+/** Percorsi critici del flusso liquidazione / import payout (controllo esplicito). */
+const PAYOUT_CRITICAL_PATHS = [
+  "src/lib/payout-actions.ts",
+  "src/lib/payout/apply.ts",
+  "src/lib/payout/bulk-historical.ts",
+  "src/lib/payout/match.ts",
+  "src/lib/payout/parse.ts",
+  "src/lib/payout/report-doc.ts",
+  "src/lib/payout/totals.ts",
+  "src/lib/helios-provvigioni-import.ts",
+];
 
 const FORBIDDEN = [
   {
@@ -51,27 +63,51 @@ function walk(dir: string): string[] {
   return out;
 }
 
+function scanFile(file: string, problems: string[]): void {
+  readFileSync(file, "utf8")
+    .split("\n")
+    .forEach((line, i) => {
+      const trimmed = line.trim();
+      // Righe di solo commento (`//`, `/* …`, `/** …`, `* …`): non sono codice.
+      if (/^(\/\/|\/\*|\*)/.test(trimmed)) return;
+      for (const rule of FORBIDDEN) {
+        if (rule.pattern.test(line)) {
+          problems.push(
+            `${relative(process.cwd(), file)}:${i + 1}  ${rule.what} — ${rule.fix}`,
+          );
+        }
+      }
+    });
+}
+
 function main() {
   const problems: string[] = [];
+  const scanned = new Set<string>();
 
   for (const file of walk(SRC)) {
     // Il client generato contiene le definizioni dei metodi: non e' codice nostro.
     if (file.includes(join("src", "generated"))) continue;
+    scanFile(file, problems);
+    scanned.add(relative(process.cwd(), file));
+  }
 
-    readFileSync(file, "utf8")
-      .split("\n")
-      .forEach((line, i) => {
-        const trimmed = line.trim();
-        // Righe di solo commento (`//`, `/* …`, `/** …`, `* …`): non sono codice.
-        if (/^(\/\/|\/\*|\*)/.test(trimmed)) return;
-        for (const rule of FORBIDDEN) {
-          if (rule.pattern.test(line)) {
-            problems.push(
-              `${relative(process.cwd(), file)}:${i + 1}  ${rule.what} — ${rule.fix}`,
-            );
-          }
-        }
-      });
+  const missingCritical = PAYOUT_CRITICAL_PATHS.filter(
+    (p) => !existsSync(join(process.cwd(), p)),
+  );
+  if (missingCritical.length > 0) {
+    console.error(
+      "\n❌ File critici liquidazione/payout mancanti (aggiorna PAYOUT_CRITICAL_PATHS):\n",
+    );
+    for (const p of missingCritical) console.error(`   ${p}`);
+    console.error("");
+    process.exit(1);
+  }
+
+  for (const rel of PAYOUT_CRITICAL_PATHS) {
+    const full = join(process.cwd(), rel);
+    if (!scanned.has(rel)) {
+      scanFile(full, problems);
+    }
   }
 
   if (problems.length > 0) {
@@ -84,6 +120,9 @@ function main() {
   }
 
   console.log("✅ Nessuna operazione Prisma incompatibile con Neon HTTP.");
+  console.log(
+    `   Liquidazione/payout: ${PAYOUT_CRITICAL_PATHS.length} file critici verificati.`,
+  );
 }
 
 main();

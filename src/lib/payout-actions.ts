@@ -21,6 +21,7 @@ import { sendMail } from "@/lib/mail";
 import { getMasterEmail } from "@/lib/mail";
 import { clientDisplayName } from "@/lib/utils";
 import { decimalToNumber, formatCurrency } from "@/lib/commission";
+import { friendlyNeonHttpError } from "@/lib/neon-http-errors";
 import { periodLabel } from "@/lib/recurring";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import {
@@ -98,7 +99,25 @@ function fail(error: string, details?: string[]): PayoutActionError {
 }
 
 function errorMessage(e: unknown, fallback: string): string {
-  return e instanceof Error ? e.message.slice(0, 200) : fallback;
+  return friendlyNeonHttpError(e, fallback);
+}
+
+function readSelectedRowKeys(formData: FormData): Set<string> | null {
+  const raw = String(formData.get("selectedRowKeys") ?? "").trim();
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return new Set(
+      parsed.filter((v): v is string => typeof v === "string" && v.length > 0),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function payoutRowKey(parsed: ParsedPayoutRow): string {
+  return `${parsed.sheetName}:${parsed.rowIndex}`;
 }
 
 /** L'import e la liquidazione sono operazioni di Master. */
@@ -650,6 +669,22 @@ export async function importPayoutFileAction(formData: FormData): Promise<
       userId: session.id,
     });
 
+    const selectedKeys = readSelectedRowKeys(formData);
+    const effectiveRows = evaluated.map((row) => {
+      if (
+        selectedKeys != null &&
+        row.matchStatus === "MATCHED" &&
+        !selectedKeys.has(payoutRowKey(row.parsed))
+      ) {
+        return {
+          ...row,
+          matchStatus: "IGNORED" as const,
+          skipReason: "Esclusa in anteprima",
+        };
+      }
+      return row;
+    });
+
     const batch = await prisma.payoutBatch.create({
       data: {
         runId: targetRun.id,
@@ -659,11 +694,12 @@ export async function importPayoutFileAction(formData: FormData): Promise<
         sha256,
         fileSize: upload.buffer.length,
         status: "PARSED",
-        totalRows: evaluated.length,
-        matchedRows: evaluated.filter((r) => r.matchStatus === "MATCHED").length,
-        ambiguousRows: evaluated.filter((r) => r.matchStatus === "AMBIGUOUS")
+        totalRows: effectiveRows.length,
+        matchedRows: effectiveRows.filter((r) => r.matchStatus === "MATCHED")
           .length,
-        unmatchedRows: evaluated.filter((r) => r.matchStatus === "UNMATCHED")
+        ambiguousRows: effectiveRows.filter((r) => r.matchStatus === "AMBIGUOUS")
+          .length,
+        unmatchedRows: effectiveRows.filter((r) => r.matchStatus === "UNMATCHED")
           .length,
         computedTotal: round2(parsed.computedTotal),
         declaredTotal:
@@ -673,7 +709,7 @@ export async function importPayoutFileAction(formData: FormData): Promise<
       select: { id: true },
     });
 
-    await mapWithConcurrency(evaluated, INSERT_CONCURRENCY, async (row) => {
+    for (const row of effectiveRows) {
       await prisma.payoutRow.create({
         data: {
           batchId: batch.id,
@@ -700,7 +736,7 @@ export async function importPayoutFileAction(formData: FormData): Promise<
           note: row.skipReason,
         },
       });
-    });
+    }
 
     await writeAuditLog({
       userId: session.id,
@@ -720,11 +756,11 @@ export async function importPayoutFileAction(formData: FormData): Promise<
       ok: true,
       runId: targetRun.id,
       batchId: batch.id,
-      totalRows: evaluated.length,
-      matchedRows: evaluated.filter((r) => r.matchStatus === "MATCHED").length,
-      ambiguousRows: evaluated.filter((r) => r.matchStatus === "AMBIGUOUS")
+      totalRows: effectiveRows.length,
+      matchedRows: effectiveRows.filter((r) => r.matchStatus === "MATCHED").length,
+      ambiguousRows: effectiveRows.filter((r) => r.matchStatus === "AMBIGUOUS")
         .length,
-      unmatchedRows: evaluated.filter((r) => r.matchStatus === "UNMATCHED")
+      unmatchedRows: effectiveRows.filter((r) => r.matchStatus === "UNMATCHED")
         .length,
     };
   } catch (e) {
@@ -779,6 +815,16 @@ export async function applyPayoutBatchAction(
         skipped++;
         continue;
       }
+
+      const fresh = await prisma.payoutRow.findUnique({
+        where: { id: row.id },
+        select: { appliedAt: true, matchStatus: true },
+      });
+      if (fresh?.appliedAt || fresh?.matchStatus !== "MATCHED") {
+        skipped++;
+        continue;
+      }
+
       try {
         const outcome = await applyPayoutRowMark({
           contractId: row.contractId,
