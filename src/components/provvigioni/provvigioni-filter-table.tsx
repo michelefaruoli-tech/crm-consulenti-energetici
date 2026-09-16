@@ -549,6 +549,9 @@ export function ProvvigioniFilterTable({
 
   /** Valori del menu presi dal database, con gli altri filtri attivi applicati. */
   async function loadColumnOptions(columnKey: string): Promise<string[]> {
+    if (!SERVER_MULTI_COLUMN_KEYS.includes(columnKey as ProvvigioniColumnKey)) {
+      return [];
+    }
     const params = new URLSearchParams();
     params.set("col", columnKey);
     for (const [key, value] of Object.entries(baseQuery())) {

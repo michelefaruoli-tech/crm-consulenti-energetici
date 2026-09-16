@@ -221,7 +221,8 @@ export function ExcelFilterTable({
     if (!loadOptions) return;
     if (!serverFilterKeys.has(columnKey)) return;
     if (textServerKeys.has(columnKey)) return;
-    if (remoteOptions[columnKey]) return;
+    if ((filterOptionsOverride?.[columnKey]?.length ?? 0) > 0) return;
+    if ((remoteOptions[columnKey]?.length ?? 0) > 0) return;
     setOptionsLoading(columnKey);
     loadOptions(columnKey)
       .then((values) =>
@@ -284,8 +285,9 @@ export function ExcelFilterTable({
   const optionsByColumn = useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const col of columns) {
-      if (remoteOptions[col.key]) {
-        map[col.key] = remoteOptions[col.key]!;
+      const remote = remoteOptions[col.key];
+      if (remote && remote.length > 0) {
+        map[col.key] = remote;
         continue;
       }
       if (filterOptionsOverride?.[col.key]?.length) {
@@ -567,7 +569,7 @@ export function ExcelFilterTable({
         ref={filterPopoverRef}
         role="dialog"
         aria-label={`Filtro ${col.label}`}
-        className="fixed z-[100] flex w-60 max-h-[min(18rem,calc(100vh-1rem))] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+        className="fixed z-[100] flex w-60 min-h-[10rem] max-h-[min(18rem,calc(100vh-1rem))] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
         style={{ top: filterMenuPos.top, left: filterMenuPos.left }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -702,10 +704,16 @@ export function ExcelFilterTable({
                 </button>
               </div>
             </div>
-            <div className="min-h-[4.5rem] flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1">
               {optionsLoading === col.key ? (
                 <p className="px-1 py-2 text-xs text-slate-500">
                   Carico i valori dal database…
+                </p>
+              ) : null}
+              {optionsLoading !== col.key &&
+              (optionsByColumn[col.key]?.length ?? 0) === 0 ? (
+                <p className="px-1 py-2 text-xs text-slate-500">
+                  Nessun valore in archivio
                 </p>
               ) : null}
               {(optionsByColumn[col.key] ?? [])
