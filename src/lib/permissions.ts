@@ -25,7 +25,9 @@ export type Permission =
   | "commissions.edit_own_gettone"
   | "reports.export"
   | "reports.email"
-  | "security.view";
+  | "security.view"
+  | "cte.catalog.view"
+  | "cte.catalog.manage";
 
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ADMIN: [
@@ -47,6 +49,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "reports.export",
     "reports.email",
     "security.view",
+    "cte.catalog.view",
+    "cte.catalog.manage",
   ],
   SEGRETERIA: [
     "contracts.edit_all",
@@ -60,6 +64,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "commissions.edit_gettone",
     "reports.export",
     "reports.email",
+    "cte.catalog.view",
   ],
   BACKOFFICE: [
     "contracts.work_scoped",
@@ -68,6 +73,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "documents.manage",
     "commissions.view_all",
     "reports.export",
+    "cte.catalog.view",
+    "cte.catalog.manage",
   ],
   AREA_MANAGER: [
     "users.manage_team",
@@ -81,6 +88,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "commissions.view_all",
     "commissions.edit_own_gettone",
     "reports.export",
+    "cte.catalog.view",
   ],
   COLLABORATORE: [
     "contracts.edit_own",
@@ -89,6 +97,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "commissions.view_own",
     "commissions.edit_own_gettone",
     "reports.export",
+    "cte.catalog.view",
   ],
   COMMERCIALE: [
     "contracts.edit_own",
@@ -96,6 +105,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "clients.create",
     "commissions.view_own",
     "commissions.edit_own_gettone",
+    "cte.catalog.view",
   ],
 };
 
