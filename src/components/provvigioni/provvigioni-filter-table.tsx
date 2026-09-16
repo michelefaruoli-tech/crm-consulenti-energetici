@@ -15,6 +15,12 @@ import { StornoLegend } from "@/components/ui/storno-legend";
 import { periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
+  COLUMN_FILTER_PARAM,
+  MONTH_FILTER_KEYS,
+  TEXT_FILTER_KEYS,
+  type ProvvigioniColumnKey,
+} from "@/lib/provvigioni-column-filters";
+import {
   PROVVIGIONE_AGENCY_OPTIONS,
   PROVVIGIONE_OPERATION_OPTIONS,
   PROVVIGIONE_STATO_OPTIONS,
@@ -205,6 +211,16 @@ const SIMPLE_COLUMN_ORDER = [
   "_del",
 ] as const;
 
+/** Colonne filtrate dal server (oltre a collaboratore, fornitore, stato, tipologia). */
+const SERVER_COLUMN_KEYS = Object.keys(
+  COLUMN_FILTER_PARAM,
+) as ProvvigioniColumnKey[];
+
+/** Solo quelle con elenco di valori: le colonne a testo usano la casella «contiene». */
+const SERVER_MULTI_COLUMN_KEYS = SERVER_COLUMN_KEYS.filter(
+  (key) => !TEXT_FILTER_KEYS.includes(key),
+);
+
 function originalCellValue(row: ProvvigioneRow, key: string): string {
   switch (key) {
     case "clientName":
@@ -270,7 +286,7 @@ export function ProvvigioniFilterTable({
     vista?: string | null;
     focus?: string | null;
     competence?: string | null;
-  };
+  } & Partial<Record<string, string | null | undefined>>;
   serverSortKey?: string | null;
   serverSortDir?: "asc" | "desc";
   page?: number;
@@ -318,6 +334,39 @@ export function ProvvigioniFilterTable({
       new Set([...PROVVIGIONE_AGENCY_OPTIONS, ...fromRows]),
     ).sort((a, b) => a.localeCompare(b, "it"));
   }, [rows]);
+  /** Filtri di colonna presenti in URL: vanno conservati in ogni navigazione. */
+  const columnFilterQuery = useMemo(() => {
+    const out: Record<string, string | undefined> = {};
+    for (const param of Object.values(COLUMN_FILTER_PARAM)) {
+      const value = listQuery?.[param];
+      if (value) out[param] = String(value);
+    }
+    return out;
+  }, [listQuery]);
+
+  const columnActiveValues = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const [key, param] of Object.entries(COLUMN_FILTER_PARAM)) {
+      if (TEXT_FILTER_KEYS.includes(key as ProvvigioniColumnKey)) continue;
+      const raw = listQuery?.[param];
+      if (!raw) continue;
+      out[key] = String(raw)
+        .split("|")
+        .map((v) => v.trim())
+        .filter(Boolean);
+    }
+    return out;
+  }, [listQuery]);
+
+  const columnActiveText = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const key of TEXT_FILTER_KEYS) {
+      const raw = listQuery?.[COLUMN_FILTER_PARAM[key]];
+      if (raw) out[key] = String(raw);
+    }
+    return out;
+  }, [listQuery]);
+
   /** Contatore per forzare reset filtri colonna locali (ExcelFilterTable) */
   const [localFilterClearN, setLocalFilterClearN] = useState(0);
   const filterResetKey = [
@@ -334,8 +383,12 @@ export function ProvvigioniFilterTable({
     serverSortKey ?? "",
     serverSortDir,
     advancedView ? "adv" : "simple",
+    JSON.stringify(columnFilterQuery),
     String(localFilterClearN),
   ].join("|");
+
+  const hasColumnFilterInUrl =
+    Object.keys(columnFilterQuery).length > 0;
 
   const hasUrlFilters = Boolean(
     listQuery?.collab ||
@@ -344,7 +397,8 @@ export function ProvvigioniFilterTable({
       listQuery?.tipologia ||
       listQuery?.q ||
       listQuery?.focus ||
-      listQuery?.competence,
+      listQuery?.competence ||
+      hasColumnFilterInUrl,
   );
 
   function clearFiltersHref() {
@@ -390,6 +444,7 @@ export function ProvvigioniFilterTable({
       competence: listQuery?.competence,
       sort: serverSortKey === "client" ? "client" : undefined,
       dir: serverSortKey === "client" ? serverSortDir : undefined,
+      ...columnFilterQuery,
       ...extra,
     };
   }
@@ -470,6 +525,42 @@ export function ProvvigioniFilterTable({
       );
       return;
     }
+
+    const param = COLUMN_FILTER_PARAM[columnKey as ProvvigioniColumnKey];
+    if (!param) return;
+    router.push(
+      buildPageHref("/provvigioni", {
+        ...baseQuery({ [param]: values.length ? values.join("|") : null }),
+      }),
+    );
+  }
+
+  /** Filtro «contiene» (nominativo, POD, note): stessa logica, valore singolo. */
+  function onServerTextFilter(columnKey: string, value: string) {
+    if (!confirmLeaveDrafts()) return;
+    const param = COLUMN_FILTER_PARAM[columnKey as ProvvigioniColumnKey];
+    if (!param) return;
+    router.push(
+      buildPageHref("/provvigioni", {
+        ...baseQuery({ [param]: value.trim() || null }),
+      }),
+    );
+  }
+
+  /** Valori del menu presi dal database, con gli altri filtri attivi applicati. */
+  async function loadColumnOptions(columnKey: string): Promise<string[]> {
+    const params = new URLSearchParams();
+    params.set("col", columnKey);
+    for (const [key, value] of Object.entries(baseQuery())) {
+      if (value) params.set(key, String(value));
+    }
+    const res = await fetch(
+      `/api/provvigioni/filter-options?${params.toString()}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) throw new Error("Valori filtro non disponibili");
+    const data = (await res.json()) as { values?: string[] };
+    return data.values ?? [];
   }
 
   const selectedCount = selectedKeys.size;
@@ -1602,15 +1693,27 @@ export function ProvvigioniFilterTable({
             "supplierName",
             "stato",
             "clientType",
+            ...SERVER_COLUMN_KEYS,
           ],
           multiSelectKeys: [
             "collaboratorName",
             "supplierName",
             "stato",
             "clientType",
+            ...SERVER_MULTI_COLUMN_KEYS,
           ],
+          textKeys: [...TEXT_FILTER_KEYS],
+          activeText: columnActiveText,
+          onTextFilter: onServerTextFilter,
+          loadOptions: loadColumnOptions,
+          optionLabel: (columnKey, value) =>
+            MONTH_FILTER_KEYS.includes(columnKey as ProvvigioniColumnKey) &&
+            /^\d{4}-\d{2}$/.test(value)
+              ? periodLabel(value)
+              : value,
           onFilter: onServerColumnFilter,
           activeValues: {
+            ...columnActiveValues,
             ...(listQuery?.collab && collaboratorByName
               ? {
                   collaboratorName: listQuery.collab

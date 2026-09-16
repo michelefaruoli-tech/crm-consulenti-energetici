@@ -36,6 +36,12 @@ import {
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
 import {
+  buildColumnFilterWhere,
+  columnFiltersToQuery,
+  parseProvvigioniColumnFilters,
+} from "@/lib/provvigioni-column-filters";
+import { loadProvvigioniFilterContext } from "@/lib/provvigioni-query";
+import {
   competenceMonthOptions,
   parseProvvigioniTab,
   parseProvvigioniVista,
@@ -87,6 +93,8 @@ type SearchParams = {
   focus?: string;
   /** Mese di competenza YYYY-MM delle ricorrenze */
   competence?: string;
+  /** Filtri di colonna (agenzia, tipo op., mese rif., gettone…): vedi provvigioni-column-filters */
+  [param: string]: string | string[] | undefined;
 };
 
 export default async function ProvvigioniPage({
@@ -95,6 +103,7 @@ export default async function ProvvigioniPage({
   searchParams: Promise<SearchParams>;
 }) {
   const session = await requireSession();
+  const rawSearchParams = await searchParams;
   const {
     page: pageRaw,
     collab,
@@ -108,7 +117,7 @@ export default async function ProvvigioniPage({
     vista: vistaRaw,
     focus: focusRaw,
     competence: competenceRaw,
-  } = await searchParams;
+  } = rawSearchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
   const canExport = hasPermission(session.role, "reports.export");
@@ -158,6 +167,28 @@ export default async function ProvvigioniPage({
   const collabFilter =
     (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
 
+  /**
+   * Filtri di colonna: tradotti in `where` Prisma prima di ogni conteggio, così
+   * lista, totali, card ed export guardano sempre lo stesso insieme di righe.
+   * L'espansione per mese cambia il significato di alcune colonne (il gettone
+   * mostrato è quello della rata), quindi va conosciuta prima di costruire il where.
+   */
+  const columnFilters = parseProvvigioniColumnFilters(rawSearchParams);
+  const expandMode = getRecurringExpandMode(
+    stato,
+    viewingAllPeriods,
+    effectiveCompetence,
+  );
+  const filterContext = await loadProvvigioniFilterContext();
+  const columnWhereParts = buildColumnFilterWhere(columnFilters, filterContext, {
+    expanded: Boolean(expandMode),
+  });
+  const rowFilterScope = {
+    unitOnly: columnWhereParts.unitOnly,
+    rate: columnWhereParts.rate,
+    excludeUnitRows: columnWhereParts.excludeUnitRows,
+  };
+
   const statsBaseFilters = {
     canViewAll: canViewAll || isScoped,
     sessionUserId: session.id,
@@ -167,6 +198,7 @@ export default async function ProvvigioniPage({
     q,
     recurrenceMode,
     visibility,
+    columnWhere: columnWhereParts.contract,
   };
 
   const listFilters = {
@@ -198,6 +230,7 @@ export default async function ProvvigioniPage({
       q,
       recurrenceMode,
       visibility,
+      columnWhere: columnWhereParts.contract,
       competencePeriod: effectiveCompetence,
     },
     focus,
@@ -225,6 +258,7 @@ export default async function ProvvigioniPage({
     tipologia,
     q,
     visibility,
+    columnWhere: columnWhereParts.contract,
   };
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
@@ -268,19 +302,23 @@ export default async function ProvvigioniPage({
   }
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
-  const expandMode = getRecurringExpandMode(
-    stato,
-    viewingAllPeriods,
-    effectiveCompetence,
-  );
   const total = expandMode
-    ? await countExpandedListRows(contractWhere, expandMode, stato)
+    ? await countExpandedListRows(contractWhere, expandMode, stato, rowFilterScope)
     : await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
   const listUsesExpandedRows = Boolean(expandMode);
+  /**
+   * Filtri che valgono sulla singola rata (mese rif., mese incasso, gettone):
+   * le righe vanno prese dal database rata per rata, non espanse in memoria,
+   * altrimenti comparirebbero mesi esclusi dal filtro.
+   */
+  const rateScopeActive =
+    rowFilterScope.rate.length > 0 ||
+    rowFilterScope.unitOnly.length > 0 ||
+    rowFilterScope.excludeUnitRows;
   const expandFetchAllForSort =
-    listUsesExpandedRows && sortByClient && total <= 400;
+    listUsesExpandedRows && sortByClient && total <= 400 && !rateScopeActive;
   const expandUsePaginatedFetch = listUsesExpandedRows && !expandFetchAllForSort;
 
   const summaryContext = {
@@ -292,6 +330,7 @@ export default async function ProvvigioniPage({
     activeListWhere: contractWhere,
     activeListTotal: total,
     allowExpand: Boolean(expandMode),
+    rowScope: rowFilterScope,
   };
 
   // Commissoni mancanti: in background (non blocca il caricamento)
@@ -517,6 +556,7 @@ export default async function ProvvigioniPage({
       contractSelect,
       buildOpts: buildRowOpts,
       orderBy: defaultOrderBy,
+      scope: rowFilterScope,
     });
     contracts = expandedPage.contracts as (typeof contractsRaw)[number][];
     prebuiltExpandedRows = expandedPage.rows;
@@ -763,6 +803,10 @@ export default async function ProvvigioniPage({
   if (vistaTab !== "tutti") exportParams.set("vista", vistaTab);
   if (focus) exportParams.set("focus", focus);
   if (competenceQueryValue) exportParams.set("competence", competenceQueryValue);
+  // L'export scarica esattamente le righe filtrate a schermo, filtri di colonna inclusi.
+  for (const [param, value] of Object.entries(columnFiltersToQuery(columnFilters))) {
+    if (value) exportParams.set(param, value);
+  }
   const exportHref = `/api/provvigioni/export?${exportParams.toString()}`;
 
   function vistaHref(nextVista: "tutti" | "mensile" | "annuale") {
@@ -778,6 +822,10 @@ export default async function ProvvigioniPage({
       ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
   }
+
+  /** Esito dell'import rendiconto, che rimanda qui dalla pagina Archivio. */
+  const importedCount = Number(rawSearchParams.importati ?? 0) || 0;
+  const importedNotFound = Number(rawSearchParams.nontrovati ?? 0) || 0;
 
   const tabQueryBase: Record<string, string | undefined> = {
     settled: settledPeriod,
@@ -797,6 +845,16 @@ export default async function ProvvigioniPage({
 
   return (
     <div className="space-y-6">
+      {importedCount > 0 ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          Import rendiconto completato: <strong>{importedCount}</strong> mesi
+          segnati incassati
+          {importedNotFound > 0
+            ? ` · ${importedNotFound} righe del file senza contratto nel CRM`
+            : ""}
+          . Qui sotto vedi le provvigioni con stato «Incassato».
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
@@ -928,6 +986,7 @@ export default async function ProvvigioniPage({
           vista: vistaTab === "tutti" ? undefined : vistaTab,
           focus,
           competence: competenceQueryValue,
+          ...columnFiltersToQuery(columnFilters),
         }}
         serverSortKey={sortByClient ? "client" : null}
         serverSortDir={sortDir}

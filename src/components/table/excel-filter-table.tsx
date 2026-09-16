@@ -83,6 +83,18 @@ type Props = {
      * (es. Stato → Da incassare + Incassato insieme)
      */
     multiSelectKeys?: string[];
+    /** Colonne a testo libero: filtro «contiene» applicato dal server. */
+    textKeys?: string[];
+    /** Testo attivo per colonna (da URL). */
+    activeText?: Record<string, string>;
+    onTextFilter?: (columnKey: string, value: string) => void;
+    /**
+     * Opzioni lette dal database all'apertura del menu: riguardano tutte le
+     * righe filtrate, non solo quelle caricate in pagina.
+     */
+    loadOptions?: (columnKey: string) => Promise<string[]>;
+    /** Etichetta leggibile di un valore (es. `2026-09` → «set 2026»). */
+    optionLabel?: (columnKey: string, value: string) => string;
   };
   /**
    * Opzioni filtro forzate per colonna (es. tutti i collaboratori, non solo quelli in pagina).
@@ -129,6 +141,13 @@ export function ExcelFilterTable({
   const [draftServerFilter, setDraftServerFilter] = useState<
     Record<string, Set<string>>
   >({});
+  /** Opzioni caricate dal database per colonna (menu filtro). */
+  const [remoteOptions, setRemoteOptions] = useState<Record<string, string[]>>(
+    {},
+  );
+  const [optionsLoading, setOptionsLoading] = useState<string | null>(null);
+  const [optionSearch, setOptionSearch] = useState<Record<string, string>>({});
+  const [textDraft, setTextDraft] = useState<Record<string, string>>({});
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [scrollWidth, setScrollWidth] = useState(0);
@@ -151,12 +170,41 @@ export function ExcelFilterTable({
     () => new Set(serverColumnFilter?.multiSelectKeys ?? []),
     [serverColumnFilter?.multiSelectKeys],
   );
+  const textServerKeys = useMemo(
+    () => new Set(serverColumnFilter?.textKeys ?? []),
+    [serverColumnFilter?.textKeys],
+  );
+  const loadOptions = serverColumnFilter?.loadOptions;
+
+  /**
+   * Apertura menu filtro: i valori arrivano dal database (tutte le righe che
+   * rispettano gli altri filtri), non dalle righe caricate in pagina.
+   */
+  function openColumnFilter(columnKey: string) {
+    setOpenFilter((current) => (current === columnKey ? null : columnKey));
+    if (!loadOptions) return;
+    if (!serverFilterKeys.has(columnKey)) return;
+    if (textServerKeys.has(columnKey)) return;
+    if (remoteOptions[columnKey]) return;
+    setOptionsLoading(columnKey);
+    loadOptions(columnKey)
+      .then((values) =>
+        setRemoteOptions((prev) => ({ ...prev, [columnKey]: values })),
+      )
+      .catch(() => setRemoteOptions((prev) => ({ ...prev, [columnKey]: [] })))
+      .finally(() => setOptionsLoading(null));
+  }
+  const optionLabelOf = (columnKey: string, value: string) =>
+    serverColumnFilter?.optionLabel?.(columnKey, value) ?? value;
 
   // Cambio collaboratore / pagina → mostra di nuovo tutte le righe caricate (fino a 100)
   useEffect(() => {
     setSelected({});
     setOpenFilter(null);
     setDraftServerFilter({});
+    setRemoteOptions({});
+    setOptionSearch({});
+    setTextDraft({});
     setSortKey(null);
     setSortDir("asc");
   }, [resetKey]);
@@ -174,6 +222,10 @@ export function ExcelFilterTable({
   const optionsByColumn = useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const col of columns) {
+      if (remoteOptions[col.key]) {
+        map[col.key] = remoteOptions[col.key]!;
+        continue;
+      }
       if (filterOptionsOverride?.[col.key]?.length) {
         map[col.key] = [...filterOptionsOverride[col.key]].sort((a, b) =>
           a.localeCompare(b, "it"),
@@ -188,7 +240,7 @@ export function ExcelFilterTable({
       map[col.key] = [...set].sort((a, b) => a.localeCompare(b, "it"));
     }
     return map;
-  }, [rows, columns, filterOptionsOverride]);
+  }, [rows, columns, filterOptionsOverride, remoteOptions]);
 
   function sortValue(col: FilterColumn, row: Record<string, unknown>): string | number {
     const raw = col.getValue(row) || "";
@@ -451,9 +503,9 @@ export function ExcelFilterTable({
       {hasAnyFilter ? (
         <div className="flex flex-col gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            Filtri locali attivi: vedi {filtered.length} di {rows.length} righe di
-            questa pagina. Fornitore, Stato e Tipologia ricaricano invece
-            tutto il database (come Collaboratore).
+            Filtri locali attivi: vedi {filtered.length} di {rows.length} righe
+            di questa pagina (le colonne con filtro sul database non sono
+            interessate).
           </span>
           <button
             type="button"
@@ -530,7 +582,8 @@ export function ExcelFilterTable({
             ) : null}
             {columns.map((col) => {
               const serverActive =
-                (serverColumnFilter?.activeValues?.[col.key]?.length ?? 0) > 0;
+                (serverColumnFilter?.activeValues?.[col.key]?.length ?? 0) > 0 ||
+                Boolean(serverColumnFilter?.activeText?.[col.key]?.trim());
               const active =
                 (selected[col.key]?.size ?? 0) > 0 || serverActive;
               const isSorted = activeSortKey(col.key);
@@ -575,9 +628,7 @@ export function ExcelFilterTable({
                         "rounded px-1 text-xs",
                         active ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700",
                       )}
-                      onClick={() =>
-                        setOpenFilter((k) => (k === col.key ? null : col.key))
-                      }
+                      onClick={() => openColumnFilter(col.key)}
                       title="Filtro"
                     >
                       ▾
@@ -587,10 +638,93 @@ export function ExcelFilterTable({
                     <div className="absolute left-0 top-full z-20 mt-1 max-h-72 w-60 overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
                       {serverFilterKeys.has(col.key) ? (
                         <p className="mb-2 text-[10px] leading-snug text-slate-500">
-                          {multiSelectServerKeys.has(col.key)
-                            ? "Spunta una o più opzioni, poi premi Applica (ricarica il database)."
-                            : "Questo filtro ricarica il database (pagine da 100 righe), non riduce solo questa pagina."}
+                          {textServerKeys.has(col.key)
+                            ? "Cerca su tutto il database: mostra le righe che contengono il testo."
+                            : multiSelectServerKeys.has(col.key)
+                              ? "Valori presi da tutto il database (con gli altri filtri attivi). Spunta e premi Applica."
+                              : "Questo filtro vale su tutto il database, non solo su questa pagina."}
                         </p>
+                      ) : null}
+                      {textServerKeys.has(col.key) && serverColumnFilter ? (
+                        <div className="space-y-2">
+                          <input
+                            autoFocus
+                            className="w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                            placeholder={`Contiene… (${col.label})`}
+                            value={
+                              textDraft[col.key] ??
+                              serverColumnFilter.activeText?.[col.key] ??
+                              ""
+                            }
+                            onChange={(e) =>
+                              setTextDraft((prev) => ({
+                                ...prev,
+                                [col.key]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter") return;
+                              serverColumnFilter.onTextFilter?.(
+                                col.key,
+                                (textDraft[col.key] ?? "").trim(),
+                              );
+                              setOpenFilter(null);
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="flex-1 rounded-md bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                              onClick={() => {
+                                serverColumnFilter.onTextFilter?.(
+                                  col.key,
+                                  (
+                                    textDraft[col.key] ??
+                                    serverColumnFilter.activeText?.[col.key] ??
+                                    ""
+                                  ).trim(),
+                                );
+                                setOpenFilter(null);
+                              }}
+                            >
+                              Applica
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+                              onClick={() => {
+                                setTextDraft((prev) => ({
+                                  ...prev,
+                                  [col.key]: "",
+                                }));
+                                serverColumnFilter.onTextFilter?.(col.key, "");
+                                setOpenFilter(null);
+                              }}
+                            >
+                              Pulisci
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {textServerKeys.has(col.key) ? null : (
+                        <>
+                      {optionsLoading === col.key ? (
+                        <p className="px-1 py-2 text-xs text-slate-500">
+                          Carico i valori dal database…
+                        </p>
+                      ) : null}
+                      {(optionsByColumn[col.key]?.length ?? 0) > 12 ? (
+                        <input
+                          className="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                          placeholder="Cerca nell'elenco…"
+                          value={optionSearch[col.key] ?? ""}
+                          onChange={(e) =>
+                            setOptionSearch((prev) => ({
+                              ...prev,
+                              [col.key]: e.target.value,
+                            }))
+                          }
+                        />
                       ) : null}
                       <div className="mb-2 flex flex-wrap gap-2 text-xs">
                         <button
@@ -638,7 +772,15 @@ export function ExcelFilterTable({
                           Nessuno
                         </button>
                       </div>
-                      {(optionsByColumn[col.key] ?? []).map((opt) => {
+                      {(optionsByColumn[col.key] ?? [])
+                        .filter((opt) => {
+                          const search = (optionSearch[col.key] ?? "").trim();
+                          if (!search) return true;
+                          return optionLabelOf(col.key, opt)
+                            .toLowerCase()
+                            .includes(search.toLowerCase());
+                        })
+                        .map((opt) => {
                         const isServerCol = serverFilterKeys.has(col.key);
                         const isMulti = multiSelectServerKeys.has(col.key);
                         const isActive = (selected[col.key]?.size ?? 0) > 0;
@@ -698,7 +840,9 @@ export function ExcelFilterTable({
                                 }
                               }}
                             />
-                            <span className="truncate">{opt}</span>
+                            <span className="truncate">
+                              {optionLabelOf(col.key, opt)}
+                            </span>
                           </label>
                         );
                       })}
@@ -739,6 +883,8 @@ export function ExcelFilterTable({
                           </button>
                         </div>
                       ) : null}
+                        </>
+                      )}
                     </div>
                   ) : null}
                 </th>

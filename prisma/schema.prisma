@@ -412,6 +412,11 @@ model Contract {
   @@index([sendToMaster])
   @@index([assignedToMaster])
   @@index([sentToMasterAt])
+  /// Filtri colonna Provvigioni sul database: agenzia, tipo operazione, date
+  @@index([deletedAt, isHistorical, agency])
+  @@index([deletedAt, isHistorical, operationType])
+  @@index([deletedAt, isHistorical, collectionDate])
+  @@index([deletedAt, isHistorical, supplyStartDate])
 }
 
 model ContractStatusHistory {
@@ -449,6 +454,10 @@ model Commission {
   updatedAt  DateTime @updatedAt
 
   entries CommissionEntry[]
+
+  /// Filtri colonna Provvigioni: storno Sì/No, mese storno, gettone
+  @@index([stornoDate])
+  @@index([expected])
 }
 
 /// Tracciamento mensile per contratti ricorrenti (es. Helios)
