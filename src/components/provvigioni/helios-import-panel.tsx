@@ -163,6 +163,17 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
       setFileName("");
       setFileKey((k) => k + 1);
       router.refresh();
+      // L'import vive nella pagina Archivio: senza questo l'utente resta sui
+      // contratti archiviati invece di vedere i mesi appena segnati incassati.
+      if (res.collected > 0) {
+        const params = new URLSearchParams({
+          stato: "Incassato",
+          settled: res.settledPeriod || res.competencePeriod,
+          importati: String(res.collected),
+        });
+        if (res.notFound > 0) params.set("nontrovati", String(res.notFound));
+        router.push(`/provvigioni?${params.toString()}`);
+      }
     });
   }
 
