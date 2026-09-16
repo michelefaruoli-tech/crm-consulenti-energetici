@@ -189,10 +189,7 @@ export async function applyPayoutRowMark(params: {
     if (existing?.status === targetStatus) {
       return { ok: false, reason: "Rata già nello stato richiesto" };
     }
-    // Una rata già liquidata non torna a «solo incassata»
-    if (existing?.status === "LIQUIDATED" && params.markMode === "INCASSATO") {
-      return { ok: false, reason: "Rata già liquidata al collaboratore" };
-    }
+    // Import incassato Helios: sovrascrive un «Pagato» errato (LIQUIDATED) con PAID.
 
     previousState.recurringMonth = existing
       ? {
@@ -261,9 +258,7 @@ export async function applyPayoutRowMark(params: {
         data: {
           paymentStatus: "Incassato",
           collectionDate,
-          ...(contract.status === "PROVVIGIONE_LIQUIDATA"
-            ? {}
-            : { status: "PAGATO_DAL_FORNITORE" }),
+          status: "PAGATO_DAL_FORNITORE",
         },
       });
     }
@@ -316,8 +311,7 @@ export async function applyPayoutRowMark(params: {
 
   if (
     contract.paymentStatus === "Incassato" &&
-    (contract.status === "PAGATO_DAL_FORNITORE" ||
-      contract.status === "PROVVIGIONE_LIQUIDATA")
+    contract.status === "PAGATO_DAL_FORNITORE"
   ) {
     return { ok: false, reason: "Contratto già incassato" };
   }
@@ -327,9 +321,7 @@ export async function applyPayoutRowMark(params: {
     data: {
       paymentStatus: "Incassato",
       collectionDate,
-      ...(contract.status === "PROVVIGIONE_LIQUIDATA"
-        ? {}
-        : { status: "PAGATO_DAL_FORNITORE" }),
+      status: "PAGATO_DAL_FORNITORE",
     },
   });
   if (contract.commission) {

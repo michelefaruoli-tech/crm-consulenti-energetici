@@ -21,7 +21,10 @@ import { sendMail } from "@/lib/mail";
 import { getMasterEmail } from "@/lib/mail";
 import { clientDisplayName } from "@/lib/utils";
 import { decimalToNumber, formatCurrency } from "@/lib/commission";
-import { friendlyNeonHttpError } from "@/lib/neon-http-errors";
+import {
+  friendlyNeonHttpError,
+  logPrismaError,
+} from "@/lib/neon-http-errors";
 import { periodLabel } from "@/lib/recurring";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import {
@@ -100,6 +103,61 @@ function fail(error: string, details?: string[]): PayoutActionError {
 
 function errorMessage(e: unknown, fallback: string): string {
   return friendlyNeonHttpError(e, fallback);
+}
+
+function logActionError(context: string, e: unknown): void {
+  logPrismaError(context, e);
+}
+
+async function ensurePayoutRun(params: {
+  period: string;
+  label: string;
+  createdById: string;
+  markMode?: PayoutMarkMode;
+}): Promise<{ id: string; status: string }> {
+  const existing = await prisma.payoutRun.findUnique({
+    where: { period_label: { period: params.period, label: params.label } },
+    select: { id: true, status: true },
+  });
+  if (existing) return existing;
+  return prisma.payoutRun.create({
+    data: {
+      period: params.period,
+      label: params.label,
+      createdById: params.createdById,
+      markMode: params.markMode ?? "INCASSATO",
+    },
+    select: { id: true, status: true },
+  });
+}
+
+function payoutRowCreateData(
+  batchId: string,
+  row: EvaluatedRow,
+  fallbackPeriod: string,
+) {
+  return {
+    batchId,
+    sheetName: row.parsed.sheetName,
+    rowIndex: row.parsed.rowIndex,
+    rawJson: JSON.stringify(row.parsed.raw),
+    podRaw: row.parsed.podRaw || null,
+    podKey: row.parsed.podKeys[0] ?? null,
+    clientNameRaw: row.parsed.clientNameRaw || null,
+    fiscalCodeRaw: row.parsed.fiscalKey || null,
+    supplierHint: row.parsed.supplierHint || null,
+    collaboratorHint: row.parsed.collaboratorHint || null,
+    amount: row.parsed.amount,
+    period: row.parsed.period ?? fallbackPeriod,
+    matchStatus: row.matchStatus,
+    matchScore: row.matchScore,
+    matchReason: row.matchReason,
+    contractId: row.contractId,
+    collaboratorId: row.collaboratorId,
+    candidateIdsJson:
+      row.candidateIds.length > 0 ? JSON.stringify(row.candidateIds) : null,
+    note: row.skipReason,
+  };
 }
 
 function readSelectedRowKeys(formData: FormData): Set<string> | null {
@@ -278,7 +336,7 @@ async function mapWithConcurrency<T, R>(
 type EvaluatedRow = {
   parsed: ParsedPayoutRow;
   status: PayoutPreviewRowStatus;
-  matchStatus: "MATCHED" | "AMBIGUOUS" | "UNMATCHED";
+  matchStatus: "MATCHED" | "AMBIGUOUS" | "UNMATCHED" | "IGNORED";
   matchScore: number | null;
   matchReason: string | null;
   contractId: string | null;
@@ -525,7 +583,7 @@ export async function previewPayoutFileAction(
       skippedRows: parsed.skipped.slice(0, 50),
     };
   } catch (e) {
-    console.error("[previewPayoutFileAction]", e);
+    logActionError("previewPayoutFileAction", e);
     return fail(errorMessage(e, "Anteprima non riuscita"));
   }
 }
@@ -645,16 +703,11 @@ export async function importPayoutFileAction(formData: FormData): Promise<
 
     const targetRun =
       run ??
-      (await prisma.payoutRun.upsert({
-        where: { period_label: { period: settledPeriod, label: runLabel } },
-        update: {},
-        create: {
-          period: settledPeriod,
-          label: runLabel,
-          createdById: session.id,
-          markMode: "INCASSATO",
-        },
-        select: { id: true, status: true },
+      (await ensurePayoutRun({
+        period: settledPeriod,
+        label: runLabel,
+        createdById: session.id,
+        markMode: "INCASSATO",
       }));
 
     const sourceId = await ensureSource({
@@ -709,34 +762,11 @@ export async function importPayoutFileAction(formData: FormData): Promise<
       select: { id: true },
     });
 
-    for (const row of effectiveRows) {
+    await mapWithConcurrency(effectiveRows, INSERT_CONCURRENCY, async (row) => {
       await prisma.payoutRow.create({
-        data: {
-          batchId: batch.id,
-          sheetName: row.parsed.sheetName,
-          rowIndex: row.parsed.rowIndex,
-          rawJson: JSON.stringify(row.parsed.raw),
-          podRaw: row.parsed.podRaw || null,
-          podKey: row.parsed.podKeys[0] ?? null,
-          clientNameRaw: row.parsed.clientNameRaw || null,
-          fiscalCodeRaw: row.parsed.fiscalKey || null,
-          supplierHint: row.parsed.supplierHint || null,
-          collaboratorHint: row.parsed.collaboratorHint || null,
-          amount: row.parsed.amount,
-          period: row.parsed.period ?? fallbackPeriod,
-          matchStatus: row.matchStatus,
-          matchScore: row.matchScore,
-          matchReason: row.matchReason,
-          contractId: row.contractId,
-          collaboratorId: row.collaboratorId,
-          candidateIdsJson:
-            row.candidateIds.length > 0
-              ? JSON.stringify(row.candidateIds)
-              : null,
-          note: row.skipReason,
-        },
+        data: payoutRowCreateData(batch.id, row, fallbackPeriod),
       });
-    }
+    });
 
     await writeAuditLog({
       userId: session.id,
@@ -764,7 +794,7 @@ export async function importPayoutFileAction(formData: FormData): Promise<
         .length,
     };
   } catch (e) {
-    console.error("[importPayoutFileAction]", e);
+    logActionError("importPayoutFileAction", e);
     return fail(errorMessage(e, "Import non riuscito"));
   }
 }
@@ -922,7 +952,7 @@ export async function applyPayoutBatchAction(
       errors,
     };
   } catch (e) {
-    console.error("[applyPayoutBatchAction]", e);
+    logActionError("applyPayoutBatchAction", e);
     return fail(errorMessage(e, "Applicazione non riuscita"));
   }
 }
@@ -1936,20 +1966,28 @@ export async function createBulkHistoricalHeliosBatchAction(
       kind: "SUPPLIER_STATEMENT",
     });
 
-    const run = await prisma.payoutRun.upsert({
+    const existingRun = await prisma.payoutRun.findUnique({
       where: {
         period_label: { period: plan.periodLimit, label: plan.runLabel },
       },
-      update: { markMode: plan.markMode },
-      create: {
-        period: plan.periodLimit,
-        label: plan.runLabel,
-        markMode: plan.markMode,
-        createdById: session.id,
-        notes: `Marcatura massiva · esclusione ${plan.exclusionMode} · ${plan.excludedCollaboratorPatterns.join(", ")}`,
-      },
       select: { id: true, status: true },
     });
+    const run = existingRun
+      ? await prisma.payoutRun.update({
+          where: { id: existingRun.id },
+          data: { markMode: plan.markMode },
+          select: { id: true, status: true },
+        })
+      : await prisma.payoutRun.create({
+          data: {
+            period: plan.periodLimit,
+            label: plan.runLabel,
+            markMode: plan.markMode,
+            createdById: session.id,
+            notes: `Marcatura massiva · esclusione ${plan.exclusionMode} · ${plan.excludedCollaboratorPatterns.join(", ")}`,
+          },
+          select: { id: true, status: true },
+        });
     if (run.status === "CLOSED") {
       return fail("La liquidazione collegata è chiusa: riaprila prima di procedere");
     }
