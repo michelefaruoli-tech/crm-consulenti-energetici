@@ -248,6 +248,7 @@ export type ContractForProvvigioneRow = {
     period: string;
     status: string;
     amount: unknown;
+    settledPeriod?: string | null;
   }>;
 };
 
@@ -279,7 +280,12 @@ function monthAmount(
 function buildSingleRow(
   contract: ContractForProvvigioneRow,
   opts: BuildProvvigioneRowsOpts,
-  monthOverride?: { period: string; status: string; amount: number },
+  monthOverride?: {
+    period: string;
+    status: string;
+    amount: number;
+    settledPeriod?: string | null;
+  },
 ): ProvvigioneRow {
   const item = contract.commission;
   const now = opts.now ?? new Date();
@@ -330,7 +336,11 @@ function buildSingleRow(
         : "Da incassare";
 
   const collectionMonth = monthOverride
-    ? formatMonthYear(new Date(`${monthOverride.period}-01`))
+    ? formatMonthYear(
+        new Date(
+          `${monthOverride.settledPeriod && /^\d{4}-\d{2}$/.test(monthOverride.settledPeriod) ? monthOverride.settledPeriod : monthOverride.period}-01`,
+        ),
+      )
     : competencePeriod
       ? (() => {
           const m = (contract.recurringMonths ?? []).find(
@@ -486,6 +496,7 @@ export function expandContractsToProvvigioneRows(
           period: month.period,
           status: month.status,
           amount: monthAmount(month, contract),
+          settledPeriod: month.settledPeriod,
         }),
       );
     }
@@ -872,7 +883,7 @@ export async function fetchExpandedProvvigionePage(args: {
     | {
         kind: "rate";
         contract: ContractForProvvigioneRow;
-        rate: { period: string; status: string; amount: unknown };
+        rate: { period: string; status: string; amount: unknown; settledPeriod?: string | null };
       };
 
   const items: PageItem[] = [];
@@ -900,6 +911,7 @@ export async function fetchExpandedProvvigionePage(args: {
           period: true,
           status: true,
           amount: true,
+          settledPeriod: true,
           contract: { select: args.contractSelect },
         },
       });
@@ -911,6 +923,7 @@ export async function fetchExpandedProvvigionePage(args: {
             period: rate.period,
             status: rate.status,
             amount: rate.amount,
+            settledPeriod: rate.settledPeriod,
           },
         });
       }
@@ -926,6 +939,7 @@ export async function fetchExpandedProvvigionePage(args: {
         period: true,
         status: true,
         amount: true,
+        settledPeriod: true,
         contract: { select: args.contractSelect },
       },
     });
@@ -937,6 +951,7 @@ export async function fetchExpandedProvvigionePage(args: {
           period: rate.period,
           status: rate.status,
           amount: rate.amount,
+          settledPeriod: rate.settledPeriod,
         },
       });
     }
@@ -960,6 +975,7 @@ export async function fetchExpandedProvvigionePage(args: {
             period: item.rate.period,
             status: item.rate.status,
             amount: monthAmount(item.rate, item.contract),
+            settledPeriod: item.rate.settledPeriod,
           }),
     )
     .filter((row) => rowMatchesStatoFilter(row, args.buildOpts.statoFilter));

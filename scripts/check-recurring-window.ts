@@ -12,7 +12,7 @@ import {
   lastGeneratedPeriod,
   recurringWindow,
 } from "../src/lib/recurring-window";
-import { HELIOS_RECURRING_GENERATION_LAG_MONTHS } from "../src/lib/helios-contract-rules";
+import { HELIOS_RECURRING_GENERATION_LAG_MONTHS, resolveHeliosCompetencePeriod } from "../src/lib/helios-contract-rules";
 
 type Case = {
   name: string;
@@ -194,6 +194,44 @@ check(
   "senza lag → mese corrente",
   lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), 0),
   "2026-09",
+);
+
+console.log("\n• Helios: mese rif. = competenza, mai il pagamento");
+check(
+  "utente luglio + pagamento settembre + foglio settembre → luglio",
+  resolveHeliosCompetencePeriod({
+    selectedCompetence: "2026-07",
+    settledPeriod: "2026-09",
+    inferredPeriod: "2026-09",
+  }),
+  "2026-07",
+);
+check(
+  "stessa selezione pagamento/competenza settembre → luglio",
+  resolveHeliosCompetencePeriod({
+    selectedCompetence: "2026-09",
+    settledPeriod: "2026-09",
+    inferredPeriod: "2026-09",
+  }),
+  "2026-07",
+);
+check(
+  "foglio luglio (competenza reale) resta luglio",
+  resolveHeliosCompetencePeriod({
+    selectedCompetence: "2026-07",
+    settledPeriod: "2026-09",
+    inferredPeriod: "2026-07",
+  }),
+  "2026-07",
+);
+check(
+  "file multi-mese foglio agosto resta agosto",
+  resolveHeliosCompetencePeriod({
+    selectedCompetence: "2026-07",
+    settledPeriod: "2026-09",
+    inferredPeriod: "2026-08",
+  }),
+  "2026-08",
 );
 
 if (failures > 0) {

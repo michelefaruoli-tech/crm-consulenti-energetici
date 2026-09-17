@@ -410,14 +410,23 @@ export function buildColumnFilterWhere(
     out.excludeUnitRows = true;
   }
 
-  // Mese di incasso: rata → periodo della rata; riga unità → data incasso.
+  // Mese di incasso: rata → mese pagamento (settledPeriod) se c'è, altrimenti competenza.
   if (filters.collectionMonth?.length) {
     const periods = filters.collectionMonth.filter((v) =>
       /^\d{4}-\d{2}$/.test(v),
     );
     const unitWhere = dateMonthsWhere("collectionDate", filters.collectionMonth);
     if (expanded) {
-      if (periods.length > 0) out.rate.push({ period: { in: periods } });
+      if (periods.length > 0) {
+        out.rate.push({
+          OR: [
+            { settledPeriod: { in: periods } },
+            {
+              AND: [{ settledPeriod: null }, { period: { in: periods } }],
+            },
+          ],
+        });
+      }
       push(out.unitOnly, unitWhere);
     } else {
       push(out.contract, unitWhere);

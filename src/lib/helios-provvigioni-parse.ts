@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { normalizePodKey } from "@/lib/storno-status";
 import { periodFromSheetName } from "@/lib/helios-provvigioni-shared";
+import { resolveHeliosCompetencePeriod } from "@/lib/helios-contract-rules";
 
 export type ParsedHeliosLine = {
   excelRow: number;
@@ -104,6 +105,7 @@ function readSheetHeaders(sheet: ExcelJS.Worksheet): Array<string | undefined> {
 export async function parseHeliosProvvigioniBuffer(
   buffer: Buffer,
   fallbackCompetence: string,
+  settledPeriod?: string,
 ): Promise<{ ok: true; lines: ParsedHeliosLine[] } | { ok: false; error: string }> {
   const workbook = new ExcelJS.Workbook();
   try {
@@ -154,7 +156,12 @@ export async function parseHeliosProvvigioniBuffer(
       const pod = normalizePodKey(podRaw);
       if (!pod) continue;
 
-      const competencePeriod = sheetPeriod ?? fallbackCompetence;
+      const competencePeriod =
+        resolveHeliosCompetencePeriod({
+          selectedCompetence: fallbackCompetence,
+          settledPeriod,
+          inferredPeriod: sheetPeriod,
+        }) || fallbackCompetence;
 
       const dedupKey = `${pod}|${competencePeriod}`;
       if (seenKeys.has(dedupKey)) continue;

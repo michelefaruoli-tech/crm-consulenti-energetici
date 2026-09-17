@@ -45,6 +45,7 @@ import {
   payoutReportFileBase,
 } from "@/lib/payout/report-doc";
 import { findBuiltinTemplate, listBuiltinTemplates } from "@/lib/payout/templates";
+import { resolveHeliosCompetencePeriod } from "@/lib/helios-contract-rules";
 import {
   buildPayoutSnapshot,
   loadPayoutRunTotals,
@@ -358,6 +359,8 @@ function evaluateRow(
   parsed: ParsedPayoutRow,
   index: PayoutContractIndex,
   fallbackPeriod: string,
+  settledPeriod?: string,
+  heliosLag?: boolean,
 ): EvaluatedRow {
   const base: EvaluatedRow = {
     parsed,
@@ -379,18 +382,26 @@ function evaluateRow(
     return { ...base, status: "no_amount", skipReason: "Importo non leggibile" };
   }
 
+  const resolvedPeriod = heliosLag
+    ? resolveHeliosCompetencePeriod({
+        selectedCompetence: fallbackPeriod,
+        settledPeriod,
+        inferredPeriod: parsed.period,
+      }) || fallbackPeriod
+    : (parsed.period ?? fallbackPeriod);
   const withPeriod: ParsedPayoutRow = {
     ...parsed,
-    period: parsed.period ?? fallbackPeriod,
+    period: resolvedPeriod,
   };
   const outcome = matchPayoutRow(withPeriod, index);
 
-  if (outcome.status === "unmatched") return base;
+  if (outcome.status === "unmatched") return { ...base, parsed: withPeriod };
 
   if (outcome.status === "ambiguous") {
     const first = outcome.candidates[0];
     return {
       ...base,
+      parsed: withPeriod,
       status: "ambiguous",
       matchStatus: "AMBIGUOUS",
       matchScore: outcome.score,
@@ -409,6 +420,7 @@ function evaluateRow(
 
   return {
     ...base,
+    parsed: withPeriod,
     status: "will_apply",
     matchStatus: "MATCHED",
     matchScore: outcome.score,
@@ -502,7 +514,13 @@ export async function previewPayoutFileAction(
 
     const index = await loadPayoutContractIndex();
     const evaluated = parsed.rows.map((row) =>
-      evaluateRow(row, index, fallbackPeriod),
+      evaluateRow(
+        row,
+        index,
+        fallbackPeriod,
+        settledPeriod,
+        templateKey === "vendite_dirette",
+      ),
     );
 
     // Righe già presenti in un batch applicato: lo stesso rendiconto può
@@ -687,7 +705,13 @@ export async function importPayoutFileAction(formData: FormData): Promise<
 
     const index = await loadPayoutContractIndex();
     const evaluated = parsed.rows.map((row) =>
-      evaluateRow(row, index, fallbackPeriod),
+      evaluateRow(
+        row,
+        index,
+        fallbackPeriod,
+        settledPeriod,
+        builtin.key === "vendite_dirette",
+      ),
     );
 
     const run = runId

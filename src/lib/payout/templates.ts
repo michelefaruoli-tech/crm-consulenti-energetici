@@ -23,7 +23,7 @@ const BUILTIN_TEMPLATES: PayoutBuiltinTemplate[] = [
   {
     key: "vendite_dirette",
     label: "Agenzia — Dettaglio vendite dirette",
-    hint: "Foglio «Dettaglio Vendite Dirette» con colonna «Cod.Ute.» e foglio «Riepilogo»",
+    hint: "Helios: fogli mensili «Cod.Ute.». Mese rif. = competenza (pagamento − 2 mesi), non il mese del bonifico",
     sourceKind: "SUPPLIER_STATEMENT",
     config: {
       sheetMatch: { mode: "all", skip: ["riepilogo"] },
