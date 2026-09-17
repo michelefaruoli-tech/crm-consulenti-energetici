@@ -18,7 +18,11 @@ import {
   recurringWindow,
   type RecurringWindow,
 } from "@/lib/recurring-window";
-import { recurringGenerationLagMonths, isHeliosSupplier } from "@/lib/helios-contract-rules";
+import {
+  isHeliosCompetenceNotYetPayable,
+  isHeliosSupplier,
+  recurringGenerationLagMonths,
+} from "@/lib/helios-contract-rules";
 import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
@@ -157,35 +161,6 @@ async function purgeOutOfWindowMonths(
   });
 
   return closeDisposableOutOfWindowMonths(rows, window);
-}
-
-async function closeDisposableHeliosLagMonths(
-  rows: OutOfWindowMonthRow[],
-  lastPeriod: string,
-): Promise<number> {
-  const toClose: Array<{ id: string }> = [];
-  for (const row of rows) {
-    if (row.period <= lastPeriod) continue;
-    if (!isDisposableRecurringMonth(row)) continue;
-    if (row.status === "CLOSED" && row.note === AUTO_CLOSED_HELIOS_LAG) continue;
-    toClose.push({ id: row.id });
-  }
-  for (let offset = 0; offset < toClose.length; offset += 25) {
-    await Promise.all(
-      toClose.slice(offset, offset + 25).map((row) =>
-        prisma.recurringMonth.update({
-          where: { id: row.id },
-          data: {
-            status: "CLOSED",
-            paidAt: null,
-            settledPeriod: null,
-            note: AUTO_CLOSED_HELIOS_LAG,
-          },
-        }),
-      ),
-    );
-  }
-  return toClose.length;
 }
 
 /**
@@ -343,21 +318,6 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       await upsertMonthStatus(contractId, period, now, amount);
     }
   }
-
-  if (isHeliosSupplier(contract.supplier?.name)) {
-    const extra = await prisma.recurringMonth.findMany({
-      where: { contractId, period: { gt: lastPeriod } },
-      select: {
-        id: true,
-        period: true,
-        status: true,
-        paidAt: true,
-        settledPeriod: true,
-        note: true,
-      },
-    });
-    await closeDisposableHeliosLagMonths(extra, lastPeriod);
-  }
 }
 
 async function syncAnnualPeriods(
@@ -488,7 +448,6 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   const nowDate = new Date();
   const now = toPeriod(nowDate);
   const outOfWindowClosures: Array<{ id: string; note: string }> = [];
-  const heliosLagClosures: Array<{ id: string }> = [];
   let manualReview = 0;
   const creates: Array<{
     contractId: string;
@@ -558,15 +517,6 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
         });
       }
     }
-
-    if (isHeliosSupplier(contract.supplier?.name)) {
-      for (const row of contract.recurringMonths) {
-        if (row.period <= lastPeriod) continue;
-        if (!isDisposableRecurringMonth(row)) continue;
-        if (row.status === "CLOSED" && row.note === AUTO_CLOSED_HELIOS_LAG) continue;
-        heliosLagClosures.push({ id: row.id });
-      }
-    }
   }
 
   for (let offset = 0; offset < outOfWindowClosures.length; offset += 25) {
@@ -579,22 +529,6 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
             paidAt: null,
             settledPeriod: null,
             note: row.note,
-          },
-        }),
-      ),
-    );
-  }
-
-  for (let offset = 0; offset < heliosLagClosures.length; offset += 25) {
-    await Promise.all(
-      heliosLagClosures.slice(offset, offset + 25).map((row) =>
-        prisma.recurringMonth.update({
-          where: { id: row.id },
-          data: {
-            status: "CLOSED",
-            paidAt: null,
-            settledPeriod: null,
-            note: AUTO_CLOSED_HELIOS_LAG,
           },
         }),
       ),
@@ -641,7 +575,6 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     monthlyUpdated: updates.length,
     annualChecked: annualIds.length,
     outOfWindowClosed: outOfWindowClosures.length,
-    heliosLagClosed: heliosLagClosures.length,
     outOfWindowManualReview: manualReview,
   });
   return contracts.length;
@@ -710,9 +643,18 @@ export async function getMissingRecurringAlerts(
     orderBy: [{ period: "asc" }],
     take: 1000,
   });
-  return rows.filter((row) =>
-    isPeriodInRecurringWindow(recurringWindow(row.contract), row.period),
-  );
+  return rows.filter((row) => {
+    if (!isPeriodInRecurringWindow(recurringWindow(row.contract), row.period)) {
+      return false;
+    }
+    if (
+      isHeliosSupplier(row.contract.supplier.name) &&
+      isHeliosCompetenceNotYetPayable(row.period)
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /** Mesi già incassati dal fornitore ma non ancora liquidati al collaboratore. */

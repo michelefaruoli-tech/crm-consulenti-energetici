@@ -22,6 +22,7 @@ import { isRecurringMonthly, periodLabel } from "@/lib/recurring";
 import {
   isHeliosSupplier,
   isHeliosCompetenceNotYetPayable,
+  heliosLastPayableCompetence,
 } from "@/lib/helios-contract-rules";
 import {
   nonRecurringWhere,
@@ -119,13 +120,28 @@ function expandedRateWhere(
   contractWhere: Prisma.ContractWhereInput,
   statuses: string[],
   scope?: ProvvigioniRowFilterScope,
+  now: Date = new Date(),
 ): Prisma.RecurringMonthWhereInput | null {
   if (statuses.length === 0) return null;
+  const lastHelios = heliosLastPayableCompetence(now);
   return {
     AND: [
       { status: { in: statuses } },
       ...(scope?.rate ?? []),
       { contract: { AND: [contractWhere, MONTHLY_RECURRING_WHERE] } },
+      {
+        NOT: {
+          AND: [
+            { period: { gt: lastHelios } },
+            { status: { in: ["PENDING", "MISSING", "ERROR_UNPAID"] } },
+            {
+              contract: {
+                supplier: { name: { contains: "helios", mode: "insensitive" } },
+              },
+            },
+          ],
+        },
+      },
     ],
   };
 }
