@@ -981,6 +981,183 @@ export async function bulkUpdateCommissionFieldsAction(
   }
 }
 
+/** Campi ammessi per modifica massiva (stessi permessi dell'edit cella). */
+const BULK_SINGLE_FIELD_ALLOWED = new Set([
+  "expected",
+  "notes",
+  "storno",
+  "stornoDate",
+  "stornoAmount",
+  "podPdr",
+  "supplyStartDate",
+  "operationType",
+  "stato",
+  "collectionDate",
+  "agency",
+  "supplierName",
+  "clientType",
+  "clientName",
+  "collaboratorName",
+]);
+
+const BULK_SINGLE_FIELD_BATCH = 5;
+const BULK_SINGLE_FIELD_MAX = 500;
+
+function sanitizeBulkErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : "Errore";
+  return raw.slice(0, 120);
+}
+
+/**
+ * Applica un unico valore a molte righe (modifica massiva Provvigioni).
+ * Senza transazioni: ogni riga è indipendente; errori parziali restituiti al client.
+ */
+export async function bulkApplyCommissionFieldAction(
+  formData: FormData,
+): Promise<
+  | {
+      ok: true;
+      applied: number;
+      failed: number;
+      errors: Array<{ id: string; message: string }>;
+    }
+  | {
+      ok: false;
+      error: string;
+      applied?: number;
+      failed?: number;
+      errors?: Array<{ id: string; message: string }>;
+    }
+> {
+  try {
+    const session = await requireSession();
+    const field = String(formData.get("field") ?? "").trim();
+    const value = String(formData.get("value") ?? "");
+    const rawItems = String(formData.get("items") ?? "[]");
+
+    if (!field || !BULK_SINGLE_FIELD_ALLOWED.has(field)) {
+      return { ok: false, error: "Campo non consentito per modifica massiva" };
+    }
+
+    let items: Array<{ commissionId: string; competencePeriod?: string }>;
+    try {
+      items = JSON.parse(rawItems) as Array<{
+        commissionId: string;
+        competencePeriod?: string;
+      }>;
+    } catch {
+      return { ok: false, error: "Elenco righe non valido" };
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return { ok: false, error: "Nessuna riga da aggiornare" };
+    }
+    if (items.length > BULK_SINGLE_FIELD_MAX) {
+      return {
+        ok: false,
+        error: `Troppe righe (max ${BULK_SINGLE_FIELD_MAX}). Applica a gruppi.`,
+      };
+    }
+
+    const normalizedItems = items
+      .map((item) => ({
+        commissionId: String(item.commissionId ?? "").trim(),
+        competencePeriod: String(item.competencePeriod ?? "").trim() || undefined,
+      }))
+      .filter((item) => item.commissionId);
+
+    if (normalizedItems.length === 0) {
+      return { ok: false, error: "Nessuna riga valida" };
+    }
+
+    const uniqueIds = [...new Set(normalizedItems.map((i) => i.commissionId))];
+    const preloaded = await prisma.commission.findMany({
+      where: { id: { in: uniqueIds } },
+      include: {
+        contract: {
+          select: CONTRACT_SELECT_FOR_EDIT,
+        },
+      },
+    });
+    const commissionCache = new Map(
+      preloaded.map((row) => [row.id, row] as const),
+    );
+
+    let applied = 0;
+    let failed = 0;
+    const errors: Array<{ id: string; message: string }> = [];
+
+    for (let i = 0; i < normalizedItems.length; i += BULK_SINGLE_FIELD_BATCH) {
+      const chunk = normalizedItems.slice(i, i + BULK_SINGLE_FIELD_BATCH);
+      for (const item of chunk) {
+        try {
+          const cached = commissionCache.get(item.commissionId);
+          const commission =
+            cached ?? (await resolveCommissionForEdit(item.commissionId));
+          if (!commission || commission.contract.deletedAt) {
+            failed += 1;
+            errors.push({ id: item.commissionId, message: "Riga non trovata" });
+            continue;
+          }
+
+          await applyCommissionField(session, commission, field, value, {
+            competencePeriod: item.competencePeriod ?? null,
+          });
+          applied += 1;
+        } catch (e) {
+          failed += 1;
+          errors.push({
+            id: item.commissionId,
+            message: sanitizeBulkErrorMessage(e),
+          });
+        }
+      }
+    }
+
+    if (applied === 0) {
+      return {
+        ok: false,
+        error:
+          failed > 0
+            ? `Nessuna riga aggiornata (${failed} errori)`
+            : "Nessuna riga aggiornata",
+        applied: 0,
+        failed,
+        errors: errors.slice(0, 20),
+      };
+    }
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Commission",
+      entityId: normalizedItems[0]?.commissionId ?? "",
+      details: {
+        source: "bulk_apply_single_field",
+        field,
+        applied,
+        failed,
+      },
+    });
+
+    revalidatePath("/provvigioni");
+    revalidatePath("/contratti");
+
+    return {
+      ok: true,
+      applied,
+      failed,
+      errors: errors.slice(0, 20),
+    };
+  } catch (e) {
+    console.error("[bulkApplyCommissionFieldAction] failed");
+    return {
+      ok: false,
+      error: sanitizeBulkErrorMessage(e),
+    };
+  }
+}
+
 /** Admin/Segreteria conferma il gettone (riga verde). */
 export async function confirmCommissionAction(formData: FormData): Promise<void> {
   const session = await requireSession();
