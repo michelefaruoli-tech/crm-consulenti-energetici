@@ -18,7 +18,7 @@ import {
   recurringWindow,
   type RecurringWindow,
 } from "@/lib/recurring-window";
-import { recurringGenerationLagMonths } from "@/lib/helios-contract-rules";
+import { recurringGenerationLagMonths, isHeliosSupplier } from "@/lib/helios-contract-rules";
 import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
@@ -33,6 +33,8 @@ const PRESERVED_STATUSES = new Set([
 
 const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura";
 const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
+const AUTO_CLOSED_HELIOS_LAG =
+  "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)";
 
 type OutOfWindowMonthRow = {
   id: string;
@@ -53,7 +55,9 @@ function autoClosureNote(window: RecurringWindow, period: string): string {
 function isAutoClosedOutOfWindow(row: OutOfWindowMonthRow): boolean {
   return (
     row.status === "CLOSED" &&
-    (row.note === AUTO_CLOSED_BEFORE_START || row.note === AUTO_CLOSED_AFTER_END)
+    (row.note === AUTO_CLOSED_BEFORE_START ||
+      row.note === AUTO_CLOSED_AFTER_END ||
+      row.note === AUTO_CLOSED_HELIOS_LAG)
   );
 }
 
@@ -153,6 +157,35 @@ async function purgeOutOfWindowMonths(
   });
 
   return closeDisposableOutOfWindowMonths(rows, window);
+}
+
+async function closeDisposableHeliosLagMonths(
+  rows: OutOfWindowMonthRow[],
+  lastPeriod: string,
+): Promise<number> {
+  const toClose: Array<{ id: string }> = [];
+  for (const row of rows) {
+    if (row.period <= lastPeriod) continue;
+    if (!isDisposableRecurringMonth(row)) continue;
+    if (row.status === "CLOSED" && row.note === AUTO_CLOSED_HELIOS_LAG) continue;
+    toClose.push({ id: row.id });
+  }
+  for (let offset = 0; offset < toClose.length; offset += 25) {
+    await Promise.all(
+      toClose.slice(offset, offset + 25).map((row) =>
+        prisma.recurringMonth.update({
+          where: { id: row.id },
+          data: {
+            status: "CLOSED",
+            paidAt: null,
+            settledPeriod: null,
+            note: AUTO_CLOSED_HELIOS_LAG,
+          },
+        }),
+      ),
+    );
+  }
+  return toClose.length;
 }
 
 /**
@@ -310,6 +343,21 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       await upsertMonthStatus(contractId, period, now, amount);
     }
   }
+
+  if (isHeliosSupplier(contract.supplier?.name)) {
+    const extra = await prisma.recurringMonth.findMany({
+      where: { contractId, period: { gt: lastPeriod } },
+      select: {
+        id: true,
+        period: true,
+        status: true,
+        paidAt: true,
+        settledPeriod: true,
+        note: true,
+      },
+    });
+    await closeDisposableHeliosLagMonths(extra, lastPeriod);
+  }
 }
 
 async function syncAnnualPeriods(
@@ -356,7 +404,9 @@ async function upsertMonthStatus(
 
   const isAutomaticClosure =
     existing?.status === "CLOSED" &&
-    (existing.note === AUTO_CLOSED_BEFORE_START || existing.note === AUTO_CLOSED_AFTER_END);
+    (existing.note === AUTO_CLOSED_BEFORE_START ||
+      existing.note === AUTO_CLOSED_AFTER_END ||
+      existing.note === AUTO_CLOSED_HELIOS_LAG);
   if (existing && PRESERVED_STATUSES.has(existing.status) && !isAutomaticClosure) {
     if (amount != null && existing.amount == null) {
       await prisma.recurringMonth.update({
@@ -438,6 +488,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   const nowDate = new Date();
   const now = toPeriod(nowDate);
   const outOfWindowClosures: Array<{ id: string; note: string }> = [];
+  const heliosLagClosures: Array<{ id: string }> = [];
   let manualReview = 0;
   const creates: Array<{
     contractId: string;
@@ -494,7 +545,9 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       }
       const autoClosed =
         row.status === "CLOSED" &&
-        (row.note === AUTO_CLOSED_BEFORE_START || row.note === AUTO_CLOSED_AFTER_END);
+        (row.note === AUTO_CLOSED_BEFORE_START ||
+          row.note === AUTO_CLOSED_AFTER_END ||
+          row.note === AUTO_CLOSED_HELIOS_LAG);
       if (PRESERVED_STATUSES.has(row.status) && !autoClosed) continue;
       if (row.status !== finalStatus || (amount != null && row.amount == null) || autoClosed) {
         updates.push({
@@ -503,6 +556,15 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
           amount: amount ?? (row.amount == null ? null : Number(row.amount)),
           clearAutoClosure: autoClosed,
         });
+      }
+    }
+
+    if (isHeliosSupplier(contract.supplier?.name)) {
+      for (const row of contract.recurringMonths) {
+        if (row.period <= lastPeriod) continue;
+        if (!isDisposableRecurringMonth(row)) continue;
+        if (row.status === "CLOSED" && row.note === AUTO_CLOSED_HELIOS_LAG) continue;
+        heliosLagClosures.push({ id: row.id });
       }
     }
   }
@@ -517,6 +579,22 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
             paidAt: null,
             settledPeriod: null,
             note: row.note,
+          },
+        }),
+      ),
+    );
+  }
+
+  for (let offset = 0; offset < heliosLagClosures.length; offset += 25) {
+    await Promise.all(
+      heliosLagClosures.slice(offset, offset + 25).map((row) =>
+        prisma.recurringMonth.update({
+          where: { id: row.id },
+          data: {
+            status: "CLOSED",
+            paidAt: null,
+            settledPeriod: null,
+            note: AUTO_CLOSED_HELIOS_LAG,
           },
         }),
       ),
@@ -563,6 +641,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     monthlyUpdated: updates.length,
     annualChecked: annualIds.length,
     outOfWindowClosed: outOfWindowClosures.length,
+    heliosLagClosed: heliosLagClosures.length,
     outOfWindowManualReview: manualReview,
   });
   return contracts.length;

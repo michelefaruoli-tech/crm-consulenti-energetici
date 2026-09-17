@@ -20,6 +20,10 @@ import {
 } from "@/lib/supply-dates";
 import { isRecurringMonthly, periodLabel } from "@/lib/recurring";
 import {
+  isHeliosSupplier,
+  isHeliosCompetenceNotYetPayable,
+} from "@/lib/helios-contract-rules";
+import {
   nonRecurringWhere,
   parseStatoFilter,
   recurringMonthlyWhereOr,
@@ -348,8 +352,12 @@ function buildSingleRow(
               r.period === competencePeriod &&
               (r.status === "PAID" || r.status === "LIQUIDATED"),
           );
-          return m
-            ? formatMonthYear(new Date(`${m.period}-01`))
+          const paidMonth =
+            m?.settledPeriod && /^\d{4}-\d{2}$/.test(m.settledPeriod)
+              ? m.settledPeriod
+              : m?.period;
+          return paidMonth
+            ? formatMonthYear(new Date(`${paidMonth}-01`))
             : hasDate
               ? formatMonthYear(effectiveCollection)
               : "";
@@ -479,6 +487,7 @@ export function expandContractsToProvvigioneRows(
 
   const statuses = rateStatusesForMode(mode, opts.statoFilter);
   const rows: ProvvigioneRow[] = [];
+  const now = opts.now ?? new Date();
 
   for (const contract of contracts) {
     if (!isRecurringMonthly(contract.recurrence)) {
@@ -488,6 +497,11 @@ export function expandContractsToProvvigioneRows(
 
     const months = (contract.recurringMonths ?? [])
       .filter((m) => statuses.includes(m.status))
+      .filter((m) => {
+        if (!isHeliosSupplier(contract.supplier.name)) return true;
+        if (m.status === "PAID" || m.status === "LIQUIDATED") return true;
+        return !isHeliosCompetenceNotYetPayable(m.period, now);
+      })
       .sort((a, b) => b.period.localeCompare(a.period));
 
     for (const month of months) {

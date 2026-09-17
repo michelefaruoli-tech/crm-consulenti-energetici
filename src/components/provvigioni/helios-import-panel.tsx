@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  applyHeliosJulyPagatoNamedAction,
   applyHeliosMeseRifShiftAction,
   applyHeliosProvvigioniAction,
   previewHeliosMeseRifShiftAction,
@@ -92,8 +93,14 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     setFileB64(b64);
     const guessed = guessCompetenceFromFilename(file.name);
     if (guessed) {
-      setCompetencePeriod(guessed);
-      setSettledPeriod(addMonths(guessed, HELIOS_RECURRING_GENERATION_LAG_MONTHS));
+      const nowPeriod = toPeriod(new Date());
+      if (guessed === nowPeriod) {
+        setSettledPeriod(guessed);
+        setCompetencePeriod(heliosCompetenceFromPaymentMonth(guessed));
+      } else {
+        setCompetencePeriod(guessed);
+        setSettledPeriod(addMonths(guessed, HELIOS_RECURRING_GENERATION_LAG_MONTHS));
+      }
     }
   }
 
@@ -395,9 +402,9 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
         <p className="font-medium">Rate già importate con mese rif. sbagliato</p>
         <p className="mt-1">
-          Se in Provvigioni vedi <strong>set 2026</strong> al posto di luglio, le
-          vecchie righe non si correggono da sole. Conta prima, poi allinea solo
-          le rate Helios dove competenza = mese pagamento.
+          Se vedi <strong>Mese rif. set 2026</strong> e <strong>Data incasso 07/2026</strong>,
+          i due campi sono invertiti. Conta, poi allinea: competenza luglio,
+          pagamento settembre. Non cambia lo stato Incassato/Pagato.
         </p>
         {shiftHint ? <p className="mt-1">{shiftHint}</p> : null}
         <div className="mt-2 flex flex-wrap gap-2">
@@ -416,7 +423,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
                 setShiftHint(
                   res.count === 0
                     ? "Nessuna rata Helios da allineare."
-                    : `${res.count} rate: mese rif. passerà da pagamento a pagamento − ${HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi (es. ${res.samples[0] ? `${periodLabel(res.samples[0].period)} → ${periodLabel(res.samples[0].targetPeriod)}` : "set → lug"}).`,
+                    : `${res.count} rate (${res.inverted} campi invertiti, ${res.coincident} coincidenza pagamento): es. ${res.samples[0] ? `${periodLabel(res.samples[0].period)} → ${periodLabel(res.samples[0].targetPeriod)}` : "set → lug"}.`,
                 );
               });
             }}
@@ -430,7 +437,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             onClick={() => {
               if (
                 !window.confirm(
-                  "Allineare il mese riferimento Helios (competenza = pagamento − 2 mesi) solo sulle rate dove oggi coincidono? Le altre restano invariate.",
+                  "Allineare Mese rif. = competenza e Data incasso = pagamento Helios? Solo rate invertite o con i due mesi uguali. Lo stato Incassato/Pagato non cambia.",
                 )
               ) {
                 return;
@@ -442,7 +449,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
                   return;
                 }
                 setShiftHint(
-                  `Allineate ${res.shifted} rate` +
+                  `Allineate ${res.shifted} rate (${res.inverted} invertite, ${res.coincident} coincidenza)` +
                     (res.skipped > 0
                       ? ` · ${res.skipped} saltate (già esiste la competenza corretta)`
                       : "") +
@@ -453,6 +460,37 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             }}
           >
             Allinea mese rif.
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  "Segnare Pagato (liquidato al collaboratore) tutte le rate Helios di competenza luglio 2026 solo per i collaboratori Laforgia e Michele? Gli altri restano invariati.",
+                )
+              ) {
+                return;
+              }
+              start(async () => {
+                const res = await applyHeliosJulyPagatoNamedAction();
+                if (!res.ok) {
+                  setShiftHint(res.error);
+                  return;
+                }
+                const detail = res.byCollaborator
+                  .map((g) => `${g.label}: ${g.count} (${g.names.join(", ") || "nessun nome"})`)
+                  .join(" · ");
+                setShiftHint(
+                  `Pagato luglio Helios: ${res.total} rate. ${detail}. Allinea prima il mese rif. se ancora vedi settembre.`,
+                );
+                router.refresh();
+              });
+            }}
+          >
+            Pagato luglio (Laforgia + Michele)
           </Button>
         </div>
       </div>

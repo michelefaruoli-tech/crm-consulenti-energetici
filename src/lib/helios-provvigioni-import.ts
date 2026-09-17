@@ -31,9 +31,10 @@ import {
 import { recurrenceWriteData } from "@/lib/recurring";
 import { repairMonthlySwitchArchives } from "@/lib/contract-pod-archive";
 import {
-  heliosCompetenceFromPaymentMonth,
   isHeliosSupplier,
+  planHeliosMeseRifShift,
   resolveHeliosCompetencePeriod,
+  resolveHeliosPaymentPeriod,
 } from "@/lib/helios-contract-rules";
 
 export type {
@@ -64,6 +65,30 @@ async function bufferFromForm(formData: FormData): Promise<
     return { ok: false, error: "Seleziona un file Excel (.xlsx)" };
   }
   return { ok: true, buffer, fileName };
+}
+
+function resolveHeliosImportPeriods(
+  formData: FormData,
+  fileName: string,
+): { competencePeriod: string; settledPeriod: string } {
+  const rawCompetence = String(formData.get("competencePeriod") ?? "").trim();
+  const rawSettled = String(formData.get("settledPeriod") ?? "").trim();
+  const calendarNow = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const selectedCompetence = isYearMonthPeriod(rawCompetence)
+    ? rawCompetence
+    : guessCompetenceFromFilename(fileName) ?? calendarNow;
+  const selectedSettled = isYearMonthPeriod(rawSettled)
+    ? rawSettled
+    : selectedCompetence;
+  const periodOpts = {
+    selectedCompetence,
+    settledPeriod: selectedSettled,
+  };
+  return {
+    competencePeriod:
+      resolveHeliosCompetencePeriod(periodOpts) || selectedCompetence,
+    settledPeriod: resolveHeliosPaymentPeriod(periodOpts) || selectedSettled,
+  };
 }
 
 async function loadHeliosContractList(supplierId: string) {
@@ -271,19 +296,10 @@ export async function previewHeliosProvvigioniAction(
     const loaded = await bufferFromForm(formData);
     if (!loaded.ok) return loaded;
 
-    let competencePeriod = String(formData.get("competencePeriod") ?? "").trim();
-    let settledPeriod = String(formData.get("settledPeriod") ?? "").trim();
-    if (!isYearMonthPeriod(competencePeriod)) {
-      competencePeriod =
-        guessCompetenceFromFilename(loaded.fileName) ??
-        `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-    }
-    if (!isYearMonthPeriod(settledPeriod)) settledPeriod = competencePeriod;
-    competencePeriod =
-      resolveHeliosCompetencePeriod({
-        selectedCompetence: competencePeriod,
-        settledPeriod,
-      }) || competencePeriod;
+    const { competencePeriod, settledPeriod } = resolveHeliosImportPeriods(
+      formData,
+      loaded.fileName,
+    );
 
     const parsed = await parseHeliosProvvigioniBuffer(
       loaded.buffer,
@@ -353,19 +369,10 @@ export async function applyHeliosProvvigioniAction(
     const loaded = await bufferFromForm(formData);
     if (!loaded.ok) return loaded;
 
-    let competencePeriod = String(formData.get("competencePeriod") ?? "").trim();
-    let settledPeriod = String(formData.get("settledPeriod") ?? "").trim();
-    if (!isYearMonthPeriod(competencePeriod)) {
-      competencePeriod =
-        guessCompetenceFromFilename(loaded.fileName) ??
-        `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-    }
-    if (!isYearMonthPeriod(settledPeriod)) settledPeriod = competencePeriod;
-    competencePeriod =
-      resolveHeliosCompetencePeriod({
-        selectedCompetence: competencePeriod,
-        settledPeriod,
-      }) || competencePeriod;
+    const { competencePeriod, settledPeriod } = resolveHeliosImportPeriods(
+      formData,
+      loaded.fileName,
+    );
 
     const parsed = await parseHeliosProvvigioniBuffer(
       loaded.buffer,
@@ -557,6 +564,8 @@ type HeliosMeseRifShiftRow = {
   period: string;
   settledPeriod: string;
   targetPeriod: string;
+  targetSettled: string;
+  kind: "coincident" | "inverted";
 };
 
 async function loadHeliosMeseRifShiftCandidates(): Promise<HeliosMeseRifShiftRow[]> {
@@ -597,23 +606,24 @@ async function loadHeliosMeseRifShiftCandidates(): Promise<HeliosMeseRifShiftRow
     if (!isHeliosSupplier(row.contract.supplier.name)) continue;
     const settled = row.settledPeriod;
     if (!settled || !isYearMonthPeriod(settled)) continue;
-    if (row.period !== settled) continue;
-    const targetPeriod = heliosCompetenceFromPaymentMonth(settled);
-    if (!isYearMonthPeriod(targetPeriod) || targetPeriod === row.period) continue;
+    const plan = planHeliosMeseRifShift(row.period, settled);
+    if (!plan) continue;
     out.push({
       id: row.id,
       contractId: row.contractId,
       clientName: clientDisplayName(row.contract.client),
       period: row.period,
       settledPeriod: settled,
-      targetPeriod,
+      targetPeriod: plan.targetPeriod,
+      targetSettled: plan.targetSettled,
+      kind: plan.kind,
     });
   }
   return out;
 }
 
 export async function previewHeliosMeseRifShiftAction(): Promise<
-  | { ok: true; count: number; samples: HeliosMeseRifShiftRow[] }
+  | { ok: true; count: number; inverted: number; coincident: number; samples: HeliosMeseRifShiftRow[] }
   | { ok: false; error: string }
 > {
   try {
@@ -622,7 +632,13 @@ export async function previewHeliosMeseRifShiftAction(): Promise<
       return { ok: false, error: "Solo chi vede tutte le provvigioni può allineare il mese rif." };
     }
     const rows = await loadHeliosMeseRifShiftCandidates();
-    return { ok: true, count: rows.length, samples: rows.slice(0, 8) };
+    return {
+      ok: true,
+      count: rows.length,
+      inverted: rows.filter((r) => r.kind === "inverted").length,
+      coincident: rows.filter((r) => r.kind === "coincident").length,
+      samples: rows.slice(0, 8),
+    };
   } catch (e) {
     return {
       ok: false,
@@ -632,7 +648,7 @@ export async function previewHeliosMeseRifShiftAction(): Promise<
 }
 
 export async function applyHeliosMeseRifShiftAction(): Promise<
-  | { ok: true; shifted: number; skipped: number }
+  | { ok: true; shifted: number; skipped: number; inverted: number; coincident: number }
   | { ok: false; error: string }
 > {
   try {
@@ -644,6 +660,8 @@ export async function applyHeliosMeseRifShiftAction(): Promise<
     const rows = await loadHeliosMeseRifShiftCandidates();
     let shifted = 0;
     let skipped = 0;
+    let inverted = 0;
+    let coincident = 0;
 
     for (const row of rows) {
       const conflict = await prisma.recurringMonth.findUnique({
@@ -666,16 +684,26 @@ export async function applyHeliosMeseRifShiftAction(): Promise<
           isDisposableRecurringMonth(conflict)
         ) {
           await prisma.recurringMonth.delete({ where: { id: conflict.id } });
-        } else {
+        } else if (conflict.id !== row.id) {
           skipped++;
           continue;
         }
       }
       await prisma.recurringMonth.update({
         where: { id: row.id },
-        data: { period: row.targetPeriod },
+        data: {
+          period: row.targetPeriod,
+          settledPeriod: row.targetSettled,
+        },
+      });
+      const [y, mo] = row.targetSettled.split("-").map(Number);
+      await prisma.contract.update({
+        where: { id: row.contractId },
+        data: { collectionDate: new Date(y, mo - 1, 1) },
       });
       shifted++;
+      if (row.kind === "inverted") inverted++;
+      else coincident++;
     }
 
     await writeAuditLog({
@@ -683,10 +711,10 @@ export async function applyHeliosMeseRifShiftAction(): Promise<
       action: "UPDATE",
       entity: "HeliosProvvigioni",
       entityId: "mese-rif-shift",
-      details: { shifted, skipped },
+      details: { shifted, skipped, inverted, coincident },
     });
     revalidatePath("/provvigioni");
-    return { ok: true, shifted, skipped };
+    return { ok: true, shifted, skipped, inverted, coincident };
   } catch (e) {
     return {
       ok: false,
@@ -694,3 +722,147 @@ export async function applyHeliosMeseRifShiftAction(): Promise<
     };
   }
 }
+
+const JULY_PAGATO_NEEDLES = [
+  { key: "laforgia", label: "Laforgia" },
+  { key: "michele", label: "Michele" },
+] as const;
+
+function collaboratorMatchesNeedle(name: string, needle: string): boolean {
+  return name.toLowerCase().includes(needle);
+}
+
+export async function applyHeliosJulyPagatoNamedAction(): Promise<
+  | {
+      ok: true;
+      total: number;
+      byCollaborator: Array<{
+        label: string;
+        names: string[];
+        count: number;
+      }>;
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    const session = await requireSession();
+    if (!hasPermission(session.role, "commissions.view_all")) {
+      return { ok: false, error: "Solo chi vede tutte le provvigioni può segnare Pagato." };
+    }
+
+    const months = await prisma.recurringMonth.findMany({
+      where: {
+        status: "PAID",
+        contract: {
+          deletedAt: null,
+          isHistorical: false,
+          supplier: { name: { contains: "helios", mode: "insensitive" } },
+        },
+      },
+      select: {
+        id: true,
+        contractId: true,
+        period: true,
+        settledPeriod: true,
+        status: true,
+        paidAt: true,
+        contract: {
+          select: {
+            supplier: { select: { name: true } },
+            collaborator: { select: { name: true } },
+          },
+        },
+      },
+      take: 8000,
+    });
+
+    const byCollaborator: Array<{ label: string; names: string[]; count: number }> =
+      [];
+    let total = 0;
+    const seenNames = new Map<string, Set<string>>();
+
+    for (const group of JULY_PAGATO_NEEDLES) {
+      seenNames.set(group.key, new Set());
+      let count = 0;
+      for (const row of months) {
+        if (!isHeliosSupplier(row.contract.supplier.name)) continue;
+        const collabName = row.contract.collaborator.name;
+        if (!collaboratorMatchesNeedle(collabName, group.key)) continue;
+        const settled = row.settledPeriod;
+        const plan =
+          settled && isYearMonthPeriod(settled)
+            ? planHeliosMeseRifShift(row.period, settled)
+            : null;
+        const competence = plan?.targetPeriod ?? row.period;
+        if (competence !== "2026-07") continue;
+
+        if (plan && (plan.targetPeriod !== row.period || plan.targetSettled !== settled)) {
+          const conflict = await prisma.recurringMonth.findUnique({
+            where: {
+              contractId_period: {
+                contractId: row.contractId,
+                period: plan.targetPeriod,
+              },
+            },
+            select: {
+              id: true,
+              status: true,
+              paidAt: true,
+              settledPeriod: true,
+            },
+          });
+          if (conflict && conflict.id !== row.id) {
+            if (isDisposableRecurringMonth(conflict)) {
+              await prisma.recurringMonth.delete({ where: { id: conflict.id } });
+            } else {
+              continue;
+            }
+          }
+          await prisma.recurringMonth.update({
+            where: { id: row.id },
+            data: {
+              period: plan.targetPeriod,
+              settledPeriod: plan.targetSettled,
+            },
+          });
+        }
+
+        await prisma.recurringMonth.update({
+          where: { id: row.id },
+          data: {
+            status: "LIQUIDATED",
+            note: "Liquidato al collaboratore",
+          },
+        });
+        await prisma.contract.update({
+          where: { id: row.contractId },
+          data: { paymentStatus: "Pagato" },
+        });
+        count++;
+        total++;
+        seenNames.get(group.key)?.add(collabName);
+      }
+      byCollaborator.push({
+        label: group.label,
+        names: [...(seenNames.get(group.key) ?? [])],
+        count,
+      });
+    }
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "HeliosProvvigioni",
+      entityId: "2026-07-pagato-laforgia-michele",
+      details: { total, byCollaborator },
+    });
+    revalidatePath("/provvigioni");
+    return { ok: true, total, byCollaborator };
+  } catch (e) {
+    return {
+      ok: false,
+      error: friendlyNeonHttpError(e, "Marcatura Pagato luglio Helios non riuscita"),
+    };
+  }
+}
+

@@ -12,7 +12,7 @@ import {
   lastGeneratedPeriod,
   recurringWindow,
 } from "../src/lib/recurring-window";
-import { HELIOS_RECURRING_GENERATION_LAG_MONTHS, resolveHeliosCompetencePeriod } from "../src/lib/helios-contract-rules";
+import { HELIOS_RECURRING_GENERATION_LAG_MONTHS, isHeliosCompetenceNotYetPayable, planHeliosMeseRifShift, resolveHeliosCompetencePeriod, resolveHeliosPaymentPeriod } from "../src/lib/helios-contract-rules";
 
 type Case = {
   name: string;
@@ -232,6 +232,62 @@ check(
     inferredPeriod: "2026-08",
   }),
   "2026-08",
+);
+check(
+  "campi invertiti: selezione settembre + incasso luglio + foglio settembre → luglio",
+  resolveHeliosCompetencePeriod({
+    selectedCompetence: "2026-09",
+    settledPeriod: "2026-07",
+    inferredPeriod: "2026-09",
+  }),
+  "2026-07",
+);
+check(
+  "pagamento corretto resta settembre anche se form invertito",
+  resolveHeliosPaymentPeriod({
+    selectedCompetence: "2026-09",
+    settledPeriod: "2026-07",
+    inferredPeriod: "2026-09",
+  }),
+  "2026-09",
+);
+check(
+  "pagamento form corretto resta settembre",
+  resolveHeliosPaymentPeriod({
+    selectedCompetence: "2026-07",
+    settledPeriod: "2026-09",
+    inferredPeriod: "2026-09",
+  }),
+  "2026-09",
+);
+
+const invertedPlan = planHeliosMeseRifShift("2026-09", "2026-07");
+check(
+  "allinea invertito: period set + settled lug → period lug, settled set",
+  `${invertedPlan?.kind}:${invertedPlan?.targetPeriod}:${invertedPlan?.targetSettled}`,
+  "inverted:2026-07:2026-09",
+);
+const coincidentPlan = planHeliosMeseRifShift("2026-09", "2026-09");
+check(
+  "allinea coincidenza: entrambi set → period lug, settled set",
+  `${coincidentPlan?.kind}:${coincidentPlan?.targetPeriod}:${coincidentPlan?.targetSettled}`,
+  "coincident:2026-07:2026-09",
+);
+check(
+  "allinea già corretto: lug + set → nessuna modifica",
+  String(planHeliosMeseRifShift("2026-07", "2026-09")),
+  "null",
+);
+
+check(
+  "agosto non è ancora pagabile a settembre 2026",
+  String(isHeliosCompetenceNotYetPayable("2026-08", new Date(2026, 8, 17))),
+  "true",
+);
+check(
+  "luglio è pagabile a settembre 2026",
+  String(isHeliosCompetenceNotYetPayable("2026-07", new Date(2026, 8, 17))),
+  "false",
 );
 
 if (failures > 0) {
