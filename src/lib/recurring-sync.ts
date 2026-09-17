@@ -12,11 +12,13 @@ import {
 import {
   isDisposableRecurringMonth,
   isPeriodInRecurringWindow,
+  lastGeneratedPeriod,
   OUT_OF_WINDOW_REASONS,
   outOfWindowReason,
   recurringWindow,
   type RecurringWindow,
 } from "@/lib/recurring-window";
+import { recurringGenerationLagMonths } from "@/lib/helios-contract-rules";
 import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
@@ -31,13 +33,6 @@ const PRESERVED_STATUSES = new Set([
 
 const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura";
 const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
-
-/** Ultimo mese generabile: oggi, oppure l'ultimo mese della finestra se precedente. */
-function lastGeneratedPeriod(window: RecurringWindow, now: Date): string {
-  const nowPeriod = toPeriod(now);
-  if (window.end && window.end < nowPeriod) return window.end;
-  return nowPeriod;
-}
 
 type OutOfWindowMonthRow = {
   id: string;
@@ -252,6 +247,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
         take: 1,
       },
       commission: { select: { expected: true } },
+      supplier: { select: { name: true } },
     },
   });
   if (!contract) return;
@@ -291,7 +287,11 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  const lastPeriod = lastGeneratedPeriod(window, nowDate);
+  const lastPeriod = lastGeneratedPeriod(
+    window,
+    nowDate,
+    recurringGenerationLagMonths(contract.supplier?.name),
+  );
 
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
@@ -414,6 +414,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       status: true,
       expiryDate: true,
       commission: { select: { expected: true } },
+      supplier: { select: { name: true } },
       statusHistory: {
         where: { toStatus: "CHIUSO" },
         select: { changedAt: true },
@@ -476,7 +477,11 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     if (contract.status === "ANNULLATO" || contract.status === "KO") continue;
 
     const start = window.start;
-    const lastPeriod = lastGeneratedPeriod(window, nowDate);
+    const lastPeriod = lastGeneratedPeriod(
+      window,
+      nowDate,
+      recurringGenerationLagMonths(contract.supplier?.name),
+    );
     const amount = Number(contract.commission?.expected ?? 0) || null;
     const existing = new Map(contract.recurringMonths.map((row) => [row.period, row]));
 

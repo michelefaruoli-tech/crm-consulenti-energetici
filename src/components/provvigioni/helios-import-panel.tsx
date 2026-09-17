@@ -3,7 +3,9 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  applyHeliosMeseRifShiftAction,
   applyHeliosProvvigioniAction,
+  previewHeliosMeseRifShiftAction,
   previewHeliosProvvigioniAction,
 } from "@/lib/helios-provvigioni-import";
 import {
@@ -11,7 +13,11 @@ import {
   HELIOS_IMPORT_STATUS_LABEL,
   type HeliosImportPreviewRow,
 } from "@/lib/helios-provvigioni-shared";
-import { periodLabel, toPeriod } from "@/lib/recurring";
+import {
+  heliosCompetenceFromPaymentMonth,
+  HELIOS_RECURRING_GENERATION_LAG_MONTHS,
+} from "@/lib/helios-contract-rules";
+import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 
@@ -31,7 +37,7 @@ function fileToBase64(file: File): Promise<string> {
 function monthOptions(): string[] {
   const now = new Date();
   const out: string[] = [];
-  for (let i = 0; i < 18; i++) {
+  for (let i = 0; i < 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     out.push(toPeriod(d));
   }
@@ -48,10 +54,12 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
   const [fileKey, setFileKey] = useState(0);
   const [fileName, setFileName] = useState("");
   const [fileB64, setFileB64] = useState<string | null>(null);
-  const [competencePeriod, setCompetencePeriod] = useState(
-    () => months.find((m) => m.endsWith("-04")) ?? months[0] ?? toPeriod(new Date()),
+  const [settledPeriod, setSettledPeriod] = useState(
+    () => months[0] ?? toPeriod(new Date()),
   );
-  const [settledPeriod, setSettledPeriod] = useState(competencePeriod);
+  const [competencePeriod, setCompetencePeriod] = useState(() =>
+    heliosCompetenceFromPaymentMonth(months[0] ?? toPeriod(new Date())),
+  );
   const [multiMonth, setMultiMonth] = useState(false);
   const [competencePeriods, setCompetencePeriods] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +73,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     ambiguous: number;
     podsToUpdate: number;
   } | null>(null);
+  const [shiftHint, setShiftHint] = useState<string | null>(null);
 
   async function onFileChange(file: File | null) {
     setError(null);
@@ -84,7 +93,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     const guessed = guessCompetenceFromFilename(file.name);
     if (guessed) {
       setCompetencePeriod(guessed);
-      setSettledPeriod(guessed);
+      setSettledPeriod(addMonths(guessed, HELIOS_RECURRING_GENERATION_LAG_MONTHS));
     }
   }
 
@@ -183,9 +192,12 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
   const form = (
     <div className="space-y-3">
       <p className="rounded-lg border border-sky-200 bg-white/80 px-3 py-2 text-xs text-sky-950">
-        <strong>Flusso:</strong> il rendiconto del fornitore porta le provvigioni da{" "}
-        <em>Da incassare</em> a <em>Incassato</em> (tu hai ricevuto da Helios). Lo stato{" "}
-        <em>Pagato</em> lo usi solo quando liquidi il collaboratore, in Provvigioni.
+        <strong>Flusso:</strong> Helios versa nel mese in corso la competenza di{" "}
+        {HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi prima. Il rendiconto porta le
+        provvigioni da <em>Da incassare</em> a <em>Incassato</em>.{" "}
+        <strong>Mese rif.</strong> = competenza (luglio).{" "}
+        <strong>Data incasso</strong> = pagamento (settembre). Lo stato{" "}
+        <em>Pagato</em> lo usi solo quando liquidi il collaboratore.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="File Excel Helios (.xlsx)">
@@ -199,7 +211,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             <p className="mt-1 truncate text-xs text-slate-600">{fileName}</p>
           ) : null}
         </Field>
-        <Field label="Mese competenza (gettone)">
+        <Field label="Mese riferimento (competenza)">
           <Select
             value={competencePeriod}
             onChange={(e) => {
@@ -210,7 +222,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             disabled={multiMonth}
             title={
               multiMonth
-                ? "File multi-mese: la competenza è letta dalla colonna Inizio di ogni riga"
+                ? "File multi-mese: la competenza è letta dal nome foglio se diverso dal pagamento"
                 : undefined
             }
           >
@@ -229,20 +241,23 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
             <p className="mt-1 text-[11px] text-sky-800">
               File multi-mese rilevato:{" "}
               {competencePeriods.map(periodLabel).join(" · ")}. Competenza dal{" "}
-              <strong>nome di ogni foglio</strong> (es. Gennaio 2026).
+              <strong>nome di ogni foglio</strong> (es. Luglio 2026), non dal
+              pagamento.
             </p>
           ) : (
             <p className="mt-1 text-[11px] text-slate-500">
-              Nei file mensili la competenza è il mese del rendiconto (dal nome file o
-              dalla selezione sopra), non la colonna Inizio fornitura.
+              Helios paga a settembre la competenza di luglio. Qui resta luglio,
+              anche se il file o il foglio si chiama settembre.
             </p>
           )}
         </Field>
-        <Field label="Mese rendiconto fornitore">
+        <Field label="Mese pagamento / incasso">
           <Select
             value={settledPeriod}
             onChange={(e) => {
-              setSettledPeriod(e.target.value);
+              const next = e.target.value;
+              setSettledPeriod(next);
+              setCompetencePeriod(heliosCompetenceFromPaymentMonth(next));
               setPreview(null);
             }}
           >
@@ -255,6 +270,10 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
               </option>
             ))}
           </Select>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Quando Helios versa (bonifico). Cambia questo mese e il riferimento
+            si sposta di {HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi indietro.
+          </p>
         </Field>
       </div>
 
@@ -372,6 +391,71 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           </ul>
         </details>
       ) : null}
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+        <p className="font-medium">Rate già importate con mese rif. sbagliato</p>
+        <p className="mt-1">
+          Se in Provvigioni vedi <strong>set 2026</strong> al posto di luglio, le
+          vecchie righe non si correggono da sole. Conta prima, poi allinea solo
+          le rate Helios dove competenza = mese pagamento.
+        </p>
+        {shiftHint ? <p className="mt-1">{shiftHint}</p> : null}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              start(async () => {
+                const res = await previewHeliosMeseRifShiftAction();
+                if (!res.ok) {
+                  setShiftHint(res.error);
+                  return;
+                }
+                setShiftHint(
+                  res.count === 0
+                    ? "Nessuna rata Helios da allineare."
+                    : `${res.count} rate: mese rif. passerà da pagamento a pagamento − ${HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi (es. ${res.samples[0] ? `${periodLabel(res.samples[0].period)} → ${periodLabel(res.samples[0].targetPeriod)}` : "set → lug"}).`,
+                );
+              });
+            }}
+          >
+            Conta rate da allineare
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  "Allineare il mese riferimento Helios (competenza = pagamento − 2 mesi) solo sulle rate dove oggi coincidono? Le altre restano invariate.",
+                )
+              ) {
+                return;
+              }
+              start(async () => {
+                const res = await applyHeliosMeseRifShiftAction();
+                if (!res.ok) {
+                  setShiftHint(res.error);
+                  return;
+                }
+                setShiftHint(
+                  `Allineate ${res.shifted} rate` +
+                    (res.skipped > 0
+                      ? ` · ${res.skipped} saltate (già esiste la competenza corretta)`
+                      : "") +
+                    ". Ricarica Provvigioni.",
+                );
+                router.refresh();
+              });
+            }}
+          >
+            Allinea mese rif.
+          </Button>
+        </div>
+      </div>
     </div>
   );
 

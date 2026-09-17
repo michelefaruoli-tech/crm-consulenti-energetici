@@ -158,7 +158,6 @@ export async function loadProvvigioniFilterOptions(
         values.add(monthOf(row[field]) ?? EMPTY_FILTER_VALUE);
       }
       if (col === "collectionMonth" && query.expandMode) {
-        // Nelle liste espanse la colonna Incasso mostra il mese della rata.
         const statuses = rateStatusesForStatoFilter(query.stato);
         const rates = await prisma.recurringMonth.findMany({
           where: {
@@ -167,12 +166,16 @@ export async function loadProvvigioniFilterOptions(
               { contract: where },
             ],
           },
-          select: { period: true },
-          distinct: ["period"],
-          orderBy: { period: "desc" },
-          take: MAX_OPTIONS,
+          select: { period: true, settledPeriod: true },
+          take: MAX_OPTIONS * 4,
         });
-        for (const rate of rates) values.add(rate.period);
+        for (const rate of rates) {
+          values.add(
+            rate.settledPeriod && /^\d{4}-\d{2}$/.test(rate.settledPeriod)
+              ? rate.settledPeriod
+              : rate.period,
+          );
+        }
       }
       break;
     }

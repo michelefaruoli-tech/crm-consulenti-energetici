@@ -13,7 +13,7 @@
  *   dell'evento di chiusura.
  * - Nessun mese prima del primo, nessuno dopo l'ultimo.
  */
-import { toPeriod } from "@/lib/recurring";
+import { addMonths, toPeriod } from "@/lib/recurring";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 /** Giorno prima (es. fornitura nuova 1/10 → ultimo giorno del vecchio 30/09). */
@@ -114,4 +114,20 @@ export function outOfWindowReason(
   if (period < window.start) return OUT_OF_WINDOW_REASONS.beforeStart;
   if (window.end && period > window.end) return OUT_OF_WINDOW_REASONS.afterEnd;
   return null;
+}
+
+/**
+ * Ultimo mese di competenza da generare automaticamente.
+ * Con `generationLagMonths` (Helios = 2): non creare mesi oltre mese_corrente − lag.
+ */
+export function lastGeneratedPeriod(
+  window: RecurringWindow,
+  now: Date,
+  generationLagMonths = 0,
+): string {
+  const nowPeriod = toPeriod(now);
+  const effectiveNow =
+    generationLagMonths > 0 ? addMonths(nowPeriod, -generationLagMonths) : nowPeriod;
+  if (window.end && window.end < effectiveNow) return window.end;
+  return effectiveNow;
 }

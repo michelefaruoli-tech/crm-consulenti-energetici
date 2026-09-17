@@ -1,7 +1,56 @@
 import { canonicalSupplierName } from "@/lib/supplier-names";
+import { addMonths } from "@/lib/recurring";
 
 export const HELIOS_MONTHLY_RESIDENTE = 4;
 export const HELIOS_MONTHLY_ALTRO = 6;
+
+/**
+ * Helios paga nel mese corrente la mensilità di competenza di N mesi prima
+ * (es. a settembre paga luglio → ultimo mese generabile a settembre = luglio).
+ */
+export const HELIOS_RECURRING_GENERATION_LAG_MONTHS = 2;
+
+/** Ritardo generazione rate ricorrenti per fornitore (0 = mese calendario corrente). */
+export function recurringGenerationLagMonths(
+  supplierName: string | null | undefined,
+): number {
+  return isHeliosSupplier(supplierName) ? HELIOS_RECURRING_GENERATION_LAG_MONTHS : 0;
+}
+
+function validYearMonth(value: string | null | undefined): string | null {
+  const period = String(value ?? "").trim();
+  return /^\d{4}-\d{2}$/.test(period) ? period : null;
+}
+
+/** Competenza Helios dal mese di pagamento (settembre → luglio). */
+export function heliosCompetenceFromPaymentMonth(paymentPeriod: string): string {
+  return addMonths(paymentPeriod, -HELIOS_RECURRING_GENERATION_LAG_MONTHS);
+}
+
+/**
+ * Mese riferimento Helios = competenza, mai il mese di pagamento/incasso.
+ * Se foglio o selezione coincidono con il pagamento, si applica il lag di 2 mesi.
+ */
+export function resolveHeliosCompetencePeriod(opts: {
+  selectedCompetence?: string | null;
+  settledPeriod?: string | null;
+  inferredPeriod?: string | null;
+}): string {
+  const selected = validYearMonth(opts.selectedCompetence);
+  const settled = validYearMonth(opts.settledPeriod);
+  const inferred = validYearMonth(opts.inferredPeriod);
+  const inferredIsPayment = Boolean(inferred && settled && inferred === settled);
+
+  if (inferred && !inferredIsPayment) {
+    return inferred;
+  }
+  if (selected && settled && selected === settled) {
+    return heliosCompetenceFromPaymentMonth(settled);
+  }
+  if (selected) return selected;
+  if (settled) return heliosCompetenceFromPaymentMonth(settled);
+  return inferred ?? "";
+}
 
 /** Fornitore Helios (nome canonico o variante). */
 export function isHeliosSupplier(name: string | null | undefined): boolean {

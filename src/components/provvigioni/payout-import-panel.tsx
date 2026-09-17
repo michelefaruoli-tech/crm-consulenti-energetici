@@ -264,7 +264,7 @@ export function PayoutImportPanel({
             ))}
           </Select>
         </Field>
-        <Field label="Mese del rendiconto">
+        <Field label="Mese pagamento / incasso">
           <Select
             value={settledPeriod}
             onChange={(e) => setSettledPeriod(e.target.value)}
@@ -276,7 +276,7 @@ export function PayoutImportPanel({
             ))}
           </Select>
         </Field>
-        <Field label="Competenza se assente nel file">
+        <Field label="Mese riferimento (competenza se assente nel file)">
           <Select
             value={fallbackPeriod}
             onChange={(e) => setFallbackPeriod(e.target.value)}

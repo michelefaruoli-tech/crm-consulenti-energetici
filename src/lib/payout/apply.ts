@@ -135,7 +135,7 @@ export async function applyPayoutRowMark(params: {
   };
 
   const recurring = isRecurringMonthly(contract.recurrence);
-  const collectionDate = periodToDate(params.period);
+  const collectionDate = periodToDate(params.settledPeriod || params.period);
   const expected = numberOrZero(contract.commission?.expected);
   const amount = params.amount ?? expected;
 
