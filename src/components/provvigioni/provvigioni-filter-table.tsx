@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
 import {
+  bulkApplyCommissionFieldAction,
   bulkSetRecurrenceAction,
   bulkUpdateCommissionFieldsAction,
 } from "@/lib/commission-actions";
@@ -193,6 +194,76 @@ function commissionIdOf(row: { commissionId?: string; id?: string; contractId?: 
 
 const STORAGE_KEY_ADVANCED = "provvigioni-colonne-avanzate";
 
+const BULK_CONFIRM_THRESHOLD = 20;
+
+/** Colonne modificabili in massa (stessi permessi dell'edit cella). */
+const BULK_EDITABLE_COLUMNS: Array<{
+  colKey: string;
+  label: string;
+  inputType: "text" | "decimal" | "select";
+  options?: readonly string[];
+  placeholder?: string;
+}> = [
+  { colKey: "amount", label: "Gettone", inputType: "decimal", placeholder: "0" },
+  {
+    colKey: "stato",
+    label: "Stato",
+    inputType: "select",
+    options: PROVVIGIONE_STATO_OPTIONS,
+  },
+  { colKey: "notes", label: "Note", inputType: "text", placeholder: "Testo note…" },
+  { colKey: "podPdr", label: "POD / PDR", inputType: "text", placeholder: "POD o PDR" },
+  {
+    colKey: "operationType",
+    label: "Tipo operazione",
+    inputType: "select",
+    options: PROVVIGIONE_OPERATION_OPTIONS,
+  },
+  { colKey: "agency", label: "Agenzia", inputType: "text", placeholder: "Nome agenzia" },
+  {
+    colKey: "supplierName",
+    label: "Fornitore",
+    inputType: "text",
+    placeholder: "Nome fornitore",
+  },
+  {
+    colKey: "collectionMonth",
+    label: "Data incasso",
+    inputType: "text",
+    placeholder: "MM/AAAA o GG/MM/AAAA",
+  },
+  {
+    colKey: "supplyStartDate",
+    label: "Inizio fornitura",
+    inputType: "text",
+    placeholder: "GG/MM/AAAA",
+  },
+  {
+    colKey: "clientType",
+    label: "Tipologia",
+    inputType: "select",
+    options: ["Business", "Domestico"],
+  },
+  {
+    colKey: "stornoFlag",
+    label: "Storno",
+    inputType: "select",
+    options: ["No", "Sì"],
+  },
+  {
+    colKey: "stornoMonth",
+    label: "Data storno",
+    inputType: "text",
+    placeholder: "MM/AAAA",
+  },
+  {
+    colKey: "stornoAmount",
+    label: "Gettone storno",
+    inputType: "decimal",
+    placeholder: "0",
+  },
+];
+
 /** Colonne principali Provvigioni (spec utente) */
 const SIMPLE_COLUMN_ORDER = [
   "clientName",
@@ -300,6 +371,8 @@ export function ProvvigioniFilterTable({
   const [bulkRecurrenceKind, setBulkRecurrenceKind] = useState<
     "UT" | "M" | "R" | null
   >(null);
+  const [bulkFieldKey, setBulkFieldKey] = useState("amount");
+  const [bulkFieldValue, setBulkFieldValue] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Bozze: rowId → { colonna → valore } */
@@ -843,6 +916,112 @@ export function ProvvigioniFilterTable({
       },
       { monthsNote },
     );
+  }
+
+  const activeBulkField = useMemo(
+    () => BULK_EDITABLE_COLUMNS.find((c) => c.colKey === bulkFieldKey),
+    [bulkFieldKey],
+  );
+
+  function applyBulkField() {
+    if (selectedCount === 0) {
+      setError("Seleziona almeno una riga (checkbox a sinistra).");
+      return;
+    }
+    const fieldDef = activeBulkField;
+    const serverField = fieldDef ? FIELD_MAP[fieldDef.colKey] : undefined;
+    if (!fieldDef || !serverField) {
+      setError("Campo non valido per modifica massiva.");
+      return;
+    }
+
+    const trimmed = bulkFieldValue.trim();
+    if (fieldDef.inputType !== "text" && !trimmed) {
+      setError("Inserisci un valore da applicare.");
+      return;
+    }
+
+    const items = selectedRows
+      .map((row) => {
+        const commissionId = commissionIdOf(row);
+        if (!commissionId) return null;
+        const competencePeriod = competenceOfRow(row);
+        return {
+          commissionId,
+          ...(competencePeriod ? { competencePeriod } : {}),
+        };
+      })
+      .filter((item): item is { commissionId: string; competencePeriod?: string } =>
+        Boolean(item),
+      );
+
+    if (items.length === 0) {
+      setError("Nessuna commissione sulle righe selezionate.");
+      return;
+    }
+
+    const valueLabel =
+      fieldDef.inputType === "select" ? trimmed || "—" : trimmed || "(vuoto)";
+    const summary = [
+      `Modifica massiva: ${fieldDef.label}`,
+      `Nuovo valore: ${valueLabel}`,
+      `Righe: ${items.length}`,
+      items.length > BULK_CONFIRM_THRESHOLD
+        ? "\nAttenzione: operazione su molte righe."
+        : "",
+      "\nConfermi?",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (!window.confirm(summary)) return;
+
+    setError(null);
+    setMessage(null);
+    start(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("field", serverField);
+        fd.set("value", bulkFieldValue);
+        fd.set("items", JSON.stringify(items));
+        const res = await bulkApplyCommissionFieldAction(fd);
+        if (!res.ok) {
+          const partial =
+            res.applied != null && res.applied > 0
+              ? ` (${res.applied} ok, ${res.failed ?? 0} errori)`
+              : "";
+          const detail =
+            res.errors?.length
+              ? ` · ${res.errors
+                  .slice(0, 3)
+                  .map((e) => e.message)
+                  .join("; ")}`
+              : "";
+          setError(`${res.error}${partial}${detail}`);
+          if (res.applied && res.applied > 0) reloadList();
+          return;
+        }
+        setSelectedKeys(new Set());
+        setBulkFieldValue("");
+        const failHint =
+          res.failed > 0
+            ? ` · ${res.failed} non aggiornate${
+                res.errors.length
+                  ? ` (${res.errors
+                      .slice(0, 2)
+                      .map((e) => e.message)
+                      .join("; ")})`
+                  : ""
+              }`
+            : "";
+        setMessage(
+          `${fieldDef.label}: aggiornate ${res.applied} righe${failHint}`,
+        );
+        reloadList();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Errore modifica massiva");
+      }
+    });
   }
 
   function applyBulkRecurrence() {
@@ -1446,6 +1625,76 @@ export function ProvvigioniFilterTable({
             {selectedCount > 0 ? `${selectedCount} selezionate` : "Nessuna selezione"}
           </span>
         </div>
+
+        {selectedCount > 0 ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-950">
+              Modifica massiva
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-amber-900/80">
+              Scegli un campo, inserisci un valore e applicalo a tutte le righe
+              selezionate. Stessi permessi della modifica cella (le righe fuori
+              perimetro vengono saltate).
+            </p>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="flex min-w-[9rem] flex-col gap-1 text-[11px] font-medium text-amber-950">
+                Campo
+                <select
+                  className="rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                  value={bulkFieldKey}
+                  disabled={pending}
+                  onChange={(e) => {
+                    setBulkFieldKey(e.target.value);
+                    setBulkFieldValue("");
+                  }}
+                >
+                  {BULK_EDITABLE_COLUMNS.map((col) => (
+                    <option key={col.colKey} value={col.colKey}>
+                      {col.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-[10rem] flex-1 flex-col gap-1 text-[11px] font-medium text-amber-950">
+                Valore
+                {activeBulkField?.inputType === "select" ? (
+                  <select
+                    className="rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                    value={bulkFieldValue}
+                    disabled={pending}
+                    onChange={(e) => setBulkFieldValue(e.target.value)}
+                  >
+                    <option value="">— Scegli —</option>
+                    {(activeBulkField.options ?? []).map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                    value={bulkFieldValue}
+                    disabled={pending}
+                    placeholder={activeBulkField?.placeholder ?? ""}
+                    inputMode={
+                      activeBulkField?.inputType === "decimal" ? "decimal" : "text"
+                    }
+                    onChange={(e) => setBulkFieldValue(e.target.value)}
+                  />
+                )}
+              </label>
+              <button
+                type="button"
+                disabled={pending || selectedCount === 0}
+                className="rounded-lg bg-amber-800 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-900 disabled:opacity-50"
+                onClick={applyBulkField}
+              >
+                Applica a {selectedCount} righe
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 grid gap-3 xl:grid-cols-2">
           <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
