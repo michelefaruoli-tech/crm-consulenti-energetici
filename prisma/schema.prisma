@@ -73,6 +73,28 @@ enum AgendaPriority {
   HIGH
 }
 
+enum CteCategory {
+  RESIDENZIALE
+  BUSINESS
+  CONDOMINI
+}
+
+enum CtePriceKind {
+  FISSO
+  VARIABILE
+}
+
+enum CteUtility {
+  LUCE
+  GAS
+}
+
+enum CteNetworkLosses {
+  INCLUDED
+  EXCLUDED
+  NOT_APPLICABLE
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -182,6 +204,7 @@ model Supplier {
   contracts       Contract[]
   userScopes      UserSupplierScope[]
   payoutSources   PayoutSource[]
+  cteOffers       CteOffer[]
 }
 
 /// Scope fornitori per utente (Backoffice Enel vede solo Enel, ecc.)
@@ -1002,4 +1025,58 @@ model PayoutReportItem {
 
   @@unique([reportRunId, collaboratorId])
   @@index([delivery])
+}
+
+/// Offerta CTE (Condizioni Tecnico-Economiche) nel catalogo fornitori
+model CteOffer {
+  id                   String           @id @default(cuid())
+  supplierId           String
+  supplier             Supplier         @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  utility              CteUtility
+  category             CteCategory
+  commercialSegment    String?
+  offerName            String
+  priceKind            CtePriceKind
+  powerKwMin           Decimal?         @db.Decimal(10, 2)
+  powerKwMax           Decimal?         @db.Decimal(10, 2)
+  annualConsumptionMin Decimal?         @db.Decimal(14, 2)
+  annualConsumptionMax Decimal?         @db.Decimal(14, 2)
+  referenceConsumption Decimal?         @db.Decimal(12, 2)
+  networkLosses        CteNetworkLosses
+  ccvAnnual            Decimal?         @db.Decimal(10, 2)
+  ccvMonthly           Decimal?         @db.Decimal(10, 2)
+  spread               Decimal?         @db.Decimal(10, 6)
+  validFrom            DateTime?
+  validTo              DateTime?
+  active               Boolean          @default(true)
+  notes                String?
+  pdfStorageKey        String?
+  pdfFilename          String?
+  pdfMimeType          String?
+  pdfContentBase64     String?
+  pdfUploadedAt        DateTime?
+  extractionStatus     String?          @default("manual")
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  priceBands CtePriceBand[]
+
+  @@index([utility, category, priceKind, active])
+  @@index([supplierId, active])
+  @@index([validTo])
+  @@index([powerKwMin, powerKwMax])
+  @@index([annualConsumptionMin, annualConsumptionMax])
+}
+
+/// Fascia di prezzo energia (monoraria o F1/F2/F3)
+model CtePriceBand {
+  id          String   @id @default(cuid())
+  cteOfferId  String
+  cteOffer    CteOffer @relation(fields: [cteOfferId], references: [id], onDelete: Cascade)
+  timeBand    String
+  energyPrice Decimal  @db.Decimal(10, 6)
+  sortOrder   Int      @default(0)
+
+  @@unique([cteOfferId, timeBand])
+  @@index([cteOfferId])
 }

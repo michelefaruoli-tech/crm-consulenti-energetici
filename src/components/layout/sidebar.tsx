@@ -22,6 +22,7 @@ import {
   HardDrive,
   ShieldAlert,
   Receipt,
+  Tag,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
@@ -44,6 +45,7 @@ const NAV_ITEMS: Array<{
   },
   { href: "/agenda", label: "Agenda", icon: CalendarDays, roles: "all" },
   { href: "/contratti", label: "Contratti", icon: FileText, roles: "all" },
+  { href: "/catalogo-cte", label: "Offerte CTE", icon: Tag, roles: "all" },
   {
     href: "/archivio",
     label: "Archivio",
