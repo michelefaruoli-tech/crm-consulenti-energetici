@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && npm run check && next build",
+    "build": "prisma migrate deploy && prisma generate && npm run check && next build",
     "start": "next start",
     "lint": "eslint",
     "check": "tsx scripts/check-server-actions.ts && tsx scripts/check-neon-http.ts",

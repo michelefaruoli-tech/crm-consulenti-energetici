@@ -75,19 +75,18 @@ git push -u origin main
    - PDF default gratis: `OPENROUTER_PDF_ENGINE` = `cloudflare-ai` (Mistral OCR solo se Admin lo attiva in UI)
 5. Deploy
 
-Dopo il primo deploy, se le tabelle non esistono ancora, da locale (con `.env` puntato a Neon):
+Il **build di produzione Vercel** esegue `prisma migrate deploy` (usa `DATABASE_URL` già presente a build time; Neon pooled/HTTP va bene). Le migrate pendenti, incluso `20260916100000_cte_catalog`, si applicano al deploy. Non serve lanciarle da Windows.
+
+Seed iniziale (solo la prima volta, da un ambiente con `.env` reale):
 
 ```bash
-npm run db:migrate
 npm run db:seed
 ```
 
-Oppure in Vercel → Settings → Environment Variables ok, poi in un secondo deploy.
-
-Build command consigliato (già in `package.json` / Vercel default ok):
+Build command (già in `package.json`; Vercel usa `npm run build`):
 
 ```
-prisma generate && next build
+prisma migrate deploy && prisma generate && npm run check && next build
 ```
 
 ## 5) Sottodominio su Tophost (`crm.fmconsulenza.it`)
