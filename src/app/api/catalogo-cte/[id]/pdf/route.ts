@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { userCanManageCteOffer } from "@/lib/cte-scope";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
@@ -14,7 +15,8 @@ export async function GET(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session.role, "cte.catalog.view")) {
+  // Fase 1: PDF solo ADMIN/BACKOFFICE (cte.catalog.manage), non a tutti i viewer.
+  if (!hasPermission(session.role, "cte.catalog.manage")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -23,6 +25,7 @@ export async function GET(
     where: { id },
     select: {
       offerName: true,
+      supplierId: true,
       active: true,
       pdfFilename: true,
       pdfMimeType: true,
@@ -32,6 +35,9 @@ export async function GET(
 
   if (!offer || !offer.active) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (!(await userCanManageCteOffer(session, offer.supplierId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!offer.pdfContentBase64) {
     return NextResponse.json({ error: "PDF non allegato" }, { status: 404 });

@@ -154,15 +154,19 @@ export function CteCatalogFilterTable({
         getValue: (r) => (r.hasPdf ? "Sì" : "No"),
         render: (r) =>
           r.hasPdf ? (
-            <a
-              href={`/api/catalogo-cte/${String(r.id)}/pdf`}
-              className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
-              title="Scarica PDF allegato"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <FileText className="h-4 w-4" />
-              PDF
-            </a>
+            canManage ? (
+              <a
+                href={`/api/catalogo-cte/${String(r.id)}/pdf`}
+                className="inline-flex items-center gap-1 text-emerald-700 hover:underline"
+                title="Scarica PDF allegato"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <FileText className="h-4 w-4" />
+                PDF
+              </a>
+            ) : (
+              "Sì"
+            )
           ) : (
             "—"
           ),
