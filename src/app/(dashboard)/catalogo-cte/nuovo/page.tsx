@@ -36,8 +36,8 @@ export default async function NuovaCtePage() {
         </Link>
         <h1 className="mt-2 text-2xl font-bold text-slate-900">Nuova offerta CTE</h1>
         <p className="text-slate-500">
-          Carica prima il PDF del fornitore: il catalogo legge il testo e propone i campi. Controlla
-          e completa, poi salva. I numeri non letti restano vuoti. Max 3 MB.
+          Seleziona uno o più PDF insieme. Per ogni file: lettura testo, controllo campi, salvataggio;
+          poi il successivo. I numeri non letti restano vuoti. Max 3 MB a file, fino a 15 file.
         </p>
       </div>
       <CteOfferForm suppliers={suppliers} mode="create" />

@@ -127,3 +127,6 @@ export function parseCteFormData(formData: FormData): CteOfferFormValues {
 
 /** Max 3 MB per PDF CTE (storage postgres base64, come allegati contratto). */
 export const CTE_PDF_MAX_BYTES = 3 * 1024 * 1024;
+
+/** Max PDF selezionabili insieme su Nuova CTE (coda sequenziale). */
+export const CTE_PDF_MAX_FILES = 15;

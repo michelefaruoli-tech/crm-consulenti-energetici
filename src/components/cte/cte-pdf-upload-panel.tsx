@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { PersistentAlert } from "@/components/ui/persistent-alert";
-import { CTE_PDF_MAX_BYTES } from "@/lib/cte-form-schema";
+import { CTE_PDF_MAX_BYTES, CTE_PDF_MAX_FILES } from "@/lib/cte-form-schema";
 import type { CtePdfParseResult } from "@/lib/cte-pdf-parse";
+import type { CtePdfQueueItem } from "@/lib/cte-pdf-queue";
+import { queueProgressLabel, queueStatusLabel } from "@/lib/cte-pdf-queue";
 
 export type CtePdfParsePayload = {
   filename: string;
@@ -16,91 +18,143 @@ export type CtePdfParsePayload = {
   file: File;
 };
 
-export function CtePdfUploadPanel({
-  onParsed,
-  file,
-  onFile,
-}: {
-  onParsed: (payload: CtePdfParsePayload) => void;
-  file: File | null;
-  onFile: (file: File | null) => void;
-}) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  async function parseFile(next: File) {
-    setError(null);
-    if (next.size > CTE_PDF_MAX_BYTES) {
-      setError(`PDF troppo grande (max ${CTE_PDF_MAX_BYTES / (1024 * 1024)} MB)`);
-      return;
-    }
-    setPending(true);
-    try {
-      const fd = new FormData();
-      fd.set("pdfFile", next);
-      const res = await fetch("/api/catalogo-cte/parse-pdf", { method: "POST", body: fd });
-      const data = (await res.json()) as
-        | {
-            ok: true;
-            filename: string;
-            totalPages: number;
-            supplierId: string | null;
-            supplierMatchName: string | null;
-            extracted: CtePdfParseResult;
-            textPreview: string;
-          }
-        | { ok: false; error: string };
-      if (!data.ok) {
-        setError(data.error);
-        return;
-      }
-      onParsed({ ...data, file: next });
-    } catch {
-      setError("Lettura PDF non riuscita. Compila i campi a mano.");
-    } finally {
-      setPending(false);
-    }
+export async function parseCtePdfClient(
+  file: File,
+): Promise<{ ok: true; payload: CtePdfParsePayload } | { ok: false; error: string }> {
+  if (file.size > CTE_PDF_MAX_BYTES) {
+    return { ok: false, error: `PDF troppo grande (max ${CTE_PDF_MAX_BYTES / (1024 * 1024)} MB)` };
   }
+  try {
+    const fd = new FormData();
+    fd.set("pdfFile", file);
+    const res = await fetch("/api/catalogo-cte/parse-pdf", { method: "POST", body: fd });
+    const data = (await res.json()) as
+      | {
+          ok: true;
+          filename: string;
+          totalPages: number;
+          supplierId: string | null;
+          supplierMatchName: string | null;
+          extracted: CtePdfParseResult;
+          textPreview: string;
+        }
+      | { ok: false; error: string };
+    if (!data.ok) return { ok: false, error: data.error };
+    return { ok: true, payload: { ...data, file } };
+  } catch {
+    return { ok: false, error: "Lettura PDF non riuscita. Compila i campi a mano." };
+  }
+}
+
+export function CtePdfUploadPanel({
+  queue,
+  currentIndex,
+  parsePending,
+  parseError,
+  onSelectFiles,
+  onRetry,
+  onSkip,
+}: {
+  queue: CtePdfQueueItem[];
+  currentIndex: number;
+  parsePending: boolean;
+  parseError: string | null;
+  onSelectFiles: (files: File[]) => void;
+  onRetry: () => void;
+  onSkip: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const currentRaw = queue[currentIndex] ?? null;
+  const current =
+    currentRaw && currentRaw.status !== "saved" && currentRaw.status !== "skipped"
+      ? currentRaw
+      : null;
+  const total = queue.length;
+  const savedCount = queue.filter((item) => item.status === "saved").length;
 
   return (
     <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
       <h2 className="font-semibold text-slate-900">1. PDF della CTE</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Carica il foglio CTE del fornitore. Viene letto il testo del PDF (nessun OCR). I campi
-        riconosciuti si compilano da soli; quelli assenti restano vuoti.
+        Seleziona uno o più fogli CTE del fornitore (Ctrl/Cmd o Maiusc per più file). Per ogni PDF
+        viene letto il testo (nessun OCR): controlli, salvi, poi passa al successivo. I numeri non
+        trovati restano vuoti. Max {CTE_PDF_MAX_BYTES / (1024 * 1024)} MB a file, fino a{" "}
+        {CTE_PDF_MAX_FILES} file.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <input
+          ref={inputRef}
           type="file"
           accept="application/pdf,.pdf"
+          multiple
           className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
           onChange={(e) => {
-            const next = e.target.files?.[0] ?? null;
-            onFile(next);
-            if (next) void parseFile(next);
+            const list = e.target.files ? Array.from(e.target.files) : [];
+            e.target.value = "";
+            if (list.length) onSelectFiles(list);
           }}
         />
-        {file ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={pending}
-            onClick={() => void parseFile(file)}
-          >
-            {pending ? "Lettura…" : "Rileggi PDF"}
+        {current ? (
+          <Button type="button" variant="secondary" size="sm" disabled={parsePending} onClick={onRetry}>
+            {parsePending ? "Lettura…" : "Rileggi PDF"}
+          </Button>
+        ) : null}
+        {current && (current.status === "error" || current.status === "review") && total > 1 ? (
+          <Button type="button" variant="secondary" size="sm" disabled={parsePending} onClick={onSkip}>
+            Salta questo file
           </Button>
         ) : null}
       </div>
-      {file ? (
+      {current ? (
         <p className="mt-2 text-sm text-slate-700">
-          File: <span className="font-medium">{file.name}</span>
-          {pending ? " — analisi in corso…" : null}
+          In lavorazione: <span className="font-medium">{current.file.name}</span>
+          {total > 1 ? ` — ${queueProgressLabel(currentIndex, total)}` : null}
+          {parsePending ? " — analisi in corso…" : null}
         </p>
+      ) : (
+        <p className="mt-2 text-sm text-slate-500">Nessun PDF in coda. Puoi anche compilare a mano.</p>
+      )}
+      {total > 0 ? (
+        <ol className="mt-3 space-y-1 rounded-lg border border-emerald-100 bg-white/80 p-3 text-sm">
+          {queue.map((item, index) => {
+            const active = index === currentIndex;
+            return (
+              <li
+                key={`${item.file.name}-${item.file.size}-${index}`}
+                className={`flex flex-wrap items-baseline justify-between gap-2 rounded-md px-2 py-1 ${
+                  active ? "bg-emerald-100 font-medium text-slate-900" : "text-slate-700"
+                }`}
+              >
+                <span className="min-w-0 truncate">
+                  {index + 1}. {item.file.name}
+                  {item.savedOfferName ? ` → ${item.savedOfferName}` : null}
+                </span>
+                <span
+                  className={
+                    item.status === "saved"
+                      ? "text-emerald-800"
+                      : item.status === "error"
+                        ? "text-red-700"
+                        : item.status === "skipped"
+                          ? "text-slate-500"
+                          : "text-slate-600"
+                  }
+                >
+                  {queueStatusLabel(item.status)}
+                </span>
+              </li>
+            );
+          })}
+          {savedCount > 0 ? (
+            <li className="pt-1 text-xs text-slate-500">
+              Salvate {savedCount} di {total}
+            </li>
+          ) : null}
+        </ol>
       ) : null}
-      {error ? (
+      {parseError ? (
         <div className="mt-3">
-          <PersistentAlert title="PDF" messages={[error]} tone="error" />
+          <PersistentAlert title="PDF" messages={[parseError]} tone="error" />
         </div>
       ) : null}
     </section>

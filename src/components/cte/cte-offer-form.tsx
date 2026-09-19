@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
@@ -8,6 +8,7 @@ import { PersistentAlert } from "@/components/ui/persistent-alert";
 import {
   CtePdfParseReview,
   CtePdfUploadPanel,
+  parseCtePdfClient,
   type CtePdfParsePayload,
 } from "@/components/cte/cte-pdf-upload-panel";
 import {
@@ -16,6 +17,14 @@ import {
   updateCteOfferAction,
 } from "@/lib/cte-actions";
 import { CTE_PDF_MAX_BYTES } from "@/lib/cte-form-schema";
+import {
+  ctePdfFileKey,
+  nextUnfinishedIndex,
+  queueHasUnfinished,
+  queueProgressLabel,
+  selectCtePdfFiles,
+  type CtePdfQueueItem,
+} from "@/lib/cte-pdf-queue";
 import type { CteOfferInput } from "@/lib/cte-types";
 
 type SupplierOption = { id: string; name: string };
@@ -86,6 +95,10 @@ function initialToDraft(
   };
 }
 
+function emptyDraft(): FormDraft {
+  return initialToDraft(undefined, "");
+}
+
 function payloadToDraft(payload: CtePdfParsePayload): FormDraft {
   const e = payload.extracted;
   return {
@@ -135,7 +148,17 @@ export function CteOfferForm({
   const [removePdf, setRemovePdf] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [parsePayload, setParsePayload] = useState<CtePdfParsePayload | null>(null);
+  const [queue, setQueue] = useState<CtePdfQueueItem[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [parsePending, setParsePending] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [selectErrors, setSelectErrors] = useState<string[]>([]);
+  const parseGen = useRef(0);
   const fromPdf = parsePayload != null;
+  const isMultiQueue = queue.length > 1;
+  const queueStatuses = queue.map((item) => item.status);
+  const queueUnfinished = queueHasUnfinished(queueStatuses);
+  const remainingAfterCurrent = nextUnfinishedIndex(queueStatuses, currentIndex);
 
   function applyDraft(next: FormDraft) {
     setDraft(next);
@@ -143,6 +166,87 @@ export function CteOfferForm({
     setPriceKind(next.priceKind);
     setBands(next.bands);
     setFieldsKey((k) => k + 1);
+  }
+
+  function patchQueue(index: number, patch: Partial<CtePdfQueueItem>) {
+    setQueue((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }
+
+  function resetCurrentForm() {
+    setParsePayload(null);
+    setParseError(null);
+    applyDraft(emptyDraft());
+  }
+
+  async function parseQueueItem(index: number, file: File) {
+    const gen = ++parseGen.current;
+    setPdfFile(file);
+    setCurrentIndex(index);
+    setParsePayload(null);
+    setParseError(null);
+    setError(null);
+    patchQueue(index, { status: "reading", error: undefined });
+    setParsePending(true);
+    const result = await parseCtePdfClient(file);
+    if (gen !== parseGen.current) return;
+    setParsePending(false);
+    if (!result.ok) {
+      setParseError(result.error);
+      patchQueue(index, { status: "error", error: result.error });
+      applyDraft(emptyDraft());
+      return;
+    }
+    patchQueue(index, { status: "review", error: undefined });
+    setParsePayload(result.payload);
+    applyDraft(payloadToDraft(result.payload));
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleSelectFiles(files: File[]) {
+    const statuses = queue.map((item) => item.status);
+    const replace = queue.length === 0 || !queueHasUnfinished(statuses);
+    const existing = replace ? [] : queue;
+    const selected = selectCtePdfFiles(files, {
+      alreadyCount: existing.length,
+      existingKeys: existing.map((item) => ctePdfFileKey(item.file)),
+    });
+    setSelectErrors(selected.errors);
+    if (selected.files.length === 0) return;
+    const added: CtePdfQueueItem[] = selected.files.map((file) => ({
+      file,
+      status: "pending" as const,
+    }));
+    const nextQueue = replace ? added : [...existing, ...added];
+    setQueue(nextQueue);
+    if (replace) {
+      resetCurrentForm();
+      void parseQueueItem(0, added[0]!.file);
+      return;
+    }
+    if (!queueHasUnfinished(statuses)) {
+      void parseQueueItem(existing.length, added[0]!.file);
+    }
+  }
+
+  function handleRetryParse() {
+    const item = queue[currentIndex];
+    if (!item) return;
+    void parseQueueItem(currentIndex, item.file);
+  }
+
+  function handleSkipCurrent() {
+    parseGen.current += 1;
+    setParsePending(false);
+    patchQueue(currentIndex, { status: "skipped", error: undefined });
+    const statuses = queue.map((item, i) => (i === currentIndex ? "skipped" : item.status));
+    const next = nextUnfinishedIndex(statuses, currentIndex);
+    if (next == null) {
+      setPdfFile(null);
+      resetCurrentForm();
+      return;
+    }
+    const nextItem = queue[next];
+    if (nextItem) void parseQueueItem(next, nextItem.file);
   }
 
   function addBand() {
@@ -172,10 +276,37 @@ export function CteOfferForm({
 
     try {
       const action = mode === "create" ? createCteOfferAction : updateCteOfferAction;
+      if (mode === "create" && queue[currentIndex]) {
+        patchQueue(currentIndex, { status: "saving" });
+      }
       const res = await action(fd);
       if (!res.ok) {
         setError(res.error);
         setPending(false);
+        if (mode === "create" && queue[currentIndex]) {
+          patchQueue(currentIndex, { status: parsePayload ? "review" : "error" });
+        }
+        return;
+      }
+      const savedName = String(fd.get("offerName") ?? "").trim();
+      if (mode === "create" && isMultiQueue) {
+        patchQueue(currentIndex, {
+          status: "saved",
+          savedId: res.id,
+          savedOfferName: savedName || queue[currentIndex]?.file.name,
+        });
+        const statuses = queue.map((item, i) => (i === currentIndex ? "saved" : item.status));
+        const next = nextUnfinishedIndex(statuses, currentIndex);
+        setPending(false);
+        if (next == null) {
+          setPdfFile(null);
+          resetCurrentForm();
+          router.refresh();
+          return;
+        }
+        const nextItem = queue[next];
+        resetCurrentForm();
+        if (nextItem) void parseQueueItem(next, nextItem.file);
         return;
       }
       router.push(`/catalogo-cte/${res.id}?saved=1`);
@@ -183,6 +314,9 @@ export function CteOfferForm({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Errore di salvataggio");
       setPending(false);
+      if (mode === "create" && queue[currentIndex]) {
+        patchQueue(currentIndex, { status: parsePayload ? "review" : "error" });
+      }
     }
   }
 
@@ -212,25 +346,57 @@ export function CteOfferForm({
       {mode === "create" ? (
         <>
           <CtePdfUploadPanel
-            file={pdfFile}
-            onFile={setPdfFile}
-            onParsed={(payload) => {
-              setPdfFile(payload.file);
-              setParsePayload(payload);
-              applyDraft(payloadToDraft(payload));
-            }}
+            queue={queue}
+            currentIndex={currentIndex}
+            parsePending={parsePending}
+            parseError={parseError}
+            onSelectFiles={handleSelectFiles}
+            onRetry={handleRetryParse}
+            onSkip={handleSkipCurrent}
           />
+          {selectErrors.length ? (
+            <PersistentAlert title="Selezione PDF" messages={selectErrors} tone="error" />
+          ) : null}
           {parsePayload ? <CtePdfParseReview payload={parsePayload} /> : null}
+          {queue.some((item) => item.status === "saved") ? (
+            <section className="rounded-xl border border-emerald-200 bg-white p-4">
+              <h2 className="font-semibold text-slate-900">Offerte create in questa sessione</h2>
+              <ul className="mt-2 list-disc pl-5 text-sm text-slate-800">
+                {queue
+                  .filter((item) => item.status === "saved" && item.savedId)
+                  .map((item) => (
+                    <li key={item.savedId}>
+                      <a
+                        href={`/catalogo-cte/${item.savedId}`}
+                        className="font-medium text-emerald-700 hover:underline"
+                      >
+                        {item.savedOfferName || item.file.name}
+                      </a>
+                      <span className="text-slate-500"> · {item.file.name}</span>
+                    </li>
+                  ))}
+              </ul>
+              {!queueUnfinished && queue.length > 0 ? (
+                <p className="mt-3 text-sm text-slate-600">
+                  Coda completata. Puoi caricare altri PDF oppure tornare al catalogo.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
           <p className="text-sm text-slate-500">
-            Puoi anche compilare tutto a mano se il PDF non è disponibile. Il file resta allegato
-            all&apos;offerta al salvataggio.
+            Ogni PDF resta allegato alla propria offerta al salvataggio. Se il file non è
+            disponibile puoi compilare a mano.
           </p>
         </>
       ) : null}
 
       <div key={fieldsKey} className="space-y-6">
         <h2 className="font-semibold text-slate-900">
-          {mode === "create" ? "3. Verifica e completa i campi" : "Dati offerta"}
+          {mode === "create"
+            ? isMultiQueue && queueUnfinished
+              ? `3. Verifica e completa i campi (${queueProgressLabel(currentIndex, queue.length)})`
+              : "3. Verifica e completa i campi"
+            : "Dati offerta"}
         </h2>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Fornitore *" fillStatus={fromPdf ? (draft.supplierId ? "filled" : "empty") : "off"}>
@@ -466,9 +632,22 @@ export function CteOfferForm({
       {error ? <PersistentAlert title="Errore" messages={[error]} tone="error" /> : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Salvataggio…" : mode === "create" ? "Crea offerta" : "Salva modifiche"}
+        <Button type="submit" disabled={pending || parsePending}>
+          {pending
+            ? "Salvataggio…"
+            : mode === "create" && isMultiQueue && queueUnfinished && remainingAfterCurrent != null
+              ? `Salva e passa al successivo (${queueProgressLabel(currentIndex, queue.length)})`
+              : mode === "create" && isMultiQueue && queueUnfinished
+                ? "Salva ultima offerta"
+                : mode === "create"
+                  ? "Crea offerta"
+                  : "Salva modifiche"}
         </Button>
+        {mode === "create" && isMultiQueue && !queueUnfinished ? (
+          <Button type="button" onClick={() => router.push("/catalogo-cte")}>
+            Vai al catalogo
+          </Button>
+        ) : null}
         <Button type="button" variant="secondary" onClick={() => router.push("/catalogo-cte")}>
           Annulla
         </Button>

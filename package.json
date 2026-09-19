@@ -11,6 +11,7 @@
     "check:server-actions": "tsx scripts/check-server-actions.ts",
     "check:neon-http": "tsx scripts/check-neon-http.ts",
     "check:cte-pdf": "tsx scripts/check-cte-pdf-parse.ts",
+    "check:cte-queue": "tsx scripts/check-cte-pdf-queue.ts",
     "check:recurrence": "tsx scripts/verify-recurrence-kind.ts",
     "check:recurring-window": "tsx scripts/check-recurring-window.ts",
     "db:cleanup-recurring": "tsx scripts/cleanup-recurring-out-of-range.ts",
