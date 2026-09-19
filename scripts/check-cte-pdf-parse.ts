@@ -1,10 +1,10 @@
 /**
- * Verifica il mapper CTE sui 5 PDF di prova (livello testo, niente OCR).
+ * Verifica il mapper CTE sui PDF di prova (livello testo, niente OCR).
  * Uso: npx tsx scripts/check-cte-pdf-parse.ts
  */
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseCtePdfText } from "../src/lib/cte-pdf-parse";
+import { parseCtePdfText, parseItalianNumber } from "../src/lib/cte-pdf-parse";
 import { extractCtePdfText } from "../src/lib/cte-pdf-text";
 
 const SAMPLES_DIR =
@@ -14,6 +14,7 @@ const SAMPLES_DIR =
 type Expect = {
   file: string;
   offerName: string;
+  supplierName?: string;
   utility: "LUCE" | "GAS";
   category: "RESIDENZIALE" | "BUSINESS";
   priceKind: "FISSO";
@@ -107,6 +108,26 @@ const EXPECTED: Expect[] = [
     annualConsumptionMax: 4_000_000,
     networkLosses: "INCLUDED",
   },
+  {
+    file: "FIX_BUSINESS_SUPER_ADAGIO_24_MESI.pdf",
+    offerName: "FIX BUSINESS SUPER ADAGIO 24 MESI",
+    supplierName: "Duferco Energia",
+    utility: "LUCE",
+    category: "BUSINESS",
+    priceKind: "FISSO",
+    bands: [
+      { timeBand: "F1", energyPrice: 0.16225 },
+      { timeBand: "F2", energyPrice: 0.17589 },
+      { timeBand: "F3", energyPrice: 0.15037 },
+    ],
+    ccvAnnual: 144,
+    validTo: "2026-09-30",
+    validFrom: "2026-09-01",
+    powerKwMin: null,
+    powerKwMax: null,
+    annualConsumptionMax: 30_000,
+    networkLosses: "INCLUDED",
+  },
 ];
 
 function almost(a: number, b: number): boolean {
@@ -114,6 +135,19 @@ function almost(a: number, b: number): boolean {
 }
 
 async function main() {
+  if (parseItalianNumber("30.000") !== 30_000) {
+    console.error("❌ parseItalianNumber(30.000) atteso 30000");
+    process.exit(1);
+  }
+  if (parseItalianNumber("0,16225") !== 0.16225) {
+    console.error("❌ parseItalianNumber(0,16225)");
+    process.exit(1);
+  }
+  if (parseItalianNumber("144,00") !== 144) {
+    console.error("❌ parseItalianNumber(144,00)");
+    process.exit(1);
+  }
+
   if (!existsSync(SAMPLES_DIR)) {
     console.error(`❌ Cartella campioni assente: ${SAMPLES_DIR}`);
     process.exit(1);
@@ -133,6 +167,9 @@ async function main() {
     const problems: string[] = [];
     if (parsed.textChars < 400) problems.push(`testo troppo corto (${parsed.textChars})`);
     if (parsed.offerName !== exp.offerName) problems.push(`nome=${parsed.offerName}`);
+    if (exp.supplierName && parsed.supplierName !== exp.supplierName) {
+      problems.push(`supplier=${parsed.supplierName}`);
+    }
     if (parsed.utility !== exp.utility) problems.push(`utility=${parsed.utility}`);
     if (parsed.category !== exp.category) problems.push(`category=${parsed.category}`);
     if (parsed.priceKind !== exp.priceKind) problems.push(`priceKind=${parsed.priceKind}`);
@@ -176,7 +213,7 @@ async function main() {
     console.error(`\n❌ ${failed} PDF non allineati al mapper`);
     process.exit(1);
   }
-  console.log("\n✅ Mapper CTE allineato ai 5 PDF di prova.");
+  console.log("\n✅ Mapper CTE allineato ai PDF di prova.");
 }
 
 main().catch((e) => {

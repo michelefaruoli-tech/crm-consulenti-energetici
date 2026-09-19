@@ -15,7 +15,7 @@ export type CtePdfHit = {
 };
 
 export type CtePdfParseResult = {
-  layout: "enel-wow" | "enel-business" | "soluzione-energia" | "generic";
+  layout: "enel-wow" | "enel-business" | "soluzione-energia" | "duferco-business" | "generic";
   supplierName: string | null;
   offerName: string | null;
   utility: CteUtility | null;
@@ -84,8 +84,8 @@ export function parseItalianNumber(raw: string): number | null {
     const n = Number(s.replace(/\./g, "").replace(",", "."));
     return Number.isFinite(n) ? n : null;
   }
-  const parts = s.split(".");
-  if (parts.length > 2) {
+  // 30.000 / 1.000.000 = migliaia italiane (non decimale)
+  if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
     const n = Number(s.replace(/\./g, ""));
     return Number.isFinite(n) ? n : null;
   }
@@ -147,7 +147,29 @@ function plausibleCcv(n: number): boolean {
   return n >= 10 && n <= 800;
 }
 
+const ITALIAN_MONTHS: Record<string, number> = {
+  gennaio: 1,
+  febbraio: 2,
+  marzo: 3,
+  aprile: 4,
+  maggio: 5,
+  giugno: 6,
+  luglio: 7,
+  agosto: 8,
+  settembre: 9,
+  ottobre: 10,
+  novembre: 11,
+  dicembre: 12,
+};
+
+function lastDayOfMonth(year: number, month1to12: number): number {
+  return new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
+}
+
 function detectLayout(line: string): CtePdfParseResult["layout"] {
+  if (/duferco energia/i.test(line) && /fix business/i.test(line)) {
+    return "duferco-business";
+  }
   if (/soluzione energia impresa/i.test(line) || (/F1\s+F2\s+F3/.test(line) && /pmi/i.test(line))) {
     return "soluzione-energia";
   }
@@ -161,6 +183,12 @@ function detectLayout(line: string): CtePdfParseResult["layout"] {
 }
 
 function extractOfferName(text: string, line: string, hits: CtePdfHit[]): string | null {
+  const duferco = text.match(/^(FIX BUSINESS[ A-Za-z0-9]+)$/im);
+  if (duferco?.[1]) {
+    const name = duferco[1].trim();
+    addHit(hits, "offerName", name, duferco[0], 0);
+    return name;
+  }
   const titled = text.match(/^(Enel Fix [A-Za-z0-9 ]+?)$/im);
   if (titled?.[1] && !/_/.test(titled[1])) {
     const name = titled[1].trim();
@@ -194,6 +222,11 @@ function extractOfferName(text: string, line: string, hits: CtePdfHit[]): string
 }
 
 function extractSupplierName(line: string, hits: CtePdfHit[]): string | null {
+  const duferco = line.match(/\b(Duferco Energia)\b/i);
+  if (duferco?.[1]) {
+    addHit(hits, "supplierName", "Duferco Energia", line, duferco.index ?? 0);
+    return "Duferco Energia";
+  }
   const m = line.match(/\b(Enel Energia)\b/i);
   if (m?.[1]) {
     addHit(hits, "supplierName", "Enel Energia", line, m.index ?? 0);
@@ -231,8 +264,13 @@ function extractCategory(line: string, hits: CtePdfHit[]): CteCategory | null {
     addHit(hits, "category", "CONDOMINI", line, line.search(/condomin/i));
     return "CONDOMINI";
   }
-  if (/non domest/i.test(line) || /uso non domestico/i.test(line) || /\bpmi\b/i.test(line)) {
-    addHit(hits, "category", "BUSINESS", line, line.search(/non domest|pmi/i));
+  if (
+    /non domest/i.test(line) ||
+    /uso non domestico/i.test(line) ||
+    /\bpmi\b/i.test(line) ||
+    /clienti business/i.test(line)
+  ) {
+    addHit(hits, "category", "BUSINESS", line, line.search(/non domest|pmi|clienti business/i));
     return "BUSINESS";
   }
   if (/uso domestico|clienti domestici|siti ad uso domestico/i.test(line)) {
@@ -250,7 +288,11 @@ function extractCommercialSegment(line: string, hits: CtePdfHit[]): string | nul
 }
 
 function extractPriceKind(line: string, hits: CtePdfHit[]): CtePriceKind | null {
-  if (/offerta a prezzo fisso|prezzo della componente energia monorario|fissi e invariabili/i.test(line)) {
+  if (
+    /offerta a prezzo fisso|prezzo della componente energia monorario|fissi e invariabili|prezzo energia rimarrà fisso|fisso e invariabile per i primi/i.test(
+      line,
+    )
+  ) {
     addHit(hits, "priceKind", "FISSO", line, line.search(/fisso|fissi/i));
     return "FISSO";
   }
@@ -322,7 +364,10 @@ function extractConsumption(line: string, utility: CteUtility | null, hits: CteP
     }
   }
   const fino = line.match(
-    new RegExp(`consumi annui fino a\\s*([\\d.]+)\\s*${utility === "GAS" ? "Smc" : "kWh"}`, "i"),
+    new RegExp(
+      `consumi(?:\\s+annui)?\\s+fino a\\s*([\\d.]+)\\s*${utility === "GAS" ? "Smc" : "kWh"}`,
+      "i",
+    ),
   );
   if (fino) {
     const max = parseItalianNumber(fino[1] ?? "");
@@ -354,6 +399,25 @@ function extractValidity(
     if (to) addHit(hits, "validTo", to, line, entro.index ?? 0);
     return { from: null, to };
   }
+  const monthNames = Object.keys(ITALIAN_MONTHS).join("|");
+  const monthOnly = line.match(
+    new RegExp(
+      `periodo di validit[àa]'?(?: della cte)?:\\s*(${monthNames})\\s+(\\d{4})`,
+      "i",
+    ),
+  );
+  if (monthOnly) {
+    const month = ITALIAN_MONTHS[monthOnly[1]!.toLowerCase()];
+    const year = Number(monthOnly[2]);
+    if (month && year >= 2000 && year <= 2100) {
+      const last = lastDayOfMonth(year, month);
+      const from = `${year}-${String(month).padStart(2, "0")}-01`;
+      const to = `${year}-${String(month).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+      addHit(hits, "validFrom", from, line, monthOnly.index ?? 0);
+      addHit(hits, "validTo", to, line, monthOnly.index ?? 0);
+      return { from, to };
+    }
+  }
   return { from: null, to: null };
 }
 
@@ -382,6 +446,16 @@ function extractCcv(
       if (/dispbt/i.test(line)) {
         warnings.push("Quota fissa del PDF include CCV + DispBT: verifica se va usata intera come CCV catalogo.");
       }
+      return n;
+    }
+  }
+  const qcv = line.match(
+    /quota commercializzazione vendita qcv\s*([\d.,]+)\s*(?:€|Euro)\s*\/\s*POD\s*\/\s*anno/i,
+  );
+  if (qcv) {
+    const n = parseItalianNumber(qcv[1] ?? "");
+    if (n != null && plausibleCcv(n)) {
+      addHit(hits, "ccvAnnual", String(n), line, qcv.index ?? 0);
       return n;
     }
   }
@@ -453,6 +527,44 @@ function extractFasciaTrios(line: string): FasciaTrio[] {
   return out;
 }
 
+function extractDufercoP0Table(line: string): {
+  f1: number;
+  f2: number;
+  f3: number;
+  peak: number;
+  offPeak: number;
+  mono: number;
+  index: number;
+} | null {
+  const m = line.match(
+    /P0F1\s+P0F2\s+P0F3\s+P0p\s+P0op\s+P0F1\s*=\s*F2\s*=\s*F3\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)/i,
+  );
+  if (!m) return null;
+  const f1 = parseItalianNumber(m[1] ?? "");
+  const f2 = parseItalianNumber(m[2] ?? "");
+  const f3 = parseItalianNumber(m[3] ?? "");
+  const peak = parseItalianNumber(m[4] ?? "");
+  const offPeak = parseItalianNumber(m[5] ?? "");
+  const mono = parseItalianNumber(m[6] ?? "");
+  if (
+    f1 == null ||
+    f2 == null ||
+    f3 == null ||
+    peak == null ||
+    offPeak == null ||
+    mono == null ||
+    !plausibleLucePrice(f1) ||
+    !plausibleLucePrice(f2) ||
+    !plausibleLucePrice(f3) ||
+    !plausibleLucePrice(peak) ||
+    !plausibleLucePrice(offPeak) ||
+    !plausibleLucePrice(mono)
+  ) {
+    return null;
+  }
+  return { f1, f2, f3, peak, offPeak, mono, index: m.index ?? 0 };
+}
+
 function extractNetworkLosses(
   line: string,
   utility: CteUtility | null,
@@ -463,7 +575,7 @@ function extractNetworkLosses(
     addHit(hits, "networkLosses", "NOT_APPLICABLE", line, 0);
     return "NOT_APPLICABLE";
   }
-  if (usedBtIncluded || /comprensiv[oi] delle perdite|perdite di rete incluse|prezzo luce è comprensivo delle perdite/i.test(line)) {
+  if (usedBtIncluded || /comprensiv[oi] delle perdite|perdite di rete incluse|prezzo luce è comprensivo delle perdite|lordo delle perdite/i.test(line)) {
     addHit(hits, "networkLosses", "INCLUDED", line, line.search(/perdite/i));
     return "INCLUDED";
   }
@@ -530,17 +642,51 @@ export function parseCtePdfText(rawText: string): CtePdfParseResult {
     }
     noteParts.push("Prezzi F1/F2/F3 da tabella BT (perdite incluse).");
   } else {
-    const mono = extractMonoPrice(line, utility, hits);
-    if (mono != null) {
-      bands = [{ timeBand: "MONO", energyPrice: mono }];
+    const dufercoP0 = extractDufercoP0Table(line);
+    if (dufercoP0) {
+      bands = [
+        { timeBand: "F1", energyPrice: dufercoP0.f1 },
+        { timeBand: "F2", energyPrice: dufercoP0.f2 },
+        { timeBand: "F3", energyPrice: dufercoP0.f3 },
+      ];
+      addHit(
+        hits,
+        "bands",
+        `F1 ${dufercoP0.f1} / F2 ${dufercoP0.f2} / F3 ${dufercoP0.f3} €/kWh`,
+        line,
+        dufercoP0.index,
+      );
+      warnings.push(
+        `Trovato anche Mono ${dufercoP0.mono} €/kWh e Peak/Off Peak ${dufercoP0.peak}/${dufercoP0.offPeak} — non applicati (usate Fasce Arera). Su POD non orari il PDF applica Mono.`,
+      );
+      noteParts.push("Prezzi F1/F2/F3 da tabella Fasce Arera (P0). Durata prezzo fisso: 24 mesi.");
+    } else {
+      const mono = extractMonoPrice(line, utility, hits);
+      if (mono != null) {
+        bands = [{ timeBand: "MONO", energyPrice: mono }];
+      }
     }
   }
 
-  const usedBt = Boolean(btTrio);
+  const usedBt = Boolean(btTrio) || bands.some((b) => b.timeBand === "F1");
   const networkLosses = extractNetworkLosses(line, utility, usedBt, hits);
 
   if (layout === "enel-wow" && /dispbt/i.test(line) && ccvAnnual != null) {
     noteParts.push("Quota fissa PDF = CCV Enel + DispBT ARERA.");
+  }
+
+  if (layout === "duferco-business") {
+    if (ccvAnnual != null) {
+      noteParts.push("QCV Duferco usata come CCV catalogo.");
+    }
+    if (power.min == null && power.max == null) {
+      warnings.push("Potenza non indicata in kW (solo bassa tensione). Completa a mano se serve.");
+    }
+    if (validity.from && !/adesioni dal|adesioni entro il/i.test(line)) {
+      warnings.push(
+        "Validità CTE nel PDF indica solo il mese: date compilate come primo e ultimo giorno di quel mese. Verifica.",
+      );
+    }
   }
 
   if (text.trim().length < 200) {
