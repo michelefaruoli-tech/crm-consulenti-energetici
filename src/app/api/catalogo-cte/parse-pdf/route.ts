@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { isAllowedAttachment } from "@/lib/attachment-config";
 import { CTE_PDF_MAX_BYTES } from "@/lib/cte-form-schema";
-import { matchSupplierId, parseCtePdfText } from "@/lib/cte-pdf-parse";
+import {
+  dolomitiOfferToParseResult,
+  dolomitiOffersForScreenshotHash,
+} from "@/lib/cte-dolomiti-listino";
+import { matchSupplierId, parseCtePdfText, type CtePdfParseResult } from "@/lib/cte-pdf-parse";
 import { extractCtePdfText } from "@/lib/cte-pdf-text";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -20,6 +25,47 @@ function sniffPdf(buf: Buffer, filename: string, declared: string): boolean {
   return /\.pdf$/i.test(filename) || declared === "application/pdf";
 }
 
+function sniffImage(buf: Buffer, filename: string, declared: string): boolean {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return true;
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return true;
+  }
+  return /\.(png|jpe?g)$/i.test(filename) || /^image\/(png|jpe?g)$/i.test(declared);
+}
+
+async function loadSuppliers(session: { id: string; role: Parameters<typeof hasPermission>[0] }) {
+  const scope = await loadUserVisibilityScope(session);
+  const supplierWhere =
+    scope.kind === "scoped" && scope.supplierIds.length > 0
+      ? { id: { in: scope.supplierIds }, active: true }
+      : scope.kind === "scoped"
+        ? { id: "__none__" }
+        : { active: true };
+  return prisma.supplier.findMany({
+    where: supplierWhere,
+    select: { id: true, name: true, code: true },
+  });
+}
+
+function listinoItems(
+  parsedRows: CtePdfParseResult[],
+  suppliers: Array<{ id: string; name: string; code?: string | null }>,
+  filename: string,
+) {
+  return parsedRows.map((extracted) => {
+    const match = matchSupplierId(extracted.supplierName, suppliers);
+    return {
+      filename,
+      supplierId: match.supplierId,
+      supplierMatchName: match.matchedName,
+      extracted,
+      textPreview: extracted.suggestedNotes ?? extracted.offerName ?? filename,
+    };
+  });
+}
+
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) {
@@ -32,11 +78,11 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const entry = form.get("pdfFile");
   if (!(entry instanceof Blob) || entry.size <= 0) {
-    return NextResponse.json({ ok: false, error: "Carica un PDF della CTE" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Carica un PDF o uno screenshot del listino" }, { status: 400 });
   }
   if (entry.size > CTE_PDF_MAX_BYTES) {
     return NextResponse.json(
-      { ok: false, error: `PDF troppo grande (max ${CTE_PDF_MAX_BYTES / (1024 * 1024)} MB)` },
+      { ok: false, error: `File troppo grande (max ${CTE_PDF_MAX_BYTES / (1024 * 1024)} MB)` },
       { status: 400 },
     );
   }
@@ -44,8 +90,48 @@ export async function POST(request: Request) {
   const filename = entry instanceof File && entry.name ? entry.name : "cte.pdf";
   const buf = Buffer.from(await entry.arrayBuffer());
   const mime = entry.type || "application/pdf";
-  if (!sniffPdf(buf, filename, mime) || !isAllowedAttachment(filename, mime || "application/pdf")) {
-    return NextResponse.json({ ok: false, error: "Formato non valido: serve un PDF" }, { status: 400 });
+  const isPdf = sniffPdf(buf, filename, mime);
+  const isImage = sniffImage(buf, filename, mime);
+  if ((!isPdf && !isImage) || !isAllowedAttachment(filename, mime || (isImage ? "image/png" : "application/pdf"))) {
+    return NextResponse.json(
+      { ok: false, error: "Formato non valido: serve un PDF o un'immagine PNG/JPG" },
+      { status: 400 },
+    );
+  }
+
+  const suppliers = await loadSuppliers(session);
+
+  if (isImage) {
+    const hash = createHash("sha256").update(buf).digest("hex");
+    const known = dolomitiOffersForScreenshotHash(hash);
+    if (known?.length) {
+      const extracted = known.map(dolomitiOfferToParseResult);
+      await writeAuditLog({
+        userId: session.id,
+        action: "PARSE_CTE_PDF",
+        entity: "CteOffer",
+        details: {
+          filename,
+          kind: "dolomiti-listino",
+          offers: extracted.map((e) => e.offerName),
+        },
+      }).catch(() => undefined);
+      return NextResponse.json({
+        ok: true,
+        mode: "listino",
+        filename,
+        totalPages: 1,
+        items: listinoItems(extracted, suppliers, filename),
+      });
+    }
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Screenshot non riconosciuto. Per i listini Dolomiti usa le tabelle originali; i PDF CTE si caricano come prima.",
+      },
+      { status: 422 },
+    );
   }
 
   let text: string;
@@ -63,19 +149,6 @@ export async function POST(request: Request) {
   }
 
   const parsed = parseCtePdfText(text);
-
-  const scope = await loadUserVisibilityScope(session);
-  const supplierWhere =
-    scope.kind === "scoped" && scope.supplierIds.length > 0
-      ? { id: { in: scope.supplierIds }, active: true }
-      : scope.kind === "scoped"
-        ? { id: "__none__" }
-        : { active: true };
-
-  const suppliers = await prisma.supplier.findMany({
-    where: supplierWhere,
-    select: { id: true, name: true, code: true },
-  });
   const match = matchSupplierId(parsed.supplierName, suppliers);
 
   await writeAuditLog({
@@ -94,6 +167,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
+    mode: "single",
     filename,
     totalPages,
     supplierId: match.supplierId,

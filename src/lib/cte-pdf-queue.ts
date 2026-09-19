@@ -1,4 +1,5 @@
 import { CTE_PDF_MAX_BYTES, CTE_PDF_MAX_FILES } from "@/lib/cte-form-schema";
+import type { CtePdfParseResult } from "@/lib/cte-pdf-parse";
 
 export type CtePdfQueueStatus =
   | "pending"
@@ -9,12 +10,21 @@ export type CtePdfQueueStatus =
   | "error"
   | "skipped";
 
+export type CteListinoPrefill = {
+  filename: string;
+  supplierId: string | null;
+  supplierMatchName: string | null;
+  extracted: CtePdfParseResult;
+  textPreview: string;
+};
+
 export type CtePdfQueueItem = {
   file: File;
   status: CtePdfQueueStatus;
   error?: string;
   savedId?: string;
   savedOfferName?: string;
+  listinoPrefill?: CteListinoPrefill;
 };
 
 export type CtePdfFileSelectResult = {
@@ -23,8 +33,14 @@ export type CtePdfFileSelectResult = {
   truncated: boolean;
 };
 
-function isPdfFile(file: File): boolean {
-  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+function isCteUploadFile(file: File): boolean {
+  return (
+    file.type === "application/pdf" ||
+    file.type === "image/png" ||
+    file.type === "image/jpeg" ||
+    file.type === "image/jpg" ||
+    /\.(pdf|png|jpe?g)$/i.test(file.name)
+  );
 }
 
 function fileKey(file: File): string {
@@ -52,8 +68,8 @@ export function selectCtePdfFiles(
     const key = fileKey(file);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!isPdfFile(file)) {
-      errors.push(`${file.name}: non è un PDF`);
+    if (!isCteUploadFile(file)) {
+      errors.push(`${file.name}: serve un PDF o un'immagine PNG/JPG`);
       continue;
     }
     if (file.size <= 0) {
@@ -71,7 +87,7 @@ export function selectCtePdfFiles(
     files.push(file);
   }
   if (truncated) {
-    errors.push(`Massimo ${maxFiles} PDF per volta. I file in eccesso non sono stati aggiunti.`);
+    errors.push(`Massimo ${maxFiles} file per volta. I file in eccesso non sono stati aggiunti.`);
   }
   return { files, errors, truncated };
 }

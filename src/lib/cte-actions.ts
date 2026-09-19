@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { isAllowedAttachment } from "@/lib/attachment-config";
 import { CTE_PDF_MAX_BYTES, parseCteFormData } from "@/lib/cte-form-schema";
+import { upsertDolomitiListinoOffers } from "@/lib/cte-dolomiti-upsert";
 import { userCanManageCteOffer } from "@/lib/cte-scope";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -266,4 +267,37 @@ export async function deactivateCteOfferAction(formData: FormData): Promise<CteA
 
   revalidatePath("/catalogo-cte");
   return { ok: true };
+}
+
+export async function importDolomitiListinoAction(): Promise<
+  { ok: true; created: number; updated: number; supplierName: string } | { ok: false; error: string }
+> {
+  const session = await requireSession();
+  assertManagePermission(session.role);
+
+  const suppliers = await prisma.supplier.findMany({
+    where: { active: true },
+    select: { id: true, name: true, code: true },
+  });
+  const dolomiti = suppliers.find(
+    (s) => /dolomiti/i.test(s.name) || /dolomiti/i.test(s.code ?? ""),
+  );
+  if (!dolomiti) {
+    return { ok: false, error: "Fornitore Dolomiti non trovato in anagrafica" };
+  }
+  if (!(await userCanManageCteOffer(session, dolomiti.id))) {
+    return { ok: false, error: "Fornitore Dolomiti fuori dal tuo scope" };
+  }
+
+  const result = await upsertDolomitiListinoOffers(prisma, dolomiti.id);
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "IMPORT_CTE_LISTINO",
+    entity: "CteOffer",
+    details: { supplier: dolomiti.name, ...result, source: "dolomiti-screenshot-set-2026" },
+  });
+
+  revalidatePath("/catalogo-cte");
+  return { ok: true, ...result, supplierName: dolomiti.name };
 }

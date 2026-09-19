@@ -30,6 +30,11 @@ assert(mixed.errors.some((e) => e.includes("note.txt")), "rifiuta non-PDF");
 assert(mixed.errors.some((e) => e.includes("grosso.pdf")), "rifiuta oversize");
 assert(!mixed.truncated, "non tronca sotto il tetto");
 
+const pngOk = selectCtePdfFiles([
+  new File([new Uint8Array(20)], "listino.png", { type: "image/png" }),
+]);
+assert(pngOk.files.map((f) => f.name).join(",") === "listino.png", "accetta PNG listino");
+
 const overflow = selectCtePdfFiles(
   Array.from({ length: CTE_PDF_MAX_FILES + 2 }, (_, i) => pdf(`f${i}.pdf`)),
 );

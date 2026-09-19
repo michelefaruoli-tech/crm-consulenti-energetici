@@ -20,9 +20,13 @@ export type CtePdfParsePayload = {
 
 export async function parseCtePdfClient(
   file: File,
-): Promise<{ ok: true; payload: CtePdfParsePayload } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; kind: "single"; payload: CtePdfParsePayload }
+  | { ok: true; kind: "listino"; payloads: CtePdfParsePayload[] }
+  | { ok: false; error: string }
+> {
   if (file.size > CTE_PDF_MAX_BYTES) {
-    return { ok: false, error: `PDF troppo grande (max ${CTE_PDF_MAX_BYTES / (1024 * 1024)} MB)` };
+    return { ok: false, error: `File troppo grande (max ${CTE_PDF_MAX_BYTES / (1024 * 1024)} MB)` };
   }
   try {
     const fd = new FormData();
@@ -31,18 +35,48 @@ export async function parseCtePdfClient(
     const data = (await res.json()) as
       | {
           ok: true;
+          mode?: "single" | "listino";
           filename: string;
           totalPages: number;
-          supplierId: string | null;
-          supplierMatchName: string | null;
-          extracted: CtePdfParseResult;
-          textPreview: string;
+          supplierId?: string | null;
+          supplierMatchName?: string | null;
+          extracted?: CtePdfParseResult;
+          textPreview?: string;
+          items?: Array<{
+            filename: string;
+            supplierId: string | null;
+            supplierMatchName: string | null;
+            extracted: CtePdfParseResult;
+            textPreview: string;
+          }>;
         }
       | { ok: false; error: string };
     if (!data.ok) return { ok: false, error: data.error };
-    return { ok: true, payload: { ...data, file } };
+    if (data.mode === "listino" && data.items?.length) {
+      return {
+        ok: true,
+        kind: "listino",
+        payloads: data.items.map((item) => ({ ...item, file, totalPages: 1 })),
+      };
+    }
+    if (!data.extracted) {
+      return { ok: false, error: "Lettura non riuscita. Compila i campi a mano." };
+    }
+    return {
+      ok: true,
+      kind: "single",
+      payload: {
+        filename: data.filename,
+        totalPages: data.totalPages,
+        supplierId: data.supplierId ?? null,
+        supplierMatchName: data.supplierMatchName ?? null,
+        extracted: data.extracted,
+        textPreview: data.textPreview ?? "",
+        file,
+      },
+    };
   } catch {
-    return { ok: false, error: "Lettura PDF non riuscita. Compila i campi a mano." };
+    return { ok: false, error: "Lettura file non riuscita. Compila i campi a mano." };
   }
 }
 
@@ -76,16 +110,16 @@ export function CtePdfUploadPanel({
     <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
       <h2 className="font-semibold text-slate-900">1. PDF della CTE</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Seleziona uno o più fogli CTE del fornitore (Ctrl/Cmd o Maiusc per più file). Per ogni PDF
-        viene letto il testo (nessun OCR): controlli, salvi, poi passa al successivo. I numeri non
-        trovati restano vuoti. Max {CTE_PDF_MAX_BYTES / (1024 * 1024)} MB a file, fino a{" "}
-        {CTE_PDF_MAX_FILES} file.
+        Seleziona uno o più fogli CTE (PDF) o screenshot di listino (PNG/JPG). Per ogni file:
+        lettura, controllo, salvataggio; poi il successivo. Da una tabella Dolomiti si creano più
+        offerte in coda. I numeri non trovati restano vuoti. Max {CTE_PDF_MAX_BYTES / (1024 * 1024)}{" "}
+        MB a file, fino a {CTE_PDF_MAX_FILES} file.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf"
+          accept="application/pdf,.pdf,image/png,image/jpeg,.png,.jpg,.jpeg"
           multiple
           className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
           onChange={(e) => {
@@ -126,7 +160,7 @@ export function CtePdfUploadPanel({
                 }`}
               >
                 <span className="min-w-0 truncate">
-                  {index + 1}. {item.file.name}
+                  {index + 1}. {item.listinoPrefill?.extracted.offerName || item.file.name}
                   {item.savedOfferName ? ` → ${item.savedOfferName}` : null}
                 </span>
                 <span

@@ -23,6 +23,7 @@ import {
   queueHasUnfinished,
   queueProgressLabel,
   selectCtePdfFiles,
+  type CteListinoPrefill,
   type CtePdfQueueItem,
 } from "@/lib/cte-pdf-queue";
 import type { CteOfferInput } from "@/lib/cte-types";
@@ -115,8 +116,8 @@ function payloadToDraft(payload: CtePdfParsePayload): FormDraft {
     referenceConsumption: "",
     networkLosses: e.networkLosses ?? (e.utility === "GAS" ? "NOT_APPLICABLE" : "INCLUDED"),
     ccvAnnual: dec(e.ccvAnnual),
-    ccvMonthly: "",
-    spread: "",
+    ccvMonthly: dec(e.ccvMonthly),
+    spread: dec(e.spread),
     validFrom: e.validFrom ?? "",
     validTo: e.validTo ?? "",
     notes: e.suggestedNotes ?? "",
@@ -178,7 +179,7 @@ export function CteOfferForm({
     applyDraft(emptyDraft());
   }
 
-  async function parseQueueItem(index: number, file: File) {
+  async function parseQueueItem(index: number, file: File, prefill?: CteListinoPrefill) {
     const gen = ++parseGen.current;
     setPdfFile(file);
     setCurrentIndex(index);
@@ -186,6 +187,16 @@ export function CteOfferForm({
     setParseError(null);
     setError(null);
     patchQueue(index, { status: "reading", error: undefined });
+    if (prefill) {
+      if (gen !== parseGen.current) return;
+      setParsePending(false);
+      patchQueue(index, { status: "review", error: undefined });
+      const payload: CtePdfParsePayload = { ...prefill, file, totalPages: 1 };
+      setParsePayload(payload);
+      applyDraft(payloadToDraft(payload));
+      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setParsePending(true);
     const result = await parseCtePdfClient(file);
     if (gen !== parseGen.current) return;
@@ -196,13 +207,20 @@ export function CteOfferForm({
       applyDraft(emptyDraft());
       return;
     }
+    const payload = result.kind === "listino" ? result.payloads[0] : result.payload;
+    if (!payload) {
+      setParseError("Nessun dato letto dal file.");
+      patchQueue(index, { status: "error", error: "Nessun dato letto dal file." });
+      applyDraft(emptyDraft());
+      return;
+    }
     patchQueue(index, { status: "review", error: undefined });
-    setParsePayload(result.payload);
-    applyDraft(payloadToDraft(result.payload));
+    setParsePayload(payload);
+    applyDraft(payloadToDraft(payload));
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function handleSelectFiles(files: File[]) {
+  async function handleSelectFiles(files: File[]) {
     const statuses = queue.map((item) => item.status);
     const replace = queue.length === 0 || !queueHasUnfinished(statuses);
     const existing = replace ? [] : queue;
@@ -212,26 +230,49 @@ export function CteOfferForm({
     });
     setSelectErrors(selected.errors);
     if (selected.files.length === 0) return;
-    const added: CtePdfQueueItem[] = selected.files.map((file) => ({
-      file,
-      status: "pending" as const,
-    }));
+    setParsePending(true);
+    const added: CtePdfQueueItem[] = [];
+    for (const file of selected.files) {
+      const isImage =
+        /^image\//i.test(file.type) || /\.(png|jpe?g)$/i.test(file.name);
+      if (!isImage) {
+        added.push({ file, status: "pending" });
+        continue;
+      }
+      const result = await parseCtePdfClient(file);
+      if (!result.ok) {
+        added.push({ file, status: "error", error: result.error });
+        continue;
+      }
+      const payloads = result.kind === "listino" ? result.payloads : [result.payload];
+      for (const payload of payloads) {
+        added.push({
+          file,
+          status: "pending",
+          listinoPrefill: {
+            filename: payload.filename,
+            supplierId: payload.supplierId,
+            supplierMatchName: payload.supplierMatchName,
+            extracted: payload.extracted,
+            textPreview: payload.textPreview,
+          },
+        });
+      }
+    }
+    setParsePending(false);
+    if (added.length === 0) return;
     const nextQueue = replace ? added : [...existing, ...added];
     setQueue(nextQueue);
-    if (replace) {
-      resetCurrentForm();
-      void parseQueueItem(0, added[0]!.file);
-      return;
-    }
-    if (!queueHasUnfinished(statuses)) {
-      void parseQueueItem(existing.length, added[0]!.file);
-    }
+    const startIndex = replace ? 0 : existing.length;
+    const startItem = nextQueue[startIndex];
+    if (replace) resetCurrentForm();
+    if (startItem) void parseQueueItem(startIndex, startItem.file, startItem.listinoPrefill);
   }
 
   function handleRetryParse() {
     const item = queue[currentIndex];
     if (!item) return;
-    void parseQueueItem(currentIndex, item.file);
+    void parseQueueItem(currentIndex, item.file, item.listinoPrefill);
   }
 
   function handleSkipCurrent() {
@@ -246,7 +287,7 @@ export function CteOfferForm({
       return;
     }
     const nextItem = queue[next];
-    if (nextItem) void parseQueueItem(next, nextItem.file);
+    if (nextItem) void parseQueueItem(next, nextItem.file, nextItem.listinoPrefill);
   }
 
   function addBand() {
@@ -306,7 +347,7 @@ export function CteOfferForm({
         }
         const nextItem = queue[next];
         resetCurrentForm();
-        if (nextItem) void parseQueueItem(next, nextItem.file);
+        if (nextItem) void parseQueueItem(next, nextItem.file, nextItem.listinoPrefill);
         return;
       }
       router.push(`/catalogo-cte/${res.id}?saved=1`);
