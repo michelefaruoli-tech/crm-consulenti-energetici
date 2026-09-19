@@ -37,7 +37,7 @@ export function CteDolomitiImportButton() {
     <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4">
       <h2 className="font-semibold text-slate-900">Listino Dolomiti da screenshot</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Importa le 16 offerte con prezzo visibile nelle tabelle (residenziale, extra, business,
+        Importa le 17 offerte con prezzo visibile nelle tabelle (residenziale, extra, business,
         corporate, pertinenza). Le righe con «/» restano fuori. Poi rivedile dal catalogo.
       </p>
       <div className="mt-3">

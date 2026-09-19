@@ -22,9 +22,9 @@ function assert(cond: unknown, msg: string): void {
 }
 
 const all = allDolomitiListinoOffers();
-assert(DOLOMITI_LISTINO_RESIDENZIALE.length === 9, "residenziale 9 offerte con prezzo");
+assert(DOLOMITI_LISTINO_RESIDENZIALE.length === 10, "residenziale 10 offerte con prezzo");
 assert(DOLOMITI_LISTINO_BUSINESS.length === 7, "business/pertinenza 7 offerte con prezzo");
-assert(all.length === 16, "16 offerte importabili");
+assert(all.length === 17, "17 offerte importabili");
 assert(
   all.every((o) => o.offerName.startsWith("DOLOMITI") || o.offerName.includes("DOLOMITI")),
   "nomi Dolomiti",
@@ -46,6 +46,10 @@ const flex = all.find((o) => o.offerName === "DOLOMITI FLEX 24 LUCE");
 assert(flex?.priceKind === "VARIABILE" && flex.spread === 0.01, "flex spread PUN+0.01");
 assert(flex?.bands.length === 0, "variabile senza fascia inventata");
 
+const flexGasExtra = all.find((o) => o.offerName === "DOLOMITI FLEX GAS EXTRA");
+assert(flexGasExtra?.priceKind === "VARIABILE" && flexGasExtra.spread === 0.09, "flex gas extra PSV+0.09");
+assert(flexGasExtra?.ccvAnnual === 136, "flex gas extra CCV 136");
+
 const giorno = all.find((o) => o.offerName === "DOLOMITI LUCE GIORNO");
 assert(giorno?.bands.length === 0, "giorno: niente MONO inventato");
 assert(giorno?.notes.includes("0,128"), "giorno: prezzi in nota");
@@ -60,11 +64,11 @@ const busPath = join(SAMPLES, "dolomiti-listino-business.png");
 if (existsSync(resPath) && existsSync(busPath)) {
   const h1 = createHash("sha256").update(readFileSync(resPath)).digest("hex");
   const h2 = createHash("sha256").update(readFileSync(busPath)).digest("hex");
-  assert(dolomitiOffersForScreenshotHash(h1)?.length === 9, `hash residenziale ${h1}`);
+  assert(dolomitiOffersForScreenshotHash(h1)?.length === 10, `hash residenziale ${h1}`);
   assert(dolomitiOffersForScreenshotHash(h2)?.length === 7, `hash business ${h2}`);
   console.log("screenshot hash: ok");
 } else {
   console.log("screenshot campioni assenti, skip hash");
 }
 
-console.log("check-cte-dolomiti-listino: ok (16 offerte)");
+console.log("check-cte-dolomiti-listino: ok (17 offerte)");
