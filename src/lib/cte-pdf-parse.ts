@@ -15,7 +15,16 @@ export type CtePdfHit = {
 };
 
 export type CtePdfParseResult = {
-  layout: "enel-wow" | "enel-business" | "soluzione-energia" | "duferco-business" | "dolomiti-listino" | "generic";
+  layout:
+    | "enel-wow"
+    | "enel-business"
+    | "soluzione-energia"
+    | "duferco-business"
+    | "dolomiti-listino"
+    | "enel-corporate-listino"
+    | "sev-iren-listino"
+    | "compara-semplice"
+    | "generic";
   supplierName: string | null;
   offerName: string | null;
   utility: CteUtility | null;

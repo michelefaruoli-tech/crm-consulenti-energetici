@@ -6,6 +6,12 @@ import { writeAuditLog } from "@/lib/audit";
 import { isAllowedAttachment } from "@/lib/attachment-config";
 import { CTE_PDF_MAX_BYTES, parseCteFormData } from "@/lib/cte-form-schema";
 import { upsertDolomitiListinoOffers } from "@/lib/cte-dolomiti-upsert";
+import {
+  LISTINO_KIND_LABEL,
+  listinoByKind,
+  type CteListinoKind,
+} from "@/lib/cte-listino-detect";
+import { upsertListinoOffers } from "@/lib/cte-listino-shared";
 import { userCanManageCteOffer } from "@/lib/cte-scope";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -300,4 +306,46 @@ export async function importDolomitiListinoAction(): Promise<
 
   revalidatePath("/catalogo-cte");
   return { ok: true, ...result, supplierName: dolomiti.name };
+}
+
+const LISTINO_KINDS: CteListinoKind[] = ["dolomiti", "enel-corporate", "sev-iren", "compara"];
+
+export async function importCteListinoAction(
+  kind: CteListinoKind,
+): Promise<
+  | { ok: true; created: number; updated: number; skipped: string[]; label: string }
+  | { ok: false; error: string }
+> {
+  const session = await requireSession();
+  assertManagePermission(session.role);
+  if (!LISTINO_KINDS.includes(kind)) {
+    return { ok: false, error: "Listino non riconosciuto" };
+  }
+
+  const suppliers = await prisma.supplier.findMany({
+    where: { active: true },
+    select: { id: true, name: true, code: true },
+  });
+  const pack = listinoByKind(kind);
+  const usable: typeof suppliers = [];
+  for (const supplier of suppliers) {
+    if (await userCanManageCteOffer(session, supplier.id)) {
+      usable.push(supplier);
+    }
+  }
+  if (usable.length === 0) {
+    return { ok: false, error: `Nessun fornitore del listino ${LISTINO_KIND_LABEL[kind]} nel tuo scope` };
+  }
+
+  const result = await upsertListinoOffers(prisma, usable, pack.offers);
+
+  await writeAuditLog({
+    userId: session.id,
+    action: "IMPORT_CTE_LISTINO",
+    entity: "CteOffer",
+    details: { source: pack.kind, ...result },
+  });
+
+  revalidatePath("/catalogo-cte");
+  return { ok: true, ...result, label: LISTINO_KIND_LABEL[kind] };
 }

@@ -4,10 +4,8 @@ import { getSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { isAllowedAttachment } from "@/lib/attachment-config";
 import { CTE_PDF_MAX_BYTES } from "@/lib/cte-form-schema";
-import {
-  dolomitiOfferToParseResult,
-  dolomitiOffersForScreenshotHash,
-} from "@/lib/cte-dolomiti-listino";
+import { detectListinoFromImageHash, detectListinoFromPdf } from "@/lib/cte-listino-detect";
+import { listinoOfferToParseResult } from "@/lib/cte-listino-shared";
 import { matchSupplierId, parseCtePdfText, type CtePdfParseResult } from "@/lib/cte-pdf-parse";
 import { extractCtePdfText } from "@/lib/cte-pdf-text";
 import { hasPermission } from "@/lib/permissions";
@@ -103,16 +101,16 @@ export async function POST(request: Request) {
 
   if (isImage) {
     const hash = createHash("sha256").update(buf).digest("hex");
-    const known = dolomitiOffersForScreenshotHash(hash);
-    if (known?.length) {
-      const extracted = known.map(dolomitiOfferToParseResult);
+    const known = detectListinoFromImageHash(hash);
+    if (known?.offers.length) {
+      const extracted = known.offers.map((row) => listinoOfferToParseResult(row, known.layout));
       await writeAuditLog({
         userId: session.id,
         action: "PARSE_CTE_PDF",
         entity: "CteOffer",
         details: {
           filename,
-          kind: "dolomiti-listino",
+          kind: known.kind,
           offers: extracted.map((e) => e.offerName),
         },
       }).catch(() => undefined);
@@ -128,12 +126,13 @@ export async function POST(request: Request) {
       {
         ok: false,
         error:
-          "Screenshot non riconosciuto. Per i listini Dolomiti usa le tabelle originali; i PDF CTE si caricano come prima.",
+          "Screenshot non riconosciuto. Usa le tabelle originali (Dolomiti, Enel Corporate) oppure i PDF CTE/SEV/Compara.",
       },
       { status: 422 },
     );
   }
 
+  const pdfHash = createHash("sha256").update(buf).digest("hex");
   let text: string;
   let totalPages: number;
   try {
@@ -142,10 +141,38 @@ export async function POST(request: Request) {
     totalPages = extracted.totalPages;
   } catch (e) {
     console.error("[catalogo-cte/parse-pdf]", e);
-    return NextResponse.json(
-      { ok: false, error: "Impossibile leggere il testo del PDF. Compila i campi a mano." },
-      { status: 422 },
-    );
+    const hashed = detectListinoFromPdf(pdfHash, "");
+    if (!hashed?.offers.length) {
+      return NextResponse.json(
+        { ok: false, error: "Impossibile leggere il testo del PDF. Compila i campi a mano." },
+        { status: 422 },
+      );
+    }
+    text = "";
+    totalPages = 1;
+  }
+
+  const knownPdf = detectListinoFromPdf(pdfHash, text);
+  if (knownPdf?.offers.length) {
+    const extracted = knownPdf.offers.map((row) => listinoOfferToParseResult(row, knownPdf.layout));
+    await writeAuditLog({
+      userId: session.id,
+      action: "PARSE_CTE_PDF",
+      entity: "CteOffer",
+      details: {
+        filename,
+        kind: knownPdf.kind,
+        pages: totalPages,
+        offers: extracted.map((e) => e.offerName),
+      },
+    }).catch(() => undefined);
+    return NextResponse.json({
+      ok: true,
+      mode: "listino",
+      filename,
+      totalPages,
+      items: listinoItems(extracted, suppliers, filename),
+    });
   }
 
   const parsed = parseCtePdfText(text);

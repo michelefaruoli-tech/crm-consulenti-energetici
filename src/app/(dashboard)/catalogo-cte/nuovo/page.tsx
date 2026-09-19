@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CteDolomitiImportButton } from "@/components/cte/cte-dolomiti-import-button";
+import { CteListinoImportPanel } from "@/components/cte/cte-listino-import-panel";
 import { CteOfferForm } from "@/components/cte/cte-offer-form";
 import { requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
@@ -37,12 +37,12 @@ export default async function NuovaCtePage() {
         </Link>
         <h1 className="mt-2 text-2xl font-bold text-slate-900">Nuova offerta CTE</h1>
         <p className="text-slate-500">
-          Seleziona PDF CTE o screenshot di listino (PNG/JPG). Da una tabella Dolomiti si creano più
-          offerte in coda: controlli, salvi, poi la successiva. I numeri non letti restano vuoti. Max
-          3 MB a file, fino a 15 file.
+          Seleziona PDF CTE o screenshot di listino (PNG/JPG). Da una tabella o da un PDF SEV/Compara
+          si creano più offerte in coda: controlli, salvi, poi la successiva. I numeri non letti
+          restano vuoti. Max 3 MB a file, fino a 15 file.
         </p>
       </div>
-      <CteDolomitiImportButton />
+      <CteListinoImportPanel />
       <CteOfferForm suppliers={suppliers} mode="create" />
     </div>
   );

@@ -111,8 +111,8 @@ export function CtePdfUploadPanel({
       <h2 className="font-semibold text-slate-900">1. PDF della CTE</h2>
       <p className="mt-1 text-sm text-slate-600">
         Seleziona uno o più fogli CTE (PDF) o screenshot di listino (PNG/JPG). Per ogni file:
-        lettura, controllo, salvataggio; poi il successivo. Da una tabella Dolomiti si creano più
-        offerte in coda. I numeri non trovati restano vuoti. Max {CTE_PDF_MAX_BYTES / (1024 * 1024)}{" "}
+        lettura, controllo, salvataggio; poi il successivo. Da Dolomiti, Enel Corporate, SEV Iren o
+        Compara si creano più offerte in coda. I numeri non trovati restano vuoti. Max {CTE_PDF_MAX_BYTES / (1024 * 1024)}{" "}
         MB a file, fino a {CTE_PDF_MAX_FILES} file.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
