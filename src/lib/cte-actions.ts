@@ -96,7 +96,7 @@ function offerDataFromParsed(parsed: ReturnType<typeof parseCteFormData>) {
     validFrom: parsed.validFrom,
     validTo: parsed.validTo,
     notes: parsed.notes?.trim() || null,
-    extractionStatus: "manual" as const,
+    extractionStatus: parsed.extractionOrigin === "pdf" ? "confirmed" : "manual",
   };
 }
 

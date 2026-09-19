@@ -50,6 +50,7 @@ export const cteOfferFormSchema = z
     validFrom: optionalDate,
     validTo: optionalDate,
     notes: z.string().optional(),
+    extractionOrigin: z.enum(["manual", "pdf"]).optional(),
     bands: z.array(ctePriceBandSchema).default([]),
   })
   .superRefine((data, ctx) => {
@@ -119,6 +120,7 @@ export function parseCteFormData(formData: FormData): CteOfferFormValues {
     validFrom: String(formData.get("validFrom") ?? ""),
     validTo: String(formData.get("validTo") ?? ""),
     notes: String(formData.get("notes") ?? ""),
+    extractionOrigin: String(formData.get("extractionOrigin") ?? "manual") === "pdf" ? "pdf" : "manual",
     bands,
   });
 }
