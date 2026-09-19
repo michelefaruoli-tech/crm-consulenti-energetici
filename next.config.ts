@@ -16,6 +16,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["unpdf"],
   experimental: {
     serverActions: {
       // Allegati CI/bolletta in base64 superano facilmente il default 1MB

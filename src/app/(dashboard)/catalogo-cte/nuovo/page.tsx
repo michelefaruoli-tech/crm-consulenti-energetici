@@ -36,8 +36,8 @@ export default async function NuovaCtePage() {
         </Link>
         <h1 className="mt-2 text-2xl font-bold text-slate-900">Nuova offerta CTE</h1>
         <p className="text-slate-500">
-          Inserimento manuale. PDF allegato opzionale (max 3 MB); conserva i file sul PC finché non
-          carichi.
+          Carica prima il PDF del fornitore: il catalogo legge il testo e propone i campi. Controlla
+          e completa, poi salva. I numeri non letti restano vuoti. Max 3 MB.
         </p>
       </div>
       <CteOfferForm suppliers={suppliers} mode="create" />

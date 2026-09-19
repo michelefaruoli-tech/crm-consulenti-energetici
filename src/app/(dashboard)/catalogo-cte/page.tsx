@@ -104,8 +104,9 @@ export default async function CatalogoCtePage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Catalogo CTE</h1>
         <p className="text-slate-500">
-          Confronto offerte luce e gas — inserimento manuale. Ranking automatico per consumo
-          (luce sempre; gas solo con Smc/mese inseriti).
+          Confronto offerte luce e gas. Admin e backoffice caricano il PDF in Nuova CTE: i campi
+          si compilano dal testo, poi si rivedono e si salva. Ranking per consumo (luce sempre; gas
+          solo con Smc/mese).
         </p>
       </div>
 
