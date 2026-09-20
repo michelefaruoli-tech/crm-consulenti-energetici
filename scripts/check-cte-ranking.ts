@@ -4,6 +4,7 @@
  */
 import {
   computeMonthlyCost,
+  energyQuota,
   rankCteOffers,
   shouldRankCatalog,
 } from "../src/lib/cte-ranking";
@@ -73,9 +74,9 @@ const costIncluded = computeMonthlyCost(
 )!;
 assert(costExcluded > costIncluded, "Perdite escluse devono aumentare il costo");
 
-// Gas senza consumo: nessun ranking forzato
+// Gas senza consumo: ranking per quota energia (non per costo)
 assert(
-  !shouldRankCatalog({
+  shouldRankCatalog({
     category: "RESIDENZIALE",
     utility: "GAS",
     priceKind: "FISSO",
@@ -84,10 +85,11 @@ assert(
     validFrom: null,
     validTo: null,
   }),
-  "Gas senza consumo non deve attivare ranking",
+  "Il ranking per quota energia è sempre attivo",
 );
 
-const gasRows = rankCteOffers([gasOffer, { ...gasOffer, id: "4", offerName: "Alpha Gas" }], {
+const cheaperGas = { ...gasOffer, id: "4", offerName: "Gas low", priceBands: [{ timeBand: "MONO" as const, energyPrice: 0.4, sortOrder: 0 }] };
+const gasRows = rankCteOffers([gasOffer, cheaperGas], {
   category: "RESIDENZIALE",
   utility: "GAS",
   priceKind: "FISSO",
@@ -96,9 +98,38 @@ const gasRows = rankCteOffers([gasOffer, { ...gasOffer, id: "4", offerName: "Alp
   validFrom: null,
   validTo: null,
 });
-assert(gasRows.every((r) => r.rank == null), "Gas senza consumo: rank null");
+assert(gasRows[0]!.offerName === "Gas low", "Gas: quota più bassa prima");
+assert(gasRows[0]!.rank === 1, "Gas: rank 1 sulla quota più bassa");
+assert(gasRows[0]!.estimatedMonthlyCost == null, "Gas senza consumo: niente costo stimato");
 
-// Luce: ranking attivo e ordine per costo
+// Luce: ordine per quota energia, non per CCV
+const priceyLowCcv: CteOfferInput = {
+  ...monoOffer,
+  id: "5",
+  offerName: "Cara CCV bassa",
+  ccvAnnual: 12,
+  priceBands: [{ timeBand: "MONO", energyPrice: 0.25, sortOrder: 0 }],
+};
+const cheapHighCcv: CteOfferInput = {
+  ...monoOffer,
+  id: "6",
+  offerName: "Economica CCV alta",
+  ccvAnnual: 900,
+  priceBands: [{ timeBand: "MONO", energyPrice: 0.11, sortOrder: 0 }],
+};
+assert(energyQuota(cheapHighCcv)! < energyQuota(priceyLowCcv)!, "quota economica < cara");
+const byQuota = rankCteOffers([priceyLowCcv, cheapHighCcv], {
+  category: "BUSINESS",
+  utility: "LUCE",
+  priceKind: "FISSO",
+  monthlyConsumption: 1500,
+  powerKw: 10,
+  validFrom: null,
+  validTo: null,
+});
+assert(byQuota[0]!.offerName === "Economica CCV alta", "Vince la quota energia più bassa, non la CCV");
+
+// Luce: ranking attivo e ordine per quota
 const ranked = rankCteOffers([baseOffer, monoOffer], {
   category: "BUSINESS",
   utility: "LUCE",
@@ -110,8 +141,8 @@ const ranked = rankCteOffers([baseOffer, monoOffer], {
 });
 assert(ranked[0]!.rank === 1, "Prima riga rank 1");
 assert(
-  (ranked[0]!.estimatedMonthlyCost ?? 0) <= (ranked[1]!.estimatedMonthlyCost ?? Infinity),
-  "Ordine per costo crescente",
+  (ranked[0]!.energyQuota ?? Infinity) <= (ranked[1]!.energyQuota ?? Infinity),
+  "Ordine per quota energia crescente",
 );
 
 console.log("✅ check-cte-ranking: tutti i casi OK");

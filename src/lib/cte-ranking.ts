@@ -48,6 +48,13 @@ function weightedEnergyPrice(
   return parts.reduce((s, x) => s + (x.w / weightSum) * x.p, 0);
 }
 
+export function energyQuota(offer: CteOfferInput): number | null {
+  if (offer.priceKind === "VARIABILE") {
+    return offer.spread;
+  }
+  return weightedEnergyPrice(offer.priceBands, offer.category);
+}
+
 export function computeMonthlyCost(
   offer: CteOfferInput,
   monthlyConsumption: number,
@@ -107,13 +114,11 @@ function resolveMonthlyConsumption(
   if (offer.referenceConsumption != null && offer.referenceConsumption > 0) {
     return offer.referenceConsumption;
   }
+  if (filters.utility === "GAS") return null;
   return defaultMonthlyConsumption(filters.category, filters.utility);
 }
 
-export function shouldRankCatalog(filters: CteCatalogFilters): boolean {
-  if (filters.utility === "GAS" && (filters.monthlyConsumption == null || filters.monthlyConsumption <= 0)) {
-    return false;
-  }
+export function shouldRankCatalog(_filters: CteCatalogFilters): boolean {
   return true;
 }
 
@@ -174,6 +179,7 @@ export function toCatalogTableRow(
     rank,
     estimatedMonthlyCost,
     applicable,
+    energyQuota: energyQuota(offer),
     priceMono: bandPrice(offer.priceBands, "MONO"),
     priceF1: bandPrice(offer.priceBands, "F1") ?? bandPrice(offer.priceBands, "MONO"),
     priceF2: bandPrice(offer.priceBands, "F2"),
@@ -194,53 +200,41 @@ export function rankCteOffers(
   offers: CteOfferInput[],
   filters: CteCatalogFilters,
 ): CteCatalogTableRow[] {
-  const rankingActive = shouldRankCatalog(filters);
   const rows = offers.map((offer) => {
-    const monthlyC = rankingActive ? resolveMonthlyConsumption(filters, offer) : null;
-    const applicable = isOfferApplicable(offer, monthlyC, filters.powerKw);
-    const cost =
-      rankingActive && monthlyC != null ? computeMonthlyCost(offer, monthlyC) : null;
+    const monthlyC = resolveMonthlyConsumption(filters, offer);
+    const applicable = isOfferApplicable(offer, filters.monthlyConsumption, filters.powerKw);
+    const quota = energyQuota(offer);
+    const cost = monthlyC != null ? computeMonthlyCost(offer, monthlyC) : null;
     return {
       offer,
       applicable,
+      quota,
       cost,
     };
   });
 
-  if (!rankingActive) {
-    const sorted = [...rows].sort((a, b) => {
-      const bySupplier = a.offer.supplierName.localeCompare(b.offer.supplierName, "it");
-      if (bySupplier !== 0) return bySupplier;
+  const byQuota = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+    if (a.quota == null && b.quota == null) {
       return a.offer.offerName.localeCompare(b.offer.offerName, "it");
-    });
-    return sorted.map(({ offer, applicable, cost }) =>
-      toCatalogTableRow(offer, filters, null, cost, applicable),
-    );
-  }
+    }
+    if (a.quota == null) return 1;
+    if (b.quota == null) return -1;
+    if (a.quota !== b.quota) return a.quota - b.quota;
+    const aValid = a.offer.validTo?.getTime() ?? 0;
+    const bValid = b.offer.validTo?.getTime() ?? 0;
+    if (bValid !== aValid) return bValid - aValid;
+    return a.offer.offerName.localeCompare(b.offer.offerName, "it");
+  };
 
-  const applicableRows = rows
-    .filter((r) => r.applicable && r.cost != null)
-    .sort((a, b) => {
-      const costDiff = (a.cost ?? 0) - (b.cost ?? 0);
-      if (costDiff !== 0) return costDiff;
-      const aValid = a.offer.validTo?.getTime() ?? 0;
-      const bValid = b.offer.validTo?.getTime() ?? 0;
-      if (bValid !== aValid) return bValid - aValid;
-      const byName = a.offer.offerName.localeCompare(b.offer.offerName, "it");
-      if (byName !== 0) return byName;
-      return a.offer.supplierName.localeCompare(b.offer.supplierName, "it");
-    });
-
-  const inapplicableRows = rows
-    .filter((r) => !r.applicable || r.cost == null)
-    .sort((a, b) => a.offer.offerName.localeCompare(b.offer.offerName, "it"));
+  const applicableRows = rows.filter((r) => r.applicable && r.quota != null).sort(byQuota);
+  const rest = rows.filter((r) => !(r.applicable && r.quota != null)).sort(byQuota);
 
   let rank = 1;
   const result: CteCatalogTableRow[] = [];
   for (const { offer, applicable, cost } of applicableRows) {
     result.push(toCatalogTableRow(offer, filters, rank++, cost, applicable));
   }
-  for (const { offer, applicable, cost } of inapplicableRows) {
+  for (const { offer, applicable, cost } of rest) {
     result.push(toCatalogTableRow(offer, filters, null, cost, applicable));
   }
   return result;

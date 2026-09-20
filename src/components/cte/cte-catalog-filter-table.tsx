@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { FileText } from "lucide-react";
 import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-filter-table";
+import { cteSupplierPalette, cteSupplierRowClass } from "@/lib/cte-supplier-colors";
 import type { CteCatalogTableRow } from "@/lib/cte-types";
 
 function fmtPrice(v: number | null, utility: string, lossesLabel: string): React.ReactNode {
@@ -66,6 +67,17 @@ export function CteCatalogFilterTable({
         key: "supplierName",
         label: "Fornitore",
         getValue: (r) => String(r.supplierName ?? ""),
+        render: (r) => {
+          const name = String(r.supplierName ?? "");
+          const pal = cteSupplierPalette(name);
+          return (
+            <span
+              className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${pal.badgeClass}`}
+            >
+              {name || "—"}
+            </span>
+          );
+        },
       },
       {
         key: "powerRangeLabel",
@@ -82,12 +94,20 @@ export function CteCatalogFilterTable({
         label: "F1 / Mono",
         getValue: (r) => String(r.priceF1 ?? ""),
         sortKind: "number",
-        render: (r) =>
-          fmtPrice(
+        render: (r) => {
+          if (r.priceKind === "VARIABILE") {
+            const unit = utility === "GAS" ? "€/Smc" : "€/kWh";
+            const idx = utility === "GAS" ? "PSV" : "PUN";
+            if (typeof r.spread !== "number") return "—";
+            if (r.spread === 0) return idx;
+            return `${idx} + ${Number(r.spread).toFixed(4)} ${unit}`;
+          }
+          return fmtPrice(
             typeof r.priceF1 === "number" ? r.priceF1 : null,
             utility,
             String(r.networkLossesLabel ?? ""),
-          ),
+          );
+        },
       },
       {
         key: "priceF2",
@@ -183,7 +203,7 @@ export function CteCatalogFilterTable({
       emptyMessage="Nessuna offerta CTE per i filtri selezionati."
       dense
       getRowClassName={(r) =>
-        r.applicable === false ? "bg-slate-50 text-slate-500" : undefined
+        cteSupplierRowClass(String(r.supplierName ?? ""), r.applicable !== false)
       }
     />
   );

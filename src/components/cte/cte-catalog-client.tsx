@@ -5,6 +5,7 @@ import { useCallback, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { CteCatalogFilterTable } from "@/components/cte/cte-catalog-filter-table";
+import { CteSummaryDownloadButton } from "@/components/cte/cte-summary-download-button";
 import { consumptionUnitLabel } from "@/lib/cte-ranking-defaults";
 import type { CteCatalogTableRow } from "@/lib/cte-types";
 import type { CteCategory, CtePriceKind, CteUtility } from "@/generated/prisma/client";
@@ -152,23 +153,30 @@ export function CteCatalogClient({
           />
         </label>
         {canManage ? (
-          <Button type="button" className="ml-auto" onClick={() => router.push("/catalogo-cte/nuovo")}>
-            Nuova CTE
-          </Button>
-        ) : null}
+          <div className="ml-auto flex flex-wrap items-end gap-2">
+            <CteSummaryDownloadButton />
+            <Button type="button" onClick={() => router.push("/catalogo-cte/nuovo")}>
+              Nuova CTE
+            </Button>
+          </div>
+        ) : (
+          <div className="ml-auto">
+            <CteSummaryDownloadButton />
+          </div>
+        )}
       </div>
 
       {showGasNoRankBanner ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          Gas senza consumo mensile: nessun ranking automatico. Filtra e scegli l&apos;offerta in
-          autonomia, oppure inserisci i Smc/mese per ordinare per costo stimato.
+          Gas senza consumo mensile: l&apos;ordine è per quota energia (prezzo/Smc o spread più basso).
+          Inserisci i Smc/mese per vedere anche il costo stimato.
         </div>
       ) : null}
 
-      {!rankingActive && filters.utility === "LUCE" ? (
+      {filters.utility === "LUCE" && !filters.monthlyConsumption ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          Ranking attivo con consumo di default per categoria. Inserisci un consumo mensile per
-          personalizzare l&apos;ordinamento.
+          Ordine: quota energia più bassa prima (MONO o media F1/F2/F3). Il costo stimato usa un
+          consumo di default: inserisci i kWh/mese per personalizzarlo.
         </div>
       ) : null}
 

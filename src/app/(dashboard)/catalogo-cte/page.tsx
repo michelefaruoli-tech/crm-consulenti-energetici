@@ -104,9 +104,8 @@ export default async function CatalogoCtePage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Catalogo CTE</h1>
         <p className="text-slate-500">
-          Confronto offerte luce e gas. Admin e backoffice caricano il PDF in Nuova CTE: i campi
-          si compilano dal testo, poi si rivedono e si salva. Ranking per consumo (luce sempre; gas
-          solo con Smc/mese).
+          Confronto offerte luce e gas, dalla quota energia più bassa alla più alta. Ogni fornitore
+          ha un colore fisso. Puoi scaricare un&apos;immagine riassuntiva divisa per categoria.
         </p>
       </div>
 

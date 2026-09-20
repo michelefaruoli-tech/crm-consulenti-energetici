@@ -41,6 +41,7 @@ export type CteCatalogTableRow = CteOfferInput & {
   rank: number | null;
   estimatedMonthlyCost: number | null;
   applicable: boolean;
+  energyQuota: number | null;
   priceMono: number | null;
   priceF1: number | null;
   priceF2: number | null;
