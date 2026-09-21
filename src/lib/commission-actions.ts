@@ -27,6 +27,8 @@ import {
 } from "@/lib/supply-dates";
 import { buildProvvigioniContractWhere } from "@/lib/provvigioni-filters";
 import {
+  isAnnualNextHidden,
+  isRecurringAnnual,
   isRecurringMonthly,
   normalizeRecurrence,
   recurrenceWriteData,
@@ -106,6 +108,12 @@ async function applyRecurringMonthStato(args: {
       : status === "MISSING"
         ? null
         : (existing?.settledPeriod ?? null);
+  const note =
+    status === "PAID" || status === "LIQUIDATED"
+      ? isAnnualNextHidden(existing?.note)
+        ? null
+        : (existing?.note ?? "Stato da tabella Provvigioni")
+      : (existing?.note ?? "Stato da tabella Provvigioni");
   if (existing) {
     await prisma.recurringMonth.update({
       where: { id: existing.id },
@@ -113,7 +121,7 @@ async function applyRecurringMonthStato(args: {
         status,
         paidAt,
         settledPeriod,
-        note: existing.note ?? "Stato da tabella Provvigioni",
+        note,
       },
     });
     return;
@@ -496,9 +504,24 @@ async function applyCommissionField(
     const periodRaw = opts?.competencePeriod?.trim() ?? "";
     const period = /^\d{4}-\d{2}$/.test(periodRaw) ? periodRaw : "";
     const monthly = isRecurringMonthly(commission.contract.recurrence);
+    const annual = isRecurringAnnual(commission.contract.recurrence);
     const wasTerminal = ["KO", "ANNULLATO", "CHIUSO"].includes(
       commission.contract.status,
     );
+    if (annual && period && !/ko|cessat|annull|chius|controll|^storn/.test(raw)) {
+      const kind = /pagat/.test(raw)
+        ? "pagato"
+        : /incass/.test(raw) && !/da\s*incass/.test(raw)
+          ? "incassato"
+          : "da-incassare";
+      const existing = await prisma.recurringMonth.findUnique({
+        where: { contractId_period: { contractId, period } },
+      });
+      if (existing) {
+        await applyRecurringMonthStato({ contractId, period, kind });
+      }
+      // La prima annualità resta sulla riga contratto (collectionDate); poi sync crea +12.
+    }
     if (monthly && !/ko|cessat|annull|chius|controll|^storn/.test(raw)) {
       const kind = /pagat/.test(raw)
         ? "pagato"
@@ -689,6 +712,7 @@ async function applyCommissionField(
           ...(wasTerminal ? reactivateContractFields() : {}),
         },
       });
+      await syncRecurringMonthsForContract(contractId).catch(() => undefined);
     }
     await writeAuditLog({
       userId: session.id,
@@ -1438,6 +1462,26 @@ export async function bulkMarkIncassatoCompetenceAction(
       continue;
     }
 
+    if (isRecurringAnnual(r.contract.recurrence)) {
+      const existing = await prisma.recurringMonth.findUnique({
+        where: {
+          contractId_period: { contractId: r.contractId, period },
+        },
+      });
+      if (existing && existing.status !== "LIQUIDATED") {
+        await prisma.recurringMonth.update({
+          where: { id: existing.id },
+          data: {
+            status: "PAID",
+            paidAt: existing.paidAt ?? new Date(),
+            settledPeriod: period,
+            note: isAnnualNextHidden(existing.note) ? null : existing.note,
+          },
+        });
+        monthsPaid += 1;
+      }
+    }
+
     const full = await prisma.contract.findUnique({
       where: { id: r.contractId },
       select: {
@@ -1586,6 +1630,27 @@ export async function bulkMarkPagatoCompetenceAction(
       await syncRecurringMonthsForContract(r.contractId).catch(() => undefined);
       count += 1;
       continue;
+    }
+
+    if (isRecurringAnnual(r.contract.recurrence)) {
+      const existing = await prisma.recurringMonth.findUnique({
+        where: {
+          contractId_period: { contractId: r.contractId, period },
+        },
+      });
+      if (existing && existing.status !== "LIQUIDATED") {
+        await prisma.recurringMonth.update({
+          where: { id: existing.id },
+          data: {
+            status: "LIQUIDATED",
+            paidAt: existing.paidAt ?? new Date(),
+            settledPeriod: period,
+            note: isAnnualNextHidden(existing.note)
+              ? "Liquidato da selezione multipla"
+              : (existing.note ?? "Liquidato da selezione multipla"),
+          },
+        });
+      }
     }
 
     const commission = await prisma.commission.findUnique({

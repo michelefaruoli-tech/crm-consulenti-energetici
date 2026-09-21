@@ -13,7 +13,7 @@
  *   dell'evento di chiusura.
  * - Nessun mese prima del primo, nessuno dopo l'ultimo.
  */
-import { addMonths, toPeriod } from "@/lib/recurring";
+import { addMonths, isAnnualNextHidden, toPeriod } from "@/lib/recurring";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 /** Giorno prima (es. fornitura nuova 1/10 → ultimo giorno del vecchio 30/09). */
@@ -85,15 +85,19 @@ export type RecurringMonthLike = {
   status: string;
   paidAt?: Date | null;
   settledPeriod?: string | null;
+  note?: string | null;
 };
 
 /**
  * Una rata fuori intervallo si può eliminare solo se non porta con sé
  * informazione economica: mai toccare incassato/pagato/segnalato a mano.
+ * La copia annuale +12 nascosta in storno non è usa-e-getta: va mostrata
+ * a fine storno anche se cade dopo la scadenza formale dei 12 mesi.
  */
 export function isDisposableRecurringMonth(row: RecurringMonthLike): boolean {
   if (row.paidAt != null) return false;
   if (row.settledPeriod != null) return false;
+  if (isAnnualNextHidden(row.note)) return false;
   return row.status === "PENDING" || row.status === "MISSING" || row.status === "CLOSED";
 }
 
