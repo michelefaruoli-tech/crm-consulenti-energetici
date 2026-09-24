@@ -6,7 +6,6 @@
  * applicano a tutto il database, non solo alla pagina da 100 righe.
  */
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
 import { contractTextSearchWhere } from "@/lib/list-search";
 import {
   FILTER_LIST_SEP,
@@ -78,7 +77,32 @@ export const nonRecurringWhere: Prisma.ContractWhereInput = {
   recurrenceKind: "UT",
 };
 
-const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
+/**
+ * Contratti mensili ricorrenti (M), non Helios, senza ancora nessuna rata
+ * `RecurringMonth` generata: dati storici pre-PR #19 (la sincronizzazione al
+ * salvataggio esiste solo da quel commit) o un giro di sync fallito in
+ * background (vedi `syncRecurringMonthsForContract`, chiamata in try/catch).
+ *
+ * Senza questo ramo questi contratti sparivano da «Da incassare»: nessuna
+ * rata da abbinare e stato normale (non IN_ATTESA_PAGAMENTO), quindi
+ * nessun'altra clausola li includeva. Restano «Da incassare» con il gettone
+ * previsto finché la sincronizzazione non genera la prima rata.
+ *
+ * Helios è escluso di proposito: l'assenza di rate durante il lag di
+ * generazione M+2 è voluta (vedi docs/regola-helios-lag.md) e non è un gap
+ * da correggere qui — quel caso è gestito solo dal pannello di bonifica
+ * dedicato in Backup.
+ */
+export const neverSyncedMonthlyWhere: Prisma.ContractWhereInput = {
+  AND: [
+    { recurrenceKind: "M" },
+    { status: { not: "PROVVIGIONE_LIQUIDATA" } },
+    { recurringMonths: { none: {} } },
+    { supplier: { NOT: { name: { contains: "helios", mode: "insensitive" } } } },
+  ],
+};
+
+export const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
 export {
   FILTER_LIST_SEP,
@@ -269,6 +293,7 @@ function provvigioneStatoWhereOne(
             { recurringMonths: { some: missingRate } },
           ],
         },
+        neverSyncedMonthlyWhere,
       ],
     };
   }
@@ -540,60 +565,3 @@ export function provvigioniCompetenceWhere(
   };
 }
 
-export type ProvvigioniTotals = {
-  complessivo: number;
-  daIncassare: number;
-  ricorrenti: number;
-  incassato: number;
-};
-
-/**
- * Somma gettoni su TUTTO il filtro (non solo la pagina).
- * Usa aggregati SQL (veloce) invece di caricare tutte le righe in memoria.
- * «Da incassare» = senza data incasso E non KO/cessato (come il filtro Stato).
- */
-export async function sumProvvigioniTotals(
-  contractWhere: Prisma.ContractWhereInput,
-): Promise<ProvvigioniTotals> {
-  const withCollection: Prisma.ContractWhereInput = {
-    AND: [contractWhere, { collectionDate: { not: null } }],
-  };
-  // Allineato al filtro «Da incassare»: esclude KO / Annullato / Chiuso
-  const withoutCollection: Prisma.ContractWhereInput = {
-    AND: [
-      contractWhere,
-      { collectionDate: null },
-      { status: { notIn: [...KO_STATUSES] } },
-    ],
-  };
-  const recurringOnly: Prisma.ContractWhereInput = {
-    AND: [contractWhere, { OR: recurringWhereOr }],
-  };
-
-  const [complessivoAgg, incassatoAgg, daIncassareAgg, ricorrentiAgg] =
-    await Promise.all([
-      prisma.commission.aggregate({
-        where: { contract: contractWhere },
-        _sum: { expected: true },
-      }),
-      prisma.commission.aggregate({
-        where: { contract: withCollection },
-        _sum: { expected: true },
-      }),
-      prisma.commission.aggregate({
-        where: { contract: withoutCollection },
-        _sum: { expected: true },
-      }),
-      prisma.commission.aggregate({
-        where: { contract: recurringOnly },
-        _sum: { expected: true },
-      }),
-    ]);
-
-  return {
-    complessivo: Number(complessivoAgg._sum.expected ?? 0),
-    incassato: Number(incassatoAgg._sum.expected ?? 0),
-    daIncassare: Number(daIncassareAgg._sum.expected ?? 0),
-    ricorrenti: Number(ricorrentiAgg._sum.expected ?? 0),
-  };
-}

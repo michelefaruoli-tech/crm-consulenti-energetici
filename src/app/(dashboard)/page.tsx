@@ -14,8 +14,8 @@ import {
   provvigioneStatoWhere,
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
-  sumProvvigioniTotals,
 } from "@/lib/provvigioni-filters";
+import { loadDashboardMoneyTotals } from "@/lib/provvigioni-summary";
 import { contractTextSearchWhere } from "@/lib/list-search";
 import { toPeriod } from "@/lib/recurring";
 import { fetchMarketPrices } from "@/lib/market-prices";
@@ -120,7 +120,7 @@ export default async function DashboardPage({
         },
         orderBy: [{ sentToMasterAt: "desc" }, { createdAt: "desc" }],
       }),
-      sumProvvigioniTotals(
+      loadDashboardMoneyTotals(
         canViewAll
           ? { deletedAt: null }
           : { deletedAt: null, collaboratorId: session.id },
@@ -316,7 +316,7 @@ export default async function DashboardPage({
             <StatCard
               label="Totale complessivo"
               value={formatCurrency(moneyTotals.complessivo)}
-              hint="Ricevute + da incassare"
+              hint="Ricevute + da incassare (una tantum/annuali, no mensilità)"
             />
           </Link>
           <Link href="/provvigioni?stato=Incassato">
@@ -324,7 +324,7 @@ export default async function DashboardPage({
               label="Totale ricevute"
               value={formatCurrency(moneyTotals.incassato)}
               tone="success"
-              hint="Provvigioni incassate"
+              hint="Provvigioni incassate — tutti i tipi di contratto"
             />
           </Link>
           <Link href="/provvigioni?stato=Da%20incassare">
@@ -332,13 +332,14 @@ export default async function DashboardPage({
               label="Da incassare"
               value={formatCurrency(moneyTotals.daIncassare)}
               tone="warning"
+              hint="Gettoni una tantum e annuali non incassati (senza le mensilità qui sotto)"
             />
           </Link>
           <Link href="/provvigioni?vista=ricorrente">
             <StatCard
               label="Ricorrenti mensili"
               value={formatCurrency(moneyTotals.ricorrenti)}
-              hint="Gettoni contratti ricorrenti"
+              hint="Rate mensili da incassare — totale separato, non incluso sopra"
             />
           </Link>
         </div>

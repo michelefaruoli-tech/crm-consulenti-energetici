@@ -34,6 +34,7 @@ import {
   heliosLastPayableCompetence,
 } from "@/lib/helios-contract-rules";
 import {
+  neverSyncedMonthlyWhere,
   nonRecurringWhere,
   parseStatoFilter,
   recurringAnnualWhereOr,
@@ -123,6 +124,9 @@ function expandedUnitWhere(
         ),
       ],
     });
+    // Mensili ricorrenti (non Helios) senza nessuna rata generata ancora:
+    // vedi il commento su `neverSyncedMonthlyWhere` in provvigioni-filters.ts.
+    unitOrs.push({ AND: [...base, neverSyncedMonthlyWhere] });
   }
   return { OR: unitOrs };
 }

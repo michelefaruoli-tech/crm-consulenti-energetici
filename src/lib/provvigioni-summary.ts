@@ -4,6 +4,8 @@
 import type { Prisma } from "@/generated/prisma/client";
 import {
   buildProvvigioniListWhere,
+  provvigioneStatoWhere,
+  recurringMonthlyWhereOr,
   type ProvvigioniFilters,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
@@ -116,5 +118,83 @@ export async function loadProvvigioniFinancialSummary(
     daIncassareAmount: daIncassare.amount,
     pagatoCount: pagato.count,
     pagatoAmount: pagato.amount,
+  };
+}
+
+export type DashboardMoneyTotals = {
+  /** Ricevute + da incassare (una tantum e annuali). Non include le mensilità
+   * ricorrenti, per non farle contare due volte insieme a «Ricorrenti mensili». */
+  complessivo: number;
+  /** Provvigioni già incassate dal fornitore — tutti i tipi (una tantum, annuali, mensili). */
+  incassato: number;
+  /** Gettoni una tantum e annuali (R) non ancora incassati. NON include le rate
+   * mensili ricorrenti (M): quelle sono in «ricorrenti», per restare un totale
+   * separato come richiesto (le due card non si devono sovrapporre). */
+  daIncassare: number;
+  /** Rate mensili ricorrenti (M) ancora da incassare (MISSING/PENDING/
+   * ERROR_UNPAID), stesso gating della lista Provvigioni (lag Helios M+2
+   * incluso). Contratti mensili non Helios senza ancora nessuna rata generata
+   * sono comunque contati con il gettone previsto (vedi `neverSyncedMonthlyWhere`). */
+  ricorrenti: number;
+};
+
+/**
+ * Totali finanziari per le 4 card della Dashboard.
+ *
+ * Prima di questa funzione la Dashboard usava un calcolo separato basato
+ * solo su `Contract.collectionDate` (`sumProvvigioniTotals`, rimossa): non
+ * considerava affatto le rate `RecurringMonth` dei contratti ricorrenti, per
+ * cui contratti realmente «Da incassare» comparivano a 0,00 € — il calcolo
+ * era completamente disallineato dalla lista Provvigioni (che invece usa
+ * `provvigioneStatoWhere` + l'espansione a rata di `provvigioni-rows.ts`).
+ *
+ * Qui si riusa la STESSA logica della lista (stessa definizione di stato,
+ * stesso gating Helios M+2, stessa gestione dei gettoni una tantum senza
+ * rata) per i 3 numeri sorgente, poi si separa la quota mensile ricorrente
+ * per due card distinte senza doppio conteggio.
+ */
+export async function loadDashboardMoneyTotals(
+  contractWhere: Prisma.ContractWhereInput,
+): Promise<DashboardMoneyTotals> {
+  const incassatoWhere: Prisma.ContractWhereInput = {
+    AND: [contractWhere, provvigioneStatoWhere("Incassato") ?? {}],
+  };
+  const daIncassareWhere: Prisma.ContractWhereInput = {
+    AND: [contractWhere, provvigioneStatoWhere("Da incassare") ?? {}],
+  };
+  const daIncassareMensiliWhere: Prisma.ContractWhereInput = {
+    AND: [daIncassareWhere, { OR: recurringMonthlyWhereOr }],
+  };
+
+  // In serie (non Promise.all): Neon HTTP satura con troppe query in parallelo
+  // (stesso motivo di `loadProvvigioniFinancialSummary` qui sopra).
+  const incassato = await sumExpandedAmountForStato(
+    incassatoWhere,
+    "incassato",
+    null,
+    "Incassato",
+  );
+  const daIncassareTotale = await sumExpandedAmountForStato(
+    daIncassareWhere,
+    "da-incassare",
+    null,
+    "Da incassare",
+  );
+  const ricorrenti = await sumExpandedAmountForStato(
+    daIncassareMensiliWhere,
+    "da-incassare",
+    null,
+    "Da incassare",
+  );
+
+  // Sottrazione invece di ricalcolo indipendente: garantisce che le due card
+  // non si sovrappongano mai (stessa fonte, stesso filtro base).
+  const daIncassare = Math.max(0, daIncassareTotale - ricorrenti);
+
+  return {
+    complessivo: incassato + daIncassare,
+    incassato,
+    daIncassare,
+    ricorrenti,
   };
 }
