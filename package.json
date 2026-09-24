@@ -18,6 +18,7 @@
     "check:cte-colors": "tsx scripts/check-cte-supplier-colors.ts",
     "check:recurrence": "tsx scripts/verify-recurrence-kind.ts",
     "check:recurring-window": "tsx scripts/check-recurring-window.ts",
+    "check:backfill-provvigioni": "tsx scripts/check-backfill-provvigioni.ts",
     "db:cleanup-recurring": "tsx scripts/cleanup-recurring-out-of-range.ts",
     "postinstall": "prisma generate",
     "db:import-dati": "tsx scripts/import-excel-dati.ts",

@@ -7,6 +7,7 @@ import { getMasterEmail } from "@/lib/mail";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { BackupPanel } from "@/components/backup/backup-panel";
 import { RecurringCleanupPanel } from "@/components/backup/recurring-cleanup-panel";
+import { ProvvigioniBackfillPanel } from "@/components/backup/provvigioni-backfill-panel";
 
 export default async function BackupPage() {
   const session = await requireSession();
@@ -75,6 +76,8 @@ export default async function BackupPage() {
       <BackupPanel backupEmail={backupEmail} gitHash={gitHash} />
 
       <RecurringCleanupPanel />
+
+      <ProvvigioniBackfillPanel />
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-2 font-semibold text-slate-900">Cosa succede in automatico</h2>
