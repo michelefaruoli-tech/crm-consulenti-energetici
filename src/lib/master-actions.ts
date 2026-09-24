@@ -399,7 +399,7 @@ export async function changeOwnPasswordAction(
 
 export async function requestPasswordResetAction(
   formData: FormData,
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{ ok: boolean; message: string; mailOk?: boolean; mailError?: string }> {
   const { isHoneypotFilled, isAuthRateLimited, logSecurityEvent } =
     await import("@/lib/security-log");
   const { getRequestMeta } = await import("@/lib/request-meta");
@@ -451,7 +451,7 @@ export async function requestPasswordResetAction(
       details: "email non trovata (risposta generica inviata)",
       meta,
     });
-    return { ok: true, message: generic };
+    return { ok: true, message: generic, mailOk: false };
   }
 
   const token = randomBytes(32).toString("hex");
@@ -479,14 +479,26 @@ export async function requestPasswordResetAction(
     "Se non hai richiesto tu il reset, ignora questa email.",
   ].join("\n");
 
-  await sendMail({
+  const mail = await sendMail({
     to: user.email,
     subject: "Reset password CRM FM Consulenza",
     text: body,
     html: textToHtmlParagraphs(body),
   });
+  if (!mail.ok) {
+    // Non cambiare la risposta pubblica (anti-enumerazione): logga solo l'esito
+    // reale per chi ha accesso a Sicurezza / per il chiamante admin.
+    console.error("[requestPasswordResetAction] invio email falso", mail.error);
+    await logSecurityEvent({
+      eventType: "PASSWORD_RESET_REQUESTED",
+      userId: user.id,
+      email: user.email,
+      details: `invio email falso: ${mail.error ?? "errore ignoto"}`,
+      meta,
+    });
+  }
 
-  return { ok: true, message: generic };
+  return { ok: true, message: generic, mailOk: mail.ok, mailError: mail.error };
 }
 
 export async function resetPasswordWithTokenAction(
@@ -545,10 +557,30 @@ export async function adminSendPasswordResetAction(formData: FormData): Promise<
   const userId = String(formData.get("userId") ?? "");
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) redirect("/utenti?error=not_found");
+  if (!user.active) {
+    redirect(
+      `/utenti?error=${encodeURIComponent(
+        "Utente disattivato: riattivalo prima di inviare il reset",
+      )}`,
+    );
+  }
 
   const fd = new FormData();
   fd.set("email", user.email);
-  await requestPasswordResetAction(fd);
+  const result = await requestPasswordResetAction(fd);
+
+  // L'admin conosce già l'account (l'ha selezionato dalla lista): qui non c'è
+  // rischio di enumerazione, quindi mostriamo l'esito reale dell'invio email
+  // invece del messaggio generico anti-enumerazione mostrato al pubblico.
+  if (result.mailOk === false) {
+    redirect(
+      `/utenti?error=${encodeURIComponent(
+        `Email di reset NON inviata (${
+          result.mailError ?? "errore SMTP"
+        }). Usa «Nuova password» per impostarne una direttamente.`,
+      )}`,
+    );
+  }
   redirect("/utenti?ok=reset_inviato");
 }
 

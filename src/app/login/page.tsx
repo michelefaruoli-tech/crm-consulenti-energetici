@@ -8,6 +8,8 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  const message = error ? decodeURIComponent(error) : null;
+  const isRateLimited = message?.includes("Troppi tentativi") ?? false;
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 px-4">
@@ -22,13 +24,15 @@ export default async function LoginPage({
           </div>
         </div>
 
-        {error === "blocked" ? (
-          <p className="mb-4 rounded-lg border border-amber-900 bg-amber-950/50 px-3 py-2 text-sm text-amber-200">
-            Troppi tentativi di accesso. Riprova tra circa 15 minuti.
-          </p>
-        ) : error ? (
-          <p className="mb-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
-            Credenziali non valide
+        {message ? (
+          <p
+            className={
+              isRateLimited
+                ? "mb-4 rounded-lg border border-amber-900 bg-amber-950/50 px-3 py-2 text-sm text-amber-200"
+                : "mb-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300"
+            }
+          >
+            {message}
           </p>
         ) : null}
 
