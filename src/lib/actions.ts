@@ -33,18 +33,14 @@ export async function loginAction(formData: FormData): Promise<void> {
     });
     // Finta risposta lenta: non rivelare il blocco
     await new Promise((r) => setTimeout(r, 800));
-    redirect("/login?error=1");
+    redirect(`/login?error=${encodeURIComponent("Credenziali non valide")}`);
   }
 
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const result = await login(email, password);
   if (result.error) {
-    const q =
-      result.error.includes("Troppi") || result.error.includes("15 minuti")
-        ? "blocked"
-        : "1";
-    redirect(`/login?error=${q}`);
+    redirect(`/login?error=${encodeURIComponent(result.error)}`);
   }
   redirect("/");
 }

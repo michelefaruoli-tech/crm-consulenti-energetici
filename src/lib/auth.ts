@@ -117,14 +117,41 @@ export async function login(email: string, password: string) {
   const user = await prisma.user.findFirst({
     where: { email: { equals: normalized, mode: "insensitive" } },
   });
-  if (!user || !user.active) {
+  if (!user) {
     await logSecurityEvent({
       eventType: "LOGIN_FAILED",
       email: normalized,
-      details: "utente assente o disattivo",
+      details: "utente assente",
       meta,
     });
     return { error: "Credenziali non valide" };
+  }
+
+  if (!user.active) {
+    await logSecurityEvent({
+      eventType: "LOGIN_FAILED",
+      userId: user.id,
+      email: user.email,
+      details: "utente disattivato",
+      meta,
+    });
+    return {
+      error: "Utente disattivato. Contatta l'amministratore per riattivarlo.",
+    };
+  }
+
+  if (!user.password) {
+    await logSecurityEvent({
+      eventType: "LOGIN_FAILED",
+      userId: user.id,
+      email: user.email,
+      details: "password non impostata",
+      meta,
+    });
+    return {
+      error:
+        "Password non impostata. Chiedi all'amministratore di impostarne una nuova (pulsante «Nuova password»).",
+    };
   }
 
   const valid = await bcrypt.compare(password, user.password);

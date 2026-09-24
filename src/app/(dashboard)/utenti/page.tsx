@@ -29,7 +29,12 @@ function supplierLabel(
   return scopes.map((s) => s.supplier?.name ?? "?").join(", ");
 }
 
-export default async function UtentiPage() {
+export default async function UtentiPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; ok?: string }>;
+}) {
+  const sp = await searchParams;
   const session = await requireSession();
   const isAdmin = hasPermission(session.role, "users.manage");
   const isAreaManager =
@@ -131,6 +136,19 @@ export default async function UtentiPage() {
         </div>
         {isAdmin ? <DeleteAllUsersButton /> : null}
       </div>
+
+      {sp.error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {decodeURIComponent(sp.error)}
+        </div>
+      ) : null}
+      {sp.ok ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          {sp.ok === "reset_inviato"
+            ? "Email di reset inviata: il collaboratore riceverà un link valido 1 ora."
+            : "Operazione completata."}
+        </div>
+      ) : null}
 
       {isAdmin ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
