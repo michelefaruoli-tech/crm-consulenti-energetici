@@ -109,26 +109,30 @@ export function InlineContractStatusSelect({
   function onChange(next: string) {
     if (next === status) return;
 
-    // In lista Master: note + Salva obbligatori per esiti (email all’agente)
-    if (mode === "master" && AGENT_NOTIFY_STATUSES.has(next)) {
+    // Esiti che notificano l’agente via email (Da incassare, Richiesta
+    // integrazione): note obbligatorie in QUALSIASI modalità, altrimenti il
+    // server rifiuta il salvataggio con "Inserisci le note per l’agente
+    // prima di salvare" senza che compaia mai il popup per scriverle.
+    // KO è gestito subito sotto insieme agli altri stati terminali.
+    if (AGENT_NOTIFY_STATUSES.has(next) && next !== "KO") {
       setPendingMasterStatus(next);
       setAgentNotes("");
       setError(null);
       return;
     }
 
-    if (["CHIUSO", "KO", "ANNULLATO"].includes(next) && mode !== "master") {
-      setTerminalStatus(next);
-      setClosureDate(format(new Date(), "yyyy-MM-dd"));
-      setClosureReason("");
-      setClosureNotes("");
-      return;
-    }
-
-    // KO da master mode senza passare da AGENT_NOTIFY? già gestito sopra
-    if (next === "KO" && mode === "master") {
-      setPendingMasterStatus(next);
-      setAgentNotes("");
+    if (["CHIUSO", "KO", "ANNULLATO"].includes(next)) {
+      if (mode === "master") {
+        // In lista Master il KO usa lo stesso popup nota rapida (senza data/motivo)
+        setPendingMasterStatus(next);
+        setAgentNotes("");
+        setError(null);
+      } else {
+        setTerminalStatus(next);
+        setClosureDate(format(new Date(), "yyyy-MM-dd"));
+        setClosureReason("");
+        setClosureNotes("");
+      }
       return;
     }
 
@@ -161,6 +165,11 @@ export function InlineContractStatusSelect({
   function confirmTerminalStatus() {
     if (!terminalStatus || !closureDate || !closureReason.trim()) {
       setError("Data e motivo sono obbligatori");
+      return;
+    }
+    // KO notifica l’agente via email: senza nota il server rifiuta il salvataggio.
+    if (terminalStatus === "KO" && !closureNotes.trim()) {
+      setError("Inserisci le note per l’agente prima di salvare");
       return;
     }
     const next = terminalStatus;
@@ -267,8 +276,21 @@ export function InlineContractStatusSelect({
               <input value={closureReason} onChange={(e) => setClosureReason(e.target.value)} placeholder="Es. cessazione, ripensamento, pratica respinta" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
             </label>
             <label className="mt-3 block text-sm font-semibold text-slate-800">
-              Note (inviate all’agente se KO)
-              <textarea value={closureNotes} onChange={(e) => setClosureNotes(e.target.value)} rows={3} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+              {terminalStatus === "KO"
+                ? "Note per l’agente (inviate via email) *"
+                : "Note (inviate all’agente se KO)"}
+              <textarea
+                value={closureNotes}
+                onChange={(e) => setClosureNotes(e.target.value)}
+                rows={3}
+                required={terminalStatus === "KO"}
+                placeholder={
+                  terminalStatus === "KO"
+                    ? "Es. pratica respinta dal fornitore, motivo"
+                    : undefined
+                }
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+              />
             </label>
             <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">
               {terminalStatus === "CHIUSO"
