@@ -13,7 +13,7 @@ import {
   formatFilterList,
   parseFilterList,
 } from "@/lib/filter-list";
-import { toPeriod } from "@/lib/recurring";
+import { notAnnualNextHiddenWhere, toPeriod } from "@/lib/recurring";
 
 export type ProvvigioniFilters = {
   canViewAll: boolean;
@@ -237,6 +237,7 @@ function provvigioneStatoWhereOne(
     const missingRate: Prisma.RecurringMonthWhereInput = {
       status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
       ...(competence ? { period: competence } : {}),
+      ...notAnnualNextHiddenWhere,
     };
     return {
       status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
@@ -253,6 +254,13 @@ function provvigioneStatoWhereOne(
                 { supplyStartDate: null },
               ],
             },
+          ],
+        },
+        {
+          AND: [
+            { OR: recurringAnnualWhereOr },
+            { collectionDate: null },
+            { status: { not: "PROVVIGIONE_LIQUIDATA" } },
           ],
         },
         {
@@ -461,6 +469,7 @@ export function buildProvvigioniListWhere(
             some: {
               status: { in: ["MISSING", "PENDING"] },
               period: { lt: toPeriod(new Date()) },
+              ...notAnnualNextHiddenWhere,
             },
           },
         },
@@ -508,6 +517,7 @@ export function provvigioniCompetenceWhere(
         some: {
           period,
           status: { in: ["MISSING", "PENDING", "ERROR_UNPAID"] },
+          ...notAnnualNextHiddenWhere,
         },
       },
     });

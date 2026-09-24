@@ -1,6 +1,8 @@
 /**
- * Espansione righe Provvigioni: un clone per ogni mese ricorrente (M)
- * quando si visualizzano tutti i periodi con filtro Incassato/Da incassare/Pagato.
+ * Espansione righe Provvigioni: un clone per ogni rata ricorrente (M mensile
+ * e R annuale) quando si visualizzano tutti i periodi con filtro
+ * Incassato / Da incassare / Pagato. Le copie annuali +12 restano nascoste
+ * in periodo storno.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -18,7 +20,14 @@ import {
   formatItDate,
   isInFornitura,
 } from "@/lib/supply-dates";
-import { isRecurringMonthly, periodLabel } from "@/lib/recurring";
+import {
+  isAnnualNextHidden,
+  isRecurring,
+  isRecurringAnnual,
+  isRecurringMonthly,
+  notAnnualNextHiddenWhere,
+  periodLabel,
+} from "@/lib/recurring";
 import {
   isHeliosSupplier,
   isHeliosCompetenceNotYetPayable,
@@ -27,6 +36,7 @@ import {
 import {
   nonRecurringWhere,
   parseStatoFilter,
+  recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
 import {
@@ -41,10 +51,6 @@ import {
 export type RecurringExpandMode = "incassato" | "da-incassare" | "pagato" | "all";
 
 const NON_RECURRING_WHERE: Prisma.ContractWhereInput = nonRecurringWhere;
-
-const MONTHLY_RECURRING_WHERE: Prisma.ContractWhereInput = {
-  OR: recurringMonthlyWhereOr,
-};
 
 /**
  * Filtri di colonna che non valgono per tutte le righe:
@@ -93,12 +99,18 @@ function expandedUnitWhere(
   const ut: Prisma.ContractWhereInput = {
     AND: [...base, NON_RECURRING_WHERE],
   };
-  const annual: Prisma.ContractWhereInput = {
-    AND: [
-      ...base,
-      withoutMatchingRates({ recurrenceKind: "R" }, rateStatuses, rateExtra),
-    ],
-  };
+  const annual: Prisma.ContractWhereInput =
+    expandMode === "da-incassare"
+      ? { AND: [...base, { recurrenceKind: "R" }, { collectionDate: null }] }
+      : expandMode === "incassato"
+        ? {
+            AND: [
+              ...base,
+              { recurrenceKind: "R" },
+              { collectionDate: { not: null } },
+            ],
+          }
+        : { AND: [...base, { recurrenceKind: "R" }] };
   const unitOrs: Prisma.ContractWhereInput[] = [ut, annual];
   if (expandMode === "da-incassare" || expandMode === "all") {
     unitOrs.push({
@@ -127,8 +139,16 @@ function expandedRateWhere(
   return {
     AND: [
       { status: { in: statuses } },
+      notAnnualNextHiddenWhere,
       ...(scope?.rate ?? []),
-      { contract: { AND: [contractWhere, MONTHLY_RECURRING_WHERE] } },
+      {
+        contract: {
+          AND: [
+            contractWhere,
+            { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] },
+          ],
+        },
+      },
       {
         NOT: {
           AND: [
@@ -269,6 +289,7 @@ export type ContractForProvvigioneRow = {
     status: string;
     amount: unknown;
     settledPeriod?: string | null;
+    note?: string | null;
   }>;
 };
 
@@ -341,12 +362,20 @@ function buildSingleRow(
   const inPagamento =
     !monthOverride && contract.status === "IN_ATTESA_PAGAMENTO";
 
+  const unpaidAnnualRate =
+    Boolean(monthOverride) &&
+    isRecurringAnnual(contract.recurrence) &&
+    monthOverride!.status !== "PAID" &&
+    monthOverride!.status !== "LIQUIDATED";
+
   const hasDate = inPagamento
     ? false
-    : expandStato === "Incassato" ||
-      expandStato === "Pagato" ||
-      Boolean(effectiveCollection) ||
-      paidRecurringForCompetence;
+    : unpaidAnnualRate
+      ? false
+      : expandStato === "Incassato" ||
+        expandStato === "Pagato" ||
+        Boolean(effectiveCollection) ||
+        paidRecurringForCompetence;
 
   const paidLabel =
     expandStato === "Pagato"
@@ -396,7 +425,7 @@ function buildSingleRow(
     expiryDate: contract.expiryDate,
     durationMonths: contract.durationMonths,
     isLatestForPod: opts.latestMap.get(contract.id) ?? true,
-    collectionDate: effectiveCollection,
+    collectionDate: unpaidAnnualRate ? null : effectiveCollection,
     isEarlyReswitch: opts.earlyMap.get(contract.id) ?? false,
   });
 
@@ -506,19 +535,31 @@ export function expandContractsToProvvigioneRows(
   const now = opts.now ?? new Date();
 
   for (const contract of contracts) {
-    if (!isRecurringMonthly(contract.recurrence)) {
+    if (!isRecurring(contract.recurrence)) {
       rows.push(buildSingleRow(contract, opts));
       continue;
     }
 
     const months = (contract.recurringMonths ?? [])
       .filter((m) => statuses.includes(m.status))
+      .filter((m) => !isAnnualNextHidden(m.note))
       .filter((m) => {
         if (!isHeliosSupplier(contract.supplier.name)) return true;
         if (m.status === "PAID" || m.status === "LIQUIDATED") return true;
         return !isHeliosCompetenceNotYetPayable(m.period, now);
       })
       .sort((a, b) => b.period.localeCompare(a.period));
+
+    if (isRecurringAnnual(contract.recurrence)) {
+      const showFirstYear =
+        mode === "all" ||
+        (mode === "da-incassare" && !contract.collectionDate) ||
+        (mode === "incassato" && Boolean(contract.collectionDate)) ||
+        (mode === "pagato" && contract.status === "PROVVIGIONE_LIQUIDATA");
+      if (showFirstYear) {
+        rows.push(buildSingleRow(contract, opts));
+      }
+    }
 
     for (const month of months) {
       rows.push(
@@ -533,6 +574,7 @@ export function expandContractsToProvvigioneRows(
 
     if (
       months.length === 0 &&
+      !isRecurringAnnual(contract.recurrence) &&
       contract.status === "IN_ATTESA_PAGAMENTO" &&
       (mode === "da-incassare" || mode === "all")
     ) {
@@ -942,6 +984,7 @@ export async function fetchExpandedProvvigionePage(args: {
           status: true,
           amount: true,
           settledPeriod: true,
+          note: true,
           contract: { select: args.contractSelect },
         },
       });
@@ -970,6 +1013,7 @@ export async function fetchExpandedProvvigionePage(args: {
         status: true,
         amount: true,
         settledPeriod: true,
+        note: true,
         contract: { select: args.contractSelect },
       },
     });

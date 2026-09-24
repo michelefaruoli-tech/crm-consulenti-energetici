@@ -148,3 +148,37 @@ export function recurrenceLabel(recurrence: string | null | undefined): string {
   const n = normalizeRecurrence(recurrence);
   return RECURRENCE_OPTIONS.find((o) => o.value === n)?.label ?? "Gettone (una tantum)";
 }
+
+/**
+ * Nota di sistema sulla rata annuale +12 creata all'incasso.
+ * Resta nascosta in Provvigioni finché il contratto è in periodo storno.
+ */
+export const ANNUAL_NEXT_HIDDEN_NOTE = "Nascosta: in attesa di fine storno";
+
+export function isAnnualNextHidden(note: string | null | undefined): boolean {
+  return note === ANNUAL_NEXT_HIDDEN_NOTE;
+}
+
+/**
+ * Clausola Prisma: esclude le copie annuali ancora in storno.
+ * `note: { not }` da solo escluderebbe anche `note = null`.
+ */
+export const notAnnualNextHiddenWhere: {
+  OR: Array<{ note: null } | { note: { not: string } }>;
+} = {
+  OR: [{ note: null }, { note: { not: ANNUAL_NEXT_HIDDEN_NOTE } }],
+};
+
+/**
+ * Prossima competenza annuale: ultimo incasso + 12 mesi, oppure
+ * primo anniversario (ingresso fornitura + 12) se non ci sono ancora rate pagate.
+ */
+export function nextAnnualDuePeriod(
+  supplyStartPeriod: string,
+  paidPeriods: readonly string[],
+): string {
+  const paid = paidPeriods.filter((p) => /^\d{4}-\d{2}$/.test(p)).sort();
+  const last = paid[paid.length - 1];
+  if (!last) return addMonths(supplyStartPeriod, 12);
+  return addMonths(last, 12);
+}

@@ -402,7 +402,7 @@ export default async function ProvvigioniPage({
       },
     },
     recurringMonths: {
-      select: { period: true, status: true, amount: true, settledPeriod: true },
+      select: { period: true, status: true, amount: true, settledPeriod: true, note: true },
       orderBy: { period: "asc" as const },
     },
   } as const;

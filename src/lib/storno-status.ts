@@ -108,6 +108,24 @@ function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+/** true se oggi è ancora nel periodo storno (rosso BLOCCA, copia annuale nascosta). */
+export function isWithinStornoPeriod(input: {
+  supplyStartDate?: Date | null;
+  stornoMonths?: number | null;
+  stornoEndDate?: Date | null;
+  now?: Date;
+}): boolean {
+  if (input.stornoMonths === 0) return false;
+  const end = computeStornoEndDate(
+    input.supplyStartDate,
+    input.stornoMonths,
+    input.stornoEndDate,
+  );
+  if (!end) return false;
+  const now = input.now ?? new Date();
+  return startOfDay(now).getTime() <= startOfDay(end).getTime();
+}
+
 function daysBetween(from: Date, to: Date): number {
   const ms = startOfDay(to).getTime() - startOfDay(from).getTime();
   return Math.round(ms / (24 * 60 * 60 * 1000));

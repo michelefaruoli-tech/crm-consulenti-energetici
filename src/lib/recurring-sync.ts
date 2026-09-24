@@ -1,10 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import {
   addMonths,
+  ANNUAL_NEXT_HIDDEN_NOTE,
+  isAnnualNextHidden,
   isRecurring,
   isRecurringAnnual,
   isRecurringMonthly,
   monthsBetween,
+  nextAnnualDuePeriod,
   normalizeRecurrence,
   recurrenceWriteData,
   toPeriod,
@@ -27,6 +30,8 @@ import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
+import { isWithinStornoPeriod } from "@/lib/storno-status";
+import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 const PRESERVED_STATUSES = new Set([
   "CLOSED",
@@ -78,6 +83,7 @@ async function closeDisposableOutOfWindowMonths(
 
   for (const row of rows) {
     if (isPeriodInRecurringWindow(window, row.period)) continue;
+    if (isAnnualNextHidden(row.note)) continue;
     if (!isDisposableRecurringMonth(row)) {
       manualReview++;
       continue;
@@ -246,6 +252,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       supplyStartDate: true,
       operationType: true,
       collectionDate: true,
+      stornoEndDate: true,
       status: true,
       expiryDate: true,
       statusHistory: {
@@ -255,7 +262,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
         take: 1,
       },
       commission: { select: { expected: true } },
-      supplier: { select: { name: true } },
+      supplier: { select: { name: true, stornoMonths: true } },
     },
   });
   if (!contract) return;
@@ -295,22 +302,22 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     return;
   }
 
-  const lastPeriod = lastGeneratedPeriod(
-    window,
-    nowDate,
-    recurringGenerationLagMonths(contract.supplier?.name),
-  );
-
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
   if (isRecurringAnnual(contract.recurrence)) {
     if (contract.status !== "CHIUSO") {
-      await syncAnnualPeriods(contractId, start, lastPeriod, amount);
+      await syncAnnualPeriods(contractId, contract, amount, nowDate);
     }
     return;
   }
 
   if (!isRecurringMonthly(contract.recurrence)) return;
+
+  const lastPeriod = lastGeneratedPeriod(
+    window,
+    nowDate,
+    recurringGenerationLagMonths(contract.supplier?.name),
+  );
 
   if (start <= lastPeriod) {
     const periods = monthsBetween(start, lastPeriod);
@@ -320,34 +327,154 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   }
 }
 
+type AnnualSyncContract = {
+  insertionDate: Date | null;
+  supplyStartDate: Date | null;
+  operationType: string | null;
+  collectionDate: Date | null;
+  stornoEndDate: Date | null;
+  supplier: { stornoMonths: number | null } | null;
+};
+
+/**
+ * Dopo un incasso annuale crea (o aggiorna) la copia +12 mesi.
+ * Resta PENDING nascosta in storno; diventa visibile solo fuori storno.
+ */
 async function syncAnnualPeriods(
   contractId: string,
-  supplyStart: string,
-  now: string,
+  contract: AnnualSyncContract,
   amount: number | null,
+  now: Date,
 ): Promise<void> {
-  const paidRows = await prisma.recurringMonth.findMany({
-    where: {
-      contractId,
-      status: { in: ["PAID", "LIQUIDATED"] },
+  const months = await prisma.recurringMonth.findMany({
+    where: { contractId },
+    select: {
+      id: true,
+      period: true,
+      status: true,
+      amount: true,
+      note: true,
+      paidAt: true,
+      settledPeriod: true,
     },
-    select: { period: true },
-    orderBy: { period: "desc" },
   });
 
-  // Baseline: ultimo pagamento ricevuto, altrimenti ingresso fornitura
-  // Prima rata dovuta = ingresso + 12 mesi
-  let nextDue =
-    paidRows.length > 0
-      ? addMonths(paidRows[0]!.period, 12)
-      : addMonths(supplyStart, 12);
+  const paid = months.filter(
+    (row) => row.status === "PAID" || row.status === "LIQUIDATED",
+  );
+  const firstYearCollected = Boolean(contract.collectionDate) || paid.length > 0;
 
-  // Genera tutte le scadenze annuali già maturate (max 10 anni)
+  if (!firstYearCollected) {
+    for (const row of months) {
+      if (!isDisposableRecurringMonth(row)) continue;
+      if (row.status !== "PENDING" && row.status !== "MISSING") continue;
+      await prisma.recurringMonth.delete({ where: { id: row.id } }).catch(() => undefined);
+    }
+    return;
+  }
+
+  const supplyStart =
+    contract.supplyStartDate ??
+    computeSupplyStartDate(contract.insertionDate ?? now, contract.operationType);
+  const supplyStartPeriod = toPeriod(supplyStart);
+  const hide = isWithinStornoPeriod({
+    supplyStartDate: supplyStart,
+    stornoMonths: contract.supplier?.stornoMonths,
+    stornoEndDate: contract.stornoEndDate,
+    now,
+  });
+
+  const byPeriod = new Map(months.map((row) => [row.period, row]));
+  let nextDue = nextAnnualDuePeriod(
+    supplyStartPeriod,
+    paid.map((row) => row.period),
+  );
+  let keptPeriod: string | null = null;
+
   for (let i = 0; i < 10; i++) {
-    if (nextDue > now) break;
-    // Scadenza annuale già maturata (anche nel mese corrente) → da incassare
-    await upsertMonthStatus(contractId, nextDue, now, amount, { treatCurrentAsMissing: true });
-    nextDue = addMonths(nextDue, 12);
+    const existing = byPeriod.get(nextDue);
+    if (existing && (existing.status === "PAID" || existing.status === "LIQUIDATED")) {
+      nextDue = addMonths(nextDue, 12);
+      continue;
+    }
+    if (existing && existing.status === "ERROR_UNPAID") {
+      keptPeriod = nextDue;
+      break;
+    }
+
+    const note = hide
+      ? ANNUAL_NEXT_HIDDEN_NOTE
+      : existing && isAnnualNextHidden(existing.note)
+        ? null
+        : (existing?.note ?? null);
+    const nowPeriod = toPeriod(now);
+    const status = !hide && nextDue <= nowPeriod ? "MISSING" : "PENDING";
+
+    if (!existing) {
+      await prisma.recurringMonth.create({
+        data: {
+          contractId,
+          period: nextDue,
+          status,
+          amount,
+          paidAt: null,
+          note,
+        },
+      });
+      keptPeriod = nextDue;
+      break;
+    }
+
+    const autoClosed =
+      existing.status === "CLOSED" &&
+      (existing.note === AUTO_CLOSED_BEFORE_START ||
+        existing.note === AUTO_CLOSED_AFTER_END ||
+        existing.note === AUTO_CLOSED_HELIOS_LAG ||
+        isAnnualNextHidden(existing.note));
+    if (
+      PRESERVED_STATUSES.has(existing.status) &&
+      !autoClosed &&
+      !isAnnualNextHidden(existing.note)
+    ) {
+      keptPeriod = nextDue;
+      break;
+    }
+
+    await prisma.recurringMonth.update({
+      where: { id: existing.id },
+      data: {
+        status,
+        amount: amount ?? existing.amount,
+        paidAt: null,
+        settledPeriod: null,
+        note,
+      },
+    });
+    keptPeriod = nextDue;
+    break;
+  }
+
+  if (keptPeriod) {
+    for (const row of months) {
+      if (row.period === keptPeriod) continue;
+      if (
+        row.status === "PAID" ||
+        row.status === "LIQUIDATED" ||
+        row.status === "ERROR_UNPAID"
+      ) {
+        continue;
+      }
+      if (row.paidAt || row.settledPeriod) continue;
+      if (
+        row.status === "PENDING" ||
+        row.status === "MISSING" ||
+        isAnnualNextHidden(row.note)
+      ) {
+        await prisma.recurringMonth
+          .delete({ where: { id: row.id } })
+          .catch(() => undefined);
+      }
+    }
   }
 }
 
@@ -468,6 +595,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     const window = recurringWindow(contract, nowDate);
     for (const row of contract.recurringMonths) {
       if (isPeriodInRecurringWindow(window, row.period)) continue;
+      if (isAnnualNextHidden(row.note)) continue;
       if (!isDisposableRecurringMonth(row)) {
         manualReview++;
         continue;
@@ -601,6 +729,7 @@ export async function getMissingRecurringAlerts(
     where: {
       status: { in: ["MISSING", "PENDING"] },
       period: periodFilter,
+      AND: [{ OR: [{ note: null }, { note: { not: ANNUAL_NEXT_HIDDEN_NOTE } }] }],
       contract: {
         isHistorical: false,
         deletedAt: null,

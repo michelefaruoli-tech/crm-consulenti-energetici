@@ -11,7 +11,7 @@
  * Nessuna transazione (adapter Neon HTTP): solo `deleteMany` a lotti.
  */
 import { prisma } from "@/lib/prisma";
-import { periodLabel } from "@/lib/recurring";
+import { isAnnualNextHidden, periodLabel } from "@/lib/recurring";
 import {
   isDisposableRecurringMonth,
   isPeriodInRecurringWindow,
@@ -91,6 +91,7 @@ const CONTRACT_SELECT = {
       amount: true,
       paidAt: true,
       settledPeriod: true,
+      note: true,
     },
     orderBy: { period: "asc" as const },
   },
@@ -120,6 +121,7 @@ type ContractWithMonths = {
     amount: unknown;
     paidAt: Date | null;
     settledPeriod: string | null;
+    note: string | null;
   }>;
 };
 
@@ -143,6 +145,7 @@ export function findOutOfWindowMonths(
 
   for (const month of contract.recurringMonths) {
     if (isPeriodInRecurringWindow(window, month.period)) continue;
+    if (isAnnualNextHidden(month.note)) continue;
     const row: OutOfWindowMonth = {
       id: month.id,
       period: month.period,
