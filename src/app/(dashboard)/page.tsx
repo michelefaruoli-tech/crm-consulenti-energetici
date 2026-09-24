@@ -120,11 +120,12 @@ export default async function DashboardPage({
         },
         orderBy: [{ sentToMasterAt: "desc" }, { createdAt: "desc" }],
       }),
-      loadDashboardMoneyTotals(
-        canViewAll
-          ? { deletedAt: null }
-          : { deletedAt: null, collaboratorId: session.id },
-      ),
+      // Stesso scope visibilità del resto della Dashboard (whereAll): prima
+      // usava solo `canViewAll` con `collaboratorId: session.id` come unica
+      // alternativa, sbagliato per Backoffice/Area Manager (scope per
+      // fornitore/team, non per collaboratorId) — mostrava 0,00 € anche con
+      // contratti reali fuori dal loro perimetro.
+      loadDashboardMoneyTotals(whereAll),
       prisma.contract.count({
         where: { ...whereActive, commissionConfirmed: false },
       }),
