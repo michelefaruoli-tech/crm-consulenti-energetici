@@ -7,6 +7,7 @@ import {
   scanMissingProvvigioniRowsAction,
 } from "@/lib/recurring-backfill-actions";
 import type { MissingProvvigioneRow } from "@/lib/recurring-backfill";
+import { friendlyActionError } from "@/lib/friendly-client-error";
 
 type Preview = {
   findings: MissingProvvigioneRow[];
@@ -62,7 +63,7 @@ export function ProvvigioniBackfillPanel() {
       setPhase("idle");
       return acc;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Anteprima non riuscita");
+      setError(friendlyActionError(e));
       setProgress(null);
       setPhase("idle");
       return null;
@@ -97,7 +98,7 @@ export function ProvvigioniBackfillPanel() {
       );
     } catch (e) {
       setPhase("idle");
-      setError(e instanceof Error ? e.message : "Backfill non riuscito");
+      setError(friendlyActionError(e));
     }
   }
 

@@ -10,10 +10,16 @@ import {
   checkProvvigioniTotalsAction,
   scanPodDuplicateAnomaliesAction,
   scanRecurringAnomaliesAction,
-  type IntegrityRowFinding,
-  type PodDuplicateFinding,
-  type TotalsConsistencyResult,
 } from "@/lib/provvigioni-integrity-actions";
+// Tipi importati dal modulo che li definisce, NON dal file "use server":
+// un `export type { ... }` senza `from` in un file "use server" causa
+// "X is not defined" a runtime nel bundle Server Actions (verificato).
+import type { IntegrityRowFinding } from "@/lib/provvigioni-integrity-scan";
+import type {
+  PodDuplicateFinding,
+  TotalsConsistencyResult,
+} from "@/lib/provvigioni-integrity";
+import { friendlyActionError } from "@/lib/friendly-client-error";
 
 type Category = IntegrityRowFinding["category"];
 
@@ -78,6 +84,7 @@ export function ProvvigioniIntegrityPanel({
   const [scan, setScan] = useState<typeof EMPTY_SCAN | null>(null);
   const [podFindings, setPodFindings] = useState<PodDuplicateFinding[] | null>(null);
   const [podScanned, setPodScanned] = useState(0);
+  const [podTruncated, setPodTruncated] = useState(false);
   const [phase, setPhase] = useState<"idle" | "scanning" | "applying">("idle");
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,13 +141,14 @@ export function ProvvigioniIntegrityPanel({
       if (podRes.ok) {
         setPodFindings(podRes.findings);
         setPodScanned(podRes.scannedContracts);
+        setPodTruncated(podRes.truncated);
       } else {
         setError(podRes.error);
       }
       setProgress(null);
       setPhase("idle");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Anteprima non riuscita");
+      setError(friendlyActionError(e));
       setProgress(null);
       setPhase("idle");
     }
@@ -171,7 +179,7 @@ export function ProvvigioniIntegrityPanel({
         return;
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Operazione non riuscita");
+      setError(friendlyActionError(e));
     }
     setPhase("idle");
   }
@@ -197,7 +205,7 @@ export function ProvvigioniIntegrityPanel({
         return;
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Operazione non riuscita");
+      setError(friendlyActionError(e));
     }
     setPhase("idle");
   }
@@ -225,7 +233,7 @@ export function ProvvigioniIntegrityPanel({
       await runScan();
       return;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Operazione non riuscita");
+      setError(friendlyActionError(e));
     }
     setPhase("idle");
   }
@@ -251,7 +259,7 @@ export function ProvvigioniIntegrityPanel({
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Operazione non riuscita");
+      setError(friendlyActionError(e));
     }
     setPhase("idle");
   }
@@ -270,7 +278,7 @@ export function ProvvigioniIntegrityPanel({
       }
       setTotalsResult(res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Verifica non riuscita");
+      setError(friendlyActionError(e));
     }
   }
 
@@ -391,6 +399,13 @@ export function ProvvigioniIntegrityPanel({
                 (in storno) o essere archiviato (fuori storno) e non lo è. Seleziona
                 i POD e applica: userà la stessa regola di sempre.
               </p>
+              {podTruncated ? (
+                <p className="mt-1 text-xs text-amber-700">
+                  Attenzione: più di {podScanned} contratti con POD/PDR nel database,
+                  verifica parziale. Ripeti l&apos;analisi dopo aver bonificato questi
+                  per controllare il resto.
+                </p>
+              ) : null}
               <div className="mt-3 max-h-72 overflow-auto rounded border border-slate-100">
                 {podFindings.map((f) => (
                   <label

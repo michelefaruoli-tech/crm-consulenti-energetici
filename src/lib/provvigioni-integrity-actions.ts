@@ -10,7 +10,6 @@ import {
   checkProvvigioniTotals,
   scanPodDuplicateAnomalies,
   scanRecurringAnomalies,
-  type IntegrityRowFinding,
   type RecurringAnomalyScan,
 } from "@/lib/provvigioni-integrity-scan";
 import type {
@@ -202,5 +201,3 @@ export async function checkProvvigioniTotalsAction(input?: {
     };
   }
 }
-
-export type { IntegrityRowFinding, PodDuplicateFinding, TotalsConsistencyResult };

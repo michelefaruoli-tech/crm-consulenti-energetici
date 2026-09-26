@@ -8,6 +8,7 @@ import {
 } from "@/lib/recurring-cleanup-actions";
 import type { ContractCleanupFinding } from "@/lib/recurring-cleanup";
 import { RECURRING_STATUS_LABELS } from "@/lib/recurring";
+import { friendlyActionError } from "@/lib/friendly-client-error";
 
 /** Allineato a `CLEANUP_APPLY_MONTH_BATCH` in `recurring-cleanup.ts`. */
 const APPLY_MONTH_CHUNK = 100;
@@ -122,7 +123,7 @@ export function RecurringCleanupPanel() {
       setPhase("idle");
       return acc;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Anteprima non riuscita");
+      setError(friendlyActionError(e));
       setProgress(null);
       setPhase("idle");
       return null;
@@ -185,7 +186,7 @@ export function RecurringCleanupPanel() {
     } catch (e) {
       setProgress(null);
       setPhase("idle");
-      setError(e instanceof Error ? e.message : "Bonifica non riuscita");
+      setError(friendlyActionError(e));
     }
   }
 
