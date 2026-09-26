@@ -89,6 +89,9 @@ export function ProvvigioniIntegrityPanel({
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [applyDetails, setApplyDetails] = useState<
+    Array<{ period: string; outcome: string; motivo?: string }>
+  >([]);
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
   const [selectedPodKeys, setSelectedPodKeys] = useState<Set<string>>(new Set());
 
@@ -106,6 +109,7 @@ export function ProvvigioniIntegrityPanel({
     setPhase("scanning");
     setError(null);
     setMessage(null);
+    setApplyDetails([]);
     setConfirmed({});
     setSelectedPodKeys(new Set());
 
@@ -174,7 +178,24 @@ export function ProvvigioniIntegrityPanel({
       if (!res.ok) {
         setError(res.error);
       } else {
-        setMessage(`Create ${res.created} rate mancanti su ${res.contracts} contratti.`);
+        const skipped = res.rowResults.filter((r) => r.outcome === "saltata").length;
+        setMessage(
+          `Esito: ${res.created} create, ${res.updated} aggiornate` +
+            (skipped > 0 ? `, ${skipped} saltate` : "") +
+            ` su ${res.contracts} contratti.`,
+        );
+        setApplyDetails(
+          res.rowResults.map((r) => ({
+            period: r.period,
+            outcome:
+              r.outcome === "creata"
+                ? "creata"
+                : r.outcome === "aggiornata"
+                  ? "aggiornata"
+                  : "saltata",
+            motivo: r.motivo,
+          })),
+        );
         await runScan();
         return;
       }
@@ -308,9 +329,22 @@ export function ProvvigioniIntegrityPanel({
         </p>
       ) : null}
       {message ? (
-        <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {message}
-        </p>
+        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          <p>{message}</p>
+          {applyDetails.length > 0 ? (
+            <ul className="mt-2 max-h-40 overflow-auto text-xs text-emerald-900">
+              {applyDetails.slice(0, 80).map((row, i) => (
+                <li key={`${row.period}-${i}`}>
+                  {row.period}: <strong>{row.outcome}</strong>
+                  {row.motivo ? ` — ${row.motivo}` : ""}
+                </li>
+              ))}
+              {applyDetails.length > 80 ? (
+                <li className="text-emerald-700">+ altre {applyDetails.length - 80} righe</li>
+              ) : null}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       {scan ? (

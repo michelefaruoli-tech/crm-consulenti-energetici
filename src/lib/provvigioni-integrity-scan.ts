@@ -47,6 +47,8 @@ const INTEGRITY_CONTRACT_SELECT = {
   pod: true,
   pdr: true,
   recurrence: true,
+  recurrenceKind: true,
+  collectionDate: true,
   insertionDate: true,
   supplyStartDate: true,
   operationType: true,
@@ -68,10 +70,10 @@ const INTEGRITY_CONTRACT_SELECT = {
       id: true,
       period: true,
       status: true,
+      note: true,
       amount: true,
       paidAt: true,
       settledPeriod: true,
-      note: true,
     },
     orderBy: { period: "asc" as const },
   },
@@ -84,6 +86,8 @@ type IntegrityContract = {
   pod: string | null;
   pdr: string | null;
   recurrence: string | null;
+  recurrenceKind: "UT" | "M" | "R";
+  collectionDate: Date | null;
   insertionDate: Date | null;
   supplyStartDate: Date | null;
   operationType: string | null;

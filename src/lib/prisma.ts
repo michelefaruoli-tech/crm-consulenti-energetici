@@ -1,5 +1,7 @@
 import { PrismaClient } from "@/generated/prisma/client";
 import { PrismaNeonHttp } from "@prisma/adapter-neon";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined };
 
@@ -25,6 +27,16 @@ function createPrismaClient() {
     throw new Error(
       "DATABASE_URL non configurata. Imposta la connection string Neon in .env / Vercel.",
     );
+  }
+
+  // Solo script di test locali (Postgres TCP, es. check-backfill-apply-pg.ts).
+  if (process.env.PRISMA_PG_DIRECT === "1") {
+    const pool = new Pool({ connectionString });
+    const adapter = new PrismaPg(pool);
+    return new PrismaClient({
+      adapter,
+      log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    });
   }
 
   // HTTP adapter: più stabile su Vercel serverless rispetto ai WebSocket

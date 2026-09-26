@@ -65,7 +65,7 @@ export async function applyMissingProvvigioniRowsAction(input: {
 
     const result = await applyMissingProvvigioniRows(ids);
 
-    if (result.created > 0) {
+    if (result.created > 0 || result.updated > 0) {
       await writeAuditLog({
         userId: session.id,
         action: "CREATE",
@@ -75,6 +75,8 @@ export async function applyMissingProvvigioniRowsAction(input: {
           source: "backfill_provvigioni_mancanti",
           contracts: result.contracts,
           created: result.created,
+          updated: result.updated,
+          rowResults: result.rowResults.slice(0, 50),
           errors: result.errors,
         },
       });

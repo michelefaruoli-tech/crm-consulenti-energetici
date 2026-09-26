@@ -72,9 +72,31 @@ export const RECURRING_STATUS_LABELS: Record<string, string> = {
   ERROR_UNPAID: "Non pagato (errore)",
 };
 
+type RecurrenceContractFields = {
+  recurrence?: string | null;
+  recurrenceKind?: "UT" | "M" | "R" | null;
+};
+
+/** Classificazione indicizzata (allineata ai filtri Prisma `recurrenceKind`). */
+export function isContractRecurringMonthly(contract: RecurrenceContractFields): boolean {
+  if (contract.recurrenceKind === "M") return true;
+  if (contract.recurrenceKind === "R") return false;
+  return isRecurringMonthly(contract.recurrence);
+}
+
+export function isContractRecurringAnnual(contract: RecurrenceContractFields): boolean {
+  if (contract.recurrenceKind === "R") return true;
+  if (contract.recurrenceKind === "M") return false;
+  return isRecurringAnnual(contract.recurrence);
+}
+
 /** Qualsiasi forma di ricorrenza (mensile o annuale). */
 export function isRecurring(recurrence: string | null | undefined): boolean {
   return isRecurringMonthly(recurrence) || isRecurringAnnual(recurrence);
+}
+
+export function isContractRecurring(contract: RecurrenceContractFields): boolean {
+  return isContractRecurringMonthly(contract) || isContractRecurringAnnual(contract);
 }
 
 /** R = ricorrente annuale (dopo 12 mesi dall’ultimo pagamento / ingresso). */
