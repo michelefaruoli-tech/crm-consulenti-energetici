@@ -28,6 +28,11 @@ const ITEMS: Array<{ kind: CteListinoKind; title: string; body: string }> = [
     title: "Compara Semplice",
     body: "15 luce/gas dal volantino, senza gettoni. Super Luce Enel non ripetuta (già Corporate).",
   },
+  {
+    kind: "duferco-flex-condomini",
+    title: "Duferco Flex Condomini",
+    body: "18 CTE (8 luce + 10 gas) variabili, sezione Condomini, senza scadenza.",
+  },
 ];
 
 export function CteListinoImportPanel() {
