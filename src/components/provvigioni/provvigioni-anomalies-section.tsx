@@ -1,12 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { AnomaliesBulkPanel } from "@/components/provvigioni/anomalies-bulk-panel";
 
 export function ProvvigioniAnomaliesSection({
   alertCount,
+  monthIds,
   children,
 }: {
   alertCount: number;
+  /** Id RecurringMonth delle segnalazioni aperte (mancanti + assenti Helios). */
+  monthIds?: string[];
   children: ReactNode;
 }) {
   if (alertCount <= 0) return null;
@@ -16,7 +20,12 @@ export function ProvvigioniAnomaliesSection({
       <summary className="cursor-pointer text-sm font-semibold text-red-950">
         Anomalie — {alertCount} segnalazioni (rate mancanti, assenti da rendiconto…)
       </summary>
-      <div className="mt-4 space-y-4">{children}</div>
+      <div className="mt-4 space-y-4">
+        {monthIds && monthIds.length > 0 ? (
+          <AnomaliesBulkPanel monthIds={monthIds} />
+        ) : null}
+        {children}
+      </div>
     </details>
   );
 }

@@ -933,7 +933,13 @@ export default async function ProvvigioniPage({
         contractCount={total}
       />
 
-      <ProvvigioniAnomaliesSection alertCount={anomalyCount}>
+      <ProvvigioniAnomaliesSection
+        alertCount={anomalyCount}
+        monthIds={[
+          ...alertRows.map((a) => a.id),
+          ...heliosAbsentRows.map((a) => a.id),
+        ]}
+      >
         {alertRows.length > 0 ? (
           <RecurringMissingPanel
             alerts={alertRows}
