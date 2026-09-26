@@ -265,7 +265,7 @@ export async function updateUserScopesAction(
       String(formData.get("allSuppliers") ?? "") === "on";
 
     let supplierIds = allSuppliers ? [] : parseIds(formData, "supplierIds");
-    const collaboratorIds =
+    let collaboratorIds =
       roleSupportsCollaboratorScope(user.role) && !allCollaborators
         ? parseIds(formData, "collaboratorIds")
         : [];
@@ -283,6 +283,19 @@ export async function updateUserScopesAction(
         const allowed = new Set(mySuppliers.map((s) => s.supplierId));
         supplierIds = supplierIds.filter((id) => allowed.has(id));
       }
+    }
+
+    // Un Area Manager che modifica il proprio scope può solo restringere il
+    // proprio team, non aggiungere collaboratori che non ne fanno già parte
+    // (altrimenti otterrebbe visibilità sui loro contratti al di fuori del
+    // proprio perimetro, bypassando la tendina "Team" già limitata al team).
+    if (!isAdmin && session.role === "AREA_MANAGER" && userId === session.id) {
+      const myTeam = await prisma.userCollaboratorScope.findMany({
+        where: { userId: session.id },
+        select: { collaboratorId: true },
+      });
+      const allowedTeamIds = new Set(myTeam.map((c) => c.collaboratorId));
+      collaboratorIds = collaboratorIds.filter((id) => allowedTeamIds.has(id));
     }
 
     await replaceUserScopes({

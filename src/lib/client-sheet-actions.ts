@@ -358,13 +358,13 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
     if (!hasPermission(session.role, "contracts.change_collaborator")) {
       throw new Error("Solo l'amministratore può cambiare il collaboratore dalla scheda");
     }
-    const collab = await prisma.user.findFirst({
-      where: {
-        id: newCollaboratorId,
-        active: true,
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-      },
-    });
+    // Solo tra i collaboratori visibili a chi modifica: un Area Manager non
+    // può assegnare il contratto a qualcuno fuori dal proprio team.
+    const { loadVisibleCollaboratorOptions } = await import("@/lib/user-scope");
+    const visibleCollaborators = await loadVisibleCollaboratorOptions(session);
+    const collab = visibleCollaborators.find(
+      (u) => u.id === newCollaboratorId && u.active,
+    );
     if (!collab) throw new Error("Collaboratore non valido");
     await prisma.contract.update({
       where: { id: contractId },

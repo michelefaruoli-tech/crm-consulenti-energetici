@@ -470,13 +470,14 @@ export async function updateContractCollaboratorAction(formData: FormData): Prom
     throw new Error("Contratto non trovato");
   }
 
-  const collaborator = await prisma.user.findFirst({
-    where: {
-      id: collaboratorId,
-      active: true,
-      role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-    },
-  });
+  // Solo tra i collaboratori visibili a chi modifica: un Area Manager non
+  // può assegnare il contratto a qualcuno fuori dal proprio team, anche
+  // passando un ID a mano (stesso perimetro della tendina di selezione).
+  const { loadVisibleCollaboratorOptions } = await import("@/lib/user-scope");
+  const visibleCollaborators = await loadVisibleCollaboratorOptions(session);
+  const collaborator = visibleCollaborators.find(
+    (u) => u.id === collaboratorId && u.active,
+  );
   if (!collaborator) {
     throw new Error("Collaboratore non valido");
   }
