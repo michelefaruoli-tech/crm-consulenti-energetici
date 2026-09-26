@@ -7,6 +7,7 @@ import {
   COLLABORATOR_ROLES,
   collaboratorOptionsWhereFromScope,
   contractWhereFromScope,
+  panelContractScopeWhere,
   type CollaboratorOption,
   type UserVisibilityScope,
 } from "@/lib/visibility-scope";
@@ -15,6 +16,7 @@ export {
   COLLABORATOR_ROLES,
   collaboratorOptionsWhereFromScope,
   contractWhereFromScope,
+  panelContractScopeWhere,
   type CollaboratorOption,
   type UserVisibilityScope,
 };

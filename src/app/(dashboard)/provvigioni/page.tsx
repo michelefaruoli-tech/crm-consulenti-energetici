@@ -123,7 +123,7 @@ export default async function ProvvigioniPage({
   const canExport = hasPermission(session.role, "reports.export");
   const isScoped = hasPermission(session.role, "contracts.work_scoped");
 
-  const { contractVisibilityWhere, loadVisibleCollaboratorOptions } =
+  const { contractVisibilityWhere, loadVisibleCollaboratorOptions, panelContractScopeWhere } =
     await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
 
@@ -167,6 +167,13 @@ export default async function ProvvigioniPage({
 
   const collabFilter =
     (canViewAll || isScoped) && collab && collab !== "tutti" ? collab : undefined;
+
+  /**
+   * Stesso perimetro dell’elenco/totali: visibility di ruolo (AM = sé+team) +
+   * eventuale filtro collab UI. Usato da Anomalie e Cestino — prima usavano
+   * `canViewAll`/`isScoped` come gate e l’AM vedeva tutta la rete.
+   */
+  const panelScope = panelContractScopeWhere(visibility, collabFilter);
 
   /**
    * Filtri di colonna: tradotti in `where` Prisma prima di ogni conteggio, così
@@ -483,8 +490,8 @@ export default async function ProvvigioniPage({
       select: { name: true, active: true },
       orderBy: { name: "asc" },
     }),
-    getMissingRecurringAlerts(sessionCollabFilter, recurringKind),
-    getHeliosAbsentAlerts(sessionCollabFilter),
+    getMissingRecurringAlerts(panelScope, recurringKind),
+    getHeliosAbsentAlerts(panelScope),
     canViewAll
       ? prisma.contract.groupBy({
           by: ["collaboratorId"],
@@ -494,8 +501,7 @@ export default async function ProvvigioniPage({
       : Promise.resolve([]),
     prisma.contract.findMany({
       where: {
-        deletedAt: { not: null },
-        ...(canViewAll ? {} : { collaboratorId: session.id }),
+        AND: [{ deletedAt: { not: null } }, panelScope],
       },
       select: {
         id: true,

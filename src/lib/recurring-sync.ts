@@ -32,6 +32,7 @@ import {
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
+import type { Prisma } from "@/generated/prisma/client";
 
 const PRESERVED_STATUSES = new Set([
   "CLOSED",
@@ -829,8 +830,14 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
   return contracts.length;
 }
 
+/**
+ * Segnalazioni rate mancanti/pending.
+ * `contractScope` = stesso perimetro di Provvigioni (`panelContractScopeWhere`:
+ * visibility di ruolo + eventuale filtro collab UI). Stringa = solo un
+ * collaboratorId (compatibilità call site vecchi).
+ */
 export async function getMissingRecurringAlerts(
-  collaboratorId?: string,
+  contractScope?: Prisma.ContractWhereInput | string,
   kind: "monthly" | "annual" | "all" = "monthly",
 ) {
   const recurrenceFilter =
@@ -846,17 +853,28 @@ export async function getMissingRecurringAlerts(
   const periodFilter =
     kind === "annual" ? { lte: now } : { lt: now };
 
+  const scopeWhere =
+    typeof contractScope === "string"
+      ? { collaboratorId: contractScope }
+      : contractScope && Object.keys(contractScope).length > 0
+        ? contractScope
+        : undefined;
+
   const rows = await prisma.recurringMonth.findMany({
     where: {
       status: { in: ["MISSING", "PENDING"] },
       period: periodFilter,
       AND: [{ OR: [{ note: null }, { note: { not: ANNUAL_NEXT_HIDDEN_NOTE } }] }],
       contract: {
-        isHistorical: false,
-        deletedAt: null,
-        status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
-        ...(collaboratorId ? { collaboratorId } : {}),
-        ...recurrenceFilter,
+        AND: [
+          {
+            isHistorical: false,
+            deletedAt: null,
+            status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
+            ...recurrenceFilter,
+          },
+          ...(scopeWhere ? [scopeWhere] : []),
+        ],
       },
     },
     include: {
@@ -954,16 +972,29 @@ export async function getPaidToLiquidateAlerts(
 }
 
 /** Helios: mesi in cui il POD non compare più nei rendiconti successivi. */
-export async function getHeliosAbsentAlerts(collaboratorId?: string) {
+export async function getHeliosAbsentAlerts(
+  contractScope?: Prisma.ContractWhereInput | string,
+) {
+  const scopeWhere =
+    typeof contractScope === "string"
+      ? { collaboratorId: contractScope }
+      : contractScope && Object.keys(contractScope).length > 0
+        ? contractScope
+        : undefined;
+
   return prisma.recurringMonth.findMany({
     where: {
       status: "ERROR_UNPAID",
       note: { contains: "ASSENTE_RENDICONTO" },
       contract: {
-        isHistorical: false,
-        deletedAt: null,
-        supplier: { name: { equals: "Helios", mode: "insensitive" } },
-        ...(collaboratorId ? { collaboratorId } : {}),
+        AND: [
+          {
+            isHistorical: false,
+            deletedAt: null,
+            supplier: { name: { equals: "Helios", mode: "insensitive" } },
+          },
+          ...(scopeWhere ? [scopeWhere] : []),
+        ],
       },
     },
     select: {
