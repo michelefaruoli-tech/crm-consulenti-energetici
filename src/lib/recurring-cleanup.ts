@@ -230,6 +230,28 @@ export type RecurringCleanupApplyResult = {
   monthIds: string[];
 };
 
+export type ManualOutOfWindowApplyRowResult = {
+  monthId: string;
+  period: string;
+  outcome: "eliminata" | "saltata";
+  motivo?: string;
+};
+
+function manualOutOfWindowIdsByMonthId(
+  contracts: ContractWithMonths[],
+  now: Date,
+): Map<string, { period: string; reason: string }> {
+  const map = new Map<string, { period: string; reason: string }>();
+  for (const contract of contracts) {
+    const finding = findOutOfWindowMonths(contract, now);
+    if (!finding) continue;
+    for (const row of finding.manual) {
+      map.set(row.id, { period: row.period, reason: row.reason });
+    }
+  }
+  return map;
+}
+
 /**
  * Ricalcola l'intervallo e restituisce solo gli id di rata effettivamente
  * rimovibili tra quelli richiesti. Rifiuta se un id non esiste, non è fuori
@@ -297,6 +319,82 @@ async function deleteRecurringMonthIds(ids: string[]): Promise<number> {
  * Con `onlyMonthIds` elimina solo le rate validate (pannello CRM).
  * Idempotente: rieseguirla sugli stessi input non rimuove altro.
  */
+/**
+ * Elimina solo le rate fuori intervallo **con incasso/rendiconto** presenti
+ * nell'anteprima (`manual`). Ri-verifica ogni id prima di cancellare: non tocca
+ * rate in intervallo, senza incasso (quelle usano `cleanupRecurringOutOfRange`
+ * sulla lista `removable`) né id non richiesti.
+ */
+export async function applyManualOutOfWindowMonthIds(
+  monthIds: string[],
+): Promise<{ deleted: number; rowResults: ManualOutOfWindowApplyRowResult[] }> {
+  const unique = [...new Set(monthIds.filter(Boolean))];
+  if (unique.length === 0) {
+    return { deleted: 0, rowResults: [] };
+  }
+
+  const rows = await prisma.recurringMonth.findMany({
+    where: { id: { in: unique } },
+    select: { id: true, contractId: true, period: true },
+  });
+  const rowsById = new Map(rows.map((r) => [r.id, r]));
+  const contractIds = [...new Set(rows.map((r) => r.contractId))];
+  const contracts =
+    contractIds.length > 0
+      ? ((await prisma.contract.findMany({
+          where: { id: { in: contractIds }, deletedAt: null },
+          select: CONTRACT_SELECT,
+        })) as ContractWithMonths[])
+      : [];
+
+  const now = new Date();
+  const manualEligible = manualOutOfWindowIdsByMonthId(contracts, now);
+  const rowResults: ManualOutOfWindowApplyRowResult[] = [];
+  let deleted = 0;
+
+  for (const monthId of unique) {
+    const row = rowsById.get(monthId);
+    if (!row) {
+      rowResults.push({
+        monthId,
+        period: "—",
+        outcome: "saltata",
+        motivo: "Rata non trovata",
+      });
+      continue;
+    }
+    if (!manualEligible.has(monthId)) {
+      rowResults.push({
+        monthId,
+        period: row.period,
+        outcome: "saltata",
+        motivo:
+          "Non è più nell'elenco fuori intervallo con incasso (riesegui l'analisi)",
+      });
+      continue;
+    }
+    try {
+      await prisma.recurringMonth.delete({ where: { id: monthId } });
+      deleted += 1;
+      rowResults.push({
+        monthId,
+        period: row.period,
+        outcome: "eliminata",
+        motivo: manualEligible.get(monthId)?.reason,
+      });
+    } catch {
+      rowResults.push({
+        monthId,
+        period: row.period,
+        outcome: "saltata",
+        motivo: "Eliminazione non riuscita",
+      });
+    }
+  }
+
+  return { deleted, rowResults };
+}
+
 export async function cleanupRecurringOutOfRange(
   contractIds: string[],
   opts?: { onlyMonthIds?: string[] },
