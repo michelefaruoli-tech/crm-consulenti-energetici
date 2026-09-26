@@ -182,3 +182,23 @@ export function nextAnnualDuePeriod(
   if (!last) return addMonths(supplyStartPeriod, 12);
   return addMonths(last, 12);
 }
+
+/**
+ * Regola annuale (R): la riga dell'anno successivo si crea SOLO al 13° mese
+ * (quando il mese corrente raggiunge `nextAnnualDuePeriod`), mai prima.
+ *
+ * Sostituisce il comportamento precedente (PR #18, commit 1f5189c): niente
+ * più copia creata subito all'incasso e nascosta in storno via
+ * `ANNUAL_NEXT_HIDDEN_NOTE`. La riga appena incassata resta rossa BLOCCA da
+ * sola (via `resolveStornoInfo`, indipendente da questa funzione) finché
+ * dura lo storno; la copia dell'anno dopo compare solo quando è davvero
+ * dovuta.
+ */
+export function annualNextRowDue(
+  supplyStartPeriod: string,
+  paidPeriods: readonly string[],
+  now: Date,
+): { due: boolean; period: string } {
+  const period = nextAnnualDuePeriod(supplyStartPeriod, paidPeriods);
+  return { due: period <= toPeriod(now), period };
+}

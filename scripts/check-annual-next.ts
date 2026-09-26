@@ -1,10 +1,15 @@
 /**
- * Verifica della copia annuale +12 all'incasso (senza database).
+ * Verifica della regola annuale (R): la copia della competenza successiva
+ * si crea SOLO al 13° mese, mai prima (sostituisce PR #18 / commit 1f5189c,
+ * che la creava subito all'incasso nascosta in storno). Copre anche la
+ * compatibilità di visualizzazione con eventuali righe nascoste "legacy"
+ * ancora presenti a database da prima di questo cambio.
  *
  * Uso: npx tsx scripts/check-annual-next.ts
  */
 import {
   ANNUAL_NEXT_HIDDEN_NOTE,
+  annualNextRowDue,
   isAnnualNextHidden,
   nextAnnualDuePeriod,
 } from "../src/lib/recurring";
@@ -47,6 +52,33 @@ check(
   "2027-12",
 );
 
+console.log("\n• Regola 13° mese: crea la copia SOLO quando è dovuta, mai prima");
+check(
+  "12 mesi dopo l'ingresso (mese 12, non 13): non ancora dovuta",
+  annualNextRowDue("2026-05", [], new Date(2027, 3, 15)).due, // aprile 2027
+  false,
+);
+check(
+  "esattamente al 13° mese: dovuta",
+  annualNextRowDue("2026-05", [], new Date(2027, 4, 2)).due, // maggio 2027
+  true,
+);
+check(
+  "in ritardo rispetto al 13° mese: resta dovuta (MISSING)",
+  annualNextRowDue("2026-05", [], new Date(2027, 6, 1)).due, // luglio 2027
+  true,
+);
+check(
+  "periodo dovuto calcolato correttamente indipendentemente dalla data",
+  annualNextRowDue("2026-05", [], new Date(2027, 3, 15)).period,
+  "2027-05",
+);
+check(
+  "dopo un incasso: la prossima dovuta è +12 da quella, non subito",
+  annualNextRowDue("2026-05", ["2027-05"], new Date(2027, 5, 1)).due, // giugno 2027
+  false,
+);
+
 check(
   "nota di sistema riconosciuta come nascosta",
   isAnnualNextHidden(ANNUAL_NEXT_HIDDEN_NOTE),
@@ -55,8 +87,11 @@ check(
 check("altre note restano visibili", isAnnualNextHidden("Incassato da tabella"), false);
 check("nota vuota visibile", isAnnualNextHidden(null), false);
 
+console.log(
+  "\n• Compatibilità legacy: eventuali righe nascoste create da PR #18 prima di questo fix",
+);
 check(
-  "copia nascosta in storno NON è usa-e-getta (niente bonifica)",
+  "copia nascosta legacy NON è usa-e-getta (niente bonifica automatica out-of-window)",
   isDisposableRecurringMonth({
     status: "PENDING",
     paidAt: null,

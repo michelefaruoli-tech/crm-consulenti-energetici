@@ -30,7 +30,6 @@ import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
-import { isWithinStornoPeriod } from "@/lib/storno-status";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 const PRESERVED_STATUSES = new Set([
@@ -337,8 +336,21 @@ type AnnualSyncContract = {
 };
 
 /**
- * Dopo un incasso annuale crea (o aggiorna) la copia +12 mesi.
- * Resta PENDING nascosta in storno; diventa visibile solo fuori storno.
+ * Regola annuale (R): la riga della competenza successiva (+12 mesi
+ * dall'ultimo incasso) si crea SOLO al 13° mese — quando il mese corrente
+ * raggiunge quella competenza — mai prima. Vedi `annualNextRowDue` in
+ * `recurring.ts` e docs/regole-provvigioni.md.
+ *
+ * Sostituisce il comportamento di PR #18 (commit 1f5189c): non crea più la
+ * copia subito all'incasso nascosta in storno (`ANNUAL_NEXT_HIDDEN_NOTE`).
+ * La riga appena incassata resta rossa BLOCCA da sola se lo storno non è
+ * ancora finito: quel colore arriva da `resolveStornoInfo` (storno-status.ts)
+ * ed è indipendente da questa funzione, quindi non serve più nascondere nulla.
+ *
+ * Se esiste già una riga creata in anticipo da versioni precedenti del CRM
+ * (periodo non ancora arrivato), questa funzione non la tocca: la bonifica
+ * passa solo dal pannello Anteprima → Applica in Backup (mai in automatico,
+ * vedi `provvigioni-integrity.ts`).
  */
 async function syncAnnualPeriods(
   contractId: string,
@@ -377,54 +389,39 @@ async function syncAnnualPeriods(
     contract.supplyStartDate ??
     computeSupplyStartDate(contract.insertionDate ?? now, contract.operationType);
   const supplyStartPeriod = toPeriod(supplyStart);
-  const hide = isWithinStornoPeriod({
-    supplyStartDate: supplyStart,
-    stornoMonths: contract.supplier?.stornoMonths,
-    stornoEndDate: contract.stornoEndDate,
-    now,
-  });
 
   const byPeriod = new Map(months.map((row) => [row.period, row]));
   let nextDue = nextAnnualDuePeriod(
     supplyStartPeriod,
     paid.map((row) => row.period),
   );
-  let keptPeriod: string | null = null;
 
+  // Concatena le competenze già pagate/liquidate (es. rientro dopo anni fermi).
   for (let i = 0; i < 10; i++) {
     const existing = byPeriod.get(nextDue);
     if (existing && (existing.status === "PAID" || existing.status === "LIQUIDATED")) {
       nextDue = addMonths(nextDue, 12);
       continue;
     }
-    if (existing && existing.status === "ERROR_UNPAID") {
-      keptPeriod = nextDue;
-      break;
-    }
+    break;
+  }
 
-    const note = hide
-      ? ANNUAL_NEXT_HIDDEN_NOTE
-      : existing && isAnnualNextHidden(existing.note)
-        ? null
-        : (existing?.note ?? null);
-    const nowPeriod = toPeriod(now);
-    const status = !hide && nextDue <= nowPeriod ? "MISSING" : "PENDING";
+  const nowPeriod = toPeriod(now);
+  // Non ancora al 13° mese: nessuna riga da creare. Non tocchiamo neanche
+  // un'eventuale riga già esistente creata in anticipo (vedi commento sopra).
+  if (nextDue > nowPeriod) return;
 
-    if (!existing) {
-      await prisma.recurringMonth.create({
-        data: {
-          contractId,
-          period: nextDue,
-          status,
-          amount,
-          paidAt: null,
-          note,
-        },
-      });
-      keptPeriod = nextDue;
-      break;
-    }
+  const existing = byPeriod.get(nextDue);
+  const keptPeriod = nextDue;
 
+  if (existing?.status === "ERROR_UNPAID") {
+    // Riga già segnalata come errore: resta così, non sovrascrivere.
+  } else if (!existing) {
+    const status = nextDue < nowPeriod ? "MISSING" : "PENDING";
+    await prisma.recurringMonth.create({
+      data: { contractId, period: nextDue, status, amount, paidAt: null },
+    });
+  } else {
     const autoClosed =
       existing.status === "CLOSED" &&
       (existing.note === AUTO_CLOSED_BEFORE_START ||
@@ -436,44 +433,35 @@ async function syncAnnualPeriods(
       !autoClosed &&
       !isAnnualNextHidden(existing.note)
     ) {
-      keptPeriod = nextDue;
-      break;
+      // PAID / LIQUIDATED / CLOSED (non auto) / ERROR_UNPAID già gestiti: non toccare.
+    } else {
+      const status = nextDue < nowPeriod ? "MISSING" : "PENDING";
+      await prisma.recurringMonth.update({
+        where: { id: existing.id },
+        data: {
+          status,
+          amount: amount ?? existing.amount,
+          paidAt: null,
+          settledPeriod: null,
+          // Rivela una eventuale riga nascosta legacy (PR #18) diventata dovuta ora.
+          note: isAnnualNextHidden(existing.note) ? null : existing.note,
+        },
+      });
     }
-
-    await prisma.recurringMonth.update({
-      where: { id: existing.id },
-      data: {
-        status,
-        amount: amount ?? existing.amount,
-        paidAt: null,
-        settledPeriod: null,
-        note,
-      },
-    });
-    keptPeriod = nextDue;
-    break;
   }
 
-  if (keptPeriod) {
-    for (const row of months) {
-      if (row.period === keptPeriod) continue;
-      if (
-        row.status === "PAID" ||
-        row.status === "LIQUIDATED" ||
-        row.status === "ERROR_UNPAID"
-      ) {
-        continue;
-      }
-      if (row.paidAt || row.settledPeriod) continue;
-      if (
-        row.status === "PENDING" ||
-        row.status === "MISSING" ||
-        isAnnualNextHidden(row.note)
-      ) {
-        await prisma.recurringMonth
-          .delete({ where: { id: row.id } })
-          .catch(() => undefined);
-      }
+  for (const row of months) {
+    if (row.period === keptPeriod) continue;
+    if (row.status === "PAID" || row.status === "LIQUIDATED" || row.status === "ERROR_UNPAID") {
+      continue;
+    }
+    if (row.paidAt || row.settledPeriod) continue;
+    // Riga non ancora dovuta (periodo futuro): mai toccarla qui, solo bonifica manuale.
+    if (row.period > nowPeriod) continue;
+    if (row.status === "PENDING" || row.status === "MISSING") {
+      await prisma.recurringMonth
+        .delete({ where: { id: row.id } })
+        .catch(() => undefined);
     }
   }
 }
