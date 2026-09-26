@@ -6,6 +6,7 @@ import { clientDisplayName, formatDate, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { deleteClientAction } from "@/lib/delete-actions";
 import { hasPermission } from "@/lib/permissions";
+import { loadVisibleCollaboratorOptions } from "@/lib/user-scope";
 import { ClientSheet } from "@/components/clients/client-sheet";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import {
@@ -91,14 +92,7 @@ export default async function ClienteDetailPage({
       orderBy: [{ name: "asc" }],
     }),
     canChangeCollaborator || hasPermission(session.role, "contracts.change_collaborator_dashboard")
-      ? prisma.user.findMany({
-          where: {
-            active: true,
-            role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-          },
-          select: { id: true, name: true, active: true, role: true },
-          orderBy: { name: "asc" },
-        })
+      ? loadVisibleCollaboratorOptions(session)
       : Promise.resolve([]),
   ]);
 

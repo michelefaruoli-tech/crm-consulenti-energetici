@@ -16,7 +16,10 @@ import {
   restoreAllDeletedUsersAction,
   purgeDeletedUsersPermanentlyAction,
 } from "@/lib/actions";
-import { roleSupportsSupplierScope } from "@/lib/user-scope";
+import {
+  loadVisibleCollaboratorOptions,
+  roleSupportsSupplierScope,
+} from "@/lib/user-scope";
 
 function supplierLabel(
   scopes: { supplier?: { name: string } | null }[] | undefined,
@@ -96,16 +99,7 @@ export default async function UtentiPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-    prisma.user.findMany({
-      where: {
-        active: true,
-        role: {
-          in: ["COLLABORATORE", "COMMERCIALE", "ADMIN", "SEGRETERIA", "AREA_MANAGER"],
-        },
-      },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true },
-    }),
+    loadVisibleCollaboratorOptions(session),
   ]);
 
   // Area Manager: fornitori limitati al proprio scope (se impostato)
