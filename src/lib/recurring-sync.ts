@@ -18,6 +18,7 @@ import {
   lastGeneratedPeriod,
   OUT_OF_WINDOW_REASONS,
   outOfWindowReason,
+  RECURRING_AUTO_CLOSED_NOTE,
   recurringWindow,
   type RecurringWindow,
 } from "@/lib/recurring-window";
@@ -39,10 +40,9 @@ const PRESERVED_STATUSES = new Set([
   "LIQUIDATED",
 ]);
 
-const AUTO_CLOSED_BEFORE_START = "Esclusa: precedente all'ingresso in fornitura";
-const AUTO_CLOSED_AFTER_END = "Esclusa: successiva alla chiusura del contratto";
-const AUTO_CLOSED_HELIOS_LAG =
-  "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)";
+const AUTO_CLOSED_BEFORE_START = RECURRING_AUTO_CLOSED_NOTE.beforeStart;
+const AUTO_CLOSED_AFTER_END = RECURRING_AUTO_CLOSED_NOTE.afterEnd;
+const AUTO_CLOSED_HELIOS_LAG = RECURRING_AUTO_CLOSED_NOTE.heliosLag;
 
 type OutOfWindowMonthRow = {
   id: string;
@@ -464,6 +464,139 @@ async function syncAnnualPeriods(
         .catch(() => undefined);
     }
   }
+}
+
+export type BackfillUpsertOutcome = "creata" | "aggiornata" | "saltata";
+
+/** Crea o riapre una singola rata mensile prevista dal piano di backfill. */
+export async function upsertMonthlyBackfillPeriod(
+  contractId: string,
+  period: string,
+  amount: number | null,
+  nowDate: Date = new Date(),
+): Promise<{ outcome: BackfillUpsertOutcome; motivo?: string }> {
+  const before = await prisma.recurringMonth.findUnique({
+    where: { contractId_period: { contractId, period } },
+    select: { id: true, status: true, note: true },
+  });
+  const now = toPeriod(nowDate);
+  await upsertMonthStatus(contractId, period, now, amount);
+  const after = await prisma.recurringMonth.findUnique({
+    where: { contractId_period: { contractId, period } },
+    select: { id: true, status: true, note: true },
+  });
+  if (!after) {
+    return { outcome: "saltata", motivo: "Scrittura non riuscita" };
+  }
+  if (!before) {
+    return { outcome: "creata" };
+  }
+  const reopened =
+    before.status === "CLOSED" &&
+    (before.note === AUTO_CLOSED_BEFORE_START ||
+      before.note === AUTO_CLOSED_AFTER_END ||
+      before.note === AUTO_CLOSED_HELIOS_LAG);
+  if (reopened && (after.status === "MISSING" || after.status === "PENDING")) {
+    return { outcome: "aggiornata", motivo: "Rata riaperta (chiusura automatica)" };
+  }
+  if (before.status !== after.status) {
+    return { outcome: "aggiornata" };
+  }
+  return {
+    outcome: "saltata",
+    motivo: "Rata già presente e non modificabile (Incassato/Pagato o chiusa manualmente)",
+  };
+}
+
+/** Crea o riapre la rata annuale per un periodo già dovuto (regola 13° mese). */
+export async function upsertAnnualBackfillPeriod(
+  contractId: string,
+  period: string,
+  amount: number | null,
+  nowDate: Date = new Date(),
+): Promise<{ outcome: BackfillUpsertOutcome; motivo?: string }> {
+  const before = await prisma.recurringMonth.findUnique({
+    where: { contractId_period: { contractId, period } },
+    select: { id: true, status: true, note: true },
+  });
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: {
+      insertionDate: true,
+      supplyStartDate: true,
+      operationType: true,
+      collectionDate: true,
+      stornoEndDate: true,
+      supplier: { select: { stornoMonths: true } },
+    },
+  });
+  if (!contract) {
+    return { outcome: "saltata", motivo: "Contratto non trovato" };
+  }
+  const nowPeriod = toPeriod(nowDate);
+  if (period > nowPeriod) {
+    return { outcome: "saltata", motivo: "Competenza annuale non ancora dovuta (13° mese)" };
+  }
+
+  const months = await prisma.recurringMonth.findMany({
+    where: { contractId },
+    select: { id: true, period: true, status: true, amount: true, note: true },
+  });
+  const paid = months.filter((r) => r.status === "PAID" || r.status === "LIQUIDATED");
+  const firstYearCollected = Boolean(contract.collectionDate) || paid.length > 0;
+  if (!firstYearCollected) {
+    return {
+      outcome: "saltata",
+      motivo: "Primo anno non ancora incassato: nessuna rata annuale da generare",
+    };
+  }
+
+  const existing = months.find((r) => r.period === period);
+  if (
+    existing &&
+    (existing.status === "PAID" ||
+      existing.status === "LIQUIDATED" ||
+      existing.status === "ERROR_UNPAID")
+  ) {
+    return { outcome: "saltata", motivo: "Rata già incassata o segnalata" };
+  }
+  if (
+    existing?.status === "CLOSED" &&
+    existing.note !== AUTO_CLOSED_BEFORE_START &&
+    existing.note !== AUTO_CLOSED_AFTER_END &&
+    existing.note !== AUTO_CLOSED_HELIOS_LAG
+  ) {
+    return { outcome: "saltata", motivo: "Rata chiusa manualmente" };
+  }
+
+  const status = period < nowPeriod ? "MISSING" : "PENDING";
+  if (!existing) {
+    await prisma.recurringMonth.create({
+      data: { contractId, period, status, amount, paidAt: null },
+    });
+    return { outcome: "creata" };
+  }
+
+  const autoClosed =
+    existing.status === "CLOSED" &&
+    (existing.note === AUTO_CLOSED_BEFORE_START ||
+      existing.note === AUTO_CLOSED_AFTER_END ||
+      existing.note === AUTO_CLOSED_HELIOS_LAG ||
+      isAnnualNextHidden(existing.note));
+  if (existing.status === status && !autoClosed && existing.amount != null) {
+    return { outcome: "saltata", motivo: "Già aggiornata" };
+  }
+  await prisma.recurringMonth.update({
+    where: { id: existing.id },
+    data: {
+      status,
+      amount: amount ?? existing.amount,
+      paidAt: null,
+      settledPeriod: null,
+      note: autoClosed || isAnnualNextHidden(existing.note) ? null : existing.note,
+    },
+  });
+  return before ? { outcome: "aggiornata" } : { outcome: "creata" };
 }
 
 async function upsertMonthStatus(

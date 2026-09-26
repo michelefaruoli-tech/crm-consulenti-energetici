@@ -7,7 +7,12 @@
  *
  * Uso: npx tsx scripts/check-backfill-provvigioni.ts
  */
-import { expectedPeriodsFor, findMissing } from "../src/lib/recurring-backfill";
+import {
+  expectedPeriodsFor,
+  findMissing,
+  planBackfillForContract,
+} from "../src/lib/recurring-backfill";
+import { RECURRING_AUTO_CLOSED_NOTE } from "../src/lib/recurring-window";
 
 type Contract = Parameters<typeof expectedPeriodsFor>[0];
 
@@ -23,6 +28,8 @@ const base: Omit<Contract, "recurrence" | "supplier" | "recurringMonths"> = {
   podPdr: "IT001E12345678",
   pod: null,
   pdr: null,
+  recurrenceKind: "UT",
+  collectionDate: null,
   insertionDate: new Date(2026, 0, 1),
   supplyStartDate: new Date(2026, 0, 1),
   operationType: "CAMBIO",
@@ -49,6 +56,7 @@ console.log("\n• Mensile non-Helios: contratto appena salvato, nessuna rata es
   const contract: Contract = {
     ...base,
     recurrence: "M",
+    recurrenceKind: "M",
     supplier: { name: "Sorgenia Business" },
     recurringMonths: [],
     supplyStartDate: new Date(2026, 8, 1),
@@ -65,6 +73,7 @@ console.log("\n• Mensile Helios: lag M+2 resta (agosto non generabile a settem
   const contract: Contract = {
     ...base,
     recurrence: "M",
+    recurrenceKind: "M",
     supplier: { name: "Helios" },
     supplyStartDate: new Date(2026, 0, 1),
     recurringMonths: [],
@@ -80,6 +89,7 @@ console.log("\n• Mensile: rate già presenti non vengono riproposte come manca
   const contract: Contract = {
     ...base,
     recurrence: "M",
+    recurrenceKind: "M",
     supplier: { name: "Sorgenia Business" },
     supplyStartDate: new Date(2026, 5, 1),
     recurringMonths: [
@@ -97,6 +107,7 @@ console.log("\n• Mensile: rata Incassato/Pagato/storno esistente non viene mai
   const contract: Contract = {
     ...base,
     recurrence: "M",
+    recurrenceKind: "M",
     supplier: { name: "Sorgenia Business" },
     supplyStartDate: new Date(2026, 0, 1),
     recurringMonths: [
@@ -120,6 +131,7 @@ console.log("\n• Annuale (+12): non ancora dovuto → nessun backfill");
   const contract: Contract = {
     ...base,
     recurrence: "R",
+    recurrenceKind: "R",
     supplier: { name: "Etruria Energy" },
     supplyStartDate: new Date(2026, 6, 1), // luglio: scadenza a luglio 2027
     recurringMonths: [],
@@ -133,13 +145,58 @@ console.log("\n• Annuale (+12): scadenza già maturata e mai creata → backfi
   const contract: Contract = {
     ...base,
     recurrence: "R",
-    supplier: { name: "Etruria Energy" },
+    recurrenceKind: "R",
+    supplier: { name: "Sinergy" },
     supplyStartDate: new Date(2025, 6, 1), // luglio 2025 → scadenza luglio 2026 (già passata)
+    collectionDate: new Date(2025, 6, 15),
     recurringMonths: [],
   };
   const missing = findMissing(contract, now);
   check("scadenza luglio 2026 mancante", missing?.missingPeriods, ["2026-07"]);
   check("tipo R", missing?.recurrenceKind, "R");
+  check("piano = anteprima", planBackfillForContract(contract, now).map((p) => p.period), [
+    "2026-07",
+  ]);
+}
+
+console.log("\n• Annuale: primo anno non incassato → nessun backfill (allineato al sync)");
+{
+  const contract: Contract = {
+    ...base,
+    recurrence: "R",
+    recurrenceKind: "R",
+    supplier: { name: "Sinergy" },
+    supplyStartDate: new Date(2025, 6, 1),
+    collectionDate: null,
+    recurringMonths: [],
+  };
+  check("nessuna scadenza attesa", expectedPeriodsFor(contract, now), []);
+  check("non segnalato", findMissing(contract, now), null);
+}
+
+console.log("\n• Mensile: rata auto-chiusa fuori regola conta come mancante");
+{
+  const contract: Contract = {
+    ...base,
+    recurrence: "M",
+    recurrenceKind: "M",
+    supplier: { name: "Sorgenia Business" },
+    supplyStartDate: new Date(2026, 5, 1),
+    recurringMonths: [
+      { period: "2026-06", status: "PAID" },
+      {
+        period: "2026-07",
+        status: "CLOSED",
+        note: RECURRING_AUTO_CLOSED_NOTE.beforeStart,
+      },
+      { period: "2026-08", status: "PENDING" },
+    ],
+  };
+  const missing = findMissing(contract, now);
+  check("luglio da riaprire (+ settembre mancante)", missing?.missingPeriods, [
+    "2026-07",
+    "2026-09",
+  ]);
 }
 
 console.log("\n• KO / ANNULLATO: mai backfillato (nessuna nuova rata)");
@@ -147,6 +204,7 @@ console.log("\n• KO / ANNULLATO: mai backfillato (nessuna nuova rata)");
   const contract: Contract = {
     ...base,
     recurrence: "M",
+    recurrenceKind: "M",
     supplier: { name: "Sorgenia Business" },
     status: "KO",
     supplyStartDate: new Date(2026, 0, 1),
@@ -160,6 +218,7 @@ console.log("\n• Una tantum: non ha mai bisogno di RecurringMonth");
   const contract: Contract = {
     ...base,
     recurrence: "Una tantum",
+    recurrenceKind: "UT",
     supplier: { name: "Enel Energia" },
     recurringMonths: [],
   };

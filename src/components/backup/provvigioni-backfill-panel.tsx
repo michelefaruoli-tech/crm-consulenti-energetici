@@ -88,7 +88,7 @@ export function ProvvigioniBackfillPanel() {
       setPhase("idle");
       const after = await runPreview();
       setMessage(
-        `Backfill completato: ${res.created} rate «Da incassare» create su ${res.contracts} contratti.` +
+        `Backfill completato: ${res.created} create, ${res.updated} aggiornate su ${res.contracts} contratti.` +
           (res.errors.length > 0
             ? ` ${res.errors.length} contratto/i con errore (vedi console).`
             : "") +

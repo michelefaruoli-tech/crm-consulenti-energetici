@@ -111,6 +111,40 @@ export const OUT_OF_WINDOW_REASONS = {
   afterEnd: "successiva alla chiusura del contratto",
 } as const;
 
+/** Note automatiche su rate `CLOSED` esclusa dal sync (non contano come rata presente). */
+export const RECURRING_AUTO_CLOSED_NOTE = {
+  beforeStart: "Esclusa: precedente all'ingresso in fornitura",
+  afterEnd: "Esclusa: successiva alla chiusura del contratto",
+  heliosLag: "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)",
+} as const;
+
+export function isAutomaticClosedRecurringMonth(row: RecurringMonthLike): boolean {
+  if (row.status !== "CLOSED") return false;
+  const note = row.note ?? "";
+  return (
+    note === RECURRING_AUTO_CLOSED_NOTE.beforeStart ||
+    note === RECURRING_AUTO_CLOSED_NOTE.afterEnd ||
+    note === RECURRING_AUTO_CLOSED_NOTE.heliosLag
+  );
+}
+
+/**
+ * Per il backfill / controllo integrità: la competenza è già coperta da una
+ * rata che non va ricreata (incassata, in attesa, chiusa manualmente, …).
+ * Le chiusure automatiche fuori regola NON contano: vanno riaperte.
+ */
+export function periodSatisfiedForBackfill(
+  row: RecurringMonthLike | undefined,
+): boolean {
+  if (!row) return false;
+  if (isAutomaticClosedRecurringMonth(row)) return false;
+  if (row.status === "PENDING" || row.status === "MISSING") return true;
+  if (row.status === "PAID" || row.status === "LIQUIDATED") return true;
+  if (row.status === "ERROR_UNPAID") return true;
+  if (row.status === "CLOSED") return true;
+  return false;
+}
+
 export function outOfWindowReason(
   window: RecurringWindow,
   period: string,

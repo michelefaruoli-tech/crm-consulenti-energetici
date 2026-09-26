@@ -1,33 +1,34 @@
 /**
  * Backfill "contratto salvato ma non in Provvigioni".
  *
- * Trova contratti ricorrenti (M/R, qualsiasi fornitore) attivi che non hanno
- * ancora la rata `RecurringMonth` che dovrebbero già avere secondo le stesse
- * regole di finestra/lag usate ovunque nel CRM (`recurring-window.ts`,
- * `helios-contract-rules.ts` — il lag Helios M+2 resta). Crea solo righe
- * assenti: usa `syncRecurringMonthsForContract`, che non tocca mai una rata
- * già presente in stato Incassato / Pagato / Chiuso / Non pagato (vedi
- * `PRESERVED_STATUSES` in `recurring-sync.ts`) — quindi nessuna rata sistemata
- * a mano dall'utente viene sovrascritta.
- *
- * Stessa struttura anteprima → applica di `recurring-cleanup.ts`: l'anteprima
- * non scrive nulla, l'applicazione è idempotente.
+ * Anteprima e applicazione usano **lo stesso piano** (`planBackfillForContract`):
+ * stesse regole di finestra, lag Helios, primo anno annuale e rate auto-chiuse.
  */
 import { prisma } from "@/lib/prisma";
 import {
   addMonths,
-  isRecurringAnnual,
-  isRecurringMonthly,
+  isContractRecurringAnnual,
+  isContractRecurringMonthly,
   monthsBetween,
+  nextAnnualDuePeriod,
   toPeriod,
 } from "@/lib/recurring";
-import { lastGeneratedPeriod, recurringWindow } from "@/lib/recurring-window";
+import {
+  isPeriodInRecurringWindow,
+  lastGeneratedPeriod,
+  periodSatisfiedForBackfill,
+  recurringWindow,
+} from "@/lib/recurring-window";
 import { recurringGenerationLagMonths } from "@/lib/helios-contract-rules";
 import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
-import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
+import {
+  upsertAnnualBackfillPeriod,
+  upsertMonthlyBackfillPeriod,
+  type BackfillUpsertOutcome,
+} from "@/lib/recurring-sync";
 
 /** Contratti esaminati per ogni giro di anteprima (limite durata Vercel). */
 export const BACKFILL_SCAN_BATCH = 300;
@@ -53,11 +54,26 @@ export type BackfillScanResult = {
   nextCursor: string | null;
 };
 
+export type BackfillPeriodRowResult = {
+  contractId: string;
+  period: string;
+  outcome: BackfillUpsertOutcome;
+  motivo?: string;
+};
+
 export type BackfillApplyResult = {
   contracts: number;
-  /** Rate RecurringMonth create (0 se il contratto era già a posto). */
+  /** Rate create ex novo. */
   created: number;
+  /** Rate riaperte o aggiornate (es. chiusura automatica). */
+  updated: number;
+  rowResults: BackfillPeriodRowResult[];
   errors: Array<{ contractId: string; message: string }>;
+};
+
+export type BackfillPlanItem = {
+  period: string;
+  recurrenceKind: "M" | "R";
 };
 
 const CANDIDATE_SELECT = {
@@ -66,6 +82,8 @@ const CANDIDATE_SELECT = {
   pod: true,
   pdr: true,
   recurrence: true,
+  recurrenceKind: true,
+  collectionDate: true,
   insertionDate: true,
   supplyStartDate: true,
   operationType: true,
@@ -88,16 +106,19 @@ const CANDIDATE_SELECT = {
     take: 1,
   },
   recurringMonths: {
-    select: { period: true, status: true },
+    select: { period: true, status: true, note: true },
   },
+  commission: { select: { expected: true } },
 } as const;
 
-type CandidateContract = {
+export type CandidateContract = {
   id: string;
   podPdr: string | null;
   pod: string | null;
   pdr: string | null;
   recurrence: string | null;
+  recurrenceKind: "UT" | "M" | "R";
+  collectionDate: Date | null;
   insertionDate: Date | null;
   supplyStartDate: Date | null;
   operationType: string | null;
@@ -112,7 +133,8 @@ type CandidateContract = {
     lastName: string | null;
   } | null;
   statusHistory: Array<{ changedAt: Date }>;
-  recurringMonths: Array<{ period: string; status: string }>;
+  recurringMonths: Array<{ period: string; status: string; note?: string | null }>;
+  commission?: { expected: unknown } | null;
 };
 
 function contractLabel(contract: CandidateContract): string {
@@ -125,10 +147,45 @@ function contractLabel(contract: CandidateContract): string {
   return `${name} · ${contract.supplier?.name ?? "—"} · POD/PDR ${pod}`;
 }
 
+function annualFirstYearCollected(contract: CandidateContract): boolean {
+  if (contract.collectionDate) return true;
+  return contract.recurringMonths.some(
+    (m) => m.status === "PAID" || m.status === "LIQUIDATED",
+  );
+}
+
+function expectedAnnualPeriods(contract: CandidateContract, now: Date): string[] {
+  if (contract.status === "CHIUSO") return [];
+  if (!annualFirstYearCollected(contract)) return [];
+
+  const window = recurringWindow(contract, now);
+  const nowPeriod = toPeriod(now);
+  const paidPeriods = contract.recurringMonths
+    .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
+    .map((m) => m.period);
+  const rowsByPeriod = new Map(contract.recurringMonths.map((m) => [m.period, m]));
+
+  const due: string[] = [];
+  let nextDue = nextAnnualDuePeriod(window.start, paidPeriods);
+  for (let i = 0; i < 10; i++) {
+    if (nextDue > nowPeriod) break;
+    const row = rowsByPeriod.get(nextDue);
+    if (row && (row.status === "PAID" || row.status === "LIQUIDATED")) {
+      nextDue = addMonths(nextDue, 12);
+      continue;
+    }
+    if (!isPeriodInRecurringWindow(window, nextDue)) {
+      nextDue = addMonths(nextDue, 12);
+      continue;
+    }
+    due.push(nextDue);
+    nextDue = addMonths(nextDue, 12);
+  }
+  return due;
+}
+
 /**
- * Periodi che dovrebbero già esistere per questo contratto, senza scrivere
- * nulla (usata dall'anteprima e testata senza database in
- * `scripts/check-backfill-provvigioni.ts`).
+ * Periodi che dovrebbero già esistere per questo contratto (solo lettura).
  */
 export function expectedPeriodsFor(
   contract: CandidateContract,
@@ -136,29 +193,12 @@ export function expectedPeriodsFor(
 ): string[] {
   if (contract.status === "ANNULLATO" || contract.status === "KO") return [];
 
-  const window = recurringWindow(contract, now);
-
-  if (isRecurringAnnual(contract.recurrence)) {
-    if (contract.status === "CHIUSO") return [];
-    const nowPeriod = toPeriod(now);
-    const paidPeriods = contract.recurringMonths
-      .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
-      .map((m) => m.period)
-      .sort((a, b) => b.localeCompare(a));
-    let nextDue =
-      paidPeriods.length > 0
-        ? addMonths(paidPeriods[0]!, 12)
-        : addMonths(window.start, 12);
-    const due: string[] = [];
-    for (let i = 0; i < 10; i++) {
-      if (nextDue > nowPeriod) break;
-      due.push(nextDue);
-      nextDue = addMonths(nextDue, 12);
-    }
-    return due;
+  if (isContractRecurringAnnual(contract)) {
+    return expectedAnnualPeriods(contract, now);
   }
 
-  if (isRecurringMonthly(contract.recurrence)) {
+  if (isContractRecurringMonthly(contract)) {
+    const window = recurringWindow(contract, now);
     const lastPeriod = lastGeneratedPeriod(
       window,
       now,
@@ -171,24 +211,67 @@ export function expectedPeriodsFor(
   return [];
 }
 
-/** Esportata solo per il test senza database `scripts/check-backfill-provvigioni.ts`. */
+/**
+ * Piano condiviso anteprima → applica: quali periodi creare o riaprire.
+ */
+export function planBackfillForContract(
+  contract: CandidateContract,
+  now: Date = new Date(),
+): BackfillPlanItem[] {
+  const expected = expectedPeriodsFor(contract, now);
+  if (expected.length === 0) return [];
+
+  const rowsByPeriod = new Map(contract.recurringMonths.map((m) => [m.period, m]));
+  const kind: "M" | "R" = isContractRecurringAnnual(contract) ? "R" : "M";
+
+  const plan: BackfillPlanItem[] = [];
+  for (const period of expected) {
+    const row = rowsByPeriod.get(period);
+    if (periodSatisfiedForBackfill(row)) continue;
+    plan.push({ period, recurrenceKind: kind });
+  }
+  return plan;
+}
+
+/** Esportata per test offline e controllo integrità. */
 export function findMissing(
   contract: CandidateContract,
   now: Date,
 ): MissingProvvigioneRow | null {
-  const expected = expectedPeriodsFor(contract, now);
-  if (expected.length === 0) return null;
-  const existing = new Set(contract.recurringMonths.map((m) => m.period));
-  const missingPeriods = expected.filter((p) => !existing.has(p));
-  if (missingPeriods.length === 0) return null;
+  const plan = planBackfillForContract(contract, now);
+  if (plan.length === 0) return null;
+  const recurrenceKind = plan[0]?.recurrenceKind ?? "M";
   return {
     contractId: contract.id,
     label: contractLabel(contract),
     collaboratorName: contract.collaborator?.name ?? "—",
     supplierName: contract.supplier?.name ?? "—",
-    recurrenceKind: isRecurringAnnual(contract.recurrence) ? "R" : "M",
-    missingPeriods,
+    recurrenceKind,
+    missingPeriods: plan.map((p) => p.period),
   };
+}
+
+export async function applyBackfillPlanForContract(
+  contract: CandidateContract,
+  now: Date = new Date(),
+): Promise<BackfillPeriodRowResult[]> {
+  const plan = planBackfillForContract(contract, now);
+  const amount = Number(contract.commission?.expected ?? 0) || null;
+  const results: BackfillPeriodRowResult[] = [];
+
+  for (const item of plan) {
+    const res =
+      item.recurrenceKind === "R"
+        ? await upsertAnnualBackfillPeriod(contract.id, item.period, amount, now)
+        : await upsertMonthlyBackfillPeriod(contract.id, item.period, amount, now);
+    results.push({
+      contractId: contract.id,
+      period: item.period,
+      outcome: res.outcome,
+      motivo: res.motivo,
+    });
+  }
+  return results;
 }
 
 /**
@@ -236,24 +319,34 @@ export async function scanMissingProvvigioniRows(opts?: {
 }
 
 /**
- * Applica il backfill: richiama `syncRecurringMonthsForContract` per ogni
- * contratto indicato (stessa funzione usata alla creazione e in ogni altro
- * punto del CRM). Rilegge le rate dopo per contare quelle effettivamente
- * create — idempotente, si può richiamare più volte senza effetti diversi.
+ * Applica il piano di backfill (stessa logica dell'anteprima), periodo per periodo.
  */
 export async function applyMissingProvvigioniRows(
   contractIds: string[],
 ): Promise<BackfillApplyResult> {
   const ids = [...new Set(contractIds.filter(Boolean))];
   let created = 0;
+  let updated = 0;
+  const rowResults: BackfillPeriodRowResult[] = [];
   const errors: Array<{ contractId: string; message: string }> = [];
+  const now = new Date();
 
   for (const contractId of ids) {
     try {
-      const before = await prisma.recurringMonth.count({ where: { contractId } });
-      await syncRecurringMonthsForContract(contractId);
-      const after = await prisma.recurringMonth.count({ where: { contractId } });
-      created += Math.max(0, after - before);
+      const contract = (await prisma.contract.findUnique({
+        where: { id: contractId },
+        select: CANDIDATE_SELECT,
+      })) as CandidateContract | null;
+      if (!contract) {
+        errors.push({ contractId, message: "Contratto non trovato" });
+        continue;
+      }
+      const applied = await applyBackfillPlanForContract(contract, now);
+      rowResults.push(...applied);
+      for (const row of applied) {
+        if (row.outcome === "creata") created += 1;
+        if (row.outcome === "aggiornata") updated += 1;
+      }
     } catch (e) {
       errors.push({
         contractId,
@@ -262,5 +355,5 @@ export async function applyMissingProvvigioniRows(
     }
   }
 
-  return { contracts: ids.length, created, errors };
+  return { contracts: ids.length, created, updated, rowResults, errors };
 }
