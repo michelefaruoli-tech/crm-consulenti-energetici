@@ -181,7 +181,7 @@ export function buildRendiconto(params: {
       params.recurringRows.map((r) => r.contractNumber),
     );
     for (const c of params.contracts) {
-      // Mensili: solo via rate. Annuali orfani (collectionDate, senza rate) restano qui.
+      // Mensili: solo via rate. Annuali (con o senza incasso, orfani) restano qui.
       if (isRecurringMonthly(c.recurrence)) continue;
       if (
         isRecurringAnnual(c.recurrence) &&
@@ -189,13 +189,16 @@ export function buildRendiconto(params: {
       ) {
         continue;
       }
-      if (isRecurringAnnual(c.recurrence) && !c.collectionDate) continue;
       // Recuperato / in clawback: solo riga storno negativa, mai +gettone.
       if (c.status === "STORNATO") continue;
       if (stornoContractNumbers.has(c.contractNumber)) continue;
       const base = c.collectionDate ?? c.insertionDate;
       const month = monthKeyFromDate(new Date(base));
-      if (allowedIncassato && !allowedIncassato.has(month)) continue;
+      // «Da incassare» (nessun incasso ancora): nessun vincolo di mese — non
+      // ha un "mese di incasso" da rispettare (docs/regole-provvigioni.md).
+      if (allowedIncassato && c.collectionDate && !allowedIncassato.has(month)) {
+        continue;
+      }
       lines.push({
         kind: "incassato",
         month,

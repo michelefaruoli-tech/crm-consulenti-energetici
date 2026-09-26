@@ -178,14 +178,19 @@ export default async function ReportPage({
     if (c.status === "STORNATO") return false;
     if (stornoContractNumbers.has(c.contractNumber)) return false;
     if (isRecurringMonthly(c.recurrence)) return false;
-    if (isRecurringAnnual(c.recurrence)) {
-      if (!c.collectionDate || recurringContractNumbers.has(c.contractNumber)) {
-        return false;
-      }
+    if (
+      isRecurringAnnual(c.recurrence) &&
+      recurringContractNumbers.has(c.contractNumber)
+    ) {
+      return false;
     }
-    const base = c.collectionDate ?? c.insertionDate;
-    const key = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`;
-    if (incassatoMonths.size > 0 && !incassatoMonths.has(key)) return false;
+    // «Da incassare» (nessun incasso ancora): nessun vincolo di mese — non ha
+    // un "mese di incasso" da rispettare (docs/regole-provvigioni.md), stesso
+    // comportamento di «Tutti i periodi» in Provvigioni.
+    if (c.collectionDate && incassatoMonths.size > 0) {
+      const key = `${c.collectionDate.getFullYear()}-${String(c.collectionDate.getMonth() + 1).padStart(2, "0")}`;
+      if (!incassatoMonths.has(key)) return false;
+    }
     return true;
   });
   const includeRecurring = reportIncludesRecurring(stati);
@@ -421,11 +426,13 @@ export default async function ReportPage({
           {month ? " (mese di incasso)" : " (date personalizzate)"}
         </p>
         <p className="mt-1 text-xs text-emerald-900/80">
-          Coincide con le righe Provvigioni che in colonna Incasso hanno{" "}
+          Per Incassato/Pagato coincide con le righe Provvigioni che in
+          colonna Incasso hanno{" "}
           {month
             ? `${month.slice(5)}/${month.slice(0, 4)}`
             : "una data in questo intervallo"}
-          .
+          . <strong>Da incassare</strong> non ha un mese di incasso: compare
+          sempre, in qualsiasi periodo tu scelga.
         </p>
       </div>
 
@@ -436,8 +443,10 @@ export default async function ReportPage({
         <p className="mt-1">{reportStatoHint(stato)}</p>
         <ul className="mt-2 list-inside list-disc text-xs text-amber-900/90">
           <li>
-            <strong>Da incassare</strong> = contratto inserito, non ancora pagato a te dal
-            fornitore
+            <strong>Da incassare</strong> = contratto inserito, non ancora
+            pagato a te dal fornitore. <strong>Sempre visibile</strong> —
+            non è legata al mese/periodo scelto sopra (nessun incasso =
+            nessun mese di incasso).
           </li>
           <li>
             <strong>Incassato</strong> = fornitore ha pagato a te → da pagare ai collaboratori

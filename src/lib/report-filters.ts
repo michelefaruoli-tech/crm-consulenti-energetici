@@ -197,14 +197,17 @@ function dateWhereForStato(
       },
     };
   }
-  if (
-    stato === "Incassato" ||
-    stato === "Pagato" ||
-    stato === "Tutti"
-  ) {
+  if (stato === "Incassato" || stato === "Pagato") {
     return { collectionDate: { gte: dateFrom, lte: dateTo } };
   }
-  // Da incassare / Da controllare / KO
+  if (stato === "Da incassare") {
+    // Non ha ancora un incasso: nessun "mese di incasso" da rispettare.
+    // Compare sempre, in qualsiasi periodo selezioni (vedi reportStatoHint
+    // e docs/regole-provvigioni.md — stesso comportamento di Provvigioni
+    // con "Tutti i periodi").
+    return {};
+  }
+  // Da controllare / KO
   return { insertionDate: { gte: dateFrom, lte: dateTo } };
 }
 
@@ -249,17 +252,29 @@ export function buildReportContractWhere(
     { isHistorical: false },
   ];
 
-  if (stati.includes("Tutti")) {
-    and.push(dateWhereForStatoPeriod("Tutti", months, dateFrom, dateTo));
-  } else if (stati.length === 1) {
-    const s = stati[0]!;
+  /**
+   * "Tutti" = tutti gli stati singoli insieme, ognuno con la sua regola di
+   * periodo (incasso / storno / inserimento / nessuna per Da incassare).
+   *
+   * Prima "Tutti" usava un solo filtro su `collectionDate` per qualsiasi
+   * stato: i contratti senza incasso (Da incassare, Da controllare, KO)
+   * sparivano sempre dal Report, qualsiasi mese si scegliesse — anche se
+   * la stessa lista Provvigioni li mostrava. Ora "Tutti" è equivalente a
+   * selezionare ogni stato singolarmente (stesso ramo sotto).
+   */
+  const effectiveStati = stati.includes("Tutti")
+    ? [...PROVVIGIONE_STATO_OPTIONS]
+    : stati;
+
+  if (effectiveStati.length === 1) {
+    const s = effectiveStati[0]!;
     and.push(dateWhereForStatoPeriod(s, months, dateFrom, dateTo));
     const statoWhere = provvigioneStatoWhere(s);
     if (statoWhere) and.push(statoWhere);
   } else {
-    // Multi-stato: ogni stato con la sua data di periodo
+    // Multi-stato (incluso "Tutti" espanso): ogni stato con la sua data di periodo
     const ors: Prisma.ContractWhereInput[] = [];
-    for (const s of stati) {
+    for (const s of effectiveStati) {
       const statoWhere = provvigioneStatoWhere(s);
       ors.push({
         AND: [
@@ -290,14 +305,17 @@ export function buildReportContractWhere(
 
 export function reportStatoHint(stato: string): string {
   const stati = resolveReportStati(stato);
+  if (stati.includes("Tutti")) {
+    return "Ogni stato usa il periodo giusto: Incassato/Pagato = mese di incasso, Stornato = mese storno, Da controllare/KO = mese di inserimento. «Da incassare» non ha ancora un mese di incasso: compare sempre, in qualsiasi periodo scelto.";
+  }
   if (stati.length > 1) {
-    return `Multi-selezione: ${stati.join(" + ")}. Il periodo usa la data corretta per ogni stato (incasso / storno / inserimento).`;
+    return `Multi-selezione: ${stati.join(" + ")}. Il periodo usa la data corretta per ogni stato (incasso / storno / inserimento / sempre per Da incassare).`;
   }
   switch (stati[0]) {
     case "Da controllare":
       return "Periodo = data inserimento. Contratti inseriti ma non ancora contrattualizzati.";
     case "Da incassare":
-      return "Periodo = data inserimento. Contratti ancora da pagare dal fornitore.";
+      return "Nessun periodo: compare sempre, in qualsiasi mese/intervallo scelto. Non ha ancora un incasso, quindi non ha un «mese di incasso» da filtrare — stesso comportamento di «Tutti i periodi» in Provvigioni.";
     case "Incassato":
       return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni (clawback) non entrano qui: usa il filtro «Stornato».";
     case "Pagato":
