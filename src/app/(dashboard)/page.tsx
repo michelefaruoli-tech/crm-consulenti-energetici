@@ -23,10 +23,13 @@ import {
   aggregateCollaboratorRanking,
   aggregateSupplierRanking,
   aggregateUtilityRanking,
+  parseDashboardYear,
   startOfMonth,
   startOfWeekMonday,
 } from "@/lib/dashboard-aggregates";
+import { loadMonthlyContractCounts } from "@/lib/dashboard-monthly-counts";
 import { DashboardRankingPanel } from "@/components/dashboard/dashboard-ranking-panel";
+import { DashboardMonthlyBreakdown } from "@/components/dashboard/dashboard-monthly-breakdown";
 import { MarketPricesPanel } from "@/components/dashboard/market-prices-panel";
 
 export const dynamic = "force-dynamic";
@@ -34,10 +37,10 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; q?: string }>;
+  searchParams: Promise<{ page?: string; q?: string; anno?: string }>;
 }) {
   const session = await requireSession();
-  const { page: pageRaw, q } = await searchParams;
+  const { page: pageRaw, q, anno } = await searchParams;
   const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
@@ -63,12 +66,15 @@ export default async function DashboardPage({
   const now = new Date();
   const weekStart = startOfWeekMonday(now);
   const monthStart = startOfMonth(now);
+  const currentYear = now.getFullYear();
+  const selectedYear = parseDashboardYear(anno, currentYear);
 
   try {
     const [
       insertedThisWeek,
       insertedThisMonth,
       insertedTotal,
+      currentYearMonthlyCountsRaw,
       inLavorazioneCount,
       inLavorazioneList,
       moneyTotals,
@@ -91,6 +97,7 @@ export default async function DashboardPage({
         where: { ...whereAll, insertionDate: { gte: monthStart } },
       }),
       prisma.contract.count({ where: whereAll }),
+      loadMonthlyContractCounts({ where: whereAll, year: currentYear }),
       prisma.contract.count({
         where: {
           ...whereActive,
@@ -269,6 +276,20 @@ export default async function DashboardPage({
     const tableRows = toContractRows(recentContracts);
     const collaborators = collaboratorOptions.map(toCollaboratorOption);
 
+    // Mese corrente: riusa il valore già calcolato per "Inseriti questo
+    // mese" (query senza limite superiore) invece del conteggio a range
+    // chiuso, così il totale del mese in questa tabella coincide sempre,
+    // byte per byte, con quella card — e la somma dei 12 mesi resta uguale
+    // a "Inseriti quest'anno" per costruzione.
+    const currentYearMonthlyCounts = [...currentYearMonthlyCountsRaw];
+    currentYearMonthlyCounts[now.getMonth()] = insertedThisMonth;
+    const insertedThisYear = currentYearMonthlyCounts.reduce((a, b) => a + b, 0);
+
+    const monthlyCounts =
+      selectedYear === currentYear
+        ? currentYearMonthlyCounts
+        : await loadMonthlyContractCounts({ where: whereAll, year: selectedYear });
+
     return (
       <div className="space-y-8">
         <div>
@@ -291,11 +312,19 @@ export default async function DashboardPage({
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Inseriti questa settimana" value={insertedThisWeek} />
           <StatCard label="Inseriti questo mese" value={insertedThisMonth} />
+          <StatCard label="Inseriti quest'anno" value={insertedThisYear} />
           <StatCard label="Totale di sempre" value={insertedTotal} />
         </div>
+
+        <DashboardMonthlyBreakdown
+          year={selectedYear}
+          counts={monthlyCounts}
+          currentYear={currentYear}
+          currentMonthIndex={now.getMonth()}
+        />
 
         <div className="grid gap-6 lg:grid-cols-2">
           <DashboardRankingPanel
