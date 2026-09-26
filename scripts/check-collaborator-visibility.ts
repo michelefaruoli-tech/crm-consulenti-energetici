@@ -18,6 +18,7 @@
 import {
   collaboratorOptionsWhereFromScope,
   contractWhereFromScope,
+  panelContractScopeWhere,
   type UserVisibilityScope,
 } from "../src/lib/visibility-scope";
 import type { Prisma, Role } from "../src/generated/prisma/client";
@@ -176,6 +177,11 @@ function matchesContractWhere(
   const w = where as Record<string, unknown>;
   if (Object.keys(w).length === 0) return true; // {} = nessuna restrizione (Admin/Segreteria)
   if (w.id === "__no_supplier_scope__") return false; // sentinella "non vede nulla"
+  if (Array.isArray(w.AND)) {
+    return (w.AND as Prisma.ContractWhereInput[]).every((part) =>
+      matchesContractWhere(contract, part),
+    );
+  }
   const collabEq = w.collaboratorId;
   if (typeof collabEq === "string" && contract.collaboratorId !== collabEq) return false;
   const collabIn = collabEq as { in?: string[] } | undefined;
@@ -221,6 +227,76 @@ check(
   "Admin: vede tutte le righe",
   visibleContractIds(contractWhereFromScope(scopes.admin.scope)),
   ["c_blasucci_sorgenia", "c_doto_enel", "c_fagiano_enel", "c_genzano_enel"],
+);
+
+// ---------------------------------------------------------------------------
+// Pannelli Anomalie / Cestino: `panelContractScopeWhere` = visibility + filtro
+// collab UI. Stesso bug di `canViewAll` come unico gate: l’AM vedeva 63
+// segnalazioni e 12 cestino della rete intera invece del solo team.
+// ---------------------------------------------------------------------------
+console.log("\n--- Pannelli Anomalie / Cestino (panelContractScopeWhere) ---\n");
+
+check(
+  "AM Blasucci senza filtro collab: solo team (sé + Genzano)",
+  visibleContractIds(
+    panelContractScopeWhere(
+      contractWhereFromScope(scopes.areaManager.scope),
+      undefined,
+    ),
+  ),
+  ["c_blasucci_sorgenia", "c_genzano_enel"],
+);
+
+check(
+  "AM Blasucci con filtro collab=Genzano: solo Genzano (non Doto)",
+  visibleContractIds(
+    panelContractScopeWhere(
+      contractWhereFromScope(scopes.areaManager.scope),
+      "u_genzano",
+    ),
+  ),
+  ["c_genzano_enel"],
+);
+
+check(
+  "AM Blasucci non può allargare lo scope filtrando un collab fuori team (Doto)",
+  visibleContractIds(
+    panelContractScopeWhere(
+      contractWhereFromScope(scopes.areaManager.scope),
+      "u_doto",
+    ),
+  ),
+  [],
+);
+
+check(
+  "Collaboratore: solo sé, indipendentemente dal filtro (scope own)",
+  visibleContractIds(
+    panelContractScopeWhere(
+      contractWhereFromScope(scopes.collaboratore.scope),
+      "u_doto",
+    ),
+  ),
+  [],
+);
+
+check(
+  "Admin senza filtro: tutta la rete",
+  visibleContractIds(
+    panelContractScopeWhere(contractWhereFromScope(scopes.admin.scope), null),
+  ),
+  ["c_blasucci_sorgenia", "c_doto_enel", "c_fagiano_enel", "c_genzano_enel"],
+);
+
+check(
+  "Admin con filtro collab=Doto: solo Doto",
+  visibleContractIds(
+    panelContractScopeWhere(
+      contractWhereFromScope(scopes.admin.scope),
+      "u_doto",
+    ),
+  ),
+  ["c_doto_enel"],
 );
 
 if (failures > 0) {

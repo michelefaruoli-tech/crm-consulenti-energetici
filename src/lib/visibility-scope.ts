@@ -38,6 +38,37 @@ export type CollaboratorOption = {
   active: boolean;
 };
 
+/**
+ * Combina lo scope di ruolo (`contractVisibilityWhere`) con l’eventuale
+ * filtro collaboratore attivo in UI (`?collab=`).
+ *
+ * Usato dai pannelli Anomalie e Cestino in Provvigioni: devono guardare lo
+ * stesso perimetro dell’elenco/totali (Collaboratore = sé, Area Manager =
+ * sé+team, Backoffice/Admin = tutti entro lo scope), e restringersi ulteriormente
+ * se l’utente ha selezionato uno o più collaboratori nel filtro.
+ */
+export function panelContractScopeWhere(
+  visibility: Prisma.ContractWhereInput,
+  collabFilter?: string | null,
+): Prisma.ContractWhereInput {
+  const parts: Prisma.ContractWhereInput[] = [];
+  if (visibility && Object.keys(visibility).length > 0) {
+    parts.push(visibility);
+  }
+  const collabIds = (collabFilter ?? "")
+    .split("|")
+    .map((s) => s.trim())
+    .filter((id) => id.length > 0 && id !== "tutti");
+  if (collabIds.length === 1) {
+    parts.push({ collaboratorId: collabIds[0] });
+  } else if (collabIds.length > 1) {
+    parts.push({ collaboratorId: { in: collabIds } });
+  }
+  if (parts.length === 0) return {};
+  if (parts.length === 1) return parts[0]!;
+  return { AND: parts };
+}
+
 /** Filtro Prisma contratti in base al ruolo / scope. */
 export function contractWhereFromScope(
   scope: UserVisibilityScope,

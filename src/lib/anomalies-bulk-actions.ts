@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { contractVisibilityWhere } from "@/lib/user-scope";
 import {
   applyAnomaliesBulk,
   previewAnomaliesBulk,
@@ -28,6 +30,32 @@ async function requireAnomaliesSession() {
   return session;
 }
 
+/**
+ * Tiene solo id di rate il cui contratto è nel visibility scope della sessione
+ * (AM = team, collab = sé, admin = tutti). Evita che Anteprima/Applica operino
+ * su segnalazioni fuori perimetro anche se gli id fossero manipolati dal client.
+ */
+async function monthIdsInVisibilityScope(
+  session: { id: string; role: Parameters<typeof contractVisibilityWhere>[0]["role"] },
+  ids: string[],
+): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const visibility = await contractVisibilityWhere(session);
+  const scoped = await prisma.recurringMonth.findMany({
+    where: {
+      id: { in: ids },
+      contract: {
+        AND: [
+          { deletedAt: null },
+          ...(Object.keys(visibility).length > 0 ? [visibility] : []),
+        ],
+      },
+    },
+    select: { id: true },
+  });
+  return scoped.map((r) => r.id);
+}
+
 export type PreviewAnomaliesBulkResult =
   | ({ ok: true } & AnomalyBulkPreview)
   | { ok: false; error: string };
@@ -37,13 +65,17 @@ export async function previewAnomaliesBulkAction(input: {
   monthIds: string[];
 }): Promise<PreviewAnomaliesBulkResult> {
   try {
-    await requireAnomaliesSession();
-    const ids = [...new Set(input.monthIds ?? [])].filter(Boolean);
-    if (ids.length === 0) {
+    const session = await requireAnomaliesSession();
+    const rawIds = [...new Set(input.monthIds ?? [])].filter(Boolean);
+    if (rawIds.length === 0) {
       return { ok: false, error: "Nessuna rata nell'elenco anomalie" };
     }
-    if (ids.length > 500) {
+    if (rawIds.length > 500) {
       return { ok: false, error: "Massimo 500 rate per anteprima" };
+    }
+    const ids = await monthIdsInVisibilityScope(session, rawIds);
+    if (ids.length === 0) {
+      return { ok: false, error: "Nessuna rata nel tuo perimetro di visibilità" };
     }
     const preview = await previewAnomaliesBulk(ids);
     return { ok: true, ...preview };
@@ -75,12 +107,16 @@ export async function applyAnomaliesBulkAction(input: {
 }): Promise<ApplyAnomaliesBulkResult> {
   try {
     const session = await requireAnomaliesSession();
-    const ids = [...new Set(input.monthIds ?? [])].filter(Boolean);
-    if (ids.length === 0) {
+    const rawIds = [...new Set(input.monthIds ?? [])].filter(Boolean);
+    if (rawIds.length === 0) {
       return { ok: false, error: "Nessuna rata selezionata" };
     }
-    if (ids.length > 500) {
+    if (rawIds.length > 500) {
       return { ok: false, error: "Massimo 500 rate per lotto" };
+    }
+    const ids = await monthIdsInVisibilityScope(session, rawIds);
+    if (ids.length === 0) {
+      return { ok: false, error: "Nessuna rata nel tuo perimetro di visibilità" };
     }
 
     const result = await applyAnomaliesBulk(ids);
