@@ -20,6 +20,7 @@ export type CtePdfParseResult = {
     | "enel-business"
     | "soluzione-energia"
     | "duferco-business"
+    | "duferco-flex-condomini"
     | "dolomiti-listino"
     | "enel-corporate-listino"
     | "sev-iren-listino"
@@ -176,6 +177,9 @@ function lastDayOfMonth(year: number, month1to12: number): number {
 }
 
 function detectLayout(line: string): CtePdfParseResult["layout"] {
+  if (/flex\s*condomini/i.test(line) && /duferco/i.test(line)) {
+    return "duferco-flex-condomini";
+  }
   if (/duferco energia/i.test(line) && /fix business/i.test(line)) {
     return "duferco-business";
   }
@@ -192,6 +196,22 @@ function detectLayout(line: string): CtePdfParseResult["layout"] {
 }
 
 function extractOfferName(text: string, line: string, hits: CtePdfHit[]): string | null {
+  const flex = text.match(
+    /^(FLEX CONDOMINI (?:MERCURIO|VENERE|TERRA|MARTE|GIOVE|SATURNO|URANO|NETTUNO|SOLE|LUNA))$/im,
+  );
+  if (flex?.[1]) {
+    const name = flex[1].trim().toUpperCase();
+    addHit(hits, "offerName", name, flex[0], 0);
+    return name;
+  }
+  const flexLine = line.match(
+    /\b(FLEX CONDOMINI (?:MERCURIO|VENERE|TERRA|MARTE|GIOVE|SATURNO|URANO|NETTUNO|SOLE|LUNA))\b/i,
+  );
+  if (flexLine?.[1]) {
+    const name = flexLine[1].trim().toUpperCase();
+    addHit(hits, "offerName", name, line, flexLine.index ?? 0);
+    return name;
+  }
   const duferco = text.match(/^(FIX BUSINESS[ A-Za-z0-9]+)$/im);
   if (duferco?.[1]) {
     const name = duferco[1].trim();
@@ -305,8 +325,12 @@ function extractPriceKind(line: string, hits: CtePdfHit[]): CtePriceKind | null 
     addHit(hits, "priceKind", "FISSO", line, line.search(/fisso|fissi/i));
     return "FISSO";
   }
-  if (/tipologia di prezzo\??\s*offerta a prezzo variabile|prezzo variabile\/indicizzat/i.test(line)) {
-    addHit(hits, "priceKind", "VARIABILE", line, line.search(/variabile/i));
+  if (
+    /tipologia di prezzo\??\s*offerta a prezzo variabile|prezzo variabile\/indicizzat|prezzo variabile su base oraria|indicizzato al PSV|P\s*=\s*PSV\s*\+|PUNHH\s*\+/i.test(
+      line,
+    )
+  ) {
+    addHit(hits, "priceKind", "VARIABILE", line, line.search(/variabile|PSV|PUNHH/i));
     return "VARIABILE";
   }
   if (/prezzo fisso \(pfi\)/i.test(line)) {
@@ -392,6 +416,16 @@ function extractValidity(
   line: string,
   hits: CtePdfHit[],
 ): { from: string | null; to: string | null } {
+  const periodoCte = line.match(
+    /periodo di validit[àa]'?(?: della cte)?:\s*dal\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+al\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i,
+  );
+  if (periodoCte) {
+    const from = italianDateToIso(periodoCte[1]!, periodoCte[2]!, periodoCte[3]!);
+    const to = italianDateToIso(periodoCte[4]!, periodoCte[5]!, periodoCte[6]!);
+    if (from) addHit(hits, "validFrom", from, line, periodoCte.index ?? 0);
+    if (to) addHit(hits, "validTo", to, line, periodoCte.index ?? 0);
+    return { from, to };
+  }
   const dalAl = line.match(
     /adesioni dal\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+al\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/i,
   );
@@ -466,6 +500,47 @@ function extractCcv(
     if (n != null && plausibleCcv(n)) {
       addHit(hits, "ccvAnnual", String(n), line, qcv.index ?? 0);
       return n;
+    }
+  }
+  const cvd = line.match(
+    /componente di vendita al dettaglio fissa\s+cvd\s*fissa\s*([\d.,]+)\s*(?:€|Euro)\s*\/\s*PdR\s*\/\s*anno/i,
+  );
+  if (cvd) {
+    const n = parseItalianNumber(cvd[1] ?? "");
+    if (n != null && plausibleCcv(n)) {
+      addHit(hits, "ccvAnnual", String(n), line, cvd.index ?? 0);
+      return n;
+    }
+  }
+  return null;
+}
+
+/** Spread variabile Duferco Flex: PUNHH + X oppure PSV + X. */
+function extractDufercoFlexSpread(
+  line: string,
+  utility: CteUtility | null,
+  hits: CtePdfHit[],
+): number | null {
+  if (utility === "LUCE" || /PUNHH/i.test(line)) {
+    const pun = line.match(
+      /P\s*=\s*\(1\s*\+\s*lambda\)\s*\*\s*PUNHH\s*\+?\s*([\d,]+)\s*(?:€|Euro)\s*\/\s*kWh/i,
+    );
+    if (pun) {
+      const n = parseItalianNumber(pun[1] ?? "");
+      if (n != null && n >= 0 && n <= 0.5) {
+        addHit(hits, "bands", `spread PUNHH + ${n} €/kWh`, line, pun.index ?? 0);
+        return n;
+      }
+    }
+  }
+  if (utility === "GAS" || /PSV\s*\+/i.test(line)) {
+    const psv = line.match(/P\s*=\s*PSV\s*\+\s*([\d,]+)/i);
+    if (psv) {
+      const n = parseItalianNumber(psv[1] ?? "");
+      if (n != null && n >= 0 && n <= 2.5) {
+        addHit(hits, "bands", `spread PSV + ${n} €/Smc`, line, psv.index ?? 0);
+        return n;
+      }
     }
   }
   return null;
@@ -606,23 +681,78 @@ export function parseCtePdfText(rawText: string): CtePdfParseResult {
   const noteParts: string[] = [];
 
   const layout = detectLayout(line);
-  const supplierName = extractSupplierName(line, hits);
+  let supplierName = extractSupplierName(line, hits);
+  if (!supplierName && layout === "duferco-flex-condomini") {
+    supplierName = "Duferco Energia";
+    addHit(hits, "supplierName", supplierName, line, 0);
+  }
   const offerName = extractOfferName(text, line, hits);
-  const utility = extractUtility(line, offerName, hits);
+  let utility = extractUtility(line, offerName, hits);
+  if (!utility && layout === "duferco-flex-condomini") {
+    if (/gas naturale|€\/smc|prezzo gas/i.test(line)) {
+      utility = "GAS";
+      addHit(hits, "utility", "GAS", line, 0);
+    } else if (/energia elettrica|€\/kwh|punhh|bassa tensione/i.test(line)) {
+      utility = "LUCE";
+      addHit(hits, "utility", "LUCE", line, 0);
+    }
+  }
   const category = extractCategory(line, hits);
   const commercialSegment = extractCommercialSegment(line, hits);
-  const priceKind = extractPriceKind(line, hits);
+  let priceKind = extractPriceKind(line, hits);
   const power = extractPower(line, hits, warnings);
   const consumption = extractConsumption(line, utility, hits);
-  const validity = extractValidity(line, hits);
+  const validityRaw = extractValidity(line, hits);
   const ccvAnnual = extractCcv(line, hits, warnings);
+  let spread: number | null = null;
+
+  // Flex Condomini: Michele — non scadono mai (validità PDF solo informativa).
+  let validity =
+    layout === "duferco-flex-condomini"
+      ? { from: null as string | null, to: null as string | null }
+      : validityRaw;
+  if (layout === "duferco-flex-condomini" && (validityRaw.from || validityRaw.to)) {
+    warnings.push(
+      `PDF indica validità ${validityRaw.from ?? "?"} → ${validityRaw.to ?? "?"}: in catalogo lasciata senza scadenza.`,
+    );
+    noteParts.push(
+      `Non scade (indicazione Michele). PDF: ${validityRaw.from ?? "?"}–${validityRaw.to ?? "?"}.`,
+    );
+  }
 
   const trios = extractFasciaTrios(line);
   const btTrio = trios.find((t) => t.kind === "bt-included") ?? (layout === "soluzione-energia" ? trios[0] : undefined);
   const mtTrio = trios.find((t) => t.kind === "mt-excluded");
 
   let bands: CtePdfParseResult["bands"] = [];
-  if (btTrio) {
+  if (layout === "duferco-flex-condomini") {
+    priceKind = priceKind ?? "VARIABILE";
+    if (!hits.some((h) => h.field === "priceKind")) {
+      addHit(hits, "priceKind", "VARIABILE", line, 0);
+    }
+    spread = extractDufercoFlexSpread(line, utility, hits);
+    if (spread != null) {
+      noteParts.push(
+        utility === "GAS"
+          ? `Spread: P = PSV + ${String(spread).replace(".", ",")} €/Smc.`
+          : `Spread: P = (1+λ)×PUNHH + ${String(spread).replace(".", ",")} €/kWh (λ=0,1 BT).`,
+      );
+    }
+    const cmod = line.match(/CMOD\s*variabile\s*([\d.,]+)\s*(?:€|Euro)\s*\/\s*Smc/i);
+    if (cmod) {
+      const n = parseItalianNumber(cmod[1] ?? "");
+      if (n != null) {
+        noteParts.push(`CMOD variabile ${String(n).replace(".", ",")} €/Smc (solo in nota).`);
+      }
+    }
+    if (ccvAnnual != null) {
+      noteParts.push(
+        utility === "GAS"
+          ? "CVD fissa Duferco usata come CCV catalogo."
+          : "QCV Duferco usata come CCV catalogo.",
+      );
+    }
+  } else if (btTrio) {
     bands = [
       { timeBand: "F1", energyPrice: btTrio.f1 },
       { timeBand: "F2", energyPrice: btTrio.f2 },
@@ -677,8 +807,15 @@ export function parseCtePdfText(rawText: string): CtePdfParseResult {
     }
   }
 
-  const usedBt = Boolean(btTrio) || bands.some((b) => b.timeBand === "F1");
-  const networkLosses = extractNetworkLosses(line, utility, usedBt, hits);
+  const usedBt =
+    Boolean(btTrio) ||
+    bands.some((b) => b.timeBand === "F1") ||
+    (layout === "duferco-flex-condomini" && utility === "LUCE");
+  let networkLosses = extractNetworkLosses(line, utility, usedBt, hits);
+  if (layout === "duferco-flex-condomini" && utility === "LUCE" && !networkLosses) {
+    networkLosses = "INCLUDED";
+    addHit(hits, "networkLosses", "INCLUDED", line, 0);
+  }
 
   if (layout === "enel-wow" && /dispbt/i.test(line) && ccvAnnual != null) {
     noteParts.push("Quota fissa PDF = CCV Enel + DispBT ARERA.");
@@ -719,7 +856,7 @@ export function parseCtePdfText(rawText: string): CtePdfParseResult {
     ccvAnnual: ccvAnnual != null,
     validFrom: Boolean(validity.from),
     validTo: Boolean(validity.to),
-    bands: bands.length > 0,
+    bands: bands.length > 0 || spread != null,
   };
 
   const filledFieldLabels = EMPTY_TRACK.filter((k) => filled[k]).map((k) => FIELD_LABELS[k] ?? k);
@@ -740,7 +877,7 @@ export function parseCtePdfText(rawText: string): CtePdfParseResult {
     networkLosses,
     ccvAnnual,
     ccvMonthly: null,
-    spread: null,
+    spread,
     validFrom: validity.from,
     validTo: validity.to,
     bands,

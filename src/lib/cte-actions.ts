@@ -308,7 +308,13 @@ export async function importDolomitiListinoAction(): Promise<
   return { ok: true, ...result, supplierName: dolomiti.name };
 }
 
-const LISTINO_KINDS: CteListinoKind[] = ["dolomiti", "enel-corporate", "sev-iren", "compara"];
+const LISTINO_KINDS: CteListinoKind[] = [
+  "dolomiti",
+  "enel-corporate",
+  "sev-iren",
+  "compara",
+  "duferco-flex-condomini",
+];
 
 export async function importCteListinoAction(
   kind: CteListinoKind,

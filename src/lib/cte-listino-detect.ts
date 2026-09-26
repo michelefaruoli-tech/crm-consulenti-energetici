@@ -1,5 +1,6 @@
 import { COMPARA_SEMPLICE_LISTINO, COMPARA_SEMPLICE_PDF_HASH } from "@/lib/cte-compara-listino";
 import { allDolomitiListinoOffers, dolomitiOffersForScreenshotHash } from "@/lib/cte-dolomiti-listino";
+import { allDufercoFlexCondominiOffers } from "@/lib/cte-duferco-flex-condomini";
 import {
   ENEL_CORPORATE_LISTINO,
   ENEL_CORPORATE_SCREENSHOT_HASH,
@@ -7,7 +8,12 @@ import {
 import type { CteListinoOffer, KnownCteListino } from "@/lib/cte-listino-shared";
 import { isSevIrenListinoText, SEV_IREN_LISTINO } from "@/lib/cte-sev-iren-listino";
 
-export type CteListinoKind = "dolomiti" | "enel-corporate" | "sev-iren" | "compara";
+export type CteListinoKind =
+  | "dolomiti"
+  | "enel-corporate"
+  | "sev-iren"
+  | "compara"
+  | "duferco-flex-condomini";
 
 function dolomitiToShared(rows: ReturnType<typeof allDolomitiListinoOffers>): CteListinoOffer[] {
   return rows.map((row) => ({
@@ -55,6 +61,12 @@ export function listinoByKind(kind: CteListinoKind): KnownCteListino {
         layout: "compara-semplice",
         offers: COMPARA_SEMPLICE_LISTINO,
       };
+    case "duferco-flex-condomini":
+      return {
+        kind: "duferco-flex-condomini",
+        layout: "duferco-flex-condomini",
+        offers: allDufercoFlexCondominiOffers(),
+      };
   }
 }
 
@@ -89,4 +101,5 @@ export const LISTINO_KIND_LABEL: Record<CteListinoKind, string> = {
   "enel-corporate": "Enel / Soluzione Energia Corporate",
   "sev-iren": "SEV Iren",
   compara: "Compara Semplice",
+  "duferco-flex-condomini": "Duferco Flex Condomini",
 };
