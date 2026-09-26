@@ -10,7 +10,7 @@ import {
 } from "@/lib/supply-dates";
 import { isManuallyRestoredArchiveLabel } from "@/lib/contract-reactivate";
 
-const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
+export const POD_ARCHIVE_LABEL = "POD ricontrattualizzato";
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -19,8 +19,11 @@ function startOfDay(d: Date): Date {
 /**
  * Se il contratto precedente è ancora nel periodo storno, NON archiviare:
  * restano entrambi in Provvigioni finché l’utente non li gestisce.
+ *
+ * Esportata: usata anche dall'audit di sola lettura in
+ * `provvigioni-integrity.ts` per prevedere l'esito senza scrivere nulla.
  */
-function keepBothWhileInStorno(opts: {
+export function keepBothWhileInStorno(opts: {
   supplyStartDate: Date | null | undefined;
   stornoEndDate: Date | null | undefined;
   stornoMonths: number | null | undefined;

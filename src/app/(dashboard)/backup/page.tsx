@@ -8,6 +8,10 @@ import { formatRomeDateTime } from "@/lib/timezone";
 import { BackupPanel } from "@/components/backup/backup-panel";
 import { RecurringCleanupPanel } from "@/components/backup/recurring-cleanup-panel";
 import { ProvvigioniBackfillPanel } from "@/components/backup/provvigioni-backfill-panel";
+import { ProvvigioniIntegrityPanel } from "@/components/backup/provvigioni-integrity-panel";
+
+/** Il controllo integrità legge tutti i contratti ricorrenti: serve più dei 10s di default. */
+export const maxDuration = 60;
 
 export default async function BackupPage() {
   const session = await requireSession();
@@ -25,19 +29,35 @@ export default async function BackupPage() {
     process.env.GIT_HASH?.slice(0, 7) ||
     "locale";
 
-  const [recentBackups, lastWorking, totalContracts, paidCount] =
-    await Promise.all([
-      prisma.backupLog.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 15,
-      }),
-      prisma.backupLog.findFirst({
-        where: { status: { in: ["WORKING", "WORKING_LOCAL"] } },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.contract.count(),
-      prisma.contract.count({ where: { collectionDate: { not: null } } }),
-    ]);
+  const [
+    recentBackups,
+    lastWorking,
+    totalContracts,
+    paidCount,
+    integrityCollaborators,
+    integritySuppliers,
+  ] = await Promise.all([
+    prisma.backupLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 15,
+    }),
+    prisma.backupLog.findFirst({
+      where: { status: { in: ["WORKING", "WORKING_LOCAL"] } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.contract.count(),
+    prisma.contract.count({ where: { collectionDate: { not: null } } }),
+    prisma.user.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.supplier.findMany({
+      where: { OR: [{ active: true }, { contracts: { some: {} } }] },
+      orderBy: { name: "asc" },
+      select: { name: true },
+    }),
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 md:p-6">
@@ -74,6 +94,11 @@ export default async function BackupPage() {
       </p>
 
       <BackupPanel backupEmail={backupEmail} gitHash={gitHash} />
+
+      <ProvvigioniIntegrityPanel
+        collaboratorOptions={integrityCollaborators}
+        supplierOptions={integritySuppliers}
+      />
 
       <RecurringCleanupPanel />
 
