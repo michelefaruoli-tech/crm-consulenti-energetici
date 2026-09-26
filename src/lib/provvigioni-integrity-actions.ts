@@ -12,6 +12,10 @@ import {
   scanRecurringAnomalies,
   type RecurringAnomalyScan,
 } from "@/lib/provvigioni-integrity-scan";
+import {
+  applyManualOutOfWindowMonthIds,
+  type ManualOutOfWindowApplyRowResult,
+} from "@/lib/recurring-cleanup";
 import type {
   PodDuplicateFinding,
   TotalsConsistencyResult,
@@ -70,6 +74,10 @@ export type ApplyEarlyRecurringCleanupResult =
   | { ok: true; deleted: number; rejected: number }
   | { ok: false; error: string };
 
+export type ApplyManualOutOfWindowResult =
+  | { ok: true; deleted: number; rowResults: ManualOutOfWindowApplyRowResult[] }
+  | { ok: false; error: string };
+
 /**
  * Elimina rate create in anticipo (mensili oltre il mese generabile, annuali
  * prima del 13° mese) selezionate dall'anteprima. Ri-verifica ogni id prima
@@ -110,6 +118,52 @@ export async function applyEarlyRecurringCleanupAction(input: {
     return { ok: true, ...result };
   } catch (e) {
     console.error("[applyEarlyRecurringCleanupAction]", e);
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message.slice(0, 200) : "Bonifica non riuscita",
+    };
+  }
+}
+
+/**
+ * Elimina le rate fuori intervallo con incasso/rendiconto selezionate
+ * dall'anteprima (sezione «solo revisione manuale»). Ri-verifica ogni id.
+ */
+export async function applyManualOutOfWindowCleanupAction(input: {
+  monthIds: string[];
+}): Promise<ApplyManualOutOfWindowResult> {
+  try {
+    const session = await requireIntegritySession();
+    const ids = [...new Set(input.monthIds ?? [])].filter(Boolean);
+    if (ids.length === 0) {
+      return { ok: false, error: "Nessuna rata selezionata" };
+    }
+    if (ids.length > 200) {
+      return { ok: false, error: "Massimo 200 rate per lotto" };
+    }
+
+    const result = await applyManualOutOfWindowMonthIds(ids);
+
+    if (result.deleted > 0) {
+      await writeAuditLog({
+        userId: session.id,
+        action: "DELETE",
+        entity: "RecurringMonth",
+        entityId: null,
+        details: {
+          source: "controllo_integrita_provvigioni_fuori_intervallo_con_incasso",
+          selected: ids.length,
+          deleted: result.deleted,
+          skipped: result.rowResults.filter((r) => r.outcome === "saltata").length,
+        },
+      });
+      revalidatePath("/provvigioni");
+      revalidatePath("/backup");
+    }
+
+    return { ok: true, ...result };
+  } catch (e) {
+    console.error("[applyManualOutOfWindowCleanupAction]", e);
     return {
       ok: false,
       error: e instanceof Error ? e.message.slice(0, 200) : "Bonifica non riuscita",

@@ -6,6 +6,7 @@ import { applyMissingProvvigioniRowsAction } from "@/lib/recurring-backfill-acti
 import { applyRecurringCleanupAction } from "@/lib/recurring-cleanup-actions";
 import {
   applyEarlyRecurringCleanupAction,
+  applyManualOutOfWindowCleanupAction,
   applyPodDuplicateArchiveAction,
   checkProvvigioniTotalsAction,
   scanPodDuplicateAnomaliesAction,
@@ -43,7 +44,7 @@ const CATEGORY_HINT: Record<Category, string> = {
   out_of_window_removable:
     "Rata prima dell'ingresso in fornitura o dopo chiusura/switch: nessun incasso, si può chiudere.",
   out_of_window_manual:
-    "Rata fuori intervallo ma con incasso/rendiconto: NON si tocca in automatico, va decisa a mano.",
+    "Rata fuori intervallo ma con incasso/rendiconto: visiona l'elenco, poi usa Applica per eliminare solo le righe confermate (nessuna cancellazione automatica).",
   duplicate_period: "Più righe per lo stesso contratto e lo stesso mese: non dovrebbe succedere.",
 };
 
@@ -231,6 +232,54 @@ export function ProvvigioniIntegrityPanel({
     setPhase("idle");
   }
 
+  async function applyOutOfWindowManual() {
+    const monthIds = findingsByCategory("out_of_window_manual").flatMap((f) =>
+      f.periods.map((p) => p.monthId).filter((id): id is string => Boolean(id)),
+    );
+    if (monthIds.length === 0) return;
+    setPhase("applying");
+    setError(null);
+    setApplyDetails([]);
+    try {
+      let deleted = 0;
+      let skipped = 0;
+      const allResults: Array<{ period: string; outcome: string; motivo?: string }> = [];
+      for (let i = 0; i < monthIds.length; i += 200) {
+        const batch = monthIds.slice(i, i + 200);
+        setProgress(
+          `Eliminazione rate con incasso: ${Math.min(i + batch.length, monthIds.length)} / ${monthIds.length}…`,
+        );
+        const res = await applyManualOutOfWindowCleanupAction({ monthIds: batch });
+        if (!res.ok) {
+          setError(res.error);
+          setProgress(null);
+          setPhase("idle");
+          return;
+        }
+        deleted += res.deleted;
+        for (const row of res.rowResults) {
+          if (row.outcome === "saltata") skipped += 1;
+          allResults.push({
+            period: row.period,
+            outcome: row.outcome,
+            motivo: row.motivo,
+          });
+        }
+      }
+      setProgress(null);
+      setMessage(
+        `Esito: ${deleted} eliminate, ${skipped} saltate (su ${monthIds.length} rate nell'elenco).`,
+      );
+      setApplyDetails(allResults);
+      await runScan();
+      return;
+    } catch (e) {
+      setError(friendlyActionError(e));
+    }
+    setProgress(null);
+    setPhase("idle");
+  }
+
   async function applyOutOfWindow() {
     const monthIds = findingsByCategory("out_of_window_removable").flatMap((f) =>
       f.periods.map((p) => p.monthId).filter((id): id is string => Boolean(id)),
@@ -413,7 +462,13 @@ export function ProvvigioniIntegrityPanel({
             title={CATEGORY_LABELS.out_of_window_manual}
             hint={CATEGORY_HINT.out_of_window_manual}
             findings={findingsByCategory("out_of_window_manual")}
-            readOnly
+            confirmKey="outOfWindowManual"
+            confirmed={confirmed}
+            setConfirmed={setConfirmed}
+            confirmLabel="Ho visionato l'elenco e confermo l'eliminazione delle rate fuori intervallo che hanno già incasso o rendiconto (operazione irreversibile)."
+            applyLabel="Applica"
+            onApply={applyOutOfWindowManual}
+            busy={busy}
           />
 
           <CategoryBlock
