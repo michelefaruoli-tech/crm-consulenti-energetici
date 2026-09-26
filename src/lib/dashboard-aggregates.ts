@@ -20,6 +20,44 @@ export function startOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 
+export function startOfYear(d: Date): Date {
+  return new Date(d.getFullYear(), 0, 1);
+}
+
+/** Etichette brevi Gen→Dic per la tabella "Contratti inseriti per mese". */
+export const MONTH_LABELS_IT = [
+  "Gen",
+  "Feb",
+  "Mar",
+  "Apr",
+  "Mag",
+  "Giu",
+  "Lug",
+  "Ago",
+  "Set",
+  "Ott",
+  "Nov",
+  "Dic",
+] as const;
+
+/** Primo anno selezionabile dal cambio-anno della Dashboard. */
+export const DASHBOARD_MIN_YEAR = 2000;
+
+/**
+ * Anno mostrato nella sezione "Contratti inseriti per mese", ricavato dal
+ * parametro `anno` in query string. Non permette anni futuri rispetto
+ * all'anno corrente (la sezione serve solo a guardare indietro).
+ */
+export function parseDashboardYear(
+  raw: string | undefined | null,
+  currentYear: number,
+  minYear: number = DASHBOARD_MIN_YEAR,
+): number {
+  const n = Number.parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(n)) return currentYear;
+  return Math.min(currentYear, Math.max(minYear, n));
+}
+
 const UTILITY_LABELS: Record<string, string> = {
   LUCE: "Luce",
   GAS: "Gas",
