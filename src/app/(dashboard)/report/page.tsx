@@ -80,28 +80,12 @@ export default async function ReportPage({
   const to = period.to;
   const month = period.month;
   const months = period.months;
-  const canViewAll = hasPermission(session.role, "contracts.edit_all");
-
-  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const { contractVisibilityWhere, loadVisibleCollaboratorOptions } =
+    await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
 
   const [collaborators, suppliers, recentBackups] = await Promise.all([
-    canViewAll
-      ? prisma.user.findMany({
-          where: { active: true },
-          orderBy: { name: "asc" },
-          select: { id: true, name: true },
-        })
-      : hasPermission(session.role, "contracts.work_scoped")
-        ? prisma.user.findMany({
-            where: {
-              active: true,
-              role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-            },
-            orderBy: { name: "asc" },
-            select: { id: true, name: true },
-          })
-        : Promise.resolve([{ id: session.id, name: session.name }]),
+    loadVisibleCollaboratorOptions(session),
     prisma.supplier.findMany({
       where: {
         // Attivi, oppure inattivi ancora usati nei contratti (es. ATS).

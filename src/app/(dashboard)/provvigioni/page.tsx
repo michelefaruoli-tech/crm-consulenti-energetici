@@ -123,7 +123,8 @@ export default async function ProvvigioniPage({
   const canExport = hasPermission(session.role, "reports.export");
   const isScoped = hasPermission(session.role, "contracts.work_scoped");
 
-  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const { contractVisibilityWhere, loadVisibleCollaboratorOptions } =
+    await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
 
   const supplier = supplierRaw?.trim() || undefined;
@@ -476,14 +477,7 @@ export default async function ProvvigioniPage({
       where: { ...contractWhere, commissionConfirmed: false },
     }),
     canViewAll
-      ? prisma.user.findMany({
-          where: {
-            active: true,
-            role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-          },
-          select: { id: true, name: true, active: true },
-          orderBy: { name: "asc" },
-        })
+      ? loadVisibleCollaboratorOptions(session)
       : Promise.resolve([]),
     prisma.supplier.findMany({
       select: { name: true, active: true },

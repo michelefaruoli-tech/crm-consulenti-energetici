@@ -3,18 +3,20 @@ import type { Prisma, Role } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getMasterEmail } from "@/lib/mail";
 import { hasPermission } from "@/lib/permissions";
+import {
+  COLLABORATOR_ROLES,
+  collaboratorOptionsWhereFromScope,
+  contractWhereFromScope,
+  type CollaboratorOption,
+  type UserVisibilityScope,
+} from "@/lib/visibility-scope";
 
-export type UserVisibilityScope = {
-  /**
-   * all = admin/segreteria
-   * own = collaboratore (solo sé; se ha supplierScopes li filtra)
-   * scoped = backoffice (fornitori + collab opzionali)
-   * team = area manager (sé + team in collaboratorScopes; fornitori opzionali)
-   */
-  kind: "all" | "own" | "scoped" | "team";
-  supplierIds: string[];
-  /** Vuoto = tutti i collaboratori (entro i fornitori), tranne in team dove vuoto = solo sé */
-  collaboratorIds: string[];
+export {
+  COLLABORATOR_ROLES,
+  collaboratorOptionsWhereFromScope,
+  contractWhereFromScope,
+  type CollaboratorOption,
+  type UserVisibilityScope,
 };
 
 /** Ruoli che possono avere scope fornitori assegnato. */
@@ -95,48 +97,24 @@ export async function loadUserVisibilityScope(session: {
   };
 }
 
-/** Filtro Prisma contratti in base al ruolo / scope. */
-export function contractWhereFromScope(
-  scope: UserVisibilityScope,
-): Prisma.ContractWhereInput {
-  if (scope.kind === "all") return {};
-
-  if (scope.kind === "own") {
-    const where: Prisma.ContractWhereInput = {
-      collaboratorId: sessionOwnId(scope),
-    };
-    if (scope.supplierIds.length > 0) {
-      where.supplierId = { in: scope.supplierIds };
-    }
-    return where;
-  }
-
-  if (scope.kind === "team") {
-    const where: Prisma.ContractWhereInput = {
-      collaboratorId: { in: scope.collaboratorIds },
-    };
-    if (scope.supplierIds.length > 0) {
-      where.supplierId = { in: scope.supplierIds };
-    }
-    return where;
-  }
-
-  // Backoffice senza fornitori assegnati → non vede nulla
-  if (scope.supplierIds.length === 0) {
-    return { id: "__no_supplier_scope__" };
-  }
-
-  const where: Prisma.ContractWhereInput = {
-    supplierId: { in: scope.supplierIds },
-  };
-  if (scope.collaboratorIds.length > 0) {
-    where.collaboratorId = { in: scope.collaboratorIds };
-  }
-  return where;
-}
-
-function sessionOwnId(scope: UserVisibilityScope): string {
-  return scope.collaboratorIds[0] ?? "__none__";
+/**
+ * Nomi visibili nei menu «Collab.» / selettori di collaboratore.
+ *
+ * Ogni tendina/filtro che elenca collaboratori deve passare da qui, mai da
+ * una query `prisma.user.findMany` ad-hoc filtrata solo su `hasPermission`:
+ * più permessi (es. `commissions.view_all`, `contracts.work_scoped`) sono
+ * condivisi da ruoli con perimetri diversi (Backoffice = rete intera, Area
+ * Manager = solo team) e usarli come unico gate mostra nomi fuori perimetro.
+ */
+export async function loadVisibleCollaboratorOptions(
+  session: { id: string; role: Role },
+): Promise<CollaboratorOption[]> {
+  const scope = await loadUserVisibilityScope(session);
+  return prisma.user.findMany({
+    where: collaboratorOptionsWhereFromScope(scope, session.id),
+    select: { id: true, name: true, role: true, active: true },
+    orderBy: { name: "asc" },
+  });
 }
 
 export async function contractVisibilityWhere(session: {

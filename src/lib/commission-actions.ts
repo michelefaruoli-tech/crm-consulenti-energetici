@@ -35,7 +35,10 @@ import {
   toPeriod,
   type RecurrenceKind,
 } from "@/lib/recurring";
-import { contractVisibilityWhere } from "@/lib/user-scope";
+import {
+  contractVisibilityWhere,
+  loadVisibleCollaboratorOptions,
+} from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
 import { reactivateContractFields } from "@/lib/contract-reactivate";
@@ -723,16 +726,15 @@ async function applyCommissionField(
     });
   } else if (field === "collaboratorName") {
     if (!canAll) throw new Error("Solo Admin/Segreteria possono cambiare collaboratore");
-    const raw = value.trim();
-    const user = await prisma.user.findFirst({
-      where: {
-        active: true,
-        name: { equals: raw, mode: "insensitive" },
-        role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-      },
-      select: { id: true },
-    });
-    if (!user) throw new Error(`Collaboratore non trovato: ${raw}`);
+    const raw = value.trim().toLowerCase();
+    // Cerca solo tra i collaboratori visibili al ruolo di chi modifica: un
+    // Area Manager non può spostare un contratto su un nome fuori dal suo team,
+    // anche se lo scrive a mano (stesso perimetro della tendina «Collab.»).
+    const visibleCollaborators = await loadVisibleCollaboratorOptions(session);
+    const user = visibleCollaborators.find(
+      (u) => u.active && u.name.trim().toLowerCase() === raw,
+    );
+    if (!user) throw new Error(`Collaboratore non trovato: ${value.trim()}`);
     await prisma.contract.update({
       where: { id: commission.contractId },
       data: { collaboratorId: user.id },

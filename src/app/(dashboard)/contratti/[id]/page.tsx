@@ -69,7 +69,8 @@ export default async function ContrattoDetailPage({
   });
 
   if (!contract) notFound();
-  const { userCanAccessContract } = await import("@/lib/user-scope");
+  const { userCanAccessContract, loadVisibleCollaboratorOptions } =
+    await import("@/lib/user-scope");
   if (!(await userCanAccessContract(session, contract))) {
     redirect("/contratti");
   }
@@ -108,14 +109,7 @@ export default async function ContrattoDetailPage({
     computeSupplyStartDate(contract.insertionDate, operationType);
 
   const collaborators = canChangeCollaborator
-    ? await prisma.user.findMany({
-        where: {
-          active: true,
-          role: { in: ["COLLABORATORE", "COMMERCIALE", "AREA_MANAGER", "ADMIN", "SEGRETERIA"] },
-        },
-        select: { id: true, name: true, role: true },
-        orderBy: { name: "asc" },
-      })
+    ? await loadVisibleCollaboratorOptions(session)
     : [];
 
   const utility = resolveUtilityDisplay({
