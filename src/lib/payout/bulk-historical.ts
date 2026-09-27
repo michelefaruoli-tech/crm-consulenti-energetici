@@ -23,6 +23,7 @@ import type { PayoutMarkMode } from "@/lib/payout/apply";
 export type BulkHistoricalExclusionMode = "TOTAL" | "ACTIVE_ONLY";
 
 import { BULK_HISTORICAL_PERIOD_LIMIT } from "@/lib/payout/view-types";
+import { heliosLastPayableCompetence } from "@/lib/helios-contract-rules";
 
 export { BULK_HISTORICAL_PERIOD_LIMIT };
 export const BULK_HISTORICAL_SUPPLIER = "Helios";
@@ -223,6 +224,10 @@ export async function buildBulkHistoricalPlan(params: {
   | { ok: true; plan: BulkHistoricalPlan }
   | { ok: false; error: string }
 > {
+  const lastPayable = heliosLastPayableCompetence();
+  // Mai marcare oltre lastPayable M+2 (es. a settembre max luglio).
+  const periodLimit =
+    params.periodLimit > lastPayable ? lastPayable : params.periodLimit;
   const excluded =
     params.excludedCollaboratorPatterns ?? BULK_HISTORICAL_EXCLUDED_NAMES;
 
@@ -261,7 +266,7 @@ export async function buildBulkHistoricalPlan(params: {
       },
       commission: { select: { expected: true } },
       recurringMonths: {
-        where: { period: { lte: params.periodLimit } },
+        where: { period: { lte: periodLimit } },
         select: { id: true, period: true, status: true, amount: true },
       },
     },
@@ -271,6 +276,7 @@ export async function buildBulkHistoricalPlan(params: {
   const skipped: BulkHistoricalSkipped[] = [];
   const contractIdsApplied = new Set<string>();
 
+  // Usa periodLimit capped per il resto della funzione
   for (const contract of contracts) {
     const collaboratorName = contract.collaborator.name;
     const excludedMatch = matchesExcludedCollaborator(collaboratorName, excluded);
@@ -288,7 +294,7 @@ export async function buildBulkHistoricalPlan(params: {
         params.exclusionMode === "TOTAL" ||
         (params.exclusionMode === "ACTIVE_ONLY" && isActive)
       ) {
-        const periods = periodsForContract(contract, params.periodLimit);
+        const periods = periodsForContract(contract, periodLimit);
         for (const period of periods.length > 0 ? periods : ["—"]) {
           skipped.push({
             contractId: contract.id,
@@ -342,7 +348,7 @@ export async function buildBulkHistoricalPlan(params: {
     const periodMatch = toHeliosPeriodMatch(contract);
 
     if (recurring) {
-      const periods = periodsForContract(contract, params.periodLimit);
+      const periods = periodsForContract(contract, periodLimit);
       for (const period of periods) {
         const existing = monthByPeriod.get(period);
         const monthStatus = existing?.status ?? null;
@@ -419,7 +425,7 @@ export async function buildBulkHistoricalPlan(params: {
 
     // Gettone una tantum
     const firstPeriod = contractPeriodWindow(contract).start;
-    if (firstPeriod > params.periodLimit) continue;
+    if (firstPeriod > periodLimit) continue;
 
     if (
       isAlreadyInTargetState({
@@ -503,19 +509,19 @@ export async function buildBulkHistoricalPlan(params: {
   }
 
   const signature = bulkHistoricalSignature({
-    periodLimit: params.periodLimit,
+    periodLimit,
     markMode: params.markMode,
     exclusionMode: params.exclusionMode,
     excludedCollaboratorPatterns: excluded,
   });
 
-  const runLabel = `Marcatura massiva ${supplier.name} fino a ${params.periodLimit}`;
+  const runLabel = `Marcatura massiva ${supplier.name} fino a ${periodLimit}`;
 
   return {
     ok: true,
     plan: {
       supplierName: supplier.name,
-      periodLimit: params.periodLimit,
+      periodLimit,
       markMode: params.markMode,
       exclusionMode: params.exclusionMode,
       excludedCollaboratorPatterns: excluded,

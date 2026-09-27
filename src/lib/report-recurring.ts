@@ -29,7 +29,6 @@ export function reportRecurringHeliosLagWhere(
     NOT: {
       AND: [
         { period: { gt: lastHelios } },
-        { status: { in: [...RECURRING_UNPAID_STATUSES] } },
         {
           contract: {
             supplier: { name: { contains: "helios", mode: "insensitive" } },

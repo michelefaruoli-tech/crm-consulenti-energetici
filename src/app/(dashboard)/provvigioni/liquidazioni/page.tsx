@@ -8,6 +8,7 @@ import { formatRomeDateTime } from "@/lib/timezone";
 import { listBuiltinTemplates } from "@/lib/payout/templates";
 import { PayoutImportPanel } from "@/components/provvigioni/payout-import-panel";
 import { PayoutBulkHistoricalPanel } from "@/components/provvigioni/payout-bulk-historical-panel";
+import { HeliosAnticipatoryCleanupPanel } from "@/components/provvigioni/helios-anticipatory-cleanup-panel";
 import { Card, CardTitle } from "@/components/ui/card";
 
 const RUN_STATUS_LABEL: Record<string, string> = {
@@ -76,6 +77,18 @@ export default async function LiquidazioniPage() {
             settembre a novembre — non in anticipo. Operazione annullabile.
           </p>
           <PayoutBulkHistoricalPanel />
+        </Card>
+      ) : null}
+
+      {session.role === "ADMIN" ? (
+        <Card>
+          <CardTitle>Bonifica Helios anticipate (M+2)</CardTitle>
+          <p className="mt-1 mb-4 text-sm text-slate-600">
+            Rate agosto/settembre (e oltre lastPayable) create per errore: il
+            sync Provvigioni e il cron le chiudono in automatico. Qui resta
+            Anteprima → Applica solo se serve un controllo manuale.
+          </p>
+          <HeliosAnticipatoryCleanupPanel />
         </Card>
       ) : null}
 

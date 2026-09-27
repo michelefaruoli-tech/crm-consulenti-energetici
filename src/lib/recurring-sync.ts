@@ -319,6 +319,58 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     recurringGenerationLagMonths(contract.supplier?.name),
   );
 
+  // Helios: rate oltre lastPeriod (anche PAID/LIQUIDATED errate) → chiudi/elimina.
+  if (isHeliosSupplier(contract.supplier?.name)) {
+    const anticipatory = await prisma.recurringMonth.findMany({
+      where: {
+        contractId,
+        period: { gt: lastPeriod },
+      },
+      select: {
+        id: true,
+        period: true,
+        status: true,
+        paidAt: true,
+        settledPeriod: true,
+        note: true,
+      },
+    });
+    for (const row of anticipatory) {
+      if (row.note === AUTO_CLOSED_HELIOS_LAG && row.status === "CLOSED") continue;
+      const hasEconomic =
+        row.paidAt != null ||
+        row.settledPeriod != null ||
+        row.status === "PAID" ||
+        row.status === "LIQUIDATED" ||
+        row.status === "ERROR_UNPAID";
+      if (hasEconomic) {
+        await prisma.recurringMonth.update({
+          where: { id: row.id },
+          data: {
+            status: "CLOSED",
+            paidAt: null,
+            settledPeriod: null,
+            note: AUTO_CLOSED_HELIOS_LAG,
+          },
+        });
+      } else {
+        await prisma.recurringMonth
+          .delete({ where: { id: row.id } })
+          .catch(async () => {
+            await prisma.recurringMonth.update({
+              where: { id: row.id },
+              data: {
+                status: "CLOSED",
+                paidAt: null,
+                settledPeriod: null,
+                note: AUTO_CLOSED_HELIOS_LAG,
+              },
+            });
+          });
+      }
+    }
+  }
+
   if (start <= lastPeriod) {
     const periods = monthsBetween(start, lastPeriod);
     for (const period of periods) {
@@ -657,6 +709,17 @@ async function upsertMonthStatus(
 
 /** Sincronizzazione globale, ottimizzata, di tutte le ricorrenze. */
 export async function syncAllRecurringMonths(collaboratorId?: string): Promise<number> {
+  // Helios M+2: chiude/elimina competenze anticipate (es. ago/set a settembre)
+  // senza click. Idempotente; non tocca ≤ lastPayable. Fail-soft.
+  try {
+    const { runHeliosAnticipatoryCleanupAuto } = await import(
+      "@/lib/helios-anticipatory-cleanup"
+    );
+    await runHeliosAnticipatoryCleanupAuto();
+  } catch (e) {
+    console.error("[syncAllRecurringMonths] helios anticipatory cleanup", e);
+  }
+
   const contracts = await prisma.contract.findMany({
     where: {
       isHistorical: false,

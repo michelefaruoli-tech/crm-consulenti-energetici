@@ -14,6 +14,10 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { canMarkIncassatoForCompetencePeriod } from "@/lib/helios-provvigioni-shared";
+import {
+  isHeliosCompetenceNotYetPayable,
+  isHeliosSupplier,
+} from "@/lib/helios-contract-rules";
 import { isRecurringMonthly } from "@/lib/recurring";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
@@ -97,6 +101,7 @@ export async function applyPayoutRowMark(params: {
       supplyStartDate: true,
       insertionDate: true,
       operationType: true,
+      supplier: { select: { name: true } },
       commission: {
         select: {
           id: true,
@@ -111,6 +116,16 @@ export async function applyPayoutRowMark(params: {
     },
   });
   if (!contract) return { ok: false, reason: "Contratto non trovato" };
+
+  if (
+    isHeliosSupplier(contract.supplier?.name) &&
+    isHeliosCompetenceNotYetPayable(params.period)
+  ) {
+    return {
+      ok: false,
+      reason: `Competenza Helios ${params.period} non ancora pagabile (lag M+2)`,
+    };
+  }
 
   const previousState: PayoutPreviousState = {
     contract: {
