@@ -99,6 +99,17 @@ export default async function CatalogoCtePage({
     utility === "GAS" && (monthlyConsumption == null || monthlyConsumption <= 0);
   const canManage = hasPermission(session.role, "cte.catalog.manage");
 
+  const dufercoFlexCount = canManage
+    ? await prisma.cteOffer.count({
+        where: {
+          ...visibility,
+          offerName: { startsWith: "FLEX CONDOMINI" },
+          validFrom: null,
+          validTo: null,
+        },
+      })
+    : 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -108,6 +119,26 @@ export default async function CatalogoCtePage({
           ha un colore fisso. Puoi scaricare un&apos;immagine riassuntiva divisa per categoria.
         </p>
       </div>
+
+      {canManage && dufercoFlexCount < 18 ? (
+        <div className="rounded-xl border-2 border-emerald-400 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+          <p className="font-semibold">P0.1 — Duferco Flex Condomini non completo</p>
+          <p className="mt-1">
+            In catalogo risultano {dufercoFlexCount}/18 offerte FLEX CONDOMINI senza scadenza.
+            Un click su{" "}
+            <a href="/catalogo-cte/nuovo#duferco-flex-condomini" className="font-medium underline">
+              Nuova CTE → Aggiungi Duferco Flex Condomini
+            </a>{" "}
+            (upsert idempotente). Non viene eseguito in automatico al deploy.
+          </p>
+        </div>
+      ) : null}
+
+      {canManage && dufercoFlexCount >= 18 ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
+          Duferco Flex Condomini: {dufercoFlexCount} offerte senza scadenza presenti (seed P0.1 ok).
+        </p>
+      ) : null}
 
       <Suspense fallback={<p className="text-sm text-slate-500">Caricamento filtri…</p>}>
         <CteCatalogClient

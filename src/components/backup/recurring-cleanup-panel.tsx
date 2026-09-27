@@ -206,8 +206,18 @@ export function RecurringCleanupPanel() {
         Rimuove le rate ricorrenti generate <strong>prima</strong> dell’inizio
         fornitura o <strong>dopo</strong> la chiusura del contratto. Il mese di
         ingresso e quello di chiusura restano sempre inclusi. Prima l’anteprima,
-        poi scegli quali rate rimuovere e conferma. Le rate già incassate,
-        pagate o segnalate non vengono mai toccate.
+        poi scegli quali rate rimuovere e conferma.
+      </p>
+      <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
+        Le rate fuori intervallo <strong>già incassate / pagate / segnalate</strong>{" "}
+        non si gestiscono qui: usa{" "}
+        <a
+          href="#fuori-intervallo-con-incasso"
+          className="font-medium underline underline-offset-2"
+        >
+          Controllo integrità → fuori intervallo con incasso
+        </a>{" "}
+        (selezione + Applica). Qui sotto restano solo quelle senza valore economico.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -344,12 +354,19 @@ export function RecurringCleanupPanel() {
           {withManual.length > 0 ? (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
               <h3 className="mb-2 text-sm font-semibold text-amber-900">
-                Da decidere a mano · {preview.manualCount} rate fuori intervallo già
-                incassate, pagate o segnalate
+                Da decidere in Integrità · {preview.manualCount} rate fuori intervallo
+                già incassate, pagate o segnalate
               </h3>
               <p className="mb-2 text-xs text-amber-800">
-                Non vengono rimosse nemmeno confermando: portano un valore
-                economico. Vanno verificate una a una in Provvigioni.
+                Questo pannello non le elimina. Apri{" "}
+                <a
+                  href="#integrita"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Controllo integrità
+                </a>
+                , analizza, poi nella sezione «con incasso» seleziona e Applica
+                (oppure deseleziona le false positive da tenere).
               </p>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[640px] text-left text-sm text-amber-900">
