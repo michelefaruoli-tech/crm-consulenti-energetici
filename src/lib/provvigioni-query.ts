@@ -11,6 +11,7 @@ import { hasPermission } from "@/lib/permissions";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import {
   buildProvvigioniListWhere,
+  effectiveStatoForList,
   parseProvvigioniFocus,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
@@ -116,11 +117,12 @@ export async function resolveProvvigioniQuery(
       ? collabRaw
       : undefined;
   const supplier = readParam(sp, "supplier");
-  const stato = readParam(sp, "stato");
   const tipologia = readParam(sp, "tipologia");
   const q = readParam(sp, "q");
   const vista = parseProvvigioniVista(readParam(sp, "vista"));
   const focus = parseProvvigioniFocus(readParam(sp, "focus"));
+  /** Focus B2 implica stato Incassato se URL senza ?stato= */
+  const stato = effectiveStatoForList(readParam(sp, "stato"), focus);
   const recurrenceMode = vistaToRecurrenceMode(vista);
 
   const settledRaw = readParam(sp, "settled");

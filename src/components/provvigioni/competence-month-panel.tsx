@@ -52,10 +52,12 @@ export function CompetenceMonthPanel({
   const statoCanon = activeStato
     ? canonicalizeProvvigioneStato(activeStato)
     : "";
-  const isAll = !activeStato || activeStato === "Tutti";
-  const isIncassato = statoCanon === "Incassato";
-  const isDaIncassare = statoCanon === "Da incassare";
-  const isPagato = statoCanon === "Pagato";
+  const focusActive = queryBase.focus === "incassato-da-liquidare";
+  const isAll =
+    (!activeStato || activeStato === "Tutti") && !focusActive;
+  const isIncassato = statoCanon === "Incassato" || focusActive;
+  const isDaIncassare = statoCanon === "Da incassare" && !focusActive;
+  const isPagato = statoCanon === "Pagato" && !focusActive;
 
   return (
     <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-4 shadow-sm sm:p-5">
@@ -118,7 +120,7 @@ export function CompetenceMonthPanel({
 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link
-          href={buildHref(queryBase, { competence: period, stato: null })}
+          href={buildHref(queryBase, { competence: period, stato: null, focus: null })}
           className={chipClass(isAll, "slate")}
         >
           Tutte ({stats.totalRates})
@@ -126,7 +128,8 @@ export function CompetenceMonthPanel({
         <Link
           href={buildHref(queryBase, {
             competence: period,
-            stato: "Incassato da liquidare",
+            stato: null,
+            focus: "incassato-da-liquidare",
           })}
           className={chipClass(isIncassato, "emerald")}
         >
@@ -134,13 +137,21 @@ export function CompetenceMonthPanel({
           {formatCurrency(incassato.amount)}
         </Link>
         <Link
-          href={buildHref(queryBase, { competence: period, stato: "Da incassare" })}
+          href={buildHref(queryBase, {
+            competence: period,
+            stato: "Da incassare",
+            focus: null,
+          })}
           className={chipClass(isDaIncassare, "amber")}
         >
           Da incassare ({stats.missingCount}) · {formatCurrency(stats.missingAmount)}
         </Link>
         <Link
-          href={buildHref(queryBase, { competence: period, stato: "Liquidato" })}
+          href={buildHref(queryBase, {
+            competence: period,
+            stato: "Liquidato",
+            focus: null,
+          })}
           className={chipClass(isPagato, "indigo")}
         >
           Liquidato ({stats.liquidatedCount})

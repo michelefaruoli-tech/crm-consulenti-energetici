@@ -4,11 +4,13 @@
 import type { Prisma } from "@/generated/prisma/client";
 import {
   buildProvvigioniListWhere,
+  isIncassatoDaLiquidareFocus,
   provvigioneStatoWhere,
   recurringMonthlyWhereOr,
   type ProvvigioniFilters,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
+import { canonicalizeProvvigioneStato } from "@/lib/provvigioni-stato";
 import {
   countExpandedListRows,
   getRecurringExpandMode,
@@ -57,7 +59,10 @@ async function summaryForStato(
       ? null
       : getRecurringExpandMode(stato, viewingAllPeriods, ctx.effectiveCompetence);
 
-  const isActive = ctx.activeStato?.trim() === stato;
+  const activeCanon = canonicalizeProvvigioneStato(ctx.activeStato?.trim() ?? "");
+  const isActive =
+    activeCanon === stato ||
+    (stato === "Incassato" && isIncassatoDaLiquidareFocus(ctx.focus));
 
   // Card attiva: usa dati già calcolati per il conteggio; espansi solo se necessario.
   if (isActive && ctx.activeListWhere && ctx.activeListTotal !== undefined) {
@@ -73,13 +78,22 @@ async function summaryForStato(
     };
   }
 
+  /**
+   * Focus B2 «incassato-da-liquidare» è la vista della card Incassato: non va
+   * AND-ato sulle altre card (altrimenti Da incassare/Liquidato diventano 0).
+   * Focus trasversali (da-confermare, fuori-storno…) restano su tutte le card.
+   */
+  const summaryFocus = isIncassatoDaLiquidareFocus(ctx.focus)
+    ? undefined
+    : ctx.focus;
+
   const where = buildProvvigioniListWhere({
     filters: {
       ...base,
       stato,
       competencePeriod: ctx.effectiveCompetence,
     },
-    focus: ctx.focus,
+    focus: summaryFocus,
     effectiveCompetence: ctx.effectiveCompetence,
     applyCompetenceToList: ctx.applyCompetenceToList,
   });

@@ -1001,7 +1001,7 @@ export async function getMissingRecurringAlerts(
 
 /** Mesi già incassati dal fornitore ma non ancora liquidati al collaboratore. */
 export async function getPaidToLiquidateAlerts(
-  collaboratorId?: string,
+  contractScope?: Prisma.ContractWhereInput | string,
   kind: "monthly" | "annual" | "all" = "monthly",
 ) {
   const recurrenceFilter =
@@ -1011,14 +1011,25 @@ export async function getPaidToLiquidateAlerts(
         ? { OR: recurringAnnualWhereOr }
         : { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] };
 
+  const scopeWhere =
+    typeof contractScope === "string"
+      ? { collaboratorId: contractScope }
+      : contractScope && Object.keys(contractScope).length > 0
+        ? contractScope
+        : undefined;
+
   return prisma.recurringMonth.findMany({
     where: {
       status: "PAID",
       contract: {
-        isHistorical: false,
-        deletedAt: null,
-        ...(collaboratorId ? { collaboratorId } : {}),
-        ...recurrenceFilter,
+        AND: [
+          {
+            isHistorical: false,
+            deletedAt: null,
+            ...recurrenceFilter,
+          },
+          ...(scopeWhere ? [scopeWhere] : []),
+        ],
       },
     },
     include: {
