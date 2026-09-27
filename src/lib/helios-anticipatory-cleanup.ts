@@ -16,29 +16,23 @@ import {
 import { periodLabel } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
 import { RECURRING_AUTO_CLOSED_NOTE } from "@/lib/recurring-window";
+import {
+  HELIOS_ANTICIPATORY_APPLY_BATCH,
+  HELIOS_ANTICIPATORY_AUTO_MAX_BATCHES,
+  HELIOS_ANTICIPATORY_SCAN_BATCH,
+  type HeliosAnticipatoryAction,
+  type HeliosAnticipatoryRow,
+} from "@/lib/helios-anticipatory-shared";
 
-export const HELIOS_ANTICIPATORY_SCAN_BATCH = 200;
-export const HELIOS_ANTICIPATORY_APPLY_BATCH = 80;
-/** Lotti per pass automatico (sync/cron): resta sotto il timeout Vercel. */
-export const HELIOS_ANTICIPATORY_AUTO_MAX_BATCHES = 8;
+export {
+  HELIOS_ANTICIPATORY_APPLY_BATCH,
+  HELIOS_ANTICIPATORY_AUTO_MAX_BATCHES,
+  HELIOS_ANTICIPATORY_SCAN_BATCH,
+  type HeliosAnticipatoryAction,
+  type HeliosAnticipatoryRow,
+};
 
 const CLOSE_NOTE = RECURRING_AUTO_CLOSED_NOTE.heliosLag;
-
-export type HeliosAnticipatoryAction = "delete" | "close";
-
-export type HeliosAnticipatoryRow = {
-  id: string;
-  contractId: string;
-  contractLabel: string;
-  collaboratorName: string;
-  period: string;
-  periodLabel: string;
-  status: string;
-  amount: number | null;
-  settledPeriod: string | null;
-  /** delete = senza valore economico; close = PAID/LIQUIDATED/ERROR o con paidAt */
-  suggestedAction: HeliosAnticipatoryAction;
-};
 
 export type HeliosAnticipatoryScan = {
   rows: HeliosAnticipatoryRow[];
