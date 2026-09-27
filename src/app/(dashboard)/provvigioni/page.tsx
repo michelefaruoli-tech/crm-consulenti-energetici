@@ -37,7 +37,7 @@ import {
   isAnomalieFocus,
   isIncassatoDaLiquidareFocus,
   isUtDaIncassareFocus,
-  parseProvvigioniFocus,
+  resolveProvvigioniFocusFromQuery,
   recurringMonthlyWhereOr,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
@@ -138,7 +138,11 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
-  const focus: ProvvigioniListFocus | undefined = parseProvvigioniFocus(focusRaw);
+  /** B8: focus esplicito oppure promozione legacy `stato=Incassato` → coda. */
+  const focus: ProvvigioniListFocus | undefined = resolveProvvigioniFocusFromQuery({
+    focus: focusRaw,
+    stato: statoRaw,
+  });
   /** Focus B2 → Incassato; focus B3 → Da incassare (per expand e card). */
   const statoEffective = effectiveStatoForList(stato, focus);
   const vistaTab = parseProvvigioniTab(vistaRaw);

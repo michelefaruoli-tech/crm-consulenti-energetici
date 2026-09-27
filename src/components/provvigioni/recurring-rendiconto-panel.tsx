@@ -2,6 +2,7 @@ import Link from "next/link";
 import { formatCurrency } from "@/lib/commission";
 import { periodLabel, addMonths } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
+import { provvigioniDeepLinkHref } from "@/lib/provvigioni-deep-links";
 
 export type SettledRow = {
   id: string;
@@ -131,7 +132,12 @@ export function RecurringRendicontoPanel({
                     </td>
                     <td className="px-3 py-2">
                       <Link
-                        href={`/provvigioni?collab=${c.id}&stato=Incassato&vista=mensile&settled=${settledPeriod}&competence=${addMonths(settledPeriod, -1)}`}
+                        href={provvigioniDeepLinkHref("incassato-da-liquidare", {
+                          collab: c.id,
+                          vista: "mensile",
+                          settled: settledPeriod,
+                          competence: addMonths(settledPeriod, -1),
+                        })}
                         className="text-emerald-700 underline hover:text-emerald-900"
                       >
                         Vedi incassati

@@ -16,6 +16,7 @@ import {
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
 import { loadDashboardMoneyTotals } from "@/lib/provvigioni-summary";
+import { provvigioniDeepLinkHref } from "@/lib/provvigioni-deep-links";
 import { contractTextSearchWhere } from "@/lib/list-search";
 import { toPeriod } from "@/lib/recurring";
 import { fetchMarketPrices } from "@/lib/market-prices";
@@ -342,14 +343,14 @@ export default async function DashboardPage({
         <MarketPricesPanel prices={marketPrices} />
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Link href="/provvigioni">
+          <Link href={provvigioniDeepLinkHref("tutti")}>
             <StatCard
               label="Totale complessivo"
               value={formatCurrency(moneyTotals.complessivo)}
               hint="Incassato da liquidare + da incassare UT/R (senza rate M)"
             />
           </Link>
-          <Link href="/provvigioni?focus=incassato-da-liquidare">
+          <Link href={provvigioniDeepLinkHref("incassato-da-liquidare")}>
             <StatCard
               label="Incassato da liquidare"
               value={formatCurrency(moneyTotals.incassato)}
@@ -357,15 +358,15 @@ export default async function DashboardPage({
               hint="Fornitore pagato, collaboratore no — tutti i tipi"
             />
           </Link>
-          <Link href="/provvigioni?stato=Da%20incassare">
+          <Link href={provvigioniDeepLinkHref("ut-da-incassare")}>
             <StatCard
-              label="Da incassare UT/R"
-              value={formatCurrency(moneyTotals.daIncassare)}
+              label="Da incassare UT"
+              value={formatCurrency(moneyTotals.daIncassareUt)}
               tone="warning"
-              hint={`UT ${formatCurrency(moneyTotals.daIncassareUt)} · R ${formatCurrency(moneyTotals.daIncassareR)} — senza rate M (totale separato sotto)`}
+              hint={`Vista UT · R ${formatCurrency(moneyTotals.daIncassareR)} resta in Provvigioni (annuali) — senza rate M`}
             />
           </Link>
-          <Link href="/provvigioni?vista=mensile&stato=Da%20incassare">
+          <Link href={provvigioniDeepLinkHref("da-incassare-m")}>
             <StatCard
               label="Da incassare M"
               value={formatCurrency(moneyTotals.ricorrenti)}
@@ -384,33 +385,40 @@ export default async function DashboardPage({
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {[
               {
                 label: "Provvigioni da confermare",
                 value: commissioniDaConfermare,
-                href: "/provvigioni?focus=da-confermare",
+                href: provvigioniDeepLinkHref("da-confermare"),
                 hint: "Controlla il gettone previsto",
                 tone: "border-amber-200 bg-amber-50 text-amber-950",
               },
               {
                 label: "Incassate da liquidare",
                 value: incassateDaLiquidare,
-                href: "/provvigioni?focus=incassato-da-liquidare",
+                href: provvigioniDeepLinkHref("incassato-da-liquidare"),
                 hint: "Fornitore pagato, collaboratore no",
                 tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
               },
               {
                 label: "Ricorrenze mancanti",
                 value: ricorrenzeMancanti,
-                href: "/provvigioni?focus=ricorrenze-mancanti",
+                href: provvigioniDeepLinkHref("ricorrenze-mancanti"),
                 hint: "Rate attese nei mesi precedenti",
                 tone: "border-sky-200 bg-sky-50 text-sky-950",
               },
               {
+                label: "Anomalie",
+                value: "→",
+                href: provvigioniDeepLinkHref("anomalie"),
+                hint: "Vista unificata · sola lettura (Backup per apply)",
+                tone: "border-slate-200 bg-slate-50 text-slate-950",
+              },
+              {
                 label: "Storni registrati",
                 value: storniRegistrati,
-                href: "/provvigioni?stato=Stornato",
+                href: provvigioniDeepLinkHref("stornato"),
                 hint: "Controlla importi e competenza",
                 tone: "border-rose-200 bg-rose-50 text-rose-950",
               },

@@ -106,15 +106,38 @@ export const PROVVIGIONE_STATO_OPTIONS = [
   "Stornato",
 ] as const;
 
+/** Normalizza token URL/UI (spazi, +, underscore, case) per alias robusti B8. */
+export function normalizeProvvigioneStatoToken(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\+/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 /**
  * Chiave canonica usata dai filtri Prisma / report (stabile, senza migrazione DB).
  * «Incassato» = coda da liquidare; «Pagato» = liquidato al collaboratore.
+ *
+ * P1.1 B8: alias case-insensitive e varianti `Incassato-da-liquidare` / `+`.
  */
 export function canonicalizeProvvigioneStato(raw: string): string {
-  const s = raw.trim();
+  const s = raw.trim().replace(/\+/g, " ").replace(/\s+/g, " ");
   if (!s) return s;
-  if (s === "Incassato da liquidare" || s === "Incassato") return "Incassato";
-  if (s === "Liquidato" || s === "Pagato") return "Pagato";
+  const n = normalizeProvvigioneStatoToken(s);
+  if (n === "incassato da liquidare" || n === "incassato") return "Incassato";
+  if (n === "liquidato" || n === "pagato") return "Pagato";
+  if (n === "ko / cessato" || n === "ko/cessato" || n === "ko") {
+    return "KO / Cessato";
+  }
+  for (const opt of PROVVIGIONE_STATO_OPTIONS) {
+    if (normalizeProvvigioneStatoToken(opt) === n) {
+      if (opt === "Incassato da liquidare") return "Incassato";
+      if (opt === "Liquidato") return "Pagato";
+      return opt;
+    }
+  }
   return s;
 }
 

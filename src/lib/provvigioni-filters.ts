@@ -114,9 +114,10 @@ export {
 export const STATO_FILTER_SEP = FILTER_LIST_SEP;
 
 /**
- * Parse + alias P1.1 B1:
+ * Parse + alias P1.1 B1/B8:
  * «Incassato da liquidare» ↔ Incassato (coda), «Liquidato» ↔ Pagato.
- * URL legacy `stato=Incassato` / `stato=Pagato` restano validi.
+ * URL legacy `stato=Incassato` / `stato=Pagato` restano validi
+ * (anche case / trattini / `+` via canonicalize).
  */
 export function parseStatoFilter(raw: string | null | undefined): string[] {
   return parseFilterList(raw).map(canonicalizeProvvigioneStato);
@@ -455,18 +456,63 @@ export type ProvvigioniListFocus =
   /** P1.1 B5 — vista Anomalie unificata (sola lettura; apply in Backup). */
   | "anomalie";
 
+/**
+ * Parse focus URL (P1.1 B8: alias robusti).
+ * Accetta slug canonici e varianti (`incassato`, `Incassato da liquidare`, `ut`, …).
+ */
 export function parseProvvigioniFocus(
   raw: string | null | undefined,
 ): ProvvigioniListFocus | undefined {
+  if (!raw?.trim()) return undefined;
+  const n = raw
+    .trim()
+    .replace(/\+/g, " ")
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "-")
+    .toLowerCase()
+    .replace(/-+/g, "-");
+
   if (
-    raw === "da-confermare" ||
-    raw === "ricorrenze-mancanti" ||
-    raw === "fuori-storno" ||
-    raw === "incassato-da-liquidare" ||
-    raw === "ut-da-incassare" ||
-    raw === "anomalie"
+    n === "incassato-da-liquidare" ||
+    n === "incassato" ||
+    n === "incassatodaliquidare"
   ) {
-    return raw;
+    return "incassato-da-liquidare";
+  }
+  if (
+    n === "ut-da-incassare" ||
+    n === "ut" ||
+    n === "una-tantum-da-incassare" ||
+    n === "una-tantum"
+  ) {
+    return "ut-da-incassare";
+  }
+  if (n === "anomalie" || n === "anomalie-unificate" || n === "anomaly") {
+    return "anomalie";
+  }
+  if (n === "da-confermare") return "da-confermare";
+  if (n === "ricorrenze-mancanti" || n === "ricorrenze") {
+    return "ricorrenze-mancanti";
+  }
+  if (n === "fuori-storno") return "fuori-storno";
+  return undefined;
+}
+
+/**
+ * P1.1 B8 — focus effettivo da query Dashboard/bookmark.
+ * Focus esplicito vince; `stato=Incassato` (o alias UI) da solo → focus B2.
+ * Non promuove `Da incassare` (troppo ampio vs UT-only).
+ */
+export function resolveProvvigioniFocusFromQuery(opts: {
+  focus?: string | null;
+  stato?: string | null;
+}): ProvvigioniListFocus | undefined {
+  const explicit = parseProvvigioniFocus(opts.focus);
+  if (explicit) return explicit;
+
+  const parts = parseStatoFilter(opts.stato);
+  if (parts.length === 1 && parts[0] === "Incassato") {
+    return "incassato-da-liquidare";
   }
   return undefined;
 }
