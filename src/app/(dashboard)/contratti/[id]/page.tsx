@@ -14,6 +14,7 @@ import {
   normalizePodKey,
   resolveStornoInfo,
 } from "@/lib/storno-status";
+import { buildContractPodPeerRows } from "@/lib/contract-pod-peers";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import {
@@ -33,6 +34,7 @@ import {
 import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { ContractCommissionTimeline } from "@/components/contracts/contract-commission-timeline";
+import { ContractPodPeersSection } from "@/components/contracts/contract-pod-peers";
 import { buildContractFinanceView } from "@/lib/contract-commission-finance";
 import { isRecurring, recurrenceKindOf } from "@/lib/recurring";
 import { ContractAttachmentsManager } from "@/components/contracts/contract-attachments-manager";
@@ -78,8 +80,11 @@ export default async function ContrattoDetailPage({
   });
 
   if (!contract) notFound();
-  const { userCanAccessContract, loadVisibleCollaboratorOptions } =
-    await import("@/lib/user-scope");
+  const {
+    userCanAccessContract,
+    loadVisibleCollaboratorOptions,
+    contractVisibilityWhere,
+  } = await import("@/lib/user-scope");
   if (!(await userCanAccessContract(session, contract))) {
     redirect("/contratti");
   }
@@ -221,19 +226,31 @@ export default async function ContrattoDetailPage({
   });
 
   const podKey = normalizePodKey(contract.podPdr || contract.pod || contract.pdr);
-  const podOr: Array<{ podPdr?: string; pod?: string; pdr?: string }> = [];
-  for (const raw of [contract.podPdr, contract.pod, contract.pdr]) {
+  const podValues = new Set<string>();
+  for (const raw of [contract.podPdr, contract.pod, contract.pdr, podKey]) {
     const v = (raw ?? "").trim();
     if (!v) continue;
-    podOr.push({ podPdr: v }, { pod: v }, { pdr: v });
+    podValues.add(v);
+    if (podKey) podValues.add(podKey);
   }
-  const podPeers =
-    podKey.length >= 6 && podOr.length > 0
+  const podList = [...podValues];
+  const podFieldOr =
+    podList.length > 0
+      ? [
+          { podPdr: { in: podList, mode: "insensitive" as const } },
+          { pod: { in: podList, mode: "insensitive" as const } },
+          { pdr: { in: podList, mode: "insensitive" as const } },
+        ]
+      : [];
+
+  // Badge latest/early: stesso perimetro di B1 (tutti i peer stesso POD, no scope)
+  const badgePeers =
+    podKey.length >= 6 && podFieldOr.length > 0
       ? await prisma.contract.findMany({
           where: {
             deletedAt: null,
             id: { not: contract.id },
-            OR: podOr,
+            OR: podFieldOr,
           },
           select: {
             id: true,
@@ -253,9 +270,103 @@ export default async function ContrattoDetailPage({
           take: 200,
         })
       : [];
-  const samePodPeers = podPeers.filter(
+  const samePodBadgePeers = badgePeers.filter(
     (p) => normalizePodKey(p.podPdr || p.pod || p.pdr) === podKey,
   );
+
+  // Lista B3: solo contratti nel perimetro utente (cross-fornitore, POD normalizzato)
+  const visibility = await contractVisibilityWhere(session);
+  const listPeersRaw =
+    podKey.length >= 6 && podFieldOr.length > 0
+      ? await prisma.contract.findMany({
+          where: {
+            AND: [
+              visibility,
+              {
+                deletedAt: null,
+                OR: podFieldOr,
+              },
+            ],
+          },
+          select: {
+            id: true,
+            contractNumber: true,
+            clientId: true,
+            supplierId: true,
+            status: true,
+            operationType: true,
+            podPdr: true,
+            pod: true,
+            pdr: true,
+            utilityType: true,
+            serviceOther: true,
+            productName: true,
+            supplyStartDate: true,
+            insertionDate: true,
+            createdAt: true,
+            collectionDate: true,
+            stornoEndDate: true,
+            expiryDate: true,
+            durationMonths: true,
+            isHistorical: true,
+            recurrence: true,
+            client: {
+              select: {
+                type: true,
+                firstName: true,
+                lastName: true,
+                companyName: true,
+              },
+            },
+            supplier: { select: { name: true, stornoMonths: true } },
+            service: { select: { name: true } },
+            commission: { select: { stornoDate: true } },
+          },
+          take: 200,
+        })
+      : [];
+
+  const peerListInputs = [
+    {
+      id: contract.id,
+      contractNumber: contract.contractNumber,
+      clientId: contract.clientId,
+      supplierId: contract.supplierId,
+      status: contract.status,
+      operationType: contract.operationType,
+      podPdr: contract.podPdr,
+      pod: contract.pod,
+      pdr: contract.pdr,
+      utilityType: contract.utilityType,
+      serviceOther: contract.serviceOther,
+      productName: contract.productName,
+      supplyStartDate: contract.supplyStartDate,
+      insertionDate: contract.insertionDate,
+      createdAt: contract.createdAt,
+      collectionDate: contract.collectionDate,
+      stornoEndDate: contract.stornoEndDate,
+      expiryDate: contract.expiryDate,
+      durationMonths: contract.durationMonths,
+      isHistorical: contract.isHistorical,
+      recurrence: contract.recurrence,
+      client: contract.client,
+      supplier: {
+        name: contract.supplier.name,
+        stornoMonths: contract.supplier.stornoMonths,
+      },
+      service: contract.service,
+      commission: contract.commission
+        ? { stornoDate: contract.commission.stornoDate }
+        : null,
+    },
+    ...listPeersRaw.filter((p) => p.id !== contract.id),
+  ];
+
+  const podPeerRows = buildContractPodPeerRows(peerListInputs, {
+    currentId: contract.id,
+    podKey,
+  });
+
   const peerBundle = [
     {
       id: contract.id,
@@ -269,7 +380,7 @@ export default async function ContrattoDetailPage({
       stornoMonths: contract.supplier.stornoMonths,
       stornoEndDate: contract.stornoEndDate,
     },
-    ...samePodPeers.map((p) => ({
+    ...samePodBadgePeers.map((p) => ({
       id: p.id,
       clientId: p.clientId,
       supplierId: p.supplierId,
@@ -296,7 +407,7 @@ export default async function ContrattoDetailPage({
     collectionDate: contract.collectionDate,
     isEarlyReswitch: earlyMap.get(contract.id) ?? false,
   });
-  const hasActivePodPeer = samePodPeers.some((p) => !p.isHistorical);
+  const hasActivePodPeer = samePodBadgePeers.some((p) => !p.isHistorical);
   const stornoBadges = resolveStornoBadges({
     stornoKind: stornoInfo.kind,
     isHistorical: contract.isHistorical,
@@ -477,6 +588,8 @@ export default async function ContrattoDetailPage({
           ) : null}
         </section>
       </div>
+
+      <ContractPodPeersSection podKey={podKey} rows={podPeerRows} />
 
       <ContractCommissionTimeline
         totals={finance.totals}
