@@ -30,7 +30,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   early_monthly: "Rate mensili creata in anticipo",
   early_annual: "Rate annuali creata prima del 13° mese",
   out_of_window_removable: "Rate fuori intervallo (senza incasso, bonificabili)",
-  out_of_window_manual: "Rate fuori intervallo con incasso (solo revisione manuale)",
+  out_of_window_manual: "Rate fuori intervallo con incasso (Applica selettivo)",
   duplicate_period: "Righe duplicate stesso mese (difensivo)",
 };
 
@@ -44,7 +44,7 @@ const CATEGORY_HINT: Record<Category, string> = {
   out_of_window_removable:
     "Rata prima dell'ingresso in fornitura o dopo chiusura/switch: nessun incasso, si può chiudere.",
   out_of_window_manual:
-    "Rata fuori intervallo ma con incasso/rendiconto: visiona l'elenco, poi usa Applica per eliminare solo le righe confermate (nessuna cancellazione automatica).",
+    "Rata fuori intervallo ma con incasso/rendiconto (~308 storiche). Seleziona le righe, conferma, poi Applica. Operazione irreversibile sulle sole selezionate.",
   duplicate_period: "Più righe per lo stesso contratto e lo stesso mese: non dovrebbe succedere.",
 };
 
@@ -95,6 +95,10 @@ export function ProvvigioniIntegrityPanel({
   >([]);
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
   const [selectedPodKeys, setSelectedPodKeys] = useState<Set<string>>(new Set());
+  /** Selezione rate fuori intervallo con incasso (default: tutte dopo lo scan). */
+  const [selectedManualMonthIds, setSelectedManualMonthIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   const [collabFilter, setCollabFilter] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("");
@@ -113,6 +117,7 @@ export function ProvvigioniIntegrityPanel({
     setApplyDetails([]);
     setConfirmed({});
     setSelectedPodKeys(new Set());
+    setSelectedManualMonthIds(new Set());
 
     const acc = {
       findings: [] as IntegrityRowFinding[],
@@ -141,6 +146,12 @@ export function ProvvigioniIntegrityPanel({
         if (!cursor) break;
       }
       setScan(acc);
+      const manualIds = acc.findings
+        .filter((f) => f.category === "out_of_window_manual")
+        .flatMap((f) =>
+          f.periods.map((p) => p.monthId).filter((id): id is string => Boolean(id)),
+        );
+      setSelectedManualMonthIds(new Set(manualIds));
 
       const podRes = await scanPodDuplicateAnomaliesAction();
       if (podRes.ok) {
@@ -233,9 +244,7 @@ export function ProvvigioniIntegrityPanel({
   }
 
   async function applyOutOfWindowManual() {
-    const monthIds = findingsByCategory("out_of_window_manual").flatMap((f) =>
-      f.periods.map((p) => p.monthId).filter((id): id is string => Boolean(id)),
-    );
+    const monthIds = [...selectedManualMonthIds];
     if (monthIds.length === 0) return;
     setPhase("applying");
     setError(null);
@@ -268,7 +277,7 @@ export function ProvvigioniIntegrityPanel({
       }
       setProgress(null);
       setMessage(
-        `Esito: ${deleted} eliminate, ${skipped} saltate (su ${monthIds.length} rate nell'elenco).`,
+        `Esito: ${deleted} eliminate, ${skipped} saltate (su ${monthIds.length} selezionate).`,
       );
       setApplyDetails(allResults);
       await runScan();
@@ -458,17 +467,18 @@ export function ProvvigioniIntegrityPanel({
             busy={busy}
           />
 
-          <CategoryBlock
-            title={CATEGORY_LABELS.out_of_window_manual}
-            hint={CATEGORY_HINT.out_of_window_manual}
+          <ManualOutOfWindowBlock
             findings={findingsByCategory("out_of_window_manual")}
-            confirmKey="outOfWindowManual"
-            confirmed={confirmed}
-            setConfirmed={setConfirmed}
-            confirmLabel="Ho visionato l'elenco e confermo l'eliminazione delle rate fuori intervallo che hanno già incasso o rendiconto (operazione irreversibile)."
-            applyLabel="Applica"
+            hint={CATEGORY_HINT.out_of_window_manual}
+            selectedIds={selectedManualMonthIds}
+            setSelectedIds={setSelectedManualMonthIds}
+            confirmed={Boolean(confirmed.outOfWindowManual)}
+            setConfirmed={(v) =>
+              setConfirmed({ ...confirmed, outOfWindowManual: v })
+            }
             onApply={applyOutOfWindowManual}
             busy={busy}
+            applying={phase === "applying"}
           />
 
           <CategoryBlock
@@ -616,6 +626,157 @@ export function ProvvigioniIntegrityPanel({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function ManualOutOfWindowBlock({
+  findings,
+  hint,
+  selectedIds,
+  setSelectedIds,
+  confirmed,
+  setConfirmed,
+  onApply,
+  busy,
+  applying,
+}: {
+  findings: IntegrityRowFinding[];
+  hint: string;
+  selectedIds: Set<string>;
+  setSelectedIds: (next: Set<string>) => void;
+  confirmed: boolean;
+  setConfirmed: (v: boolean) => void;
+  onApply: () => void;
+  busy: boolean;
+  applying: boolean;
+}) {
+  const rows = useMemo(() => {
+    const list: Array<{
+      monthId: string;
+      contractLabel: string;
+      collaboratorName: string;
+      periodLabel: string;
+      detail?: string;
+    }> = [];
+    for (const f of findings) {
+      for (const p of f.periods) {
+        if (!p.monthId) continue;
+        list.push({
+          monthId: p.monthId,
+          contractLabel: f.label,
+          collaboratorName: f.collaboratorName,
+          periodLabel: p.label,
+          detail: f.detail,
+        });
+      }
+    }
+    return list;
+  }, [findings]);
+
+  if (findings.length === 0) return null;
+
+  const selectedCount = selectedIds.size;
+  const allSelected = rows.length > 0 && selectedCount === rows.length;
+
+  function toggleAll(checked: boolean) {
+    setSelectedIds(checked ? new Set(rows.map((r) => r.monthId)) : new Set());
+  }
+
+  function toggleOne(id: string, checked: boolean) {
+    const next = new Set(selectedIds);
+    if (checked) next.add(id);
+    else next.delete(id);
+    setSelectedIds(next);
+  }
+
+  return (
+    <details
+      id="fuori-intervallo-con-incasso"
+      className="rounded-lg border border-amber-300 bg-amber-50/40 p-4"
+      open
+    >
+      <summary className="cursor-pointer text-sm font-semibold text-amber-950">
+        {CATEGORY_LABELS.out_of_window_manual} — {findings.length} contratti ·{" "}
+        {rows.length} righe · {selectedCount} selezionate
+      </summary>
+      <p className="mt-2 text-xs text-amber-900/80">{hint}</p>
+      <div className="mt-3 mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-amber-800">
+          Di default tutte sono selezionate. Deseleziona quelle da tenere.
+        </p>
+        <label className="flex items-center gap-2 text-xs text-amber-900">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={(e) => toggleAll(e.target.checked)}
+            disabled={busy}
+            className="rounded border-amber-400"
+          />
+          Seleziona tutte
+        </label>
+      </div>
+      <div className="max-h-72 overflow-auto rounded border border-amber-200 bg-white">
+        {rows.slice(0, 400).map((row) => (
+          <label
+            key={row.monthId}
+            className="flex items-start gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-0"
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={selectedIds.has(row.monthId)}
+              onChange={(e) => toggleOne(row.monthId, e.target.checked)}
+              disabled={busy}
+              aria-label={`Eliminare ${row.periodLabel} per ${row.contractLabel}`}
+            />
+            <div>
+              <p className="font-medium text-slate-900">
+                {row.contractLabel} · {row.periodLabel}
+              </p>
+              <p className="text-slate-500">
+                {row.collaboratorName}
+                {row.detail ? ` · ${row.detail}` : ""}
+              </p>
+            </div>
+          </label>
+        ))}
+        {rows.length > 400 ? (
+          <p className="px-3 py-2 text-xs text-slate-400">
+            + altre {rows.length - 400} rate (deseleziona dopo la prima passata se
+            serve).
+          </p>
+        ) : null}
+      </div>
+      {selectedCount > 0 ? (
+        <div className="mt-3 space-y-2">
+          <label className="flex items-start gap-2 text-xs text-amber-950">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+              disabled={busy}
+            />
+            Ho selezionato {selectedCount} rate fuori intervallo con incasso e
+            confermo l&apos;eliminazione (irreversibile sulle sole selezionate).
+          </label>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={onApply}
+            disabled={busy || !confirmed}
+          >
+            {applying
+              ? "Eliminazione in corso…"
+              : `2. Elimina ${selectedCount} rate selezionate`}
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-amber-800">
+          Nessuna rata selezionata: spunta almeno una riga per procedere.
+        </p>
+      )}
+    </details>
   );
 }
 

@@ -125,7 +125,7 @@ export function ProvvigioniBackfillPanel() {
         sempre la finestra di fornitura e il ritardo Helios M+2: a settembre non
         crea agosto né settembre; agosto solo a ottobre. Le annuali solo al 13°
         mese. Non tocca mai una rata già presente — Incassato, Pagato o storno
-        restano come li hai impostati tu.
+        restano come li hai impostati tu. Percorso: Anteprima → conferma → Crea.
       </p>
 
       <div className="flex flex-wrap gap-2">

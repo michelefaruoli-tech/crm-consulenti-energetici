@@ -7,7 +7,18 @@ import { PersistentAlert } from "@/components/ui/persistent-alert";
 import { importCteListinoAction, importDolomitiListinoAction } from "@/lib/cte-actions";
 import type { CteListinoKind } from "@/lib/cte-listino-detect";
 
-const ITEMS: Array<{ kind: CteListinoKind; title: string; body: string }> = [
+const ITEMS: Array<{
+  kind: CteListinoKind;
+  title: string;
+  body: string;
+  highlight?: boolean;
+}> = [
+  {
+    kind: "duferco-flex-condomini",
+    title: "Duferco Flex Condomini",
+    body: "P0.1 — 18 CTE (8 luce + 10 gas) variabili, sezione Condomini, validFrom/validTo vuoti. Un click, idempotente.",
+    highlight: true,
+  },
   {
     kind: "dolomiti",
     title: "Dolomiti",
@@ -27,11 +38,6 @@ const ITEMS: Array<{ kind: CteListinoKind; title: string; body: string }> = [
     kind: "compara",
     title: "Compara Semplice",
     body: "15 luce/gas dal volantino, senza gettoni. Super Luce Enel non ripetuta (già Corporate).",
-  },
-  {
-    kind: "duferco-flex-condomini",
-    title: "Duferco Flex Condomini",
-    body: "18 CTE (8 luce + 10 gas) variabili, sezione Condomini, senza scadenza.",
   },
 ];
 
@@ -76,15 +82,28 @@ export function CteListinoImportPanel() {
   }
 
   return (
-    <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+    <div id="duferco-flex-condomini" className="rounded-xl border border-sky-200 bg-sky-50/70 p-4">
       <h2 className="font-semibold text-slate-900">Listini da screenshot / PDF</h2>
       <p className="mt-1 text-sm text-slate-600">
         Aggiunge le offerte al catalogo. I numeri assenti restano vuoti; i compensi Compara non
         vengono importati. In alternativa carica il file: si apre la coda offerta per offerta.
+        Nessun seed automatico in build: serve un click esplicito (idempotente).
       </p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {ITEMS.map((item) => (
-          <div key={item.kind} className="rounded-lg border border-sky-100 bg-white/80 p-3">
+          <div
+            key={item.kind}
+            className={
+              item.highlight
+                ? "rounded-lg border-2 border-emerald-400 bg-emerald-50/90 p-3 shadow-sm ring-1 ring-emerald-200"
+                : "rounded-lg border border-sky-100 bg-white/80 p-3"
+            }
+          >
+            {item.highlight ? (
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                Residuo P0.1 — un click
+              </p>
+            ) : null}
             <p className="font-medium text-slate-900">{item.title}</p>
             <p className="mt-1 text-sm text-slate-600">{item.body}</p>
             <Button
