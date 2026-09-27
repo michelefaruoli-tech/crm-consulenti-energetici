@@ -21,6 +21,10 @@ import {
   defaultGettonePrivato,
   operationTypeLabel,
 } from "@/lib/provvigioni-stato";
+import {
+  competencePeriodsForExpectedPayable,
+  HELIOS_SUPPLIER_NAME_CONTAINS,
+} from "@/lib/provvigioni-operative";
 
 /** Valore mostrato nei menu per una cella vuota. */
 export const EMPTY_FILTER_VALUE = "(vuoto)";
@@ -32,6 +36,7 @@ export type ProvvigioniColumnKey =
   | "operationType"
   | "recurrence"
   | "meseRif"
+  | "mesePrevisto"
   | "supplyStartDate"
   | "collectionMonth"
   | "stornoFlag"
@@ -48,6 +53,7 @@ export const COLUMN_FILTER_PARAM: Record<ProvvigioniColumnKey, string> = {
   operationType: "tipoop",
   recurrence: "tipo",
   meseRif: "mese",
+  mesePrevisto: "meseprev",
   supplyStartDate: "forn",
   collectionMonth: "incasso",
   stornoFlag: "storno",
@@ -71,6 +77,7 @@ export const TEXT_FILTER_KEYS: ProvvigioniColumnKey[] = [
 /** Colonne il cui valore è un mese YYYY-MM (etichetta «mm/aaaa»). */
 export const MONTH_FILTER_KEYS: ProvvigioniColumnKey[] = [
   "meseRif",
+  "mesePrevisto",
   "supplyStartDate",
   "collectionMonth",
   "stornoMonth",
@@ -405,6 +412,51 @@ export function buildColumnFilterWhere(
       out.rate.push({ period: { in: mesi } });
       if (!expanded) {
         out.contract.push({ recurringMonths: { some: { period: { in: mesi } } } });
+      }
+    }
+    out.excludeUnitRows = true;
+  }
+
+  // P1.1 B4 — mese previsto di pagamento: Helios = competenza+2, altri = competenza.
+  if (filters.mesePrevisto?.length) {
+    const expected = filters.mesePrevisto.filter((v) => /^\d{4}-\d{2}$/.test(v));
+    if (expected.length > 0) {
+      const { helios, other } = competencePeriodsForExpectedPayable(expected);
+      const heliosSupplier = {
+        name: { contains: HELIOS_SUPPLIER_NAME_CONTAINS, mode: "insensitive" as const },
+      };
+      const rateOr: Prisma.RecurringMonthWhereInput[] = [];
+      if (helios.length > 0) {
+        rateOr.push({
+          AND: [
+            { period: { in: helios } },
+            { contract: { supplier: heliosSupplier } },
+          ],
+        });
+      }
+      if (other.length > 0) {
+        rateOr.push({
+          AND: [
+            { period: { in: other } },
+            {
+              contract: {
+                supplier: {
+                  NOT: heliosSupplier,
+                },
+              },
+            },
+          ],
+        });
+      }
+      if (rateOr.length > 0) {
+        out.rate.push(rateOr.length === 1 ? rateOr[0]! : { OR: rateOr });
+        if (!expanded) {
+          out.contract.push({
+            recurringMonths: {
+              some: rateOr.length === 1 ? rateOr[0]! : { OR: rateOr },
+            },
+          });
+        }
       }
     }
     out.excludeUnitRows = true;

@@ -34,6 +34,12 @@ import {
   heliosLastPayableCompetence,
 } from "@/lib/helios-contract-rules";
 import {
+  expectedPayableLabel,
+  expectedPayablePeriod,
+  operativeDelayDays,
+  operativeDelayLabel,
+} from "@/lib/provvigioni-operative";
+import {
   neverSyncedMonthlyWhere,
   nonRecurringWhere,
   parseStatoFilter,
@@ -482,6 +488,18 @@ function buildSingleRow(
     ? `${contract.id}:${monthOverride.period}`
     : contract.id;
 
+  const expectedPeriod = expectedPayablePeriod(
+    competencePeriod,
+    contract.supplier.name,
+  );
+  const delayDays = operativeDelayLabel(
+    operativeDelayDays({
+      stato,
+      expectedPeriod,
+      now,
+    }),
+  );
+
   return {
     id: rowKey,
     rowKey,
@@ -503,6 +521,9 @@ function buildSingleRow(
     paymentStatus: paidLabel,
     confirmed: contract.commissionConfirmed ? "Confermata" : "Da confermare",
     collectionMonth,
+    expectedPeriod: expectedPeriod ?? undefined,
+    expectedMonth: expectedPayableLabel(competencePeriod, contract.supplier.name),
+    delayDays,
     recurringIncassoNote,
     stornoFlag: item?.stornoDate ? "Sì" : "No",
     stornoMonth: item?.stornoDate ? formatMonthYear(item.stornoDate) : "",
