@@ -24,6 +24,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/** Status ammessi via `?status=` (deep-link Dashboard P1.3). */
+const CONTRATTI_STATUS_FILTER = new Set([
+  "ERRORE_INVIO",
+  "DOCUMENTAZIONE_INCOMPLETA",
+  "IN_LAVORAZIONE",
+  "DA_LAVORARE",
+  "KO",
+]);
+
 export default async function ContrattiPage({
   searchParams,
 }: {
@@ -33,14 +42,38 @@ export default async function ContrattiPage({
     page?: string;
     q?: string;
     storno?: string;
+    /** P1.3 — filtro stato contratto (whitelist). */
+    status?: string;
   }>;
 }) {
   const session = await requireSession();
-  const { vista, collab, page: pageRaw, q, storno: stornoRaw } = await searchParams;
+  const {
+    vista,
+    collab,
+    page: pageRaw,
+    q,
+    storno: stornoRaw,
+    status: statusRaw,
+  } = await searchParams;
   const page = parsePage(pageRaw);
   const now = new Date();
   const stornoIds = parseStornoStatusFilters(stornoRaw);
   const stornoParam = formatStornoStatusFilters(stornoIds) ?? undefined;
+  const statusFilter = statusRaw?.trim().toUpperCase();
+  const statusWhere: import("@/generated/prisma/client").Prisma.ContractWhereInput | undefined =
+    statusFilter && CONTRATTI_STATUS_FILTER.has(statusFilter)
+      ? statusFilter === "ERRORE_INVIO"
+        ? {
+            OR: [{ status: "ERRORE_INVIO" }, { emailStatus: "ERROR" }],
+          }
+        : {
+            status: statusFilter as
+              | "DOCUMENTAZIONE_INCOMPLETA"
+              | "IN_LAVORAZIONE"
+              | "DA_LAVORARE"
+              | "KO",
+          }
+      : undefined;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
     session.role,
@@ -72,6 +105,7 @@ export default async function ContrattiPage({
       : mode === "storico"
         ? { isHistorical: true as const }
         : {}),
+    ...(statusWhere ? statusWhere : {}),
     ...(textSearch ? { AND: [textSearch] } : {}),
   };
 
