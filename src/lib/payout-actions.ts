@@ -25,7 +25,8 @@ import {
   friendlyNeonHttpError,
   logPrismaError,
 } from "@/lib/neon-http-errors";
-import { periodLabel } from "@/lib/recurring";
+import { periodLabel, addMonths } from "@/lib/recurring";
+import { HELIOS_RECURRING_GENERATION_LAG_MONTHS } from "@/lib/helios-contract-rules";
 import { contractVisibilityWhere } from "@/lib/user-scope";
 import {
   applyPayoutRowMark,
@@ -854,7 +855,13 @@ export async function applyPayoutBatchAction(
 
     const pending = await prisma.payoutRow.findMany({
       where: { batchId, matchStatus: "MATCHED", appliedAt: null },
-      select: { id: true, contractId: true, period: true, amount: true },
+      select: {
+        id: true,
+        contractId: true,
+        period: true,
+        amount: true,
+        matchReason: true,
+      },
       take: APPLY_BATCH_SIZE,
       orderBy: { id: "asc" },
     });
@@ -880,13 +887,22 @@ export async function applyPayoutBatchAction(
       }
 
       try {
+        const competence = row.period ?? batch.run.period;
+        // Helios bulk: mese rif. = competenza; bonifico = competenza + 2 (M+2).
+        const settledPeriod =
+          row.matchReason === "bulk_historical" && /^\d{4}-\d{2}$/.test(competence)
+            ? addMonths(competence, HELIOS_RECURRING_GENERATION_LAG_MONTHS)
+            : batch.run.period;
         const outcome = await applyPayoutRowMark({
           contractId: row.contractId,
-          period: row.period ?? batch.run.period,
-          settledPeriod: batch.run.period,
+          period: competence,
+          settledPeriod,
           amount: row.amount == null ? null : decimalToNumber(row.amount),
           markMode: batch.run.markMode,
-          note: `Import rendiconto · liquidazione ${batch.run.period}`,
+          note:
+            row.matchReason === "bulk_historical"
+              ? `Marcatura massiva Helios · competenza ${competence} · bonifico ${settledPeriod}`
+              : `Import rendiconto · liquidazione ${batch.run.period}`,
         });
 
         if (!outcome.ok) {

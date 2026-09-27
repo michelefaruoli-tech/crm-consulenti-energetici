@@ -32,6 +32,7 @@ import { repairMonthlySwitchArchives } from "@/lib/contract-pod-archive";
 import {
   resolveHeliosCompetencePeriod,
   resolveHeliosPaymentPeriod,
+  isHeliosCompetenceNotYetPayable,
 } from "@/lib/helios-contract-rules";
 
 export type {
@@ -253,7 +254,20 @@ function buildPreviewRows(
     const month = c.recurringMonths.find(
       (m) => m.period === line.competencePeriod,
     );
-    const already = month?.status === "PAID";
+    const already = month?.status === "PAID" || month?.status === "LIQUIDATED";
+    if (!already && isHeliosCompetenceNotYetPayable(line.competencePeriod)) {
+      return {
+        excelRow: line.excelRow,
+        pod: line.pod,
+        intestatario: line.intestatario,
+        baseAmount: line.baseAmount,
+        competencePeriod: line.competencePeriod,
+        status: "not_yet_payable" as const,
+        contractId: c.id,
+        clientName: clientDisplayName(c.client),
+        willUpdatePod: matchedByName,
+      };
+    }
     return {
       excelRow: line.excelRow,
       pod: line.pod,
@@ -273,6 +287,7 @@ function summarize(rows: HeliosImportPreviewRow[]) {
     total: rows.length,
     willPay: rows.filter((r) => r.status === "will_pay").length,
     alreadyPaid: rows.filter((r) => r.status === "already_paid").length,
+    notYetPayable: rows.filter((r) => r.status === "not_yet_payable").length,
     notFound: rows.filter((r) => r.status === "not_found").length,
     ambiguous: rows.filter((r) => r.status === "ambiguous").length,
     podsToUpdate: rows.filter((r) => r.willUpdatePod).length,
@@ -421,6 +436,12 @@ export async function applyHeliosProvvigioniAction(
       if (row.status !== "will_pay" || !row.contractId) continue;
 
       const rowPeriod = row.competencePeriod;
+      // Lag M+2: non creare/incassare competenze non ancora pagabili
+      // (es. agosto a settembre; si crea solo a ottobre).
+      if (isHeliosCompetenceNotYetPayable(rowPeriod)) {
+        skippedCollected++;
+        continue;
+      }
       const amount =
         amountByKey.get(`${row.pod}|${rowPeriod}`) || null;
 

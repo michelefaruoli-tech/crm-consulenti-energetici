@@ -70,9 +70,10 @@ export default async function LiquidazioniPage() {
         <Card>
           <CardTitle>Marcatura massiva storico Helios</CardTitle>
           <p className="mt-1 mb-4 text-sm text-slate-600">
-            Chiude in una sola operazione i mesi arretrati fino a giugno 2026,
-            con anteprima obbligatoria e tracciabilità nel ciclo di liquidazione.
-            L&apos;applicazione è annullabile e idempotente.
+            Chiude le competenze Helios fino a luglio 2026 incluso come{" "}
+            <strong>pagate dal fornitore e liquidate al collaboratore</strong>,
+            con anteprima obbligatoria. Lag M+2 resta: agosto si crea a ottobre,
+            settembre a novembre — non in anticipo. Operazione annullabile.
           </p>
           <PayoutBulkHistoricalPanel />
         </Card>

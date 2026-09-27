@@ -5,8 +5,13 @@ export const HELIOS_MONTHLY_RESIDENTE = 4;
 export const HELIOS_MONTHLY_ALTRO = 6;
 
 /**
- * Helios paga nel mese corrente la mensilità di competenza di N mesi prima
- * (es. a settembre paga luglio → ultimo mese generabile a settembre = luglio).
+ * Helios: lag fisso M+2 (vincolante).
+ * Genera la riga solo nel mese di pagamento/liquidazione, con mese rif. = competenza.
+ *
+ * Esempi (calendario → competenza creabile):
+ * - settembre → solo fino a luglio (agosto NO: si crea a ottobre)
+ * - ottobre → fino ad agosto (settembre NO: si crea a novembre)
+ * - novembre → fino a settembre
  */
 export const HELIOS_RECURRING_GENERATION_LAG_MONTHS = 2;
 

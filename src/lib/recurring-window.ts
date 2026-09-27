@@ -156,7 +156,10 @@ export function outOfWindowReason(
 
 /**
  * Ultimo mese di competenza da generare automaticamente.
- * Con `generationLagMonths` (Helios = 2): non creare mesi oltre mese_corrente − lag.
+ * Con `generationLagMonths` (Helios = 2): non creare mesi oltre mese_calendario − 2.
+ *
+ * Helios (esempi Michele): a settembre genera fino a luglio; la riga agosto
+ * nasce solo a ottobre; settembre solo a novembre. Mai rate future in anticipo.
  */
 export function lastGeneratedPeriod(
   window: RecurringWindow,

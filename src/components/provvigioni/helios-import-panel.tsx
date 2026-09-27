@@ -67,6 +67,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     total: number;
     willPay: number;
     alreadyPaid: number;
+    notYetPayable: number;
     notFound: number;
     ambiguous: number;
     podsToUpdate: number;
@@ -131,7 +132,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
         ? `mesi ${res.competencePeriods.map(periodLabel).join(", ")}`
         : `competenza ${periodLabel(res.competencePeriod)}`;
       setMessage(
-        `Anteprima (${mesiLabel}): ${res.summary.willPay} da incassare · ${res.summary.alreadyPaid} già incassati · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
+        `Anteprima (${mesiLabel}): ${res.summary.willPay} da incassare · ${res.summary.alreadyPaid} già incassati · ${res.summary.notYetPayable} non ancora pagabili (M+2) · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
           (res.summary.podsToUpdate > 0
             ? ` · ${res.summary.podsToUpdate} POD da aggiornare`
             : ""),
@@ -321,6 +322,11 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           <span className="rounded-full bg-emerald-100 px-2 py-1 text-emerald-900">
             Già incassati: {summary.alreadyPaid}
           </span>
+          {summary.notYetPayable > 0 ? (
+            <span className="rounded-full bg-slate-200 px-2 py-1 text-slate-800">
+              Non ancora pagabili (M+2): {summary.notYetPayable}
+            </span>
+          ) : null}
           <span className="rounded-full bg-red-100 px-2 py-1 text-red-900">
             Non trovati: {summary.notFound}
           </span>

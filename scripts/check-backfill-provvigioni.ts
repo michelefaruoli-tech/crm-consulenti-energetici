@@ -84,6 +84,23 @@ console.log("\n• Mensile Helios: lag M+2 resta (agosto non generabile a settem
   check("settembre NON tra i periodi attesi", expected.includes("2026-09"), false);
 }
 
+console.log("\n• Helios: a ottobre nasce agosto, settembre ancora no");
+{
+  const contract: Contract = {
+    ...base,
+    recurrence: "M",
+    recurrenceKind: "M",
+    supplier: { name: "Helios" },
+    supplyStartDate: new Date(2026, 0, 1),
+    recurringMonths: [],
+  };
+  const october = new Date(2026, 9, 15);
+  const expected = expectedPeriodsFor(contract, october);
+  check("a ottobre ultimo = agosto", expected.at(-1), "2026-08");
+  check("a ottobre agosto presente", expected.includes("2026-08"), true);
+  check("a ottobre settembre ancora assente", expected.includes("2026-09"), false);
+}
+
 console.log("\n• Mensile: rate già presenti non vengono riproposte come mancanti");
 {
   const contract: Contract = {
