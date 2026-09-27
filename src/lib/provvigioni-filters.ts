@@ -451,7 +451,9 @@ export type ProvvigioniListFocus =
   /** P1.1 B2 — coda operativa: fornitore ha pagato, collaboratore no. */
   | "incassato-da-liquidare"
   /** P1.1 B3 — una tantum (UT) ancora da incassare dal fornitore. */
-  | "ut-da-incassare";
+  | "ut-da-incassare"
+  /** P1.1 B5 — vista Anomalie unificata (sola lettura; apply in Backup). */
+  | "anomalie";
 
 export function parseProvvigioniFocus(
   raw: string | null | undefined,
@@ -461,7 +463,8 @@ export function parseProvvigioniFocus(
     raw === "ricorrenze-mancanti" ||
     raw === "fuori-storno" ||
     raw === "incassato-da-liquidare" ||
-    raw === "ut-da-incassare"
+    raw === "ut-da-incassare" ||
+    raw === "anomalie"
   ) {
     return raw;
   }
@@ -488,15 +491,24 @@ export function isUtDaIncassareFocus(
   return focus === "ut-da-incassare";
 }
 
+/** P1.1 B5 — vista Anomalie unificata (read-only). */
+export function isAnomalieFocus(
+  focus: ProvvigioniListFocus | null | undefined,
+): boolean {
+  return focus === "anomalie";
+}
+
 /**
- * Focus che definiscono un bucket finanziario proprio: non vanno AND-ati
+ * Focus che definiscono un bucket proprio: non vanno AND-ati
  * sulle altre card summary (altrimenti gli altri totali diventano 0).
  */
 export function isBucketSpecificFocus(
   focus: ProvvigioniListFocus | null | undefined,
 ): boolean {
   return (
-    isIncassatoDaLiquidareFocus(focus) || isUtDaIncassareFocus(focus)
+    isIncassatoDaLiquidareFocus(focus) ||
+    isUtDaIncassareFocus(focus) ||
+    isAnomalieFocus(focus)
   );
 }
 
@@ -584,6 +596,40 @@ export function buildProvvigioniListWhere(
     };
   } else if (opts.focus === "fuori-storno") {
     where = { AND: [where, fuoriStornoWhere()] };
+  } else if (opts.focus === "anomalie") {
+    /**
+     * P1.1 B5: contratti con almeno una anomalia operativa in scope
+     * (rate mancanti/pending dovute, assenti Helios, fuori storno).
+     * Duplicati POD / incongruenze integrity restano nel pannello read-only
+     * (apply solo Backup) e non restringono ulteriormente la lista.
+     */
+    where = {
+      AND: [
+        where,
+        {
+          OR: [
+            {
+              recurringMonths: {
+                some: {
+                  status: { in: ["MISSING", "PENDING"] },
+                  period: { lt: toPeriod(new Date()) },
+                  ...notAnnualNextHiddenWhere,
+                },
+              },
+            },
+            {
+              recurringMonths: {
+                some: {
+                  status: "ERROR_UNPAID",
+                  note: { contains: "ASSENTE_RENDICONTO" },
+                },
+              },
+            },
+            fuoriStornoWhere(),
+          ],
+        },
+      ],
+    };
   }
   // focus=incassato-da-liquidare / ut-da-incassare: già mappati su filters sopra
 

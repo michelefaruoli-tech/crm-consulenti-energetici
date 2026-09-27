@@ -34,12 +34,14 @@ import {
   buildProvvigioniContractWhere,
   buildProvvigioniListWhere,
   effectiveStatoForList,
+  isAnomalieFocus,
   isIncassatoDaLiquidareFocus,
   isUtDaIncassareFocus,
   parseProvvigioniFocus,
   recurringMonthlyWhereOr,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
+import { buildProvvigioniAnomaliesOverview } from "@/lib/provvigioni-anomalies";
 import {
   buildColumnFilterWhere,
   columnFiltersToQuery,
@@ -793,6 +795,38 @@ export default async function ProvvigioniPage({
   }));
 
   const anomalyCount = alertRows.length + heliosAbsentRows.length;
+  const showUnifiedAnomalies = isAnomalieFocus(focus);
+  const anomalieOverview = showUnifiedAnomalies
+    ? await buildProvvigioniAnomaliesOverview({
+        panelScope,
+        missingCount: alertRows.length,
+        heliosAbsentCount: heliosAbsentRows.length,
+        missingPreview: alertRows.slice(0, 40).map((a) => ({
+          id: a.id,
+          label: `${a.clientName} · ${a.supplierName} · ${periodLabel(a.period)}`,
+          detail: [a.collaboratorName, a.podPdr || null]
+            .filter(Boolean)
+            .join(" · "),
+          href: `/contratti/${a.contractId}`,
+        })),
+        heliosPreview: heliosAbsentRows.slice(0, 40).map((a) => ({
+          id: a.id,
+          label: `${a.clientName} · Helios · ${periodLabel(a.period)}`,
+          detail: [a.collaboratorName, a.podPdr || null]
+            .filter(Boolean)
+            .join(" · "),
+          href: `/contratti/${a.contractId}`,
+        })),
+        queryBase: {
+          collab: collabFilter,
+          settled: settledPeriod,
+          supplier,
+          tipologia,
+          q,
+          competence: competenceQueryValue,
+        },
+      })
+    : null;
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
   const queryBase = {
     collab: collabFilter,
@@ -807,6 +841,15 @@ export default async function ProvvigioniPage({
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
   };
+  const anomalieHref = `/provvigioni?${new URLSearchParams({
+    settled: settledPeriod,
+    ...(collabFilter ? { collab: collabFilter } : {}),
+    ...(supplier ? { supplier } : {}),
+    ...(tipologia ? { tipologia } : {}),
+    ...(q ? { q } : {}),
+    ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
+    focus: "anomalie",
+  }).toString()}`;
   const filterHints = [
     selectedCollabName ? `collab. ${selectedCollabName}` : null,
     supplier ? `fornitore ${supplier.split("|").join(" + ")}` : null,
@@ -816,7 +859,9 @@ export default async function ProvvigioniPage({
         ? "Incassato da liquidare"
         : isUtDaIncassareFocus(focus)
           ? "Una tantum da incassare"
-          : null,
+          : isAnomalieFocus(focus)
+            ? "Anomalie unificate"
+            : null,
     effectiveCompetence && !competenceAll
       ? `competenza ${periodLabel(effectiveCompetence)}`
       : competenceAll
@@ -898,7 +943,9 @@ export default async function ProvvigioniPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            {isIncassatoDaLiquidareFocus(focus)
+            {isAnomalieFocus(focus)
+              ? "Provvigioni · Anomalie"
+              : isIncassatoDaLiquidareFocus(focus)
               ? "Provvigioni · Incassato da liquidare"
               : isUtDaIncassareFocus(focus)
                 ? "Provvigioni · Una tantum da incassare"
@@ -925,6 +972,15 @@ export default async function ProvvigioniPage({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link href={anomalieHref}>
+            <Button
+              type="button"
+              variant={showUnifiedAnomalies ? "primary" : "secondary"}
+            >
+              Anomalie
+              {anomalyCount > 0 ? ` (${anomalyCount})` : ""}
+            </Button>
+          </Link>
           {canViewAll || isScoped ? (
             <Link href="/archivio#helios-import">
               <Button type="button" variant="secondary">
@@ -993,25 +1049,34 @@ export default async function ProvvigioniPage({
         />
       ) : null}
 
-      <ProvvigioniAnomaliesSection
-        alertCount={anomalyCount}
-        monthIds={[
-          ...alertRows.map((a) => a.id),
-          ...heliosAbsentRows.map((a) => a.id),
-        ]}
-      >
-        {alertRows.length > 0 ? (
-          <RecurringMissingPanel
-            alerts={alertRows}
-            otherRecurringCount={otherRecurringCount}
-            kind={recurringKind}
-            summary={monthlySummary}
-          />
-        ) : null}
-        {heliosAbsentRows.length > 0 ? (
-          <HeliosAbsentPanel alerts={heliosAbsentRows} />
-        ) : null}
-      </ProvvigioniAnomaliesSection>
+      {showUnifiedAnomalies && anomalieOverview ? (
+        <ProvvigioniAnomaliesSection
+          mode="unified"
+          alertCount={anomalieOverview.totalCount}
+          overview={anomalieOverview}
+        />
+      ) : (
+        <ProvvigioniAnomaliesSection
+          alertCount={anomalyCount}
+          anomalieHref={anomalieHref}
+          monthIds={[
+            ...alertRows.map((a) => a.id),
+            ...heliosAbsentRows.map((a) => a.id),
+          ]}
+        >
+          {alertRows.length > 0 ? (
+            <RecurringMissingPanel
+              alerts={alertRows}
+              otherRecurringCount={otherRecurringCount}
+              kind={recurringKind}
+              summary={monthlySummary}
+            />
+          ) : null}
+          {heliosAbsentRows.length > 0 ? (
+            <HeliosAbsentPanel alerts={heliosAbsentRows} />
+          ) : null}
+        </ProvvigioniAnomaliesSection>
+      )}
 
       <ProvvigioniTrashPanel
         rows={deletedRecent.map((c) => ({
