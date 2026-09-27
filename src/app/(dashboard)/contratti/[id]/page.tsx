@@ -6,6 +6,14 @@ import { hasPermission } from "@/lib/permissions";
 import { clientDisplayName, formatDate, formatDateTime } from "@/lib/utils";
 import { formatCurrency } from "@/lib/commission";
 import { StatusBadge } from "@/components/ui/badge";
+import { StornoBadgeList } from "@/components/ui/storno-badge";
+import { resolveStornoBadges } from "@/lib/storno-badges";
+import {
+  markEarlyReswitchContracts,
+  markLatestContractsByPod,
+  normalizePodKey,
+  resolveStornoInfo,
+} from "@/lib/storno-status";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import {
@@ -212,6 +220,93 @@ export default async function ContrattoDetailPage({
     serviceOther: contract.serviceOther,
   });
 
+  const podKey = normalizePodKey(contract.podPdr || contract.pod || contract.pdr);
+  const podOr: Array<{ podPdr?: string; pod?: string; pdr?: string }> = [];
+  for (const raw of [contract.podPdr, contract.pod, contract.pdr]) {
+    const v = (raw ?? "").trim();
+    if (!v) continue;
+    podOr.push({ podPdr: v }, { pod: v }, { pdr: v });
+  }
+  const podPeers =
+    podKey.length >= 6 && podOr.length > 0
+      ? await prisma.contract.findMany({
+          where: {
+            deletedAt: null,
+            id: { not: contract.id },
+            OR: podOr,
+          },
+          select: {
+            id: true,
+            clientId: true,
+            supplierId: true,
+            podPdr: true,
+            pod: true,
+            pdr: true,
+            supplyStartDate: true,
+            insertionDate: true,
+            createdAt: true,
+            collectionDate: true,
+            stornoEndDate: true,
+            isHistorical: true,
+            supplier: { select: { stornoMonths: true } },
+          },
+          take: 200,
+        })
+      : [];
+  const samePodPeers = podPeers.filter(
+    (p) => normalizePodKey(p.podPdr || p.pod || p.pdr) === podKey,
+  );
+  const peerBundle = [
+    {
+      id: contract.id,
+      clientId: contract.clientId,
+      supplierId: contract.supplierId,
+      podPdr: contract.podPdr || contract.pod || contract.pdr,
+      supplyStartDate: contract.supplyStartDate,
+      insertionDate: contract.insertionDate,
+      createdAt: contract.createdAt,
+      collectionDate: contract.collectionDate,
+      stornoMonths: contract.supplier.stornoMonths,
+      stornoEndDate: contract.stornoEndDate,
+    },
+    ...samePodPeers.map((p) => ({
+      id: p.id,
+      clientId: p.clientId,
+      supplierId: p.supplierId,
+      podPdr: p.podPdr || p.pod || p.pdr,
+      supplyStartDate: p.supplyStartDate,
+      insertionDate: p.insertionDate,
+      createdAt: p.createdAt,
+      collectionDate: p.collectionDate,
+      stornoMonths: p.supplier.stornoMonths,
+      stornoEndDate: p.stornoEndDate,
+    })),
+  ];
+  const latestMap = markLatestContractsByPod(peerBundle);
+  const earlyMap = markEarlyReswitchContracts(peerBundle);
+  const stornoInfo = resolveStornoInfo({
+    status: contract.status,
+    recurrence: contract.recurrence,
+    supplyStartDate: supplyStart,
+    stornoMonths: contract.supplier.stornoMonths,
+    stornoEndDate: contract.stornoEndDate,
+    expiryDate: contract.expiryDate,
+    durationMonths: contract.durationMonths,
+    isLatestForPod: latestMap.get(contract.id) ?? true,
+    collectionDate: contract.collectionDate,
+    isEarlyReswitch: earlyMap.get(contract.id) ?? false,
+  });
+  const hasActivePodPeer = samePodPeers.some((p) => !p.isHistorical);
+  const stornoBadges = resolveStornoBadges({
+    stornoKind: stornoInfo.kind,
+    isHistorical: contract.isHistorical,
+    isEarlyReswitch: earlyMap.get(contract.id) === true,
+    isStornato:
+      contract.status === "STORNATO" ||
+      Boolean(contract.commission?.stornoDate),
+    hasActivePodPeer,
+  });
+
   return (
     <div className="space-y-6">
       {statusError ? (
@@ -247,9 +342,15 @@ export default async function ContrattoDetailPage({
               {utility.serviceLabel}
             </p>
           </div>
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={contract.status} />
+            <StornoBadgeList badges={stornoBadges} />
           </div>
+          {contract.isHistorical && contract.archiveLabel ? (
+            <p className="mt-1 text-xs text-slate-600">
+              Archivio: {contract.archiveLabel}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href={`/clienti/${contract.clientId}?contratto=${contract.id}`}>

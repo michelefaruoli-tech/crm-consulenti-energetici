@@ -7,7 +7,13 @@ import { ExcelFilterTable, type FilterColumn } from "@/components/table/excel-fi
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StornoLegend } from "@/components/ui/storno-legend";
+import { StornoBadgesFromSignals } from "@/components/ui/storno-badge";
 import type { CollaboratorOption, ContractTableRow } from "@/lib/contract-row";
+import {
+  resolveStornoBadges,
+  stornoBadgesFilterText,
+} from "@/lib/storno-badges";
+import type { StornoKind } from "@/lib/storno-status";
 import { updateContractFieldAction } from "@/lib/contract-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { InlineContractStatusSelect } from "@/components/contracts/inline-contract-status-select";
@@ -220,8 +226,29 @@ export function ContractsFilterTable({
     {
       key: "stornoLabel",
       label: "Storno",
-      getValue: (r) => String(r.stornoLabel ?? ""),
+      getValue: (r) => {
+        const badges = resolveStornoBadges({
+          stornoKind: (r.stornoKind as StornoKind) ?? null,
+          isHistorical: r.isHistorical === true,
+          isEarlyReswitch: r.isEarlyReswitch === true,
+          isStornato: r.isStornato === true,
+        });
+        return (
+          stornoBadgesFilterText(badges) || String(r.stornoLabel ?? "")
+        );
+      },
       sortKind: "text",
+      render: (r) => (
+        <StornoBadgesFromSignals
+          input={{
+            stornoKind: (r.stornoKind as StornoKind) ?? null,
+            isHistorical: r.isHistorical === true,
+            isEarlyReswitch: r.isEarlyReswitch === true,
+            isStornato: r.isStornato === true,
+          }}
+          emptyFallback={String(r.stornoLabel ?? "") || null}
+        />
+      ),
     },
     {
       key: "operationLabel",

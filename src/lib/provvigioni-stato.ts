@@ -56,6 +56,10 @@ export type ProvvigioneRow = {
   /** Etichetta periodo rischio (solo lettura / colori riga) */
   stornoLabel?: string;
   stornoRowClass?: string;
+  /** Kind storno per badge P1.2 */
+  stornoKind?: string;
+  isEarlyReswitch?: boolean;
+  isStornato?: boolean;
   warnOnEdit?: boolean;
   gettoneBorderClass?: string;
   /** Manca data ingresso fornitura → POD/link in rosso */

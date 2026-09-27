@@ -45,6 +45,10 @@ export type ContractTableRow = {
   stornoLabel: string;
   stornoRowClass: string;
   warnOnEdit: boolean;
+  /** P1.2 — segnali badge testo+icona */
+  isHistorical: boolean;
+  isEarlyReswitch: boolean;
+  isStornato: boolean;
 };
 
 type ContractForRow = {
@@ -161,6 +165,9 @@ export function toContractRow(
     stornoLabel: storno.label,
     stornoRowClass: storno.rowClassName,
     warnOnEdit: storno.warnOnEdit,
+    isHistorical: contract.isHistorical === true,
+    isEarlyReswitch: options?.isEarlyReswitch === true,
+    isStornato: contract.status === "STORNATO",
   };
 }
 
