@@ -24,8 +24,9 @@ import {
 } from "@/lib/supply-dates";
 import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
-import { ContractEconomicSummary } from "@/components/contracts/contract-economic-summary";
-import { isRecurring } from "@/lib/recurring";
+import { ContractCommissionTimeline } from "@/components/contracts/contract-commission-timeline";
+import { buildContractFinanceView } from "@/lib/contract-commission-finance";
+import { isRecurring, recurrenceKindOf } from "@/lib/recurring";
 import { ContractAttachmentsManager } from "@/components/contracts/contract-attachments-manager";
 import { SendBackofficePanel } from "@/components/contracts/send-backoffice-panel";
 
@@ -111,6 +112,97 @@ export default async function ContrattoDetailPage({
   const collaborators = canChangeCollaborator
     ? await loadVisibleCollaboratorOptions(session)
     : [];
+
+  const [payoutRows, payoutAdjustments] = await Promise.all([
+    prisma.payoutRow.findMany({
+      where: { contractId: contract.id },
+      select: {
+        id: true,
+        period: true,
+        amount: true,
+        recurringMonthId: true,
+        matchStatus: true,
+        appliedAt: true,
+        note: true,
+        batch: {
+          select: {
+            runId: true,
+            source: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    }),
+    prisma.payoutAdjustment.findMany({
+      where: { contractId: contract.id },
+      select: {
+        id: true,
+        kind: true,
+        amount: true,
+        note: true,
+        voidedAt: true,
+        createdAt: true,
+        runId: true,
+        run: { select: { period: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
+  ]);
+
+  const finance = buildContractFinanceView({
+    recurrenceKind:
+      contract.recurrenceKind ?? recurrenceKindOf(contract.recurrence),
+    contractStatus: contract.status,
+    collectionDate: contract.collectionDate ?? contract.paymentDate,
+    commission: contract.commission
+      ? {
+          expected: Number(contract.commission.expected),
+          received: Number(contract.commission.received),
+          paid: Number(contract.commission.paid),
+          stornoAmount: Number(contract.commission.stornoAmount ?? 0),
+          stornoDate: contract.commission.stornoDate,
+        }
+      : null,
+    recurringMonths: contract.recurringMonths.map((m) => ({
+      id: m.id,
+      period: m.period,
+      status: m.status,
+      amount: Number(m.amount ?? 0),
+      paidAt: m.paidAt,
+      settledPeriod: m.settledPeriod,
+      note: m.note,
+    })),
+    commissionEntries: (contract.commission?.entries ?? []).map((e) => ({
+      id: e.id,
+      type: e.type,
+      amount: Number(e.amount),
+      note: e.note,
+      createdAt: e.createdAt,
+    })),
+    payoutRows: payoutRows.map((r) => ({
+      id: r.id,
+      period: r.period,
+      amount: r.amount != null ? Number(r.amount) : null,
+      recurringMonthId: r.recurringMonthId,
+      matchStatus: r.matchStatus,
+      appliedAt: r.appliedAt,
+      note: r.note,
+      runId: r.batch.runId,
+      sourceName: r.batch.source.name,
+    })),
+    adjustments: payoutAdjustments.map((a) => ({
+      id: a.id,
+      kind: a.kind,
+      amount: Number(a.amount),
+      note: a.note,
+      voidedAt: a.voidedAt,
+      createdAt: a.createdAt,
+      runId: a.runId,
+      runPeriod: a.run.period,
+    })),
+  });
 
   const utility = resolveUtilityDisplay({
     utilityType: contract.utilityType,
@@ -248,7 +340,7 @@ export default async function ContrattoDetailPage({
           <h2 className="mb-4 font-semibold text-slate-900">Provvigione</h2>
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <dt className="text-slate-500">Prevista</dt>
+              <dt className="text-slate-500">Attesa</dt>
               <dd>{formatCurrency(expected)}</dd>
             </div>
             <div className="flex justify-between">
@@ -256,7 +348,7 @@ export default async function ContrattoDetailPage({
               <dd>{formatCurrency(accrued)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Ricevuta</dt>
+              <dt className="text-slate-500">Incassata</dt>
               <dd>{formatCurrency(received)}</dd>
             </div>
             <div className="flex justify-between">
@@ -285,33 +377,10 @@ export default async function ContrattoDetailPage({
         </section>
       </div>
 
-      <ContractEconomicSummary
-        expected={expected}
-        recurrence={contract.recurrence}
-        received={received}
-        paid={paid}
-        stornoAmount={Number(contract.commission?.stornoAmount ?? 0)}
-        stornoDate={contract.commission?.stornoDate ?? null}
-        commissionCreatedAt={contract.commission?.createdAt ?? null}
-        commissionConfirmedAt={contract.commissionConfirmedAt}
-        collectionDate={contract.collectionDate}
-        commissionEntries={(contract.commission?.entries ?? []).map((entry) => ({
-          id: entry.id,
-          type: entry.type,
-          amount: Number(entry.amount),
-          note: entry.note,
-          createdAt: entry.createdAt,
-        }))}
-        recurringEntries={contract.recurringMonths
-          .filter((entry) => entry.status !== "CLOSED")
-          .map((entry) => ({
-          id: entry.id,
-          period: entry.period,
-          status: entry.status,
-          amount: Number(entry.amount ?? 0),
-          paidAt: entry.paidAt,
-          settledPeriod: entry.settledPeriod,
-          }))}
+      <ContractCommissionTimeline
+        totals={finance.totals}
+        timeline={finance.timeline}
+        adjustments={finance.adjustments}
       />
 
       {canEditContract ? (
