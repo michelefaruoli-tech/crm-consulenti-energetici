@@ -32,16 +32,46 @@ import { loadMonthlyContractCounts } from "@/lib/dashboard-monthly-counts";
 import { DashboardRankingPanel } from "@/components/dashboard/dashboard-ranking-panel";
 import { DashboardMonthlyBreakdown } from "@/components/dashboard/dashboard-monthly-breakdown";
 import { MarketPricesPanel } from "@/components/dashboard/market-prices-panel";
+import { StornoDashboardSection } from "@/components/dashboard/storno-dashboard-section";
+import {
+  buildStornoDashboardScopeWhere,
+  buildStornoKpiCards,
+  loadStornoDashboardAlerts,
+  loadStornoDashboardKpis,
+  parseDashboardCollabParam,
+  parseDashboardSupplierIds,
+  resolveOptionalDashboardPeriod,
+  stornoDashboardListHref,
+} from "@/lib/storno-dashboard-kpi";
+import { recentMonthOptions } from "@/lib/report-month";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; q?: string; anno?: string }>;
+  searchParams: Promise<{
+    page?: string;
+    q?: string;
+    anno?: string;
+    collab?: string;
+    supplierId?: string;
+    from?: string;
+    to?: string;
+    month?: string;
+  }>;
 }) {
   const session = await requireSession();
-  const { page: pageRaw, q, anno } = await searchParams;
+  const {
+    page: pageRaw,
+    q,
+    anno,
+    collab: collabRaw,
+    supplierId: supplierIdRaw,
+    from: fromRaw,
+    to: toRaw,
+    month: monthRaw,
+  } = await searchParams;
   const page = parsePage(pageRaw);
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
@@ -50,8 +80,27 @@ export default async function DashboardPage({
   );
   const canChangeStatus = hasPermission(session.role, "contracts.change_status");
   const isAdminStats = hasPermission(session.role, "stats.full");
-  const { contractVisibilityWhere } = await import("@/lib/user-scope");
+  const isScoped = hasPermission(session.role, "contracts.work_scoped");
+  const showCollabFilter = canViewAll || isScoped;
+  const {
+    contractVisibilityWhere,
+    loadVisibleCollaboratorOptions,
+  } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
+  const stornoCollab = showCollabFilter
+    ? parseDashboardCollabParam(collabRaw)
+    : undefined;
+  const stornoSupplierIds = parseDashboardSupplierIds(supplierIdRaw);
+  const stornoPeriod = resolveOptionalDashboardPeriod({
+    from: fromRaw,
+    to: toRaw,
+    month: monthRaw,
+  });
+  const stornoScopeWhere = buildStornoDashboardScopeWhere({
+    visibility,
+    collab: stornoCollab,
+    supplierIds: stornoSupplierIds,
+  });
   const textSearch = contractTextSearchWhere(q);
   const whereActive = {
     isHistorical: false as const,
@@ -90,6 +139,8 @@ export default async function DashboardPage({
       recentContracts,
       collaboratorOptions,
       marketPrices,
+      stornoCollabOptions,
+      stornoSupplierOptions,
     ] = await Promise.all([
       prisma.contract.count({
         where: { ...whereAll, insertionDate: { gte: weekStart } },
@@ -233,7 +284,48 @@ export default async function DashboardPage({
           })
         : Promise.resolve([]),
       fetchMarketPrices(),
+      loadVisibleCollaboratorOptions(session),
+      prisma.supplier.findMany({
+        where: {
+          AND: [
+            {
+              OR: [{ active: true }, { contracts: { some: {} } }],
+            },
+            { NOT: { code: { contains: "_MERGED_" } } },
+            { NOT: { name: { contains: "(unito in" } } },
+            { NOT: { name: { startsWith: "_archivio_" } } },
+          ],
+        },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
     ]);
+
+    const { counts: stornoCounts, doppiaIds } = await loadStornoDashboardKpis({
+      db: prisma,
+      scopeWhere: stornoScopeWhere,
+      now,
+      period: stornoPeriod,
+    });
+    const stornoSupplierName =
+      stornoSupplierIds.length === 1
+        ? (stornoSupplierOptions.find((s) => s.id === stornoSupplierIds[0])
+            ?.name ?? null)
+        : null;
+    const stornoLinkExtras = {
+      collab: stornoCollab,
+      supplierName: stornoSupplierName,
+    };
+    const stornoKpiCards = buildStornoKpiCards(stornoCounts, stornoLinkExtras);
+    const stornoAlerts = await loadStornoDashboardAlerts({
+      db: prisma,
+      scopeWhere: stornoScopeWhere,
+      now,
+      period: stornoPeriod,
+      collab: stornoCollab,
+      supplierName: stornoSupplierName,
+      doppiaIds,
+    });
 
     const collaboratorIds = [
       ...new Set([
@@ -342,6 +434,27 @@ export default async function DashboardPage({
 
         <MarketPricesPanel prices={marketPrices} />
 
+        <StornoDashboardSection
+          cards={stornoKpiCards}
+          alerts={stornoAlerts}
+          collaborators={stornoCollabOptions}
+          suppliers={stornoSupplierOptions}
+          monthOptions={recentMonthOptions(24)}
+          showCollabFilter={showCollabFilter}
+          filters={{
+            collab: stornoCollab,
+            supplierId:
+              stornoSupplierIds.length === 1
+                ? stornoSupplierIds[0]
+                : supplierIdRaw?.trim() || undefined,
+            month: monthRaw?.trim() || undefined,
+            from: stornoPeriod?.from,
+            to: stornoPeriod?.to,
+            q: q?.trim() || undefined,
+            anno: anno?.trim() || undefined,
+          }}
+        />
+
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Link href={provvigioniDeepLinkHref("tutti")}>
             <StatCard
@@ -418,7 +531,10 @@ export default async function DashboardPage({
               {
                 label: "Storni registrati",
                 value: storniRegistrati,
-                href: provvigioniDeepLinkHref("stornato"),
+                href: stornoDashboardListHref({
+                  storno: "stornato",
+                  list: "provvigioni",
+                }),
                 hint: "Controlla importi e competenza",
                 tone: "border-rose-200 bg-rose-50 text-rose-950",
               },
