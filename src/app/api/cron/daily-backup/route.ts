@@ -28,7 +28,32 @@ export async function GET(request: Request) {
     force: false,
   });
 
-  return NextResponse.json(result, {
-    status: result.ok || result.skipped ? 200 : 500,
-  });
+  // Helios M+2: bonifica rate anticipate (ago/set a settembre) senza click.
+  let heliosCleanup: {
+    closed: number;
+    deleted: number;
+    done: boolean;
+    lastPayableCompetence: string;
+  } | null = null;
+  try {
+    const { runHeliosAnticipatoryCleanupAuto } = await import(
+      "@/lib/helios-anticipatory-cleanup"
+    );
+    const cleanup = await runHeliosAnticipatoryCleanupAuto();
+    heliosCleanup = {
+      closed: cleanup.closed,
+      deleted: cleanup.deleted,
+      done: cleanup.done,
+      lastPayableCompetence: cleanup.lastPayableCompetence,
+    };
+  } catch (e) {
+    console.error("[daily-backup] helios anticipatory cleanup", e);
+  }
+
+  return NextResponse.json(
+    { ...result, heliosCleanup },
+    {
+      status: result.ok || result.skipped ? 200 : 500,
+    },
+  );
 }

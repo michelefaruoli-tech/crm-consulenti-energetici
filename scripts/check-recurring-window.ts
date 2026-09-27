@@ -12,7 +12,7 @@ import {
   lastGeneratedPeriod,
   recurringWindow,
 } from "../src/lib/recurring-window";
-import { HELIOS_RECURRING_GENERATION_LAG_MONTHS, isHeliosCompetenceNotYetPayable, planHeliosMeseRifShift, resolveHeliosCompetencePeriod, resolveHeliosPaymentPeriod } from "../src/lib/helios-contract-rules";
+import { HELIOS_RECURRING_GENERATION_LAG_MONTHS, heliosLastPayableCompetence, isHeliosCompetenceNotYetPayable, planHeliosMeseRifShift, resolveHeliosCompetencePeriod, resolveHeliosPaymentPeriod } from "../src/lib/helios-contract-rules";
 
 type Case = {
   name: string;
@@ -290,9 +290,19 @@ check(
   "true",
 );
 check(
+  "settembre non è ancora pagabile a settembre 2026",
+  String(isHeliosCompetenceNotYetPayable("2026-09", new Date(2026, 8, 17))),
+  "true",
+);
+check(
   "luglio è pagabile a settembre 2026",
   String(isHeliosCompetenceNotYetPayable("2026-07", new Date(2026, 8, 17))),
   "false",
+);
+check(
+  "heliosLastPayable a settembre 2026 = luglio",
+  heliosLastPayableCompetence(new Date(2026, 8, 17)),
+  "2026-07",
 );
 
 if (failures > 0) {

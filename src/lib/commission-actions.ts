@@ -36,6 +36,10 @@ import {
   type RecurrenceKind,
 } from "@/lib/recurring";
 import {
+  isHeliosCompetenceNotYetPayable,
+  isHeliosSupplier,
+} from "@/lib/helios-contract-rules";
+import {
   contractVisibilityWhere,
   loadVisibleCollaboratorOptions,
 } from "@/lib/user-scope";
@@ -1376,7 +1380,13 @@ async function assertCanAccessCommissions(
       id: true,
       contractId: true,
       expected: true,
-      contract: { select: { collaboratorId: true, recurrence: true } },
+      contract: {
+        select: {
+          collaboratorId: true,
+          recurrence: true,
+          supplier: { select: { name: true } },
+        },
+      },
     },
   });
   if (rows.length === 0) throw new Error("Nessuna provvigione trovata");
@@ -1409,6 +1419,13 @@ export async function bulkMarkIncassatoCompetenceAction(
 
   for (const r of rows) {
     if (isRecurringMonthly(r.contract.recurrence)) {
+      // Helios M+2: non creare/marcare competenze non ancora pagabili.
+      if (
+        isHeliosSupplier(r.contract.supplier?.name) &&
+        isHeliosCompetenceNotYetPayable(period)
+      ) {
+        continue;
+      }
       const existing = await prisma.recurringMonth.findUnique({
         where: {
           contractId_period: { contractId: r.contractId, period },
@@ -1566,6 +1583,13 @@ export async function bulkMarkPagatoCompetenceAction(
 
   for (const r of rows) {
     if (isRecurringMonthly(r.contract.recurrence)) {
+      // Helios M+2: non creare/marcare competenze non ancora pagabili.
+      if (
+        isHeliosSupplier(r.contract.supplier?.name) &&
+        isHeliosCompetenceNotYetPayable(period)
+      ) {
+        continue;
+      }
       const commission = await prisma.commission.findUnique({
         where: { id: r.id },
         select: { expected: true, received: true, paid: true },

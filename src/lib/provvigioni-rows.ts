@@ -153,11 +153,12 @@ function expandedRateWhere(
           ],
         },
       },
+      // Helios M+2: nascondi QUALSIASI rata (anche PAID/LIQUIDATED) oltre lastPayable.
+      // Rate anticipate errate restano in DB finché bonificate; non devono comparire in lista.
       {
         NOT: {
           AND: [
             { period: { gt: lastHelios } },
-            { status: { in: ["PENDING", "MISSING", "ERROR_UNPAID"] } },
             {
               contract: {
                 supplier: { name: { contains: "helios", mode: "insensitive" } },
@@ -549,7 +550,6 @@ export function expandContractsToProvvigioneRows(
       .filter((m) => !isAnnualNextHidden(m.note))
       .filter((m) => {
         if (!isHeliosSupplier(contract.supplier.name)) return true;
-        if (m.status === "PAID" || m.status === "LIQUIDATED") return true;
         return !isHeliosCompetenceNotYetPayable(m.period, now);
       })
       .sort((a, b) => b.period.localeCompare(a.period));
