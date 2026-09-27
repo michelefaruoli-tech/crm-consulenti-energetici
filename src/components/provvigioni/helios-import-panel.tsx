@@ -147,8 +147,8 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
     }
     if (
       !window.confirm(
-        `Segnare come INCASSATI ${summary?.willPay ?? 0} mesi (pagamento dal fornitore)?\n` +
-          `Lo stato «Pagato» al collaboratore lo imposti tu dopo in Provvigioni.\n` +
+        `Segnare come Incassato da liquidare ${summary?.willPay ?? 0} mesi (pagamento dal fornitore)?\n` +
+          `Lo stato «Liquidato» al collaboratore lo imposti tu dopo in Provvigioni o Liquidazioni.\n` +
           (multiMonth
             ? `Competenze: ${competencePeriods.map(periodLabel).join(", ")}\n`
             : `Competenza ${periodLabel(competencePeriod)}\n`) +
@@ -197,10 +197,10 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
       <p className="rounded-lg border border-sky-200 bg-white/80 px-3 py-2 text-xs text-sky-950">
         <strong>Flusso:</strong> Helios versa nel mese in corso la competenza di{" "}
         {HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi prima. Il rendiconto porta le
-        provvigioni da <em>Da incassare</em> a <em>Incassato</em>.{" "}
-        <strong>Mese rif.</strong> = competenza (luglio).{" "}
-        <strong>Data incasso</strong> = pagamento (settembre). Lo stato{" "}
-        <em>Pagato</em> lo usi solo quando liquidi il collaboratore.
+        provvigioni da <em>Da incassare</em> a{" "}
+        <em>Incassato da liquidare</em>. <strong>Mese rif.</strong> = competenza
+        (luglio). <strong>Data incasso</strong> = pagamento (settembre). Lo stato{" "}
+        <em>Liquidato</em> lo usi solo quando liquidi il collaboratore.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="File Excel Helios (.xlsx)">
