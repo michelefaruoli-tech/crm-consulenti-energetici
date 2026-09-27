@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { isAllowedAttachment } from "@/lib/attachment-config";
 import { CTE_PDF_MAX_BYTES } from "@/lib/cte-form-schema";
@@ -65,7 +65,7 @@ function listinoItems(
 }
 
 export async function POST(request: Request) {
-  const session = await getSession();
+  const session = await requireApiSession();
   if (!session) {
     return NextResponse.json({ ok: false, error: "Non autenticato" }, { status: 401 });
   }

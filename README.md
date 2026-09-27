@@ -32,10 +32,10 @@ Apri http://localhost:3000
 
 | Ruolo | Email | Password |
 |-------|-------|----------|
-| Admin | admin@crm.local | Admin123! |
-| Segreteria | segreteria@crm.local | Segreteria123! |
-| Collaboratore | collaboratore@crm.local | Collab123! |
-| Commerciale | commerciale@crm.local | Comm123! |
+| Admin | admin@crm.local | AdminSecure123! |
+| Segreteria | segreteria@crm.local | SegreteriaSecure1! |
+| Collaboratore | collaboratore@crm.local | CollabSecure123! |
+| Commerciale | commerciale@crm.local | CommSecure1234! |
 
 ## Stack
 

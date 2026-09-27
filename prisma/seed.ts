@@ -18,7 +18,7 @@ const adapter = new PrismaNeon({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const password = await bcrypt.hash("Admin123!", 10);
+  const password = await bcrypt.hash("AdminSecure123!", 10);
 
   const admin = await prisma.user.upsert({
     where: { email: "admin@crm.local" },
@@ -36,7 +36,7 @@ async function main() {
     update: {},
     create: {
       email: "segreteria@crm.local",
-      password: await bcrypt.hash("Segreteria123!", 10),
+      password: await bcrypt.hash("SegreteriaSecure1!", 10),
       name: "Maria Rossi",
       role: "SEGRETERIA",
     },
@@ -47,7 +47,7 @@ async function main() {
     update: {},
     create: {
       email: "collaboratore@crm.local",
-      password: await bcrypt.hash("Collab123!", 10),
+      password: await bcrypt.hash("CollabSecure123!", 10),
       name: "Luca Bianchi",
       role: "COLLABORATORE",
     },
@@ -58,7 +58,7 @@ async function main() {
     update: {},
     create: {
       email: "commerciale@crm.local",
-      password: await bcrypt.hash("Comm123!", 10),
+      password: await bcrypt.hash("CommSecure1234!", 10),
       name: "Giulia Verdi",
       role: "COMMERCIALE",
     },
@@ -251,10 +251,10 @@ async function main() {
 
   console.log("Seed completato (Neon/PostgreSQL).");
   console.log("Utenti demo:");
-  console.log("  admin@crm.local / Admin123!");
-  console.log("  segreteria@crm.local / Segreteria123!");
-  console.log("  collaboratore@crm.local / Collab123!");
-  console.log("  commerciale@crm.local / Comm123!");
+  console.log("  admin@crm.local / AdminSecure123!");
+  console.log("  segreteria@crm.local / SegreteriaSecure1!");
+  console.log("  collaboratore@crm.local / CollabSecure123!");
+  console.log("  commerciale@crm.local / CommSecure1234!");
   console.log(`Admin ID: ${admin.id}`);
 }
 

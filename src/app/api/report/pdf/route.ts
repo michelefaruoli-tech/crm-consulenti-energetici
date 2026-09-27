@@ -1,7 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
@@ -32,7 +32,7 @@ import {
 } from "@/lib/report-filters";
 
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireApiSession();
   if (!session || !hasPermission(session.role, "reports.export")) {
     return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
   }

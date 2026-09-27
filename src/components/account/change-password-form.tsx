@@ -60,7 +60,7 @@ export function ChangePasswordForm() {
           name="newPassword"
           type="password"
           required
-          minLength={8}
+          minLength={12}
           autoComplete="new-password"
           value={newPw}
           onChange={(e) => setNewPw(e.target.value)}
@@ -97,7 +97,7 @@ export function ChangePasswordForm() {
           name="confirmPassword"
           type="password"
           required
-          minLength={8}
+          minLength={12}
           autoComplete="new-password"
         />
       </Field>

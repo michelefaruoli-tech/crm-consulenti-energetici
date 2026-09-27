@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
@@ -20,7 +20,10 @@ export async function GET(
   { params }: { params: Promise<{ itemId: string }> },
 ) {
   const { itemId } = await params;
-  const session = await requireSession();
+  const session = await requireApiSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const item = await prisma.payoutReportItem.findUnique({
     where: { id: itemId },

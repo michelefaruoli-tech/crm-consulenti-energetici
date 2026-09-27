@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { attachmentConfig } from "@/lib/attachment-config";
 import { archiveSupersededPodContracts } from "@/lib/contract-pod-archive";
+import { authorizeCronRequest } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -11,9 +12,7 @@ export const maxDuration = 60;
  * Vercel Cron: Authorization Bearer CRON_SECRET
  */
 export async function GET(request: Request) {
-  const auth = request.headers.get("authorization");
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret || auth !== `Bearer ${secret}`) {
+  if (!authorizeCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

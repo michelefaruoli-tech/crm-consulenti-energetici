@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
@@ -27,7 +27,7 @@ export const maxDuration = 60;
  */
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
+    const session = await requireApiSession();
     if (!session) {
       return NextResponse.json({ success: false, message: "Non autenticato" }, { status: 401 });
     }
