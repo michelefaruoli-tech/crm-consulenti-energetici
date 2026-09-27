@@ -731,6 +731,17 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     console.error("[syncAllRecurringMonths] helios anticipatory cleanup", e);
   }
 
+  // Annuali R: competenze < 2026 → liquidate; 2026+ restano aperte.
+  // Idempotente; non tocca Helios mensili. Fail-soft.
+  try {
+    const { runAnnualPastYearsCleanupAuto } = await import(
+      "@/lib/annual-past-years-cleanup"
+    );
+    await runAnnualPastYearsCleanupAuto();
+  } catch (e) {
+    console.error("[syncAllRecurringMonths] annual past-years cleanup", e);
+  }
+
   const contracts = await prisma.contract.findMany({
     where: {
       isHistorical: false,

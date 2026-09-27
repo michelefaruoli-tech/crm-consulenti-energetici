@@ -42,8 +42,30 @@ export async function GET(request: Request) {
     console.error("[daily-backup] helios anticipatory cleanup", e);
   }
 
+  // Annuali R: competenze < 2026 liquidate; 2026+ aperte. Idempotente.
+  let annualPastYearsCleanup: {
+    monthsLiquidated: number;
+    contractsLiquidated: number;
+    openKept: number;
+    done: boolean;
+  } | null = null;
+  try {
+    const { runAnnualPastYearsCleanupAuto } = await import(
+      "@/lib/annual-past-years-cleanup"
+    );
+    const cleanup = await runAnnualPastYearsCleanupAuto();
+    annualPastYearsCleanup = {
+      monthsLiquidated: cleanup.monthsLiquidated,
+      contractsLiquidated: cleanup.contractsLiquidated,
+      openKept: cleanup.openKept,
+      done: cleanup.done,
+    };
+  } catch (e) {
+    console.error("[daily-backup] annual past-years cleanup", e);
+  }
+
   return NextResponse.json(
-    { ...result, heliosCleanup },
+    { ...result, heliosCleanup, annualPastYearsCleanup },
     {
       status: result.ok || result.skipped ? 200 : 500,
     },

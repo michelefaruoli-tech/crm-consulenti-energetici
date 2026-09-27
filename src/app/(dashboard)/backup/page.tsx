@@ -10,6 +10,7 @@ import { P01ChecklistBanner } from "@/components/backup/p0-1-checklist-banner";
 import { RecurringCleanupPanel } from "@/components/backup/recurring-cleanup-panel";
 import { ProvvigioniBackfillPanel } from "@/components/backup/provvigioni-backfill-panel";
 import { ProvvigioniIntegrityPanel } from "@/components/backup/provvigioni-integrity-panel";
+import { AnnualPastYearsCleanupPanel } from "@/components/backup/annual-past-years-panel";
 
 /** Il controllo integrità legge tutti i contratti ricorrenti: serve più dei 10s di default. */
 export const maxDuration = 60;
@@ -103,6 +104,10 @@ export default async function BackupPage() {
           collaboratorOptions={integrityCollaborators}
           supplierOptions={integritySuppliers}
         />
+      </div>
+
+      <div id="annuali-anni-passati">
+        <AnnualPastYearsCleanupPanel />
       </div>
 
       <div id="fuori-intervallo">
