@@ -18,7 +18,7 @@ Priorità concordate dopo analisi Excel `Rendiconto_Contratti_Database.xlsx`.
 - Mesi di storno configurabili per fornitore (`/fornitori`)
 - Conteggio da **ingresso in fornitura**
 - Colori in **Contratti** e **Provvigioni**: fuori storno (verde), ricorrente (salvia), in scadenza (giallo), in storno/scaduto (rosso), KO/cessato (grigio)
-- Stesso cliente + stesso POD → conta solo il contratto **più recente**
+- Latest UI = stesso cliente + fornitore + POD → contratto **più recente** (≠ archivio POD globale cross-fornitore; D1 2026-09-27)
 - Popup di avviso se si modifica un contratto non fuori storno
 
 ### C. OCR da fattura/documento ✅ (in uso)
