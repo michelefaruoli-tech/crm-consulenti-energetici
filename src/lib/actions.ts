@@ -14,10 +14,11 @@ import {
   normalizeOperationType,
 } from "@/lib/supply-dates";
 import { CONTRACT_STATUS_LABELS } from "@/lib/constants";
-import { writeClientHistoryBatch } from "@/lib/audit";
+import { writeClientHistoryBatch, writeAuditLog } from "@/lib/audit";
 import { canonicalSupplierName } from "@/lib/supplier-merge";
 import { suggestPersonNameOrder } from "@/lib/italian-person-name";
 import { notifyCollaboratorStatusChange } from "@/lib/notify-collaborator-status";
+import { userCanAccessContract } from "@/lib/user-scope";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const { isHoneypotFilled, logSecurityEvent } = await import("@/lib/security-log");
@@ -351,11 +352,29 @@ export async function createContractAction(formData: FormData): Promise<void> {
   redirect(`/contratti/${contract.id}`);
 }
 
+const contractStatusSchema = z.object({
+  contractId: z.string().min(1),
+  status: z.string().min(1),
+  note: z.string().max(2000).optional().nullable(),
+});
+
+const liquidateSchema = z.object({
+  contractId: z.string().min(1),
+  amount: z.coerce.number().finite().positive(),
+});
+
 export async function updateContractStatusAction(formData: FormData): Promise<void> {
   const session = await requireSession();
-  const contractId = String(formData.get("contractId") ?? "");
-  const toStatus = String(formData.get("status") ?? "") as ContractStatus;
-  const note = String(formData.get("note") ?? "") || null;
+  const parsed = contractStatusSchema.safeParse({
+    contractId: String(formData.get("contractId") ?? ""),
+    status: String(formData.get("status") ?? ""),
+    note: String(formData.get("note") ?? "") || null,
+  });
+  if (!parsed.success) {
+    redirect("/contratti?error=dati_non_validi");
+  }
+  const { contractId, note } = parsed.data;
+  const toStatus = parsed.data.status as ContractStatus;
 
   const contract = await prisma.contract.findUnique({ where: { id: contractId } });
   if (!contract || contract.deletedAt) {
@@ -367,6 +386,9 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
     hasPermission(session.role, "contracts.edit_own") &&
     contract.collaboratorId === session.id;
   if (!canChangeAll && !canChangeOwn) {
+    redirect(`/contratti/${contractId}?error=permesso`);
+  }
+  if (!(await userCanAccessContract(session, contract))) {
     redirect(`/contratti/${contractId}?error=permesso`);
   }
 
@@ -400,6 +422,18 @@ export async function updateContractStatusAction(formData: FormData): Promise<vo
         fromStatus: contract.status,
         toStatus,
         changedById: session.id,
+        note,
+      },
+    });
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "STATUS_CHANGE",
+      entity: "Contract",
+      entityId: contractId,
+      details: {
+        from: contract.status,
+        to: toStatus,
         note,
       },
     });
@@ -560,8 +594,25 @@ export async function liquidateCommissionAction(formData: FormData): Promise<voi
     throw new Error("Permesso negato");
   }
 
-  const contractId = String(formData.get("contractId") ?? "");
-  const amount = Number(formData.get("amount") ?? 0);
+  const parsed = liquidateSchema.safeParse({
+    contractId: String(formData.get("contractId") ?? ""),
+    amount: formData.get("amount") ?? 0,
+  });
+  if (!parsed.success) {
+    throw new Error("Dati liquidazione non validi");
+  }
+  const { contractId, amount } = parsed.data;
+
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { id: true, collaboratorId: true, supplierId: true, deletedAt: true },
+  });
+  if (!contract || contract.deletedAt) {
+    throw new Error("Contratto non trovato");
+  }
+  if (!(await userCanAccessContract(session, contract))) {
+    throw new Error("Permesso negato");
+  }
 
   const commission = await prisma.commission.findUnique({ where: { contractId } });
   if (!commission) {
@@ -593,6 +644,13 @@ export async function liquidateCommissionAction(formData: FormData): Promise<voi
       changedById: session.id,
       note: `Liquidata provvigione di € ${amount.toFixed(2)}`,
     },
+  });
+  await writeAuditLog({
+    userId: session.id,
+    action: "LIQUIDATE",
+    entity: "Commission",
+    entityId: contractId,
+    details: { amount, newPaid },
   });
 
   revalidatePath("/provvigioni");
