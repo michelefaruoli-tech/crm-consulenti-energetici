@@ -13,6 +13,8 @@ import {
 import { bulkDeleteContractsAction } from "@/lib/delete-actions";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
+import { StornoBadgesFromSignals } from "@/components/ui/storno-badge";
+import type { StornoKind } from "@/lib/storno-status";
 import { periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
@@ -1143,6 +1145,19 @@ export function ProvvigioniFilterTable({
       sortKind: "text",
       inputClassName:
         "min-w-[11rem] text-[13px] font-semibold tracking-tight text-slate-900",
+      cellExtra: (r) => {
+        const row = r as ProvvigioneRow;
+        return (
+          <StornoBadgesFromSignals
+            className="mt-1"
+            input={{
+              stornoKind: (row.stornoKind as StornoKind) ?? null,
+              isEarlyReswitch: row.isEarlyReswitch === true,
+              isStornato: row.isStornato === true,
+            }}
+          />
+        );
+      },
     },
     {
       key: "podPdr",

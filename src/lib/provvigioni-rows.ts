@@ -542,6 +542,9 @@ function buildSingleRow(
         : stato === "Stornato"
           ? "bg-rose-100 hover:bg-rose-200/80"
           : storno.rowClassName,
+    stornoKind: storno.kind,
+    isEarlyReswitch: opts.earlyMap.get(contract.id) === true,
+    isStornato: stato === "Stornato" || contract.status === "STORNATO",
     warnOnEdit: storno.warnOnEdit,
     missingSupplyStart: storno.missingSupplyStart === true,
     gettoneBorderClass: contract.commissionConfirmed
