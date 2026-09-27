@@ -29,7 +29,7 @@ export type ProvvigioneRow = {
   /** Etichetta tipo operazione (Switch, Voltura, …) */
   operationType: string;
   recurrence: string;
-  /** Stato semplificato: KO / Cessato | Da incassare | Incassato */
+  /** Stato semplificato: KO / Cessato | Da incassare | Incassato da liquidare | Liquidato */
   stato: string;
   paymentStatus: string;
   confirmed: string;
@@ -55,16 +55,17 @@ export type ProvvigioneRow = {
 /**
  * Stato in Provvigioni (UI semplificata).
  *
- * Flusso atteso:
- * 1. Rendiconto fornitore (import Helios, ecc.) → Incassato (collectionDate)
- * 2. Liquidazione collaboratore (Segna pagato) → Pagato (PROVVIGIONE_LIQUIDATA)
- * 3. Storno gettone applicato → Stornato (importo negativo nel Report Incassato)
+ * Ciclo (P1.1 B1) — INCASSATO ≠ LIQUIDATO:
+ * 1. Atteso / da incassare → fornitore non ha ancora pagato
+ * 2. Incassato da liquidare → fornitore ha pagato (collectionDate / rate PAID)
+ * 3. Liquidato → liquidato al collaboratore (PROVVIGIONE_LIQUIDATA / LIQUIDATED)
+ * 4. Storno gettone applicato → Stornato
  *
- * «Da controllare» = contratto inserito ma non ancora contrattualizzato:
- * va tenuto d’occhio e aggiornato appena possibile.
+ * Alias URL/filtro retrocompatibili: `stato=Incassato` ≡ «Incassato da liquidare»,
+ * `stato=Pagato` ≡ «Liquidato» (vedi canonicalizeProvvigioneStato).
  *
- * Se non è ancora in fornitura → sempre «Da incassare»
- * (la data futura è attivazione prevista, non pagamento).
+ * «Da controllare» = contratto inserito ma non ancora contrattualizzato.
+ * Se non è ancora in fornitura → sempre «Da incassare».
  */
 export function simplifiedProvvigioneStato(
   status: string,
@@ -77,20 +78,65 @@ export function simplifiedProvvigioneStato(
   if (status === "STORNATO") return "Stornato";
   if (status === "DA_CONTROLLARE") return "Da controllare";
   if (status === "IN_ATTESA_PAGAMENTO") return "Da incassare";
-  if (status === "PROVVIGIONE_LIQUIDATA") return "Pagato";
-  if (hasCollectionDate) return "Incassato";
+  if (status === "PROVVIGIONE_LIQUIDATA") return "Liquidato";
+  if (hasCollectionDate) return "Incassato da liquidare";
   if (opts?.inFornitura === false) return "Da incassare";
   return "Da incassare";
 }
 
+/** Etichette UI del ciclo (filtri, card, colonna Stato). */
 export const PROVVIGIONE_STATO_OPTIONS = [
   "KO / Cessato",
   "Da controllare",
   "Da incassare",
-  "Incassato",
-  "Pagato",
+  "Incassato da liquidare",
+  "Liquidato",
   "Stornato",
 ] as const;
+
+/**
+ * Chiave canonica usata dai filtri Prisma / report (stabile, senza migrazione DB).
+ * «Incassato» = coda da liquidare; «Pagato» = liquidato al collaboratore.
+ */
+export function canonicalizeProvvigioneStato(raw: string): string {
+  const s = raw.trim();
+  if (!s) return s;
+  if (s === "Incassato da liquidare" || s === "Incassato") return "Incassato";
+  if (s === "Liquidato" || s === "Pagato") return "Pagato";
+  return s;
+}
+
+/** Etichetta UI a partire da chiave canonica o alias URL. */
+export function displayProvvigioneStato(raw: string): string {
+  const c = canonicalizeProvvigioneStato(raw);
+  if (c === "Incassato") return "Incassato da liquidare";
+  if (c === "Pagato") return "Liquidato";
+  return c;
+}
+
+/**
+ * Interpreta etichetta UI (nuova o alias) per marcatura cella/bulk.
+ * Non confondere «Incassato da liquidare» con «Liquidato».
+ */
+export function provvigioneStatoActionKind(
+  label: string,
+): "ko" | "controllare" | "stornato" | "liquidato" | "incassato" | "da-incassare" {
+  const raw = label.trim().toLowerCase();
+  if (/ko|cessat|annull|chius/.test(raw)) return "ko";
+  if (/controll/.test(raw)) return "controllare";
+  if (/^storn/.test(raw)) return "stornato";
+  // Liquidato al collaboratore (alias: Pagato). Esclude «Incassato da liquidare».
+  if (
+    raw === "liquidato" ||
+    raw === "pagato" ||
+    (/liquidat/.test(raw) && !/incass/.test(raw)) ||
+    (/pagat/.test(raw) && !/incass/.test(raw))
+  ) {
+    return "liquidato";
+  }
+  if (/incass/.test(raw) && !/da\s*incass/.test(raw)) return "incassato";
+  return "da-incassare";
+}
 
 /** Opzioni modificabili in tabella Provvigioni (etichette UI). */
 export const PROVVIGIONE_OPERATION_OPTIONS = [
@@ -235,7 +281,7 @@ export function lastRecurringPaidNote(
     .sort((a, b) => a.period.localeCompare(b.period));
   if (paid.length === 0) return "";
   const last = paid[paid.length - 1]!;
-  const tag = last.status === "LIQUIDATED" ? "pagato" : "incassato";
+  const tag = last.status === "LIQUIDATED" ? "liquidato" : "incassato";
   return `ultimo mese ${tag}: ${periodLabel(last.period)}`;
 }
 

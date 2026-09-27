@@ -10,7 +10,11 @@
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { fromZonedTime } from "date-fns-tz";
-import { PROVVIGIONE_STATO_OPTIONS } from "@/lib/provvigioni-stato";
+import {
+  canonicalizeProvvigioneStato,
+  displayProvvigioneStato,
+  PROVVIGIONE_STATO_OPTIONS,
+} from "@/lib/provvigioni-stato";
 import {
   parseFilterList,
   formatFilterList,
@@ -43,6 +47,18 @@ export const REPORT_STATO_OPTIONS = [
   ...PROVVIGIONE_STATO_OPTIONS,
 ] as const;
 
+function isAllowedReportStato(raw: string): boolean {
+  if (raw === "Tutti") return true;
+  const canon = canonicalizeProvvigioneStato(raw);
+  if ((REPORT_STATO_OPTIONS as readonly string[]).includes(raw)) return true;
+  if ((REPORT_STATO_OPTIONS as readonly string[]).includes(displayProvvigioneStato(canon))) {
+    return true;
+  }
+  // Alias URL legacy: Incassato / Pagato
+  return canon === "Incassato" || canon === "Pagato" ||
+    (PROVVIGIONE_STATO_OPTIONS as readonly string[]).includes(canon);
+}
+
 export {
   REPORT_MONTH_LABELS,
   monthToDateRange,
@@ -57,13 +73,19 @@ export {
 
 export { parseFilterList, formatFilterList };
 
-/** Lista stati validi dal query param (senza «Tutti» se ci sono altri). */
+/** Lista stati validi dal query param (senza «Tutti» se ci sono altri).
+ * Canonicalizza alias P1.1: «Incassato da liquidare»→Incassato, «Liquidato»→Pagato.
+ */
 export function resolveReportStati(raw: string | null | undefined): string[] {
   const parts = parseFilterList(raw);
   if (parts.length === 0) return [REPORT_DEFAULT_STATO];
-  const valid = parts.filter(
-    (s) => (REPORT_STATO_OPTIONS as readonly string[]).includes(s),
-  );
+  const valid = [
+    ...new Set(
+      parts.filter(isAllowedReportStato).map((s) =>
+        s === "Tutti" ? "Tutti" : canonicalizeProvvigioneStato(s),
+      ),
+    ),
+  ];
   if (valid.length === 0) return [REPORT_DEFAULT_STATO];
   if (valid.includes("Tutti")) return ["Tutti"];
   return valid;
@@ -306,7 +328,7 @@ export function buildReportContractWhere(
 export function reportStatoHint(stato: string): string {
   const stati = resolveReportStati(stato);
   if (stati.includes("Tutti")) {
-    return "Ogni stato usa il periodo giusto: Incassato/Pagato = mese di incasso, Stornato = mese storno, Da controllare/KO = mese di inserimento. «Da incassare» non ha ancora un mese di incasso: compare sempre, in qualsiasi periodo scelto.";
+    return "Ogni stato usa il periodo giusto: Incassato da liquidare / Liquidato = mese di incasso, Stornato = mese storno, Da controllare/KO = mese di inserimento. «Da incassare» non ha ancora un mese di incasso: compare sempre, in qualsiasi periodo scelto.";
   }
   if (stati.length > 1) {
     return `Multi-selezione: ${stati.join(" + ")}. Il periodo usa la data corretta per ogni stato (incasso / storno / inserimento / sempre per Da incassare).`;
@@ -317,9 +339,9 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Nessun periodo: compare sempre, in qualsiasi mese/intervallo scelto. Non ha ancora un incasso, quindi non ha un «mese di incasso» da filtrare — stesso comportamento di «Tutti i periodi» in Provvigioni.";
     case "Incassato":
-      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Gli storni (clawback) non entrano qui: usa il filtro «Stornato».";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Incassato dal fornitore, ancora da liquidare al collaboratore. Gli storni non entrano qui: usa il filtro «Stornato».";
     case "Pagato":
-      return "Periodo = data di incasso (stesso mese della colonna Incasso). Già liquidati ai collaboratori.";
+      return "Periodo = data di incasso (stesso mese della colonna Incasso). Liquidato al collaboratore.";
     case "Stornato":
       return "Periodo = data storno. Solo importi negativi (da recuperare o già recuperati). Nessun gettone positivo.";
     case "KO / Cessato":

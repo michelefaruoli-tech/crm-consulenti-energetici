@@ -12,6 +12,7 @@ import {
   formatFilterList,
   parseFilterList,
 } from "@/lib/filter-list";
+import { canonicalizeProvvigioneStato } from "@/lib/provvigioni-stato";
 import { notAnnualNextHiddenWhere, toPeriod } from "@/lib/recurring";
 
 export type ProvvigioniFilters = {
@@ -21,7 +22,7 @@ export type ProvvigioniFilters = {
   collab?: string | null;
   /** Nome fornitore (uno o più, separati da |) da ?supplier= */
   supplier?: string | null;
-  /** Stato semplificato: uno o più (es. "Da incassare|Incassato") */
+  /** Stato semplificato: uno o più (es. "Da incassare|Incassato da liquidare") */
   stato?: string | null;
   /** Tipologia: Business | Domestico (anche multi con |) */
   tipologia?: string | null;
@@ -44,7 +45,7 @@ export type ProvvigioniFilters = {
    * valida per ogni riga, quelle per rata/riga unità le usa `provvigioni-rows`.
    */
   columnWhere?: Prisma.ContractWhereInput[] | null;
-  /** Mese competenza YYYY-MM — allinea filtro Incassato/Pagato alle rate mensili */
+  /** Mese competenza YYYY-MM — allinea filtro Incassato/Liquidato alle rate mensili */
   competencePeriod?: string | null;
 };
 
@@ -112,8 +113,13 @@ export {
 /** @deprecated usa FILTER_LIST_SEP */
 export const STATO_FILTER_SEP = FILTER_LIST_SEP;
 
+/**
+ * Parse + alias P1.1 B1:
+ * «Incassato da liquidare» ↔ Incassato (coda), «Liquidato» ↔ Pagato.
+ * URL legacy `stato=Incassato` / `stato=Pagato` restano validi.
+ */
 export function parseStatoFilter(raw: string | null | undefined): string[] {
-  return parseFilterList(raw);
+  return parseFilterList(raw).map(canonicalizeProvvigioneStato);
 }
 
 export function formatStatoFilter(values: string[]): string | null {
@@ -124,11 +130,12 @@ export function formatStatoFilter(values: string[]): string | null {
  * Filtro Prisma per stato semplificato (stessa logica Report + Provvigioni).
  *
  * Accetta un solo stato oppure più stati uniti con `|` (OR).
+ * Alias UI (P1.1 B1): «Incassato da liquidare» → Incassato, «Liquidato» → Pagato.
  *
  * - Da controllare = inserito ma non ancora contrattualizzato (da visionare)
- * - Da incassare = contratto inserito, fornitore non ha ancora pagato a te
- * - Incassato = fornitore ha pagato a te, tu non hai ancora liquidato il collab.
- * - Pagato = tu hai già pagato il collaboratore (PROVVIGIONE_LIQUIDATA)
+ * - Da incassare = atteso: fornitore non ha ancora pagato a te
+ * - Incassato (= Incassato da liquidare) = fornitore ha pagato, da liquidare al collab.
+ * - Pagato (= Liquidato) = già liquidato al collaboratore (PROVVIGIONE_LIQUIDATA)
  * - Stornato = storno gettone applicato (clawback, importo negativo in Report)
  * - KO / Cessato = pratica chiusa (anche se aveva già un incasso storico)
  */
@@ -157,7 +164,7 @@ function provvigioneStatoWhereOne(
   stato: string,
   opts?: ProvvigioneStatoWhereOpts,
 ): Prisma.ContractWhereInput | undefined {
-  const s = stato.trim();
+  const s = canonicalizeProvvigioneStato(stato.trim());
   if (!s || s === "Tutti") return undefined;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -218,7 +225,7 @@ function provvigioneStatoWhereOne(
       "STORNATO",
       ...KO_STATUSES,
     ] as const;
-    /** Solo PAID: LIQUIDATED = già pagato al collaboratore (scheda Pagato). */
+    /** Solo PAID: LIQUIDATED = già liquidato al collaboratore (scheda Liquidato / alias Pagato). */
     const recurringPaid: Prisma.RecurringMonthWhereInput = {
       status: "PAID",
       ...(competence ? { period: competence } : {}),

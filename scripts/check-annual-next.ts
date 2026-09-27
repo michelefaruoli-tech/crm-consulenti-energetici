@@ -244,7 +244,7 @@ const hiddenRows = expandContractsToProvvigioneRows([annualContract()], {
 check(
   "in storno: solo la riga incassata, copia +12 nascosta",
   hiddenRows.map((r) => `${r.stato}:${r.competencePeriod ?? "anno1"}`).join("|"),
-  "Incassato:anno1",
+  "Incassato da liquidare:anno1",
 );
 check(
   "in storno: riga incassata in rosso BLOCCA",
@@ -282,7 +282,7 @@ const visibleRows = expandContractsToProvvigioneRows(
 check(
   "fuori storno: incassata + copia anno successivo",
   visibleRows.map((r) => `${r.stato}:${r.competencePeriod ?? "anno1"}`).join("|"),
-  "Incassato:anno1|Da incassare:2027-05",
+  "Incassato da liquidare:anno1|Da incassare:2027-05",
 );
 
 const copyRow = visibleRows.find((r) => r.competencePeriod === "2027-05");

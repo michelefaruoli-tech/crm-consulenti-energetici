@@ -104,11 +104,17 @@ export function competenceSummaryForStato(
   stato?: string | null,
 ): CompetenceSummaryView {
   const incassato = incassatoCompetenceTotals(stats);
-  const s = stato?.trim();
+  const raw = stato?.trim() ?? "";
+  const s =
+    raw === "Incassato da liquidare" || raw === "Incassato"
+      ? "Incassato"
+      : raw === "Liquidato" || raw === "Pagato"
+        ? "Pagato"
+        : raw;
 
   if (s === "Pagato") {
     return {
-      primaryLabel: "Pagate al collaboratore",
+      primaryLabel: "Liquidato al collaboratore",
       primaryCount: stats.liquidatedCount,
       primaryAmount: stats.liquidatedAmount,
       primaryTone: "indigo",
@@ -120,7 +126,7 @@ export function competenceSummaryForStato(
   }
   if (s === "Incassato") {
     return {
-      primaryLabel: "Incassate dal fornitore",
+      primaryLabel: "Incassato da liquidare",
       primaryCount: incassato.count,
       primaryAmount: incassato.amount,
       primaryTone: "emerald",
