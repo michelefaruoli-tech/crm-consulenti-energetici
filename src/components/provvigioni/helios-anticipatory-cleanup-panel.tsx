@@ -6,10 +6,10 @@ import {
   applyHeliosAnticipatoryAction,
   scanHeliosAnticipatoryAction,
 } from "@/lib/helios-anticipatory-actions";
-import type { HeliosAnticipatoryRow } from "@/lib/helios-anticipatory-cleanup";
+import type { HeliosAnticipatoryRow } from "@/lib/helios-anticipatory-shared";
+import { HELIOS_ANTICIPATORY_APPLY_BATCH } from "@/lib/helios-anticipatory-shared";
 import { RECURRING_STATUS_LABELS } from "@/lib/recurring";
 import { friendlyActionError } from "@/lib/friendly-client-error";
-import { HELIOS_ANTICIPATORY_APPLY_BATCH } from "@/lib/helios-anticipatory-cleanup";
 
 const TABLE_MAX_HEIGHT = "28rem";
 
