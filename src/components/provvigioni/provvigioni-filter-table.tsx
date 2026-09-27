@@ -264,23 +264,25 @@ const BULK_EDITABLE_COLUMNS: Array<{
   },
 ];
 
-/** Colonne principali Provvigioni (spec utente) */
+/** Colonne vista Semplificata (spec utente: solo essenziali + azioni) */
 const SIMPLE_COLUMN_ORDER = [
   "clientName",
   "podPdr",
-  "collaboratorName",
   "supplierName",
-  "operationType",
   "stato",
   "meseRif",
-  "supplyStartDate",
   "collectionMonth",
-  "recurrence",
-  "stornoFlag",
-  "amount",
   "_open",
   "_del",
 ] as const;
+
+/** Etichette più chiare solo in vista Semplificata */
+const SIMPLE_COLUMN_LABELS: Partial<Record<(typeof SIMPLE_COLUMN_ORDER)[number], string>> = {
+  podPdr: "Pod",
+  supplierName: "Fornitore",
+  meseRif: "Mese riferimento",
+  collectionMonth: "Data incasso",
+};
 
 /** Colonne filtrate dal server (oltre a collaboratore, fornitore, stato, tipologia). */
 const SERVER_COLUMN_KEYS = Object.keys(
@@ -1472,10 +1474,10 @@ export function ProvvigioniFilterTable({
             }`}
             title={
               missing
-                ? "Manca data ingresso fornitura — apri scheda"
-                : "Apri scheda cliente / contratto"
+                ? "Manca data ingresso fornitura — vai al contratto"
+                : "Vai al contratto"
             }
-            aria-label="Apri scheda cliente"
+            aria-label="Vai al contratto"
             onClick={(e) => e.stopPropagation()}
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
@@ -1542,30 +1544,21 @@ export function ProvvigioniFilterTable({
       }));
     }
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
-    /** Larghezze minime leggibili; scroll orizzontale se servono tutte le colonne */
+    /** Poche colonne: larghezze leggibili senza affollare l’header filtri */
     const widths: Record<string, string> = {
-      clientName: "w-[11rem] min-w-[11rem]",
-      podPdr: "w-[9rem] min-w-[9rem]",
-      collaboratorName: "w-[7rem] min-w-[7rem]",
-      supplierName: "w-[7.5rem] min-w-[7.5rem]",
-      operationType: "w-[7rem] min-w-[7rem]",
-      stato: "w-[8.5rem] min-w-[8.5rem]",
-      meseRif: "w-[6.5rem] min-w-[6.5rem]",
-      supplyStartDate: "w-[7rem] min-w-[7rem]",
-      collectionMonth: "w-[7.5rem] min-w-[7.5rem]",
-      recurrence: "w-[5.5rem] min-w-[5.5rem]",
-      stornoFlag: "w-[5rem] min-w-[5rem]",
-      amount: "w-[5.5rem] min-w-[5.5rem] text-right",
+      clientName: "w-[14rem] min-w-[12rem]",
+      podPdr: "w-[11rem] min-w-[9rem]",
+      supplierName: "w-[10rem] min-w-[8rem]",
+      stato: "w-[10rem] min-w-[9rem]",
+      meseRif: "w-[8.5rem] min-w-[7.5rem]",
+      collectionMonth: "w-[9rem] min-w-[8rem]",
       _open: "w-[2.75rem] min-w-[2.75rem] text-center",
       _del: "w-[3rem] min-w-[3rem]",
     };
     const inputs: Record<string, string> = {
       clientName:
         "min-w-0 w-full truncate text-[12px] font-semibold tracking-tight text-slate-900",
-      amount: "max-w-full w-full text-right tabular-nums",
       collectionMonth: "max-w-full w-full tabular-nums",
-      supplyStartDate: "max-w-full w-full tabular-nums",
-      notes: "min-w-0 w-full truncate",
       supplierName: "min-w-0 w-full truncate",
     };
     return SIMPLE_COLUMN_ORDER.map((k) => {
@@ -1576,9 +1569,8 @@ export function ProvvigioniFilterTable({
         colClassName: widths[k],
         ...(inputs[k] ? { inputClassName: inputs[k] } : {}),
       };
-      if (k === "collectionMonth") {
-        next.label = "Data incasso";
-      }
+      const simpleLabel = SIMPLE_COLUMN_LABELS[k];
+      if (simpleLabel) next.label = simpleLabel;
       return next;
     }).filter((c): c is FilterColumn => Boolean(c));
   }, [advancedView, allColumns]);
@@ -1863,24 +1855,34 @@ export function ProvvigioniFilterTable({
             </>
           ) : (
             <>
-              Vista <strong>semplificata</strong>: colonne essenziali (Nominativo ·
-              Collab. · Fornitore · date · Stato · Tipo). Scorri in orizzontale se
-              serve. Stato <strong>Da controllare</strong> = inserito
-              ma non ancora contrattualizzato
-              {canDelete ? " · ×" : ""}.{" "}
+              Vista <strong>semplificata</strong>: Nominativo · Pod · Fornitore ·
+              Stato · Mese riferimento · Data incasso · vai al contratto
+              {canDelete ? " · elimina" : ""}. Stato{" "}
+              <strong>Da controllare</strong> = inserito ma non ancora
+              contrattualizzato.{" "}
             </>
           )}
           Colori riga (legenda sotto): 1 da incassare · 2 rosso BLOCCA storno · 3
           verde fuori storno · 4 ciano ricorrente · 5 viola fine storno · 6 arancio
           scadenza 12 mesi.
-          Nominativo, fornitore e date (inizio fornitura e incasso) sono
-          modificabili anche dai collaboratori (bozza gialla → Salva).
-          Icona ↗ in fondo riga = apri scheda cliente/contratto.
-          {advancedView
-            ? " Campo POD rosso = manca ingresso fornitura."
-            : ""}{" "}
-          <strong>Tipo</strong>: UT gettone · M mensile · R annuale (12 mesi).
-          {canDelete ? " × rossa = elimina." : ""}
+          {advancedView ? (
+            <>
+              {" "}
+              Nominativo, fornitore e date (inizio fornitura e incasso) sono
+              modificabili anche dai collaboratori (bozza gialla → Salva).
+              Icona ↗ = vai al contratto. Campo POD rosso = manca ingresso
+              fornitura. <strong>Tipo</strong>: UT gettone · M mensile · R annuale
+              (12 mesi).
+              {canDelete ? " × rossa = elimina." : ""}
+            </>
+          ) : (
+            <>
+              {" "}
+              Nominativo, fornitore e data incasso restano modificabili (bozza
+              gialla → Salva). Icona ↗ = vai al contratto.
+              {canDelete ? " × rossa = elimina." : ""}
+            </>
+          )}
         </p>
         </details>
         <div className="order-1 flex shrink-0 flex-wrap items-center gap-2 md:order-2">
@@ -1926,7 +1928,7 @@ export function ProvvigioniFilterTable({
       </div>
       <ExcelFilterTable
         dense
-        fitWidth={false}
+        fitWidth={!advancedView}
         rows={rows as unknown as Record<string, unknown>[]}
         columns={columns}
         rowKey={(r) => rowId(r)}
