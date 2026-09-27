@@ -346,28 +346,28 @@ export default async function DashboardPage({
             <StatCard
               label="Totale complessivo"
               value={formatCurrency(moneyTotals.complessivo)}
-              hint="Ricevute + da incassare (una tantum/annuali, no mensilità)"
+              hint="Incassato da liquidare + da incassare UT/R (senza rate M)"
             />
           </Link>
-          <Link href="/provvigioni?stato=Incassato">
+          <Link href="/provvigioni?focus=incassato-da-liquidare">
             <StatCard
-              label="Totale ricevute"
+              label="Incassato da liquidare"
               value={formatCurrency(moneyTotals.incassato)}
               tone="success"
-              hint="Provvigioni incassate — tutti i tipi di contratto"
+              hint="Fornitore pagato, collaboratore no — tutti i tipi"
             />
           </Link>
           <Link href="/provvigioni?stato=Da%20incassare">
             <StatCard
-              label="Da incassare"
+              label="Da incassare UT/R"
               value={formatCurrency(moneyTotals.daIncassare)}
               tone="warning"
-              hint="Gettoni una tantum e annuali non incassati (senza le mensilità qui sotto)"
+              hint={`UT ${formatCurrency(moneyTotals.daIncassareUt)} · R ${formatCurrency(moneyTotals.daIncassareR)} — senza rate M (totale separato sotto)`}
             />
           </Link>
-          <Link href="/provvigioni?vista=ricorrente">
+          <Link href="/provvigioni?vista=mensile&stato=Da%20incassare">
             <StatCard
-              label="Ricorrenti mensili"
+              label="Da incassare M"
               value={formatCurrency(moneyTotals.ricorrenti)}
               hint="Rate mensili da incassare — totale separato, non incluso sopra"
             />

@@ -449,7 +449,9 @@ export type ProvvigioniListFocus =
   | "ricorrenze-mancanti"
   | "fuori-storno"
   /** P1.1 B2 — coda operativa: fornitore ha pagato, collaboratore no. */
-  | "incassato-da-liquidare";
+  | "incassato-da-liquidare"
+  /** P1.1 B3 — una tantum (UT) ancora da incassare dal fornitore. */
+  | "ut-da-incassare";
 
 export function parseProvvigioniFocus(
   raw: string | null | undefined,
@@ -458,7 +460,8 @@ export function parseProvvigioniFocus(
     raw === "da-confermare" ||
     raw === "ricorrenze-mancanti" ||
     raw === "fuori-storno" ||
-    raw === "incassato-da-liquidare"
+    raw === "incassato-da-liquidare" ||
+    raw === "ut-da-incassare"
   ) {
     return raw;
   }
@@ -476,8 +479,30 @@ export function isIncassatoDaLiquidareFocus(
 }
 
 /**
- * Stato effettivo per expand/lista: il focus B2 implica «Incassato» se l’URL
- * non ha già un filtro stato (così card e tabella contano le stesse righe).
+ * Focus «UT da incassare» = recurrenceKind UT + stato Da incassare.
+ * Non include M (regola Michele: Da incassare card ≠ Ricorrenti mensili).
+ */
+export function isUtDaIncassareFocus(
+  focus: ProvvigioniListFocus | null | undefined,
+): boolean {
+  return focus === "ut-da-incassare";
+}
+
+/**
+ * Focus che definiscono un bucket finanziario proprio: non vanno AND-ati
+ * sulle altre card summary (altrimenti gli altri totali diventano 0).
+ */
+export function isBucketSpecificFocus(
+  focus: ProvvigioniListFocus | null | undefined,
+): boolean {
+  return (
+    isIncassatoDaLiquidareFocus(focus) || isUtDaIncassareFocus(focus)
+  );
+}
+
+/**
+ * Stato effettivo per expand/lista: il focus B2 implica «Incassato», il focus
+ * B3 implica «Da incassare», se l’URL non ha già un filtro stato.
  */
 export function effectiveStatoForList(
   stato: string | null | undefined,
@@ -486,6 +511,7 @@ export function effectiveStatoForList(
   const trimmed = stato?.trim() || undefined;
   if (trimmed) return trimmed;
   if (isIncassatoDaLiquidareFocus(focus)) return "Incassato";
+  if (isUtDaIncassareFocus(focus)) return "Da incassare";
   return undefined;
 }
 
@@ -516,15 +542,26 @@ export function buildProvvigioniListWhere(
   opts: ProvvigioniListWhereOpts,
 ): Prisma.ContractWhereInput {
   /**
-   * Focus B2: stessa coda di stato=Incassato (mapping su stati esistenti).
-   * Iniettiamo lo stato nei filtri così card, lista ed export condividono
-   * lo stesso where Prisma (conteggio card = conteggio elenco).
+   * Focus B2/B3: mapping su stati/ricorrenza esistenti (zero migration).
+   * Iniettiamo nei filtri così card, lista ed export condividono lo stesso where.
    */
-  const filters =
+  let filters = opts.filters;
+  if (
     opts.focus === "incassato-da-liquidare" &&
-    !parseStatoFilter(opts.filters.stato).includes("Incassato")
-      ? { ...opts.filters, stato: "Incassato" }
-      : opts.filters;
+    !parseStatoFilter(filters.stato).includes("Incassato")
+  ) {
+    filters = { ...filters, stato: "Incassato" };
+  }
+  if (opts.focus === "ut-da-incassare") {
+    filters = {
+      ...filters,
+      stato: parseStatoFilter(filters.stato).includes("Da incassare")
+        ? filters.stato
+        : "Da incassare",
+      /** Solo UT (`nonRecurringWhere`); non M/R. */
+      recurrenceMode: "exclude",
+    };
+  }
 
   let where = buildProvvigioniContractWhere(filters);
 
@@ -548,7 +585,7 @@ export function buildProvvigioniListWhere(
   } else if (opts.focus === "fuori-storno") {
     where = { AND: [where, fuoriStornoWhere()] };
   }
-  // focus=incassato-da-liquidare: già mappato su filters.stato sopra (niente AND extra)
+  // focus=incassato-da-liquidare / ut-da-incassare: già mappati su filters sopra
 
   if (opts.applyCompetenceToList && opts.effectiveCompetence) {
     where = {

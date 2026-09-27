@@ -121,7 +121,7 @@ export async function resolveProvvigioniQuery(
   const q = readParam(sp, "q");
   const vista = parseProvvigioniVista(readParam(sp, "vista"));
   const focus = parseProvvigioniFocus(readParam(sp, "focus"));
-  /** Focus B2 implica stato Incassato se URL senza ?stato= */
+  /** Focus B2 ⇒ Incassato; focus B3 ⇒ Da incassare se URL senza ?stato= */
   const stato = effectiveStatoForList(readParam(sp, "stato"), focus);
   const recurrenceMode = vistaToRecurrenceMode(vista);
 

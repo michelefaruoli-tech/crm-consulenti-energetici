@@ -35,6 +35,7 @@ import {
   buildProvvigioniListWhere,
   effectiveStatoForList,
   isIncassatoDaLiquidareFocus,
+  isUtDaIncassareFocus,
   parseProvvigioniFocus,
   recurringMonthlyWhereOr,
   type ProvvigioniListFocus,
@@ -136,7 +137,7 @@ export default async function ProvvigioniPage({
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
   const focus: ProvvigioniListFocus | undefined = parseProvvigioniFocus(focusRaw);
-  /** Focus B2 → stesso bucket di stato=Incassato per expand e card. */
+  /** Focus B2 → Incassato; focus B3 → Da incassare (per expand e card). */
   const statoEffective = effectiveStatoForList(stato, focus);
   const vistaTab = parseProvvigioniTab(vistaRaw);
   const vista: ProvvigioniVista = parseProvvigioniVista(vistaRaw);
@@ -813,7 +814,9 @@ export default async function ProvvigioniPage({
       ? `stato ${stato.split("|").join(" + ")}`
       : isIncassatoDaLiquidareFocus(focus)
         ? "Incassato da liquidare"
-        : null,
+        : isUtDaIncassareFocus(focus)
+          ? "Una tantum da incassare"
+          : null,
     effectiveCompetence && !competenceAll
       ? `competenza ${periodLabel(effectiveCompetence)}`
       : competenceAll
@@ -897,7 +900,9 @@ export default async function ProvvigioniPage({
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
             {isIncassatoDaLiquidareFocus(focus)
               ? "Provvigioni · Incassato da liquidare"
-              : vistaTab === "mensile"
+              : isUtDaIncassareFocus(focus)
+                ? "Provvigioni · Una tantum da incassare"
+                : vistaTab === "mensile"
                 ? "Provvigioni · Ricorrenti mensili (M)"
                 : vistaTab === "annuale"
                   ? "Provvigioni · Ricorrenti annuali (R)"
@@ -978,6 +983,7 @@ export default async function ProvvigioniPage({
         contractCount={total}
         activeFocus={focus}
         activeStato={statoEffective}
+        activeVista={vistaTab}
       />
 
       {showToLiquidatePanel ? (
