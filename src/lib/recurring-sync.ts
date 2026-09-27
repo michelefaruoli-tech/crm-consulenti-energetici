@@ -114,6 +114,7 @@ async function closeDisposableOutOfWindowMonths(
 /**
  * Il mese di competenza è ammesso per questo contratto?
  * Guardia da usare prima di creare una rata da azioni manuali o import.
+ * Helios: blocca anche competenze oltre lastPayable (lag M+2).
  */
 export async function isPeriodAllowedForContract(
   contractId: string,
@@ -127,6 +128,7 @@ export async function isPeriodAllowedForContract(
       operationType: true,
       status: true,
       expiryDate: true,
+      supplier: { select: { name: true } },
       statusHistory: {
         where: { toStatus: "CHIUSO" },
         select: { changedAt: true },
@@ -136,7 +138,16 @@ export async function isPeriodAllowedForContract(
     },
   });
   if (!contract) return false;
-  return isPeriodInRecurringWindow(recurringWindow(contract), period);
+  if (!isPeriodInRecurringWindow(recurringWindow(contract), period)) {
+    return false;
+  }
+  if (
+    isHeliosSupplier(contract.supplier?.name) &&
+    isHeliosCompetenceNotYetPayable(period)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
