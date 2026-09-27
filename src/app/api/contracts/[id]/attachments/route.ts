@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getMasterEmail, sendMail, textToHtmlParagraphs } from "@/lib/mail";
@@ -120,7 +120,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getSession();
+    const session = await requireApiSession();
     if (!session) {
       return NextResponse.json({ success: false, message: "Non autenticato" }, { status: 401 });
     }
@@ -271,7 +271,7 @@ export async function PUT(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const session = await getSession();
+    const session = await requireApiSession();
     if (!session) {
       return NextResponse.json({ success: false, message: "Non autenticato" }, { status: 401 });
     }

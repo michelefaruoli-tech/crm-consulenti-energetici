@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
@@ -10,7 +10,7 @@ import { formatMonthYear } from "@/lib/date-parse";
 import { periodLabel } from "@/lib/recurring";
 
 export async function GET(request: Request) {
-  const session = await getSession();
+  const session = await requireApiSession();
   if (!session || !hasPermission(session.role, "reports.export")) {
     return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { searchTermVariants } from "@/lib/list-search";
@@ -169,7 +169,7 @@ function clientLabel(c: {
 }
 
 export async function GET(request: Request) {
-  const session = await getSession();
+  const session = await requireApiSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
