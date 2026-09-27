@@ -1,25 +1,17 @@
 import Link from "next/link";
+import {
+  buildVistaTabHref,
+  type ProvvigioniVistaTab,
+} from "@/lib/provvigioni-vista-tabs";
 
-/** Schede principali Provvigioni (3 tab). */
-export type ProvvigioniVistaTab = "tutti" | "mensile" | "annuale";
+export type { ProvvigioniVistaTab };
+export { buildVistaTabHref };
 
 type TabCounts = {
   tutti: number;
   mensile: number;
   annuale: number;
 };
-
-function buildHref(
-  vista: ProvvigioniVistaTab,
-  base: Record<string, string | undefined>,
-): string {
-  const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(base)) {
-    if (v) params.set(k, v);
-  }
-  if (vista !== "tutti") params.set("vista", vista);
-  return `/provvigioni?${params.toString()}`;
-}
 
 export function ProvvigioniVistaTabs({
   active,
@@ -71,7 +63,7 @@ export function ProvvigioniVistaTabs({
         return (
           <Link
             key={tab.id}
-            href={buildHref(tab.id, queryBase)}
+            href={buildVistaTabHref(tab.id, queryBase)}
             className={`rounded-xl border px-4 py-3 shadow-sm transition ${
               isActive ? tab.activeClass : tab.idleClass
             }`}
