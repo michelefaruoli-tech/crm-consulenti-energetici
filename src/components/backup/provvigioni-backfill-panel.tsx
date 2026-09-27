@@ -8,6 +8,7 @@ import {
 } from "@/lib/recurring-backfill-actions";
 import type { MissingProvvigioneRow } from "@/lib/recurring-backfill";
 import { friendlyActionError } from "@/lib/friendly-client-error";
+import { periodLabel } from "@/lib/recurring";
 
 type Preview = {
   findings: MissingProvvigioneRow[];
@@ -103,6 +104,14 @@ export function ProvvigioniBackfillPanel() {
   }
 
   const busy = phase !== "idle";
+  const annualFindings =
+    preview?.findings.filter((f) => f.recurrenceKind === "R") ?? [];
+  const monthlyFindings =
+    preview?.findings.filter((f) => f.recurrenceKind === "M") ?? [];
+  const annualPeriods = annualFindings.reduce(
+    (n, f) => n + f.missingPeriods.length,
+    0,
+  );
 
   return (
     <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
@@ -112,10 +121,11 @@ export function ProvvigioniBackfillPanel() {
       <p className="mb-4 text-sm text-slate-600">
         Trova i contratti ricorrenti (mensili o annuali, qualsiasi fornitore)
         già salvati che non hanno ancora la riga in Provvigioni e la crea come{" "}
-        <strong>Da incassare</strong>. Rispetta sempre la finestra di fornitura
-        e il ritardo Helios (2 mesi): non crea nulla fuori regola. Non tocca mai
-        una rata già presente — Incassato, Pagato o storno restano come li hai
-        impostati tu.
+        <strong>Da incassare</strong> (mai liquidata in automatico). Rispetta
+        sempre la finestra di fornitura e il ritardo Helios M+2: a settembre non
+        crea agosto né settembre; agosto solo a ottobre. Le annuali solo al 13°
+        mese. Non tocca mai una rata già presente — Incassato, Pagato o storno
+        restano come li hai impostati tu.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -147,7 +157,7 @@ export function ProvvigioniBackfillPanel() {
 
       {preview ? (
         <div className="mt-4 space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat value={preview.scannedContracts} label="Contratti ricorrenti esaminati" />
             <Stat
               value={preview.missingContractsCount}
@@ -155,8 +165,13 @@ export function ProvvigioniBackfillPanel() {
               tone="text-violet-700"
             />
             <Stat
-              value={preview.missingPeriodsCount}
-              label="Rate da creare"
+              value={monthlyFindings.length}
+              label={`Mensili (${preview.missingPeriodsCount - annualPeriods} rate)`}
+              tone="text-slate-900"
+            />
+            <Stat
+              value={annualFindings.length}
+              label={`Annuali da rivedere (${annualPeriods} rate)`}
               tone="text-violet-700"
             />
           </div>
@@ -169,7 +184,8 @@ export function ProvvigioniBackfillPanel() {
           ) : (
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">
-                Contratti che riceveranno la rata «Da incassare»
+                Contratti che riceveranno la rata «Da incassare» (mese rif. =
+                competenza)
               </h3>
               <div className="max-h-[28rem] overflow-auto">
                 <table className="w-full min-w-[720px] text-left text-sm text-slate-700">
@@ -178,7 +194,7 @@ export function ProvvigioniBackfillPanel() {
                       <th className="px-2 py-2">Contratto</th>
                       <th className="px-2 py-2">Collaboratore</th>
                       <th className="px-2 py-2">Tipo</th>
-                      <th className="px-2 py-2">Mesi mancanti</th>
+                      <th className="px-2 py-2">Mesi rif. mancanti</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -193,7 +209,9 @@ export function ProvvigioniBackfillPanel() {
                           {f.recurrenceKind === "R" ? "Annuale" : "Mensile"}
                         </td>
                         <td className="px-2 py-2 align-top text-xs">
-                          {f.missingPeriods.join(", ")}
+                          {f.missingPeriods
+                            .map((p) => `${periodLabel(p)} (${p})`)
+                            .join(", ")}
                         </td>
                       </tr>
                     ))}

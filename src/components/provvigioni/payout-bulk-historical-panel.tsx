@@ -31,6 +31,7 @@ export function PayoutBulkHistoricalPanel() {
   const router = useRouter();
   const [pending, start] = useTransition();
 
+  /** Predefinito LIQUIDATO = Pagato al collaboratore (implica anche incasso fornitore). */
   const [markMode, setMarkMode] = useState<"INCASSATO" | "LIQUIDATO">(
     "LIQUIDATO",
   );
@@ -156,6 +157,13 @@ export function PayoutBulkHistoricalPanel() {
         anteprima ma non bloccate.
       </div>
 
+      <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+        <strong>Mese riferimento</strong> = competenza sulla riga (
+        <code className="text-xs">period</code>
+        ), non il mese di bonifico. Lag M+2: a settembre non si creano agosto né
+        settembre; agosto solo a ottobre, settembre solo a novembre.
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Field label="Stato da applicare">
@@ -168,15 +176,15 @@ export function PayoutBulkHistoricalPanel() {
               }}
             >
               <option value="LIQUIDATO">
-                Liquidato al collaboratore (predefinito)
+                Pagate + liquidate (predefinito)
               </option>
-              <option value="INCASSATO">Incassato dal fornitore</option>
+              <option value="INCASSATO">Solo incassato dal fornitore</option>
             </Select>
           </Field>
           <p className="mt-1 text-xs text-slate-500">
             {markMode === "LIQUIDATO"
-              ? "Liquidato = hai pagato il collaboratore (Pagato, PROVVIGIONE_LIQUIDATA)."
-              : "Incassato = il fornitore ha pagato l'agenzia (Incassato, PAGATO_DAL_FORNITORE)."}
+              ? "Segna la rata LIQUIDATED (Pagato): fornitore già pagato e collaboratore liquidato."
+              : "Segna solo PAID (Incassato): fornitore pagato, collaboratore non ancora liquidato."}
           </p>
         </div>
 
@@ -205,8 +213,9 @@ export function PayoutBulkHistoricalPanel() {
       </div>
 
       <p className="text-sm text-slate-600">
-        Fornitore: <strong>Helios</strong> · Mesi fino a{" "}
-        <strong>{periodLabel(BULK_HISTORICAL_PERIOD_LIMIT)}</strong> compreso
+        Fornitore: <strong>Helios</strong> · Competenze (mese rif.) fino a{" "}
+        <strong>{periodLabel(BULK_HISTORICAL_PERIOD_LIMIT)}</strong> compreso.
+        Agosto e mesi successivi restano fuori da questa marcatura.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -301,13 +310,13 @@ export function PayoutBulkHistoricalPanel() {
           {preview.byMonth.length > 0 ? (
             <div>
               <h3 className="mb-2 text-sm font-semibold text-slate-800">
-                Per mese
+                Per mese di riferimento (competenza)
               </h3>
               <div className="max-h-40 overflow-auto rounded border border-slate-200 bg-white">
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                     <tr>
-                      <th className="px-3 py-2">Mese</th>
+                      <th className="px-3 py-2">Mese rif.</th>
                       <th className="px-3 py-2">Rate</th>
                       <th className="px-3 py-2">Totale</th>
                     </tr>
@@ -316,7 +325,10 @@ export function PayoutBulkHistoricalPanel() {
                     {preview.byMonth.map((row) => (
                       <tr key={row.period} className="border-t">
                         <td className="px-3 py-1.5">
-                          {periodLabel(row.period)}
+                          {periodLabel(row.period)}{" "}
+                          <span className="text-xs text-slate-400">
+                            ({row.period})
+                          </span>
                         </td>
                         <td className="px-3 py-1.5">{row.rateCount}</td>
                         <td className="px-3 py-1.5">

@@ -181,14 +181,19 @@ check(
   "2026-07",
 );
 check(
-  "ottobre 2026, lag 2 → agosto",
+  "ottobre 2026, lag 2 → agosto (riga agosto solo a ottobre)",
   lastGeneratedPeriod(heliosWindow, new Date(2026, 9, 10), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
   "2026-08",
 );
 check(
-  "novembre 2026, lag 2 → settembre",
+  "novembre 2026, lag 2 → settembre (riga settembre solo a novembre)",
   lastGeneratedPeriod(heliosWindow, new Date(2026, 10, 5), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
   "2026-09",
+);
+check(
+  "a settembre 2026 non generare ancora agosto",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), HELIOS_RECURRING_GENERATION_LAG_MONTHS) < "2026-08",
+  true,
 );
 check(
   "senza lag → mese corrente",

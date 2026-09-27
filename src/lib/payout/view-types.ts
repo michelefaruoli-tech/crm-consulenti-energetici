@@ -99,7 +99,8 @@ export type PayoutBatchProgress = {
 export type BulkHistoricalExclusionMode = "TOTAL" | "ACTIVE_ONLY";
 export type BulkHistoricalMarkMode = "INCASSATO" | "LIQUIDATO";
 
-export const BULK_HISTORICAL_PERIOD_LIMIT = "2026-06";
+/** Punto finale Michele: rate Helios competenza fino a luglio 2026 incluse. */
+export const BULK_HISTORICAL_PERIOD_LIMIT = "2026-07";
 
 export type BulkHistoricalPreviewResult = {
   ok: true;

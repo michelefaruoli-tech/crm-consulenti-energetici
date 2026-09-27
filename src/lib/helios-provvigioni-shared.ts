@@ -109,6 +109,7 @@ export function pickHeliosContractForPeriod<T extends HeliosContractPeriodMatch>
 export type HeliosImportRowStatus =
   | "will_pay" /** da segnare incassato (fornitore) */
   | "already_paid" /** già incassato */
+  | "not_yet_payable" /** competenza oltre M+2: crea solo nel mese di pagamento */
   | "not_found"
   | "ambiguous";
 
@@ -116,6 +117,7 @@ export type HeliosImportRowStatus =
 export const HELIOS_IMPORT_STATUS_LABEL: Record<HeliosImportRowStatus, string> = {
   will_pay: "Da segnare incassato",
   already_paid: "Già incassato",
+  not_yet_payable: "Competenza non ancora pagabile (lag M+2)",
   not_found: "POD non in CRM",
   ambiguous: "Più contratti",
 };
@@ -149,6 +151,7 @@ export type HeliosImportPreviewResult = {
     total: number;
     willPay: number;
     alreadyPaid: number;
+    notYetPayable: number;
     notFound: number;
     ambiguous: number;
     podsToUpdate: number;
