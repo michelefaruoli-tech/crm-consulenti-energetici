@@ -16,6 +16,16 @@ import {
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
 import {
+  andStornoStatusWhere,
+  buildStornoStatusWhere,
+  formatStornoStatusFilters,
+  loadDoppiaPosizioneContractIds,
+  mergeLegacyFuoriStornoFocus,
+  parseStornoStatusFilters,
+  stornoFilterAllowsHistorical,
+  stornoFilterNeedsDoppiaIds,
+} from "@/lib/storno-filters";
+import {
   parseProvvigioniVista,
   vistaToRecurrenceMode,
   type ProvvigioniVista,
@@ -74,6 +84,8 @@ export type ResolvedProvvigioniQuery = {
   q?: string;
   vista: ProvvigioniVista;
   focus?: ProvvigioniListFocus;
+  /** P1.2 B4 — filtri storno normalizzati per URL/export */
+  storno?: string;
   settledPeriod: string;
   effectiveCompetence?: string;
   applyCompetenceToList: boolean;
@@ -120,16 +132,29 @@ export async function resolveProvvigioniQuery(
   const tipologia = readParam(sp, "tipologia");
   const q = readParam(sp, "q");
   const vista = parseProvvigioniVista(readParam(sp, "vista"));
-  const focus = parseProvvigioniFocus(readParam(sp, "focus"));
+  const focusRaw = readParam(sp, "focus");
+  const stornoIds = mergeLegacyFuoriStornoFocus(
+    parseStornoStatusFilters(readParam(sp, "storno")),
+    focusRaw,
+  );
+  const stornoParam = formatStornoStatusFilters(stornoIds) ?? undefined;
+  const focusParsed = parseProvvigioniFocus(focusRaw);
+  /** Legacy fuori-storno → gestito da `storno=` (B4). */
+  const focus =
+    focusParsed === "fuori-storno" ? undefined : focusParsed;
   /** Focus B2 ⇒ Incassato; focus B3 ⇒ Da incassare se URL senza ?stato= */
-  const stato = effectiveStatoForList(readParam(sp, "stato"), focus);
+  const stato = effectiveStatoForList(
+    readParam(sp, "stato"),
+    focus ?? focusParsed,
+  );
   const recurrenceMode = vistaToRecurrenceMode(vista);
+  const now = new Date();
 
   const settledRaw = readParam(sp, "settled");
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw)
       ? settledRaw
-      : toPeriod(new Date());
+      : toPeriod(now);
 
   const competenceRaw = readParam(sp, "competence");
   const showCompetencePanel = vista === "mensile" || vista === "annuale";
@@ -168,24 +193,43 @@ export async function resolveProvvigioniQuery(
     excludeUnitRows: columnWhereParts.excludeUnitRows,
   };
 
-  const contractWhere = buildProvvigioniListWhere({
-    filters: {
-      canViewAll: canViewAll || isScoped,
-      sessionUserId: session.id,
-      collab: collabFilter,
-      supplier,
-      stato,
-      tipologia,
-      q,
-      recurrenceMode,
-      visibility,
-      columnWhere: columnWhereParts.contract,
-      competencePeriod: effectiveCompetence,
-    },
-    focus,
-    effectiveCompetence,
-    applyCompetenceToList,
-  });
+  const doppiaIds = stornoFilterNeedsDoppiaIds(stornoIds)
+    ? await loadDoppiaPosizioneContractIds(prisma, {
+        deletedAt: null,
+        ...visibility,
+        ...(collabFilter
+          ? {
+              collaboratorId: collabFilter.includes("|")
+                ? { in: collabFilter.split("|").filter(Boolean) }
+                : collabFilter,
+            }
+          : {}),
+      })
+    : undefined;
+  const stornoWhere = buildStornoStatusWhere(stornoIds, { now, doppiaIds });
+
+  const contractWhere = andStornoStatusWhere(
+    buildProvvigioniListWhere({
+      filters: {
+        canViewAll: canViewAll || isScoped,
+        sessionUserId: session.id,
+        collab: collabFilter,
+        supplier,
+        stato,
+        tipologia,
+        q,
+        recurrenceMode,
+        visibility,
+        columnWhere: columnWhereParts.contract,
+        competencePeriod: effectiveCompetence,
+        includeHistorical: stornoFilterAllowsHistorical(stornoIds),
+      },
+      focus,
+      effectiveCompetence,
+      applyCompetenceToList,
+    }),
+    stornoWhere,
+  );
 
   return {
     canViewAll,
@@ -197,6 +241,7 @@ export async function resolveProvvigioniQuery(
     q,
     vista,
     focus,
+    storno: stornoParam,
     settledPeriod,
     effectiveCompetence,
     applyCompetenceToList,

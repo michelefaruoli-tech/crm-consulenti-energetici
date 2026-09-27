@@ -402,6 +402,7 @@ export function ProvvigioniFilterTable({
     q?: string | null;
     vista?: string | null;
     focus?: string | null;
+    storno?: string | null;
     competence?: string | null;
   } & Partial<Record<string, string | null | undefined>>;
   serverSortKey?: string | null;
@@ -497,6 +498,7 @@ export function ProvvigioniFilterTable({
     listQuery?.q ?? "",
     listQuery?.vista ?? "tutti",
     listQuery?.focus ?? "",
+    listQuery?.storno ?? "",
     listQuery?.competence ?? "",
     String(page),
     serverSortKey ?? "",
@@ -516,6 +518,7 @@ export function ProvvigioniFilterTable({
       listQuery?.tipologia ||
       listQuery?.q ||
       listQuery?.focus ||
+      listQuery?.storno ||
       listQuery?.competence ||
       hasColumnFilterInUrl,
   );
@@ -560,6 +563,7 @@ export function ProvvigioniFilterTable({
       q: listQuery?.q,
       vista: listQuery?.vista,
       focus: listQuery?.focus,
+      storno: listQuery?.storno,
       competence: listQuery?.competence,
       sort: serverSortKey === "client" ? "client" : undefined,
       dir: serverSortKey === "client" ? serverSortDir : undefined,
@@ -1912,17 +1916,38 @@ export function ProvvigioniFilterTable({
             type="button"
             disabled={pending}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+              (listQuery?.storno ?? "")
+                .split("|")
+                .map((s) => s.trim())
+                .includes("fuori_storno") ||
               listQuery?.focus === "fuori-storno"
                 ? "bg-emerald-700 text-white hover:bg-emerald-800"
                 : "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300 hover:bg-emerald-200"
             }`}
-            title="Mostra solo contratti con periodo storno già scaduto"
+            title="Mostra solo contratti con periodo storno già scaduto (filtro storno URL)"
             onClick={() => {
               if (!confirmLeaveDrafts()) return;
-              const nextFocus =
-                listQuery?.focus === "fuori-storno" ? undefined : "fuori-storno";
+              const parts = String(listQuery?.storno ?? "")
+                .split("|")
+                .map((s) => s.trim())
+                .filter(Boolean);
+              const active =
+                parts.includes("fuori_storno") ||
+                listQuery?.focus === "fuori-storno";
+              const nextParts = active
+                ? parts.filter((p) => p !== "fuori_storno")
+                : [...parts.filter((p) => p !== "fuori_storno"), "fuori_storno"];
               router.push(
-                buildPageHref("/provvigioni", baseQuery({ focus: nextFocus })),
+                buildPageHref(
+                  "/provvigioni",
+                  baseQuery({
+                    storno: nextParts.length ? nextParts.join("|") : null,
+                    focus:
+                      listQuery?.focus === "fuori-storno"
+                        ? null
+                        : listQuery?.focus,
+                  }),
+                ),
               );
             }}
           >

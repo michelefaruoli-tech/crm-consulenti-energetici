@@ -41,6 +41,18 @@ import {
   recurringMonthlyWhereOr,
   type ProvvigioniListFocus,
 } from "@/lib/provvigioni-filters";
+import {
+  andStornoStatusWhere,
+  buildStornoStatusWhere,
+  formatStornoStatusFilters,
+  loadDoppiaPosizioneContractIds,
+  mergeLegacyFuoriStornoFocus,
+  parseStornoStatusFilters,
+  stornoFilterAllowsHistorical,
+  stornoFilterHintLabels,
+  stornoFilterNeedsDoppiaIds,
+} from "@/lib/storno-filters";
+import { StornoStatusFilters } from "@/components/ui/storno-status-filters";
 import { buildProvvigioniAnomaliesOverview } from "@/lib/provvigioni-anomalies";
 import {
   buildColumnFilterWhere,
@@ -98,6 +110,8 @@ type SearchParams = {
   vista?: string;
   /** Accesso rapido dalla Dashboard */
   focus?: string;
+  /** P1.2 B4 — filtri stato storno (`in_storno|storico|…`) */
+  storno?: string;
   /** Mese di competenza YYYY-MM delle ricorrenze */
   competence?: string;
   /** Filtri di colonna (agenzia, tipo op., mese rif., gettone…): vedi provvigioni-column-filters */
@@ -123,12 +137,14 @@ export default async function ProvvigioniPage({
     q: qRaw,
     vista: vistaRaw,
     focus: focusRaw,
+    storno: stornoRaw,
     competence: competenceRaw,
   } = rawSearchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
   const canExport = hasPermission(session.role, "reports.export");
   const isScoped = hasPermission(session.role, "contracts.work_scoped");
+  const stornoNow = new Date();
 
   const { contractVisibilityWhere, loadVisibleCollaboratorOptions, panelContractScopeWhere } =
     await import("@/lib/user-scope");
@@ -138,11 +154,24 @@ export default async function ProvvigioniPage({
   const stato = statoRaw?.trim() || undefined;
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
+  const stornoIds = mergeLegacyFuoriStornoFocus(
+    parseStornoStatusFilters(
+      typeof stornoRaw === "string" ? stornoRaw : Array.isArray(stornoRaw) ? stornoRaw[0] : undefined,
+    ),
+    typeof focusRaw === "string" ? focusRaw : Array.isArray(focusRaw) ? focusRaw[0] : undefined,
+  );
+  const stornoParam = formatStornoStatusFilters(stornoIds) ?? undefined;
   /** B8: focus esplicito oppure promozione legacy `stato=Incassato` → coda. */
-  const focus: ProvvigioniListFocus | undefined = resolveProvvigioniFocusFromQuery({
+  const focusResolved: ProvvigioniListFocus | undefined = resolveProvvigioniFocusFromQuery({
     focus: focusRaw,
     stato: statoRaw,
   });
+  /**
+   * `focus=fuori-storno` legacy è gestito dai filtri `storno=` (B4):
+   * non ri-applicarlo in buildProvvigioniListWhere.
+   */
+  const focus: ProvvigioniListFocus | undefined =
+    focusResolved === "fuori-storno" ? undefined : focusResolved;
   /** Focus B2 → Incassato; focus B3 → Da incassare (per expand e card). */
   const statoEffective = effectiveStatoForList(stato, focus);
   const vistaTab = parseProvvigioniTab(vistaRaw);
@@ -225,6 +254,7 @@ export default async function ProvvigioniPage({
     recurrenceMode,
     visibility,
     columnWhere: columnWhereParts.contract,
+    includeHistorical: stornoFilterAllowsHistorical(stornoIds),
   };
 
   const listFilters = {
@@ -239,30 +269,52 @@ export default async function ProvvigioniPage({
     applyCompetenceToList,
   };
 
-  const contractWhere = buildProvvigioniListWhere({
-    filters: listFilters,
-    ...listWhereOpts,
-  });
+  const doppiaIds = stornoFilterNeedsDoppiaIds(stornoIds)
+    ? await loadDoppiaPosizioneContractIds(prisma, {
+        deletedAt: null,
+        ...visibility,
+        ...(collabFilter
+          ? {
+              collaboratorId: collabFilter.includes("|")
+                ? { in: collabFilter.split("|").filter(Boolean) }
+                : collabFilter,
+            }
+          : {}),
+      })
+    : undefined;
+  const stornoWhere = buildStornoStatusWhere(stornoIds, { now: stornoNow, doppiaIds });
+
+  const contractWhere = andStornoStatusWhere(
+    buildProvvigioniListWhere({
+      filters: listFilters,
+      ...listWhereOpts,
+    }),
+    stornoWhere,
+  );
 
   const activeRecurringPeriod = addMonths(toPeriod(new Date()), -1);
   const activeRecurringWhere = activeRecurringContractWhere();
-  let collaboratorCountsWhere: Prisma.ContractWhereInput = buildProvvigioniListWhere({
-    filters: {
-      canViewAll: canViewAll || isScoped,
-      sessionUserId: session.id,
-      supplier,
-      stato,
-      tipologia,
-      q,
-      recurrenceMode,
-      visibility,
-      columnWhere: columnWhereParts.contract,
-      competencePeriod: effectiveCompetence,
-    },
-    focus,
-    effectiveCompetence,
-    applyCompetenceToList,
-  });
+  let collaboratorCountsWhere: Prisma.ContractWhereInput = andStornoStatusWhere(
+    buildProvvigioniListWhere({
+      filters: {
+        canViewAll: canViewAll || isScoped,
+        sessionUserId: session.id,
+        supplier,
+        stato,
+        tipologia,
+        q,
+        recurrenceMode,
+        visibility,
+        columnWhere: columnWhereParts.contract,
+        competencePeriod: effectiveCompetence,
+        includeHistorical: stornoFilterAllowsHistorical(stornoIds),
+      },
+      focus,
+      effectiveCompetence,
+      applyCompetenceToList,
+    }),
+    stornoWhere,
+  );
   if (vista === "mensile" || vista === "annuale") {
     collaboratorCountsWhere = {
       AND: [collaboratorCountsWhere, activeRecurringWhere],
@@ -285,6 +337,7 @@ export default async function ProvvigioniPage({
     q,
     visibility,
     columnWhere: columnWhereParts.contract,
+    includeHistorical: stornoFilterAllowsHistorical(stornoIds),
   };
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
@@ -841,6 +894,7 @@ export default async function ProvvigioniPage({
     q,
     vista: vistaTab === "tutti" ? undefined : vistaTab,
     focus,
+    storno: stornoParam,
     competence: competenceQueryValue,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
@@ -852,8 +906,10 @@ export default async function ProvvigioniPage({
     ...(tipologia ? { tipologia } : {}),
     ...(q ? { q } : {}),
     ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
+    ...(stornoParam ? { storno: stornoParam } : {}),
     focus: "anomalie",
   }).toString()}`;
+  const stornoHint = stornoFilterHintLabels(stornoIds);
   const filterHints = [
     selectedCollabName ? `collab. ${selectedCollabName}` : null,
     supplier ? `fornitore ${supplier.split("|").join(" + ")}` : null,
@@ -875,7 +931,7 @@ export default async function ProvvigioniPage({
     q ? `cerca «${q}»` : null,
     focus === "da-confermare" ? "solo provvigioni da confermare" : null,
     focus === "ricorrenze-mancanti" ? "solo ricorrenze mancanti" : null,
-    focus === "fuori-storno" ? "solo fuori storno" : null,
+    stornoHint ? `storno ${stornoHint}` : null,
     vistaTab === "mensile"
       ? "scheda M (mensile)"
       : vistaTab === "annuale"
@@ -891,6 +947,7 @@ export default async function ProvvigioniPage({
   if (q) exportParams.set("q", q);
   if (vistaTab !== "tutti") exportParams.set("vista", vistaTab);
   if (focus) exportParams.set("focus", focus);
+  if (stornoParam) exportParams.set("storno", stornoParam);
   if (competenceQueryValue) exportParams.set("competence", competenceQueryValue);
   // L'export scarica esattamente le righe filtrate a schermo, filtri di colonna inclusi.
   for (const [param, value] of Object.entries(columnFiltersToQuery(columnFilters))) {
@@ -907,6 +964,7 @@ export default async function ProvvigioniPage({
       ...(tipologia ? { tipologia } : {}),
       ...(q ? { q } : {}),
       ...(focus ? { focus } : {}),
+      ...(stornoParam ? { storno: stornoParam } : {}),
       ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
       ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
@@ -923,6 +981,7 @@ export default async function ProvvigioniPage({
     tipologia,
     q,
     focus,
+    storno: stornoParam,
     stato,
     ...(vistaTab !== "tutti" ? { vista: vistaTab } : {}),
     ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
@@ -1015,6 +1074,24 @@ export default async function ProvvigioniPage({
           annuale: countAnnuali,
         }}
         queryBase={tabQueryBase}
+      />
+
+      <StornoStatusFilters
+        path="/provvigioni"
+        selected={stornoIds}
+        queryBase={{
+          settled: settledPeriod,
+          collab: collabFilter,
+          supplier,
+          stato,
+          tipologia,
+          q,
+          vista: vistaTab === "tutti" ? undefined : vistaTab,
+          focus,
+          competence: competenceQueryValue,
+          sort: sortByClient ? "client" : undefined,
+          dir: sortByClient ? sortDir : undefined,
+        }}
       />
 
       <ProvvigioniToolbar
@@ -1114,6 +1191,7 @@ export default async function ProvvigioniPage({
           q,
           vista: vistaTab === "tutti" ? undefined : vistaTab,
           focus,
+          storno: stornoParam,
           competence: competenceQueryValue,
           ...columnFiltersToQuery(columnFilters),
         }}
