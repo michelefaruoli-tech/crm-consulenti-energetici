@@ -93,6 +93,17 @@ check(
   true,
 );
 
+const panelSrc = readFileSync(
+  join(process.cwd(), "src/components/provvigioni/helios-anticipatory-cleanup-panel.tsx"),
+  "utf8",
+);
+check(
+  "panel client non importa helios-anticipatory-cleanup (server-only)",
+  !panelSrc.includes("helios-anticipatory-cleanup") &&
+    panelSrc.includes("helios-anticipatory-shared"),
+  true,
+);
+
 const vercel = readFileSync(join(process.cwd(), "vercel.json"), "utf8");
 check(
   "vercel.json senza cron orario Helios (limite piano)",

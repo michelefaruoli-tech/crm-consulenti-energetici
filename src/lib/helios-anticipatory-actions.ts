@@ -5,12 +5,14 @@ import { requireSession } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import {
-  HELIOS_ANTICIPATORY_APPLY_BATCH,
-  HELIOS_ANTICIPATORY_SCAN_BATCH,
   applyHeliosAnticipatoryCleanup,
   scanHeliosAnticipatoryRates,
-  type HeliosAnticipatoryRow,
 } from "@/lib/helios-anticipatory-cleanup";
+import {
+  HELIOS_ANTICIPATORY_APPLY_BATCH,
+  HELIOS_ANTICIPATORY_SCAN_BATCH,
+  type HeliosAnticipatoryRow,
+} from "@/lib/helios-anticipatory-shared";
 import { periodLabel } from "@/lib/recurring";
 
 export type HeliosAnticipatoryScanResult =
