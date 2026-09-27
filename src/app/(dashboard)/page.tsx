@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { formatCurrency } from "@/lib/commission";
 import { hasPermission } from "@/lib/permissions";
 import { StatCard } from "@/components/ui/card";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
@@ -10,15 +9,7 @@ import { PaginationNav } from "@/components/ui/pagination-nav";
 import { ListSearchForm } from "@/components/ui/list-search-form";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
-import {
-  provvigioneStatoWhere,
-  recurringAnnualWhereOr,
-  recurringMonthlyWhereOr,
-} from "@/lib/provvigioni-filters";
-import { loadDashboardMoneyTotals } from "@/lib/provvigioni-summary";
-import { provvigioniDeepLinkHref } from "@/lib/provvigioni-deep-links";
 import { contractTextSearchWhere } from "@/lib/list-search";
-import { toPeriod } from "@/lib/recurring";
 import { fetchMarketPrices } from "@/lib/market-prices";
 import {
   aggregateCollaboratorRanking,
@@ -33,6 +24,7 @@ import { DashboardRankingPanel } from "@/components/dashboard/dashboard-ranking-
 import { DashboardMonthlyBreakdown } from "@/components/dashboard/dashboard-monthly-breakdown";
 import { MarketPricesPanel } from "@/components/dashboard/market-prices-panel";
 import { StornoDashboardSection } from "@/components/dashboard/storno-dashboard-section";
+import { DashboardOperativaSection } from "@/components/dashboard/dashboard-operativa-section";
 import {
   buildStornoDashboardScopeWhere,
   buildStornoKpiCards,
@@ -41,8 +33,16 @@ import {
   parseDashboardCollabParam,
   parseDashboardSupplierIds,
   resolveOptionalDashboardPeriod,
-  stornoDashboardListHref,
 } from "@/lib/storno-dashboard-kpi";
+import {
+  buildDashboardQuickActions,
+  buildOperativaKpiCards,
+  loadOperativaAlerts,
+  loadOperativaMoneyBundle,
+  loadStorniPeriodTotals,
+  resolveOperativaCompetenceMonth,
+  sumRicorrentiMensiliCompetence,
+} from "@/lib/dashboard-operativa";
 import { recentMonthOptions } from "@/lib/report-month";
 
 export const dynamic = "force-dynamic";
@@ -127,11 +127,6 @@ export default async function DashboardPage({
       currentYearMonthlyCountsRaw,
       inLavorazioneCount,
       inLavorazioneList,
-      moneyTotals,
-      commissioniDaConfermare,
-      incassateDaLiquidare,
-      ricorrenzeMancanti,
-      storniRegistrati,
       topCollaboratorsAllTime,
       topCollaboratorsMonth,
       rankingRows,
@@ -178,43 +173,6 @@ export default async function DashboardPage({
           supplier: { select: { name: true } },
         },
         orderBy: [{ sentToMasterAt: "desc" }, { createdAt: "desc" }],
-      }),
-      // Stesso scope visibilità del resto della Dashboard (whereAll): prima
-      // usava solo `canViewAll` con `collaboratorId: session.id` come unica
-      // alternativa, sbagliato per Backoffice/Area Manager (scope per
-      // fornitore/team, non per collaboratorId) — mostrava 0,00 € anche con
-      // contratti reali fuori dal loro perimetro.
-      loadDashboardMoneyTotals(whereAll),
-      prisma.contract.count({
-        where: { ...whereActive, commissionConfirmed: false },
-      }),
-      prisma.contract.count({
-        where: {
-          AND: [whereActive, provvigioneStatoWhere("Incassato") ?? {}],
-        },
-      }),
-      prisma.recurringMonth.count({
-        where: {
-          status: "MISSING",
-          period: { lt: toPeriod(new Date()) },
-          contract: {
-            ...whereActive,
-            OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr],
-          },
-        },
-      }),
-      prisma.contract.count({
-        where: {
-          AND: [
-            whereActive,
-            {
-              OR: [
-                { status: "STORNATO" },
-                { commission: { stornoDate: { not: null } } },
-              ],
-            },
-          ],
-        },
       }),
       isAdminStats
         ? prisma.contract.groupBy({
@@ -327,6 +285,38 @@ export default async function DashboardPage({
       doppiaIds,
     });
 
+    // P1.3 — KPI economici / alert / azioni (serie dopo storno per Neon HTTP)
+    const operativaScope = stornoScopeWhere;
+    const operativaMoney = await loadOperativaMoneyBundle(operativaScope);
+    const competenceMese = resolveOperativaCompetenceMonth({
+      now,
+      period: stornoPeriod,
+    });
+    const ricorrentiMese = await sumRicorrentiMensiliCompetence({
+      contractWhere: operativaScope,
+      competence: competenceMese,
+      now,
+    });
+    const storniPeriodo = await loadStorniPeriodTotals({
+      scopeWhere: operativaScope,
+      period: stornoPeriod,
+    });
+    const operativaKpis = buildOperativaKpiCards({
+      money: operativaMoney,
+      ricorrentiMese,
+      storni: storniPeriodo,
+      competence: competenceMese,
+      period: stornoPeriod,
+      linkExtras: stornoLinkExtras,
+    });
+    const operativaAlerts = await loadOperativaAlerts({
+      scopeWhere: operativaScope,
+      now,
+      doppiaIds,
+      linkExtras: stornoLinkExtras,
+    });
+    const quickActions = buildDashboardQuickActions(stornoLinkExtras);
+
     const collaboratorIds = [
       ...new Set([
         ...topCollaboratorsAllTime.map((c) => c.collaboratorId),
@@ -434,6 +424,12 @@ export default async function DashboardPage({
 
         <MarketPricesPanel prices={marketPrices} />
 
+        <DashboardOperativaSection
+          kpis={operativaKpis}
+          alerts={operativaAlerts}
+          actions={quickActions}
+        />
+
         <StornoDashboardSection
           cards={stornoKpiCards}
           alerts={stornoAlerts}
@@ -454,111 +450,6 @@ export default async function DashboardPage({
             anno: anno?.trim() || undefined,
           }}
         />
-
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Link href={provvigioniDeepLinkHref("tutti")}>
-            <StatCard
-              label="Totale complessivo"
-              value={formatCurrency(moneyTotals.complessivo)}
-              hint="Incassato da liquidare + da incassare UT/R (senza rate M)"
-            />
-          </Link>
-          <Link href={provvigioniDeepLinkHref("incassato-da-liquidare")}>
-            <StatCard
-              label="Incassato da liquidare"
-              value={formatCurrency(moneyTotals.incassato)}
-              tone="success"
-              hint="Fornitore pagato, collaboratore no — tutti i tipi"
-            />
-          </Link>
-          <Link href={provvigioniDeepLinkHref("ut-da-incassare")}>
-            <StatCard
-              label="Da incassare UT"
-              value={formatCurrency(moneyTotals.daIncassareUt)}
-              tone="warning"
-              hint={`Vista UT · R ${formatCurrency(moneyTotals.daIncassareR)} resta in Provvigioni (annuali) — senza rate M`}
-            />
-          </Link>
-          <Link href={provvigioniDeepLinkHref("da-incassare-m")}>
-            <StatCard
-              label="Da incassare M"
-              value={formatCurrency(moneyTotals.ricorrenti)}
-              hint="Rate mensili da incassare — totale separato, non incluso sopra"
-            />
-          </Link>
-        </div>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
-                Priorità operative
-              </p>
-              <h2 className="mt-1 text-xl font-bold text-slate-900">Da gestire</h2>
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {[
-              {
-                label: "Provvigioni da confermare",
-                value: commissioniDaConfermare,
-                href: provvigioniDeepLinkHref("da-confermare"),
-                hint: "Controlla il gettone previsto",
-                tone: "border-amber-200 bg-amber-50 text-amber-950",
-              },
-              {
-                label: "Incassate da liquidare",
-                value: incassateDaLiquidare,
-                href: provvigioniDeepLinkHref("incassato-da-liquidare"),
-                hint: "Fornitore pagato, collaboratore no",
-                tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
-              },
-              {
-                label: "Ricorrenze mancanti",
-                value: ricorrenzeMancanti,
-                href: provvigioniDeepLinkHref("ricorrenze-mancanti"),
-                hint: "Rate attese nei mesi precedenti",
-                tone: "border-sky-200 bg-sky-50 text-sky-950",
-              },
-              {
-                label: "Anomalie",
-                value: "→",
-                href: provvigioniDeepLinkHref("anomalie"),
-                hint: "Vista unificata · sola lettura (Backup per apply)",
-                tone: "border-slate-200 bg-slate-50 text-slate-950",
-              },
-              {
-                label: "Storni registrati",
-                value: storniRegistrati,
-                href: stornoDashboardListHref({
-                  storno: "stornato",
-                  list: "provvigioni",
-                }),
-                hint: "Controlla importi e competenza",
-                tone: "border-rose-200 bg-rose-50 text-rose-950",
-              },
-            ].map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={`group rounded-xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md ${item.tone}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm font-semibold leading-tight">{item.label}</p>
-                  <span
-                    aria-hidden
-                    className="text-lg leading-none opacity-50 transition group-hover:translate-x-0.5"
-                  >
-                    →
-                  </span>
-                </div>
-                <p className="mt-3 text-3xl font-bold tabular-nums">{item.value}</p>
-                <p className="mt-2 text-xs leading-snug opacity-75">{item.hint}</p>
-              </Link>
-            ))}
-          </div>
-        </section>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

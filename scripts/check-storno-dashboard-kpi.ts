@@ -143,8 +143,17 @@ const page = readFileSync(
 check("page importa StornoDashboardSection", page.includes("StornoDashboardSection"), true);
 check("page usa loadStornoDashboardKpis", page.includes("loadStornoDashboardKpis"), true);
 check(
-  "Da gestire storni → stornoDashboardListHref",
-  page.includes("stornoDashboardListHref"),
+  "page wiring alert/card storno (P1.3: storni anche in operativa)",
+  page.includes("loadStornoDashboardAlerts") && page.includes("buildStornoKpiCards"),
+  true,
+);
+const operativaLib = readFileSync(
+  join(process.cwd(), "src/lib/dashboard-operativa.ts"),
+  "utf8",
+);
+check(
+  "operativa riusa stornoDashboardListHref",
+  operativaLib.includes("stornoDashboardListHref"),
   true,
 );
 

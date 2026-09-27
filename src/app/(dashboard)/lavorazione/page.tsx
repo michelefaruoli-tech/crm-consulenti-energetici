@@ -13,6 +13,7 @@ import { formatRomeDateTime } from "@/lib/timezone";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@/generated/prisma/client";
 import { contractVisibilityWhere } from "@/lib/user-scope";
+import { STALE_LAVORAZIONE_HOURS } from "@/lib/stale-lavorazione-alert";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,8 @@ export default async function LavorazionePage({
     service?: string;
     /** lavorazione (default) | ko */
     vista?: string;
+    /** P1.3 — solo pratiche ferme oltre soglia 48h */
+    stale?: string;
   }>;
 }) {
   const session = await requireSession();
@@ -39,7 +42,12 @@ export default async function LavorazionePage({
 
   const sp = await searchParams;
   const vistaKo = sp.vista === "ko";
+  const staleOnly = sp.stale === "1" || sp.stale === "true";
   const visibility = await contractVisibilityWhere(session);
+  const now = new Date();
+  const staleCutoff = new Date(
+    now.getTime() - STALE_LAVORAZIONE_HOURS * 60 * 60 * 1000,
+  );
 
   const filterExtras: Prisma.ContractWhereInput = {
     ...visibility,
@@ -72,6 +80,20 @@ export default async function LavorazionePage({
    * Lista «KO»: contratti in stato KO (stesso ambito utente/filtri).
    * Prima il contatore KO contava TUTTI i KO del DB ma la lista non li mostrava → sembrava un errore.
    */
+  const staleWhere: Prisma.ContractWhereInput | undefined = staleOnly
+    ? {
+        OR: [
+          { sentToMasterAt: { lte: staleCutoff } },
+          {
+            AND: [
+              { sentToMasterAt: null },
+              { insertionDate: { lte: staleCutoff } },
+            ],
+          },
+        ],
+      }
+    : undefined;
+
   const where: Prisma.ContractWhereInput = vistaKo
     ? {
         deletedAt: null,
@@ -85,6 +107,7 @@ export default async function LavorazionePage({
         assignedToMaster: true,
         status: "IN_LAVORAZIONE",
         ...filterExtras,
+        ...(staleWhere ? staleWhere : {}),
       };
 
   const scopeBase: Prisma.ContractWhereInput = {
