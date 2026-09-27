@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { mapDbOffer } from "@/lib/cte-ranking";
 import { cteCatalogVisibilityWhere } from "@/lib/cte-scope";
 import { buildCteSummaryPayload } from "@/lib/cte-summary-build";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const session = await getSession();
+  const session = await requireApiSession();
   if (!session) {
     return NextResponse.json({ ok: false, error: "Non autenticato" }, { status: 401 });
   }

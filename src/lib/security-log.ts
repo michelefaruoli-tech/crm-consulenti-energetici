@@ -122,7 +122,13 @@ export async function isAuthRateLimited(opts: {
       }
     }
   } catch (e) {
+    // Fail-closed: se non riusciamo a contare i tentativi, blocchiamo
+    // per non aprire la porta a brute-force durante un’indisponibilità DB.
     console.error("[isAuthRateLimited]", e);
+    return {
+      blocked: true,
+      reason: "Controllo di sicurezza temporaneamente non disponibile. Riprova tra qualche minuto.",
+    };
   }
 
   return { blocked: false };

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { analyzeDocuments } from "@/lib/ocr/analyze";
 import { writeAuditLog } from "@/lib/audit";
@@ -11,6 +11,24 @@ export const maxDuration = 60;
 const MAX_SIZE =
   (Number(process.env.MAX_DOCUMENT_SIZE_MB) || 10) * 1024 * 1024;
 const MAX_FILES = Number(process.env.MAX_DOCUMENTS_PER_ANALYSIS) || 6;
+
+/** Rate limit OCR per utente (best-effort in memoria sulle istanze serverless). */
+const OCR_WINDOW_MS = 10 * 60 * 1000;
+const OCR_MAX = 20;
+const ocrHits = new Map<string, number[]>();
+
+function isOcrRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const recent = (ocrHits.get(userId) ?? []).filter((t) => now - t < OCR_WINDOW_MS);
+  recent.push(now);
+  ocrHits.set(userId, recent);
+  if (ocrHits.size > 500) {
+    for (const [id, times] of ocrHits) {
+      if (times.every((t) => now - t >= OCR_WINDOW_MS)) ocrHits.delete(id);
+    }
+  }
+  return recent.length > OCR_MAX;
+}
 
 const ALLOWED = new Set([
   "image/jpeg",
@@ -46,7 +64,7 @@ function sniffMime(buf: Buffer, filename: string, declared: string): string {
 /** Analizza documenti (CI + bolletta) e restituisce JSON strutturato. Non salva il contratto. */
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
+    const session = await requireApiSession();
     if (!session) {
       return NextResponse.json(
         { ok: false, error: humanizeOcrError("Non autenticato") },
@@ -60,6 +78,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { ok: false, error: humanizeOcrError("Permesso negato") },
         { status: 403 },
+      );
+    }
+    if (isOcrRateLimited(session.id)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: humanizeOcrError(
+            "Troppe analisi OCR ravvicinate. Riprova tra qualche minuto.",
+          ),
+        },
+        { status: 429 },
       );
     }
 

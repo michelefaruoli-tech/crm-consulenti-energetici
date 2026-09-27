@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { contractVisibilityWhere } from "@/lib/user-scope";
@@ -31,7 +31,7 @@ function isProbeRateLimited(userId: string): boolean {
 }
 
 export async function GET(request: Request) {
-  const session = await getSession();
+  const session = await requireApiSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const value = new URL(request.url).searchParams.get("value")?.trim() ?? "";

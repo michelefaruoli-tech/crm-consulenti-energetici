@@ -38,6 +38,7 @@ import {
 import {
   contractVisibilityWhere,
   loadVisibleCollaboratorOptions,
+  userCanAccessContract,
 } from "@/lib/user-scope";
 import type { Role } from "@/generated/prisma/client";
 import { parsePrivatoDisplayName } from "@/lib/utils";
@@ -57,6 +58,7 @@ type CommissionWithContract = {
     id: string;
     clientId: string;
     collaboratorId: string;
+    supplierId: string;
     collectionDate: Date | null;
     insertionDate: Date;
     operationType: string | null;
@@ -73,6 +75,7 @@ const CONTRACT_SELECT_FOR_EDIT = {
   id: true,
   clientId: true,
   collaboratorId: true,
+  supplierId: true,
   collectionDate: true,
   insertionDate: true,
   operationType: true,
@@ -194,6 +197,10 @@ async function applyCommissionField(
   value: string,
   opts?: { competencePeriod?: string | null },
 ): Promise<void> {
+  // view_all non è accesso globale: Backoffice/Area Manager restano nello scope
+  if (!(await userCanAccessContract(session, commission.contract))) {
+    throw new Error("Permesso negato");
+  }
   const canAll = hasPermission(session.role, "commissions.view_all");
   if (!canAll && commission.contract.collaboratorId !== session.id) {
     throw new Error("Permesso negato");
@@ -261,6 +268,18 @@ async function applyCommissionField(
           source: "provvigioni_table",
         },
       });
+    } else {
+      await writeAuditLog({
+        userId: session.id,
+        action: "UPDATE",
+        entity: "Commission",
+        entityId: commission.contractId,
+        details: {
+          field,
+          to: amount,
+          source: "provvigioni_table",
+        },
+      });
     }
   } else if (field === "paymentStatus") {
     const raw = value.trim();
@@ -283,6 +302,17 @@ async function applyCommissionField(
       });
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     }
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: commission.contractId,
+      details: {
+        field: "paymentStatus",
+        to: normalized,
+        source: "provvigioni_table",
+      },
+    });
   } else if (field === "collectionDate") {
     const raw = value.trim();
     const terminal = ["KO", "ANNULLATO", "CHIUSO"].includes(commission.contract.status);
@@ -331,6 +361,17 @@ async function applyCommissionField(
       });
       await syncRecurringMonthsForContract(commission.contractId).catch(() => undefined);
     }
+    await writeAuditLog({
+      userId: session.id,
+      action: "UPDATE",
+      entity: "Contract",
+      entityId: commission.contractId,
+      details: {
+        field: "collectionDate",
+        to: raw || null,
+        source: "provvigioni_table",
+      },
+    });
   } else if (field === "supplyStartDate") {
     const raw = value.trim();
     if (!raw) {

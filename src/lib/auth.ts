@@ -96,6 +96,32 @@ export async function requireSession(): Promise<SessionUser> {
   };
 }
 
+/**
+ * Sessione per route API: rilegge utente da DB (`active` + ruolo aggiornato).
+ * A differenza di `getSession()` (solo JWT), un utente disattivato/declassato
+ * perde subito l’accesso alle API. Restituisce `null` → risposta 401.
+ */
+export async function requireApiSession(): Promise<SessionUser | null> {
+  const session = await getSession();
+  if (!session) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: { id: true, email: true, name: true, role: true, active: true },
+  });
+  if (!user || !user.active) {
+    await destroySession();
+    return null;
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+  };
+}
+
 export async function login(email: string, password: string) {
   const meta = await getRequestMeta();
   const normalized = email.trim().toLowerCase();

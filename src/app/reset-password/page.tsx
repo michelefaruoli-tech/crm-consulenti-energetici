@@ -32,10 +32,10 @@ function ResetForm() {
     >
       <input type="hidden" name="token" value={token} />
       <Field label="Nuova password">
-        <Input name="newPassword" type="password" required minLength={8} />
+        <Input name="newPassword" type="password" required minLength={12} />
       </Field>
       <Field label="Conferma password">
-        <Input name="confirmPassword" type="password" required minLength={8} />
+        <Input name="confirmPassword" type="password" required minLength={12} />
       </Field>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {message ? (
@@ -62,7 +62,7 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h1 className="text-xl font-bold text-slate-900">Reimposta password</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Scegli una password sicura: almeno 8 caratteri, una lettera e un
+          Scegli una password sicura: almeno 12 caratteri, una lettera e un
           numero.
         </p>
         <Suspense fallback={<p className="mt-4 text-sm">Caricamento…</p>}>

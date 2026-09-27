@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth";
+import { requireApiSession } from "@/lib/auth";
 import { loadProvvigioniFilterOptions } from "@/lib/provvigioni-filter-options";
 import {
   COLUMN_FILTER_KEYS,
@@ -11,7 +11,10 @@ export const dynamic = "force-dynamic";
 
 /** Valori dei menu filtro della tabella Provvigioni, presi da tutto il database. */
 export async function GET(request: Request) {
-  const session = await requireSession();
+  const session = await requireApiSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const url = new URL(request.url);
   const col = (url.searchParams.get("col") ?? "") as ProvvigioniColumnKey;
   if (!COLUMN_FILTER_KEYS.includes(col) || TEXT_FILTER_KEYS.includes(col)) {
