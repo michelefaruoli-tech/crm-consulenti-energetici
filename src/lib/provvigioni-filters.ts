@@ -447,7 +447,9 @@ export function buildProvvigioniContractWhere(
 export type ProvvigioniListFocus =
   | "da-confermare"
   | "ricorrenze-mancanti"
-  | "fuori-storno";
+  | "fuori-storno"
+  /** P1.1 B2 — coda operativa: fornitore ha pagato, collaboratore no. */
+  | "incassato-da-liquidare";
 
 export function parseProvvigioniFocus(
   raw: string | null | undefined,
@@ -455,10 +457,35 @@ export function parseProvvigioniFocus(
   if (
     raw === "da-confermare" ||
     raw === "ricorrenze-mancanti" ||
-    raw === "fuori-storno"
+    raw === "fuori-storno" ||
+    raw === "incassato-da-liquidare"
   ) {
     return raw;
   }
+  return undefined;
+}
+
+/**
+ * Focus «Incassato da liquidare» = stesso bucket del filtro stato Incassato
+ * (PAID / collectionDate, escluso Liquidato). Usato per expand rate e card.
+ */
+export function isIncassatoDaLiquidareFocus(
+  focus: ProvvigioniListFocus | null | undefined,
+): boolean {
+  return focus === "incassato-da-liquidare";
+}
+
+/**
+ * Stato effettivo per expand/lista: il focus B2 implica «Incassato» se l’URL
+ * non ha già un filtro stato (così card e tabella contano le stesse righe).
+ */
+export function effectiveStatoForList(
+  stato: string | null | undefined,
+  focus?: ProvvigioniListFocus | null,
+): string | undefined {
+  const trimmed = stato?.trim() || undefined;
+  if (trimmed) return trimmed;
+  if (isIncassatoDaLiquidareFocus(focus)) return "Incassato";
   return undefined;
 }
 
@@ -488,7 +515,18 @@ export type ProvvigioniListWhereOpts = {
 export function buildProvvigioniListWhere(
   opts: ProvvigioniListWhereOpts,
 ): Prisma.ContractWhereInput {
-  let where = buildProvvigioniContractWhere(opts.filters);
+  /**
+   * Focus B2: stessa coda di stato=Incassato (mapping su stati esistenti).
+   * Iniettiamo lo stato nei filtri così card, lista ed export condividono
+   * lo stesso where Prisma (conteggio card = conteggio elenco).
+   */
+  const filters =
+    opts.focus === "incassato-da-liquidare" &&
+    !parseStatoFilter(opts.filters.stato).includes("Incassato")
+      ? { ...opts.filters, stato: "Incassato" }
+      : opts.filters;
+
+  let where = buildProvvigioniContractWhere(filters);
 
   if (opts.focus === "da-confermare") {
     where = { AND: [where, { commissionConfirmed: false }] };
@@ -510,6 +548,7 @@ export function buildProvvigioniListWhere(
   } else if (opts.focus === "fuori-storno") {
     where = { AND: [where, fuoriStornoWhere()] };
   }
+  // focus=incassato-da-liquidare: già mappato su filters.stato sopra (niente AND extra)
 
   if (opts.applyCompetenceToList && opts.effectiveCompetence) {
     where = {

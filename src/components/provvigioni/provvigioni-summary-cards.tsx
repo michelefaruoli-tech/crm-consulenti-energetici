@@ -3,15 +3,35 @@ import { formatCurrency } from "@/lib/commission";
 import { periodLabel } from "@/lib/recurring";
 import type { ProvvigioniFinancialSummary } from "@/lib/provvigioni-summary";
 
-function buildHref(
+/**
+ * Card «Incassato da liquidare» → focus first-class (P1.1 B2).
+ * Altre card: filtro stato; rimuovono il focus B2 per non AND-are bucket incompatibili.
+ */
+function buildStatoHref(
   base: Record<string, string | undefined>,
   stato: string,
 ): string {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(base)) {
-    if (v) params.set(k, v);
+    if (!v) continue;
+    if (k === "focus" && v === "incassato-da-liquidare") continue;
+    if (k === "stato") continue;
+    params.set(k, v);
   }
   params.set("stato", stato);
+  return `/provvigioni?${params.toString()}`;
+}
+
+function buildIncassatoDaLiquidareHref(
+  base: Record<string, string | undefined>,
+): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(base)) {
+    if (!v) continue;
+    if (k === "stato" || k === "focus") continue;
+    params.set(k, v);
+  }
+  params.set("focus", "incassato-da-liquidare");
   return `/provvigioni?${params.toString()}`;
 }
 
@@ -21,17 +41,29 @@ export function ProvvigioniSummaryCards({
   competenceAll,
   queryBase,
   contractCount,
+  activeFocus,
+  activeStato,
 }: {
   summary: ProvvigioniFinancialSummary;
   competencePeriod: string | null;
   competenceAll: boolean;
   queryBase: Record<string, string | undefined>;
   contractCount: number;
+  activeFocus?: string | null;
+  activeStato?: string | null;
 }) {
   const periodHint =
     competenceAll || !competencePeriod
       ? "tutti i periodi"
       : periodLabel(competencePeriod);
+
+  const incassatoActive =
+    activeFocus === "incassato-da-liquidare" ||
+    activeStato === "Incassato" ||
+    activeStato === "Incassato da liquidare";
+  const daIncassareActive = activeStato === "Da incassare";
+  const liquidatoActive =
+    activeStato === "Liquidato" || activeStato === "Pagato";
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -44,8 +76,13 @@ export function ProvvigioniSummaryCards({
       </div>
 
       <Link
-        href={buildHref(queryBase, "Incassato da liquidare")}
-        className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm transition hover:border-emerald-300 hover:shadow-md"
+        href={buildIncassatoDaLiquidareHref(queryBase)}
+        aria-current={incassatoActive ? "page" : undefined}
+        className={`rounded-xl border p-4 shadow-sm transition hover:border-emerald-300 hover:shadow-md ${
+          incassatoActive
+            ? "border-emerald-500 bg-emerald-100 ring-2 ring-emerald-400"
+            : "border-emerald-200 bg-emerald-50"
+        }`}
       >
         <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
           Incassato da liquidare
@@ -62,8 +99,13 @@ export function ProvvigioniSummaryCards({
       </Link>
 
       <Link
-        href={buildHref(queryBase, "Da incassare")}
-        className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm transition hover:border-amber-300 hover:shadow-md"
+        href={buildStatoHref(queryBase, "Da incassare")}
+        aria-current={daIncassareActive ? "page" : undefined}
+        className={`rounded-xl border p-4 shadow-sm transition hover:border-amber-300 hover:shadow-md ${
+          daIncassareActive
+            ? "border-amber-500 bg-amber-100 ring-2 ring-amber-400"
+            : "border-amber-200 bg-amber-50"
+        }`}
       >
         <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
           Da incassare
@@ -80,8 +122,13 @@ export function ProvvigioniSummaryCards({
       </Link>
 
       <Link
-        href={buildHref(queryBase, "Liquidato")}
-        className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md"
+        href={buildStatoHref(queryBase, "Liquidato")}
+        aria-current={liquidatoActive ? "page" : undefined}
+        className={`rounded-xl border p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md ${
+          liquidatoActive
+            ? "border-indigo-500 bg-indigo-100 ring-2 ring-indigo-400"
+            : "border-indigo-200 bg-indigo-50"
+        }`}
       >
         <p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">
           Liquidato

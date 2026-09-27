@@ -10,6 +10,7 @@ import {
 } from "@/components/provvigioni/provvigioni-filter-table";
 import { ProvvigioniTrashPanel } from "@/components/provvigioni/provvigioni-trash-panel";
 import { RecurringMissingPanel } from "@/components/provvigioni/recurring-missing-panel";
+import { RecurringToLiquidatePanel } from "@/components/provvigioni/recurring-to-liquidate-panel";
 import { HeliosAbsentPanel } from "@/components/provvigioni/helios-absent-panel";
 import { ProvvigioniVistaTabs } from "@/components/provvigioni/provvigioni-vista-tabs";
 import { ProvvigioniToolbar } from "@/components/provvigioni/provvigioni-toolbar";
@@ -19,6 +20,7 @@ import { PaginationNav } from "@/components/ui/pagination-nav";
 import {
   getMissingRecurringAlerts,
   getHeliosAbsentAlerts,
+  getPaidToLiquidateAlerts,
   syncAllRecurringMonths,
   syncRecurringMonthsForContract,
   reconcileAllRecurringBounds,
@@ -31,6 +33,8 @@ import { PAGE_SIZE, pageCount, pageSkip, parsePage } from "@/lib/pagination";
 import {
   buildProvvigioniContractWhere,
   buildProvvigioniListWhere,
+  effectiveStatoForList,
+  isIncassatoDaLiquidareFocus,
   parseProvvigioniFocus,
   recurringMonthlyWhereOr,
   type ProvvigioniListFocus,
@@ -132,6 +136,8 @@ export default async function ProvvigioniPage({
   const tipologia = tipologiaRaw?.trim() || undefined;
   const q = qRaw?.trim() || undefined;
   const focus: ProvvigioniListFocus | undefined = parseProvvigioniFocus(focusRaw);
+  /** Focus B2 → stesso bucket di stato=Incassato per expand e card. */
+  const statoEffective = effectiveStatoForList(stato, focus);
   const vistaTab = parseProvvigioniTab(vistaRaw);
   const vista: ProvvigioniVista = parseProvvigioniVista(vistaRaw);
   const competenceAll =
@@ -149,7 +155,12 @@ export default async function ProvvigioniPage({
       ? "all"
       : vista === "annuale"
         ? "annual"
-        : "monthly";
+        : vista === "mensile"
+          ? "monthly"
+          : "all";
+  const showToLiquidatePanel =
+    isIncassatoDaLiquidareFocus(focus) ||
+    statoEffective === "Incassato";
 
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
@@ -183,7 +194,7 @@ export default async function ProvvigioniPage({
    */
   const columnFilters = parseProvvigioniColumnFilters(rawSearchParams);
   const expandMode = getRecurringExpandMode(
-    stato,
+    statoEffective,
     viewingAllPeriods,
     effectiveCompetence,
   );
@@ -311,7 +322,12 @@ export default async function ProvvigioniPage({
 
   // Prima conta: serve per clampare la pagina (evita pagine oltre il totale → elenco vuoto)
   const total = expandMode
-    ? await countExpandedListRows(contractWhere, expandMode, stato, rowFilterScope)
+    ? await countExpandedListRows(
+        contractWhere,
+        expandMode,
+        statoEffective,
+        rowFilterScope,
+      )
     : await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
   const page = Math.min(parsePage(pageRaw), pages);
@@ -334,7 +350,7 @@ export default async function ProvvigioniPage({
     effectiveCompetence,
     applyCompetenceToList,
     viewingAllPeriods,
-    activeStato: stato,
+    activeStato: statoEffective,
     activeListWhere: contractWhere,
     activeListTotal: total,
     allowExpand: Boolean(expandMode),
@@ -543,7 +559,7 @@ export default async function ProvvigioniPage({
     latestMap: new Map<string, boolean>(),
     earlyMap: new Map<string, boolean>(),
     now: new Date(),
-    statoFilter: stato,
+    statoFilter: statoEffective,
   };
   let prebuiltExpandedRows: ProvvigioneRow[] | null = null;
 
@@ -690,6 +706,23 @@ export default async function ProvvigioniPage({
     collaboratorName: m.contract.collaborator?.name,
     amount: m.amount != null ? Number(m.amount) : undefined,
   }));
+
+  /** Pannello rate PAID → Liquidato: solo in vista Incassato da liquidare (scope ruolo). */
+  const paidToLiquidate = showToLiquidatePanel
+    ? await getPaidToLiquidateAlerts(panelScope, recurringKind)
+    : [];
+  const toLiquidateRows = paidToLiquidate.map((m) => ({
+    id: m.id,
+    period: m.period,
+    settledPeriod: m.settledPeriod,
+    contractId: m.contractId,
+    podPdr: m.contract.podPdr || "",
+    supplierName: m.contract.supplier.name,
+    clientName: clientDisplayName(m.contract.client),
+    collaboratorName: m.contract.collaborator?.name,
+    amount: m.amount != null ? Number(m.amount) : undefined,
+  }));
+
   const tabRecurringCount = vista === "annuale" ? countAnnuali : countMensili;
   const missingContractCount = new Set(alertRows.map((a) => a.contractId)).size;
   const otherRecurringCount = Math.max(0, tabRecurringCount - missingContractCount);
@@ -776,7 +809,11 @@ export default async function ProvvigioniPage({
   const filterHints = [
     selectedCollabName ? `collab. ${selectedCollabName}` : null,
     supplier ? `fornitore ${supplier.split("|").join(" + ")}` : null,
-    stato ? `stato ${stato.split("|").join(" + ")}` : null,
+    stato
+      ? `stato ${stato.split("|").join(" + ")}`
+      : isIncassatoDaLiquidareFocus(focus)
+        ? "Incassato da liquidare"
+        : null,
     effectiveCompetence && !competenceAll
       ? `competenza ${periodLabel(effectiveCompetence)}`
       : competenceAll
@@ -858,11 +895,13 @@ export default async function ProvvigioniPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            {vistaTab === "mensile"
-              ? "Provvigioni · Ricorrenti mensili (M)"
-              : vistaTab === "annuale"
-                ? "Provvigioni · Ricorrenti annuali (R)"
-                : "Provvigioni"}
+            {isIncassatoDaLiquidareFocus(focus)
+              ? "Provvigioni · Incassato da liquidare"
+              : vistaTab === "mensile"
+                ? "Provvigioni · Ricorrenti mensili (M)"
+                : vistaTab === "annuale"
+                  ? "Provvigioni · Ricorrenti annuali (R)"
+                  : "Provvigioni"}
           </h1>
           <p className="text-sm text-slate-500 sm:text-base">
             {total} {listUsesExpandedRows ? "voci" : "contratti"} in elenco
@@ -937,7 +976,16 @@ export default async function ProvvigioniPage({
         competenceAll={viewingAllPeriods}
         queryBase={tabQueryBase}
         contractCount={total}
+        activeFocus={focus}
+        activeStato={statoEffective}
       />
+
+      {showToLiquidatePanel ? (
+        <RecurringToLiquidatePanel
+          alerts={toLiquidateRows}
+          kind={recurringKind}
+        />
+      ) : null}
 
       <ProvvigioniAnomaliesSection
         alertCount={anomalyCount}

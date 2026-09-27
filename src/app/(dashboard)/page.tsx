@@ -396,7 +396,7 @@ export default async function DashboardPage({
               {
                 label: "Incassate da liquidare",
                 value: incassateDaLiquidare,
-                href: "/provvigioni?stato=Incassato",
+                href: "/provvigioni?focus=incassato-da-liquidare",
                 hint: "Fornitore pagato, collaboratore no",
                 tone: "border-emerald-200 bg-emerald-50 text-emerald-950",
               },
