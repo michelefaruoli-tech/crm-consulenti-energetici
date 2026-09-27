@@ -15,10 +15,6 @@
     {
       "path": "/api/cron/stale-lavorazione",
       "schedule": "20 7 * * *"
-    },
-    {
-      "path": "/api/cron/helios-anticipatory-cleanup",
-      "schedule": "35 * * * *"
     }
   ]
 }

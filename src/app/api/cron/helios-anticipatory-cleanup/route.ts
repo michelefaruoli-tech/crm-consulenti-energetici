@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/cron-auth";
 import { runHeliosAnticipatoryCleanupAuto } from "@/lib/helios-anticipatory-cleanup";
 
 export const dynamic = "force-dynamic";
@@ -6,20 +7,12 @@ export const maxDuration = 60;
 
 /**
  * Chiude/elimina rate Helios con competenza oltre lastPayable (M+2).
- * Idempotente. Vercel Cron: Authorization Bearer CRON_SECRET.
- * Anche invocato da sync Provvigioni (refresh lista = applica).
+ * Idempotente. Invocabile con Bearer CRON_SECRET.
+ * In produzione gira anche da sync Provvigioni e da daily-backup (senza cron dedicato:
+ * un cron orario faceva fallire il deploy sul piano attuale).
  */
-function authorize(request: Request): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  const auth = request.headers.get("authorization");
-  if (auth === `Bearer ${secret}`) return true;
-  const url = new URL(request.url);
-  return url.searchParams.get("secret") === secret;
-}
-
 export async function GET(request: Request) {
-  if (!authorize(request)) {
+  if (!authorizeCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
