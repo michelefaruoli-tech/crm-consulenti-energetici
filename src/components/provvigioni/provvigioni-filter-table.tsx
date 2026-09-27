@@ -264,7 +264,7 @@ const BULK_EDITABLE_COLUMNS: Array<{
   },
 ];
 
-/** Colonne vista Semplificata (spec utente: solo essenziali + azioni) */
+/** Colonne vista Semplificata (spec utente Tutti/UT: solo essenziali + azioni) */
 const SIMPLE_COLUMN_ORDER = [
   "clientName",
   "podPdr",
@@ -276,13 +276,51 @@ const SIMPLE_COLUMN_ORDER = [
   "_del",
 ] as const;
 
-/** Etichette più chiare solo in vista Semplificata */
+/**
+ * P1.1 B4 — Semplificata su tab M / R: colonne operative
+ * (competenza, atteso, mese previsto, ritardo, storno, stato, azioni).
+ */
+const SIMPLE_MR_COLUMN_ORDER = [
+  "clientName",
+  "podPdr",
+  "supplierName",
+  "collaboratorName",
+  "meseRif",
+  "amount",
+  "mesePrevisto",
+  "ritardo",
+  "stornoFlag",
+  "stato",
+  "_open",
+  "_del",
+] as const;
+
+/** Etichette più chiare solo in vista Semplificata (Tutti) */
 const SIMPLE_COLUMN_LABELS: Partial<Record<(typeof SIMPLE_COLUMN_ORDER)[number], string>> = {
   podPdr: "Pod",
   supplierName: "Fornitore",
   meseRif: "Mese riferimento",
   collectionMonth: "Data incasso",
 };
+
+/** Etichette operative M/R (Semplificata) */
+const SIMPLE_MR_COLUMN_LABELS: Partial<
+  Record<(typeof SIMPLE_MR_COLUMN_ORDER)[number], string>
+> = {
+  podPdr: "Pod",
+  supplierName: "Fornitore",
+  collaboratorName: "Collab.",
+  meseRif: "Competenza",
+  amount: "Atteso",
+  mesePrevisto: "Mese previsto",
+  ritardo: "Ritardo",
+  stornoFlag: "Storno",
+  stato: "Stato",
+};
+
+function isMensileOrAnnualeVista(vista: string | null | undefined): boolean {
+  return vista === "mensile" || vista === "annuale";
+}
 
 /** Colonne filtrate dal server (oltre a collaboratore, fornitore, stato, tipologia). */
 const SERVER_COLUMN_KEYS = Object.keys(
@@ -322,6 +360,10 @@ function originalCellValue(row: ProvvigioneRow, key: string): string {
       return shortRecurrence(row.recurrence ?? "");
     case "collectionMonth":
       return row.collectionMonth ?? "";
+    case "mesePrevisto":
+      return row.expectedMonth ?? "";
+    case "ritardo":
+      return row.delayDays ?? "";
     case "stornoFlag":
       return row.stornoFlag ?? "No";
     case "stornoMonth":
@@ -1338,6 +1380,52 @@ export function ProvvigioniFilterTable({
       ),
     },
     {
+      key: "mesePrevisto",
+      label: "Mese previsto",
+      getValue: (r) => String((r as ProvvigioneRow).expectedMonth ?? ""),
+      sortKind: "text",
+      render: (r) => {
+        const label = String((r as ProvvigioneRow).expectedMonth ?? "").trim();
+        const period = String((r as ProvvigioneRow).expectedPeriod ?? "").trim();
+        return (
+          <span
+            className="whitespace-nowrap text-xs tabular-nums text-slate-800"
+            title={
+              period
+                ? `Mese in cui il fornitore dovrebbe pagare (${period})`
+                : "Mese previsto non disponibile (manca competenza)"
+            }
+          >
+            {label || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      key: "ritardo",
+      label: "Ritardo",
+      getValue: (r) => String((r as ProvvigioneRow).delayDays ?? ""),
+      sortKind: "text",
+      render: (r) => {
+        const label = String((r as ProvvigioneRow).delayDays ?? "").trim();
+        const late = Boolean(label);
+        return (
+          <span
+            className={`whitespace-nowrap text-xs tabular-nums ${
+              late ? "font-semibold text-rose-700" : "text-slate-400"
+            }`}
+            title={
+              late
+                ? `Giorni oltre la fine del mese previsto (${label})`
+                : "Ritardo mostrato solo su Da incassare oltre il mese previsto"
+            }
+          >
+            {label || "—"}
+          </span>
+        );
+      },
+    },
+    {
       key: "recurrence",
       label: "Tipo",
       getValue: (r) => baseCellValue(r, "recurrence"),
@@ -1503,6 +1591,8 @@ export function ProvvigioniFilterTable({
   }, [canDelete, collaboratorByName, supplierNames, rows]);
 
   const columns = useMemo(() => {
+    const vista = listQuery?.vista ?? "tutti";
+    const mrSimple = isMensileOrAnnualeVista(vista);
     if (advancedView) {
       const widths: Record<string, string> = {
         clientName: "w-[15rem] min-w-[15rem] max-w-[15rem]",
@@ -1516,6 +1606,8 @@ export function ProvvigioniFilterTable({
         operationType: "w-[8rem] min-w-[8rem] max-w-[8rem]",
         stato: "w-[10rem] min-w-[10rem] max-w-[10rem]",
         meseRif: "w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem]",
+        mesePrevisto: "w-[7rem] min-w-[7rem] max-w-[7rem]",
+        ritardo: "w-[5rem] min-w-[5rem] max-w-[5rem]",
         recurrence: "w-[7rem] min-w-[7rem] max-w-[7rem]",
         collectionMonth: "w-[8rem] min-w-[8rem] max-w-[8rem]",
         stornoFlag: "w-[5rem] min-w-[5rem] max-w-[5rem]",
@@ -1544,36 +1636,57 @@ export function ProvvigioniFilterTable({
       }));
     }
     const byKey = new Map(allColumns.map((c) => [c.key, c]));
+    const order = mrSimple ? SIMPLE_MR_COLUMN_ORDER : SIMPLE_COLUMN_ORDER;
     /** Poche colonne: larghezze leggibili senza affollare l’header filtri */
-    const widths: Record<string, string> = {
-      clientName: "w-[14rem] min-w-[12rem]",
-      podPdr: "w-[11rem] min-w-[9rem]",
-      supplierName: "w-[10rem] min-w-[8rem]",
-      stato: "w-[10rem] min-w-[9rem]",
-      meseRif: "w-[8.5rem] min-w-[7.5rem]",
-      collectionMonth: "w-[9rem] min-w-[8rem]",
-      _open: "w-[2.75rem] min-w-[2.75rem] text-center",
-      _del: "w-[3rem] min-w-[3rem]",
-    };
+    const widths: Record<string, string> = mrSimple
+      ? {
+          clientName: "w-[12rem] min-w-[10rem]",
+          podPdr: "w-[9rem] min-w-[8rem]",
+          supplierName: "w-[8rem] min-w-[7rem]",
+          collaboratorName: "w-[7rem] min-w-[6rem]",
+          meseRif: "w-[7rem] min-w-[6.5rem]",
+          amount: "w-[5rem] min-w-[4.5rem] text-right",
+          mesePrevisto: "w-[7rem] min-w-[6.5rem]",
+          ritardo: "w-[4.5rem] min-w-[4rem]",
+          stornoFlag: "w-[4.5rem] min-w-[4rem]",
+          stato: "w-[9.5rem] min-w-[8.5rem]",
+          _open: "w-[2.75rem] min-w-[2.75rem] text-center",
+          _del: "w-[3rem] min-w-[3rem]",
+        }
+      : {
+          clientName: "w-[14rem] min-w-[12rem]",
+          podPdr: "w-[11rem] min-w-[9rem]",
+          supplierName: "w-[10rem] min-w-[8rem]",
+          stato: "w-[10rem] min-w-[9rem]",
+          meseRif: "w-[8.5rem] min-w-[7.5rem]",
+          collectionMonth: "w-[9rem] min-w-[8rem]",
+          _open: "w-[2.75rem] min-w-[2.75rem] text-center",
+          _del: "w-[3rem] min-w-[3rem]",
+        };
     const inputs: Record<string, string> = {
       clientName:
         "min-w-0 w-full truncate text-[12px] font-semibold tracking-tight text-slate-900",
       collectionMonth: "max-w-full w-full tabular-nums",
       supplierName: "min-w-0 w-full truncate",
+      amount: "w-full text-right font-semibold tabular-nums",
     };
-    return SIMPLE_COLUMN_ORDER.map((k) => {
-      const col = byKey.get(k);
-      if (!col) return undefined;
-      const next: FilterColumn = {
-        ...col,
-        colClassName: widths[k],
-        ...(inputs[k] ? { inputClassName: inputs[k] } : {}),
-      };
-      const simpleLabel = SIMPLE_COLUMN_LABELS[k];
-      if (simpleLabel) next.label = simpleLabel;
-      return next;
-    }).filter((c): c is FilterColumn => Boolean(c));
-  }, [advancedView, allColumns]);
+    return order
+      .map((k) => {
+        const col = byKey.get(k);
+        if (!col) return undefined;
+        const next: FilterColumn = {
+          ...col,
+          colClassName: widths[k],
+          ...(inputs[k] ? { inputClassName: inputs[k] } : {}),
+        };
+        const simpleLabel = mrSimple
+          ? SIMPLE_MR_COLUMN_LABELS[k as (typeof SIMPLE_MR_COLUMN_ORDER)[number]]
+          : SIMPLE_COLUMN_LABELS[k as (typeof SIMPLE_COLUMN_ORDER)[number]];
+        if (simpleLabel) next.label = simpleLabel;
+        return next;
+      })
+      .filter((c): c is FilterColumn => Boolean(c));
+  }, [advancedView, allColumns, listQuery?.vista]);
 
   return (
     <div className="space-y-2">
@@ -1853,6 +1966,13 @@ export function ProvvigioniFilterTable({
               agenzia pagatrice, tip., inizio fornitura, tipo op., storno…). Scorri in
               orizzontale sulla tabella se serve. Celle modificabili = bozza
               (giallo) finché non salvi.{" "}
+            </>
+          ) : isMensileOrAnnualeVista(listQuery?.vista) ? (
+            <>
+              Vista <strong>semplificata M/R</strong>: Nominativo · Pod · Fornitore ·
+              Collab. · Competenza · Atteso · Mese previsto · Ritardo · Storno ·
+              Stato · azioni. Ritardo solo su «Da incassare» oltre il mese previsto
+              (Helios = competenza + 2).{" "}
             </>
           ) : (
             <>

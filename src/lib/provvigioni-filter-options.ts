@@ -23,6 +23,7 @@ import {
   operationTypeLabel,
 } from "@/lib/provvigioni-stato";
 import { rateStatusesForStatoFilter } from "@/lib/provvigioni-rows";
+import { expectedPayablePeriod } from "@/lib/provvigioni-operative";
 import { toPeriod } from "@/lib/recurring";
 
 const MAX_OPTIONS = 400;
@@ -142,6 +143,31 @@ export async function loadProvvigioniFilterOptions(
         take: MAX_OPTIONS,
       });
       for (const row of rows) values.add(row.period);
+      break;
+    }
+    case "mesePrevisto": {
+      // P1.1 B4: mese previsto = competenza (+2 se Helios).
+      const statuses = rateStatusesForStatoFilter(query.stato);
+      const rows = await prisma.recurringMonth.findMany({
+        where: {
+          AND: [
+            statuses.length > 0 ? { status: { in: statuses } } : {},
+            { contract: where },
+          ],
+        },
+        select: {
+          period: true,
+          contract: { select: { supplier: { select: { name: true } } } },
+        },
+        take: DERIVED_SCAN_LIMIT,
+      });
+      for (const row of rows) {
+        const expected = expectedPayablePeriod(
+          row.period,
+          row.contract.supplier.name,
+        );
+        if (expected) values.add(expected);
+      }
       break;
     }
     case "supplyStartDate":

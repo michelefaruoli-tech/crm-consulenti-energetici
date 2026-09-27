@@ -22,7 +22,7 @@ export type ProvvigioneRow = {
   /** Chi paga il gettone (da fornitore) — vista avanzata */
   agency: string;
   clientType: string;
-  /** Gettone effettivo mostrato in colonna Gettone */
+  /** Gettone effettivo mostrato in colonna Gettone / Atteso */
   amount: string;
   /** Data inizio fornitura (gg/mm/aaaa) — vista avanzata */
   supplyStartDate: string;
@@ -34,6 +34,18 @@ export type ProvvigioneRow = {
   paymentStatus: string;
   confirmed: string;
   collectionMonth: string;
+  /**
+   * P1.1 B4 — mese previsto di pagamento (YYYY-MM).
+   * Helios = competenza + 2; altri = competenza.
+   */
+  expectedPeriod?: string;
+  /** Etichetta mese previsto (es. «ott 2026»). */
+  expectedMonth?: string;
+  /**
+   * P1.1 B4 — giorni di ritardo oltre il mese previsto (solo Da incassare).
+   * Stringa vuota se non sensato.
+   */
+  delayDays?: string;
   /** Storno gettone: Sì / No */
   stornoFlag: string;
   /** Data storno MM/AAAA */
