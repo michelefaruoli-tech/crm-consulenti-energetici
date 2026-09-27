@@ -162,7 +162,11 @@ export function ExcelFilterTable({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [scrollWidth, setScrollWidth] = useState(0);
   const [needsHScroll, setNeedsHScroll] = useState(false);
-  /** Barra orizzontale fissa in basso allo schermo (sempre visibile a metà tabella) */
+  /**
+   * Barra orizzontale fissa in basso al viewport (portal su body).
+   * Non dipende da position:fixed dentro main overflow-auto, che in alcuni
+   * layout la “incolla” in fondo al contenuto invece che allo schermo.
+   */
   const [fixedBar, setFixedBar] = useState<{
     left: number;
     width: number;
@@ -450,23 +454,20 @@ export function ExcelFilterTable({
     setNeedsHScroll(el.scrollWidth > el.clientWidth + 2);
   }
 
-  function updateFixedBarPosition() {
+  function updateFixedBarGeometry() {
     const root = rootRef.current;
     if (!root) return;
     const rect = root.getBoundingClientRect();
-    const vh = window.innerHeight;
-    // Tabella almeno parzialmente in vista → mostra la barra in basso allo schermo
-    const inView = rect.bottom > 48 && rect.top < vh - 24;
-    setFixedBar({
+    setFixedBar((prev) => ({
+      ...prev,
       left: Math.max(0, Math.round(rect.left)),
       width: Math.max(0, Math.round(rect.width)),
-      visible: inView,
-    });
+    }));
   }
 
   function getVerticalScrollParent(el: HTMLElement | null): HTMLElement | null {
     let node = el?.parentElement ?? null;
-    while (node) {
+    while (node && node !== document.documentElement) {
       const { overflowY } = getComputedStyle(node);
       if (
         overflowY === "auto" ||
@@ -482,28 +483,65 @@ export function ExcelFilterTable({
 
   useEffect(() => {
     measureScroll();
-    updateFixedBarPosition();
+    updateFixedBarGeometry();
     const el = scrollRef.current;
     const root = rootRef.current;
-    if (!el) return;
+    if (!el || !root) return;
+
     const ro = new ResizeObserver(() => {
       measureScroll();
-      updateFixedBarPosition();
+      updateFixedBarGeometry();
     });
     ro.observe(el);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
-    if (root) ro.observe(root);
+    ro.observe(root);
+
+    // Visibilità immediata (prima del callback IO) + IntersectionObserver
+    const bootRect = root.getBoundingClientRect();
+    const bootVisible =
+      bootRect.bottom > 24 && bootRect.top < window.innerHeight - 8;
+    setFixedBar((prev) => ({
+      ...prev,
+      left: Math.max(0, Math.round(bootRect.left)),
+      width: Math.max(0, Math.round(bootRect.width)),
+      visible: bootVisible,
+    }));
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        const visible = Boolean(entry?.isIntersecting);
+        setFixedBar((prev) =>
+          prev.visible === visible ? prev : { ...prev, visible },
+        );
+        if (visible) updateFixedBarGeometry();
+      },
+      {
+        root: null,
+        threshold: 0,
+        // Margine basso: nasconde la barra quando la tabella è quasi fuori viewport
+        rootMargin: "0px 0px -24px 0px",
+      },
+    );
+    io.observe(root);
 
     const scrollParent = getVerticalScrollParent(root);
-    const onScrollOrResize = () => updateFixedBarPosition();
+    const onScrollOrResize = () => updateFixedBarGeometry();
     window.addEventListener("resize", onScrollOrResize);
     scrollParent?.addEventListener("scroll", onScrollOrResize, {
       passive: true,
     });
     window.addEventListener("scroll", onScrollOrResize, { passive: true });
+    // Secondo frame: layout stabile dopo font/padding
+    const raf = requestAnimationFrame(() => {
+      measureScroll();
+      updateFixedBarGeometry();
+    });
 
     return () => {
+      cancelAnimationFrame(raf);
       ro.disconnect();
+      io.disconnect();
       window.removeEventListener("resize", onScrollOrResize);
       window.removeEventListener("scroll", onScrollOrResize);
       scrollParent?.removeEventListener("scroll", onScrollOrResize);
@@ -511,7 +549,7 @@ export function ExcelFilterTable({
   }, [columns, rows, fitWidth, dense]);
 
   useEffect(() => {
-    updateFixedBarPosition();
+    updateFixedBarGeometry();
   }, [needsHScroll]);
 
   function syncFromMain() {
@@ -543,7 +581,10 @@ export function ExcelFilterTable({
   }
 
   const showFixedHScroll =
-    needsHScroll && fixedBar.visible && fixedBar.width > 0;
+    typeof document !== "undefined" &&
+    needsHScroll &&
+    fixedBar.visible &&
+    fixedBar.width > 40;
 
   // Quando la barra fissa riappare, allinea lo scroll alla tabella
   useEffect(() => {
@@ -881,7 +922,11 @@ export function ExcelFilterTable({
 
       <div
         ref={scrollRef}
-        className="hide-native-scrollbar overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
+        className={cn(
+          "overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]",
+          // Nasconde la nativa solo quando la barra fissa in basso è attiva
+          showFixedHScroll && "hide-native-scrollbar",
+        )}
         onScroll={syncFromMain}
       >
       <table
@@ -1120,27 +1165,30 @@ export function ExcelFilterTable({
       </table>
       </div>
 
-      {showFixedHScroll ? (
-        <div
-          className="fixed z-[55] border-t-2 border-emerald-600 bg-white px-2 py-1.5 shadow-[0_-4px_14px_rgba(0,0,0,0.12)]"
-          style={{
-            left: fixedBar.left,
-            width: fixedBar.width,
-            bottom: 0,
-          }}
-          aria-label="Scorri la tabella in orizzontale"
-        >
-          <div
-            ref={stickyScrollRef}
-            className="overflow-x-auto rounded border border-slate-300 bg-slate-100"
-            onScroll={syncFromSticky}
-            style={{ height: 14 }}
-            aria-label="Barra di scorrimento orizzontale"
-          >
-            <div style={{ width: Math.max(scrollWidth, 1), height: 1 }} />
-          </div>
-        </div>
-      ) : null}
+      {showFixedHScroll
+        ? createPortal(
+            <div
+              className="pointer-events-auto fixed z-[55] border-t-2 border-emerald-600 bg-white px-2 py-1.5 shadow-[0_-4px_14px_rgba(0,0,0,0.12)]"
+              style={{
+                left: fixedBar.left,
+                width: fixedBar.width,
+                bottom: 0,
+              }}
+              aria-label="Scorri la tabella in orizzontale"
+            >
+              <div
+                ref={stickyScrollRef}
+                className="table-fixed-h-scrollbar overflow-x-auto rounded border border-slate-300 bg-slate-100"
+                onScroll={syncFromSticky}
+                style={{ height: 16 }}
+                aria-label="Barra di scorrimento orizzontale"
+              >
+                <div style={{ width: Math.max(scrollWidth, 1), height: 1 }} />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
         <p className="text-xs text-slate-500">
