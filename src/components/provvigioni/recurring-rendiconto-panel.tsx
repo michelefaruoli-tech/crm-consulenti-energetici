@@ -98,9 +98,10 @@ export function RecurringRendicontoPanel({
           {rows.length} rate · totale rendiconto {formatCurrency(total)}
         </p>
         <p className="mt-1 text-xs text-emerald-900/90">
-          <strong>Incassato</strong> = Helios (o altro fornitore) ha pagato a te.{" "}
-          <strong>Pagato</strong> = tu hai liquidato il collaboratore in Provvigioni («Segna
-          pagato»). I totali sotto sono gli importi del rendiconto da considerare per il
+          <strong>Incassato da liquidare</strong> = Helios (o altro fornitore) ha
+          pagato a te. <strong>Liquidato</strong> = tu hai liquidato il
+          collaboratore in Provvigioni o Liquidazioni («Segna Liquidato»). I
+          totali sotto sono gli importi del rendiconto da considerare per il
           pagamento ai collaboratori.
         </p>
       </div>

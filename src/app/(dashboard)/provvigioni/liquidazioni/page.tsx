@@ -65,6 +65,12 @@ export default async function LiquidazioniPage() {
           Ogni liquidazione resta aperta: puoi aggiungere altri file, inserire
           rettifiche manuali e rigenerare i report.
         </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Stesso ciclo di Provvigioni:{" "}
+          <strong>Da incassare</strong> →{" "}
+          <strong>Incassato da liquidare</strong> (fornitore) →{" "}
+          <strong>Liquidato</strong> (collaboratore). INCASSATO ≠ LIQUIDATO.
+        </p>
       </div>
 
       {session.role === "ADMIN" ? (
@@ -72,8 +78,9 @@ export default async function LiquidazioniPage() {
           <CardTitle>Marcatura massiva storico Helios</CardTitle>
           <p className="mt-1 mb-4 text-sm text-slate-600">
             Chiude le competenze Helios fino a luglio 2026 incluso come{" "}
-            <strong>pagate dal fornitore e liquidate al collaboratore</strong>,
-            con anteprima obbligatoria. Lag M+2 resta: agosto si crea a ottobre,
+            <strong>Incassato da liquidare</strong> e{" "}
+            <strong>Liquidato</strong> (fornitore + collaboratore), con
+            anteprima obbligatoria. Lag M+2 resta: agosto si crea a ottobre,
             settembre a novembre — non in anticipo. Operazione annullabile.
           </p>
           <PayoutBulkHistoricalPanel />
@@ -95,8 +102,10 @@ export default async function LiquidazioniPage() {
       <Card>
         <CardTitle>Nuovo import</CardTitle>
         <p className="mt-1 mb-4 text-sm text-slate-600">
-          L&apos;anteprima non scrive nulla. L&apos;applicazione segna i contratti come
-          incassati dal fornitore e resta annullabile.
+          L&apos;anteprima non scrive nulla. L&apos;applicazione porta le rate a{" "}
+          <strong>Incassato da liquidare</strong> (incasso fornitore) e resta
+          annullabile. Il passo <strong>Liquidato</strong> ai collaboratori si
+          fa dopo, dalla scheda liquidazione.
         </p>
         <PayoutImportPanel templates={templates} />
       </Card>
@@ -136,7 +145,11 @@ export default async function LiquidazioniPage() {
                       </Link>
                       {run.liquidatedAt ? (
                         <span className="block text-xs text-slate-500">
-                          Liquidata ai collaboratori
+                          Liquidato ai collaboratori
+                        </span>
+                      ) : run.appliedAt ? (
+                        <span className="block text-xs text-amber-700">
+                          Incassato da liquidare
                         </span>
                       ) : null}
                     </td>

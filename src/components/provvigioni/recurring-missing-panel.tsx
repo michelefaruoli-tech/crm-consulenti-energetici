@@ -18,7 +18,7 @@ export type MissingAlert = {
 
 /**
  * Solo mesi già scaduti e non ancora incassati.
- * Incassato → passa alla lista «Pagato» sotto; Pagato → esce del tutto.
+ * Incassato da liquidare → passa alla lista «Liquidato» sotto; Liquidato → esce del tutto.
  */
 export function RecurringMissingPanel({
   alerts,

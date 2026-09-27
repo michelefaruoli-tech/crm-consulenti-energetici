@@ -31,7 +31,7 @@ export function PayoutBulkHistoricalPanel() {
   const router = useRouter();
   const [pending, start] = useTransition();
 
-  /** Predefinito LIQUIDATO = Pagato al collaboratore (implica anche incasso fornitore). */
+  /** Predefinito LIQUIDATO = Liquidato al collaboratore (implica anche Incassato da liquidare). */
   const [markMode, setMarkMode] = useState<"INCASSATO" | "LIQUIDATO">(
     "LIQUIDATO",
   );
@@ -71,8 +71,8 @@ export function PayoutBulkHistoricalPanel() {
 
     const statoLabel =
       markMode === "LIQUIDATO"
-        ? "liquidato al collaboratore (Pagato)"
-        : "incassato dal fornitore (Incassato)";
+        ? "Liquidato (fornitore + collaboratore)"
+        : "Incassato da liquidare (solo fornitore)";
     const exclLabel =
       exclusionMode === "ACTIVE_ONLY"
         ? "escludi Moschetta e Lobefaro solo sui contratti attivi"
@@ -176,15 +176,15 @@ export function PayoutBulkHistoricalPanel() {
               }}
             >
               <option value="LIQUIDATO">
-                Pagate + liquidate (predefinito)
+                Incassato da liquidare + Liquidato (predefinito)
               </option>
-              <option value="INCASSATO">Solo incassato dal fornitore</option>
+              <option value="INCASSATO">Solo Incassato da liquidare</option>
             </Select>
           </Field>
           <p className="mt-1 text-xs text-slate-500">
             {markMode === "LIQUIDATO"
-              ? "Segna la rata LIQUIDATED (Pagato): fornitore già pagato e collaboratore liquidato."
-              : "Segna solo PAID (Incassato): fornitore pagato, collaboratore non ancora liquidato."}
+              ? "Segna LIQUIDATED (Liquidato): fornitore già incassato e collaboratore liquidato."
+              : "Segna solo PAID (Incassato da liquidare): fornitore ok, collaboratore non ancora liquidato."}
           </p>
         </div>
 

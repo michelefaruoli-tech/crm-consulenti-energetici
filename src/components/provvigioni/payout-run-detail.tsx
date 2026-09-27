@@ -380,7 +380,8 @@ export function PayoutRunDetail({
   function markLiquidated() {
     if (
       !window.confirm(
-        "Segnare le provvigioni come liquidate ai collaboratori? È il passo successivo all'incasso dal fornitore.",
+        "Segnare le rate come Liquidato ai collaboratori?\n" +
+          "Passo successivo a Incassato da liquidare (incasso fornitore già applicato).",
       )
     ) {
       return;
@@ -474,6 +475,12 @@ export function PayoutRunDetail({
       ) : null}
       {progress ? <p className="text-sm text-slate-600">{progress}</p> : null}
 
+      <p className="text-xs text-slate-500">
+        Ciclo liquidazione (allineato a Provvigioni): applicazione file →{" "}
+        <strong>Incassato da liquidare</strong> (fornitore) →{" "}
+        <strong>Liquidato</strong> (collaboratore). INCASSATO ≠ LIQUIDATO.
+      </p>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <p className="text-sm text-slate-500">Totale da rendiconti</p>
@@ -488,7 +495,12 @@ export function PayoutRunDetail({
           </p>
         </Card>
         <Card className="border-emerald-200 bg-emerald-50">
-          <p className="text-sm text-slate-500">Netto da liquidare</p>
+          <p className="text-sm text-slate-500">
+            Netto da liquidare
+            <span className="mt-0.5 block text-[11px] font-normal normal-case text-slate-500">
+              coda Incassato da liquidare → Liquidato
+            </span>
+          </p>
           <p className="mt-1 text-2xl font-bold text-slate-900">
             {formatCurrency(netTotal)}
           </p>
@@ -508,7 +520,7 @@ export function PayoutRunDetail({
               onClick={markLiquidated}
               disabled={pending || closed || !run.appliedAt}
             >
-              Segna liquidato ai collaboratori
+              Segna Liquidato ai collaboratori
             </Button>
             <Button variant="ghost" onClick={toggleClosed} disabled={pending}>
               {closed ? "Riapri liquidazione" : "Chiudi liquidazione"}
@@ -516,7 +528,12 @@ export function PayoutRunDetail({
           </div>
           {run.liquidatedAt ? (
             <p className="mt-2 text-sm text-emerald-700">
-              Liquidata ai collaboratori il {itDate(run.liquidatedAt)}
+              Liquidato ai collaboratori il {itDate(run.liquidatedAt)}
+            </p>
+          ) : run.appliedAt ? (
+            <p className="mt-2 text-sm text-amber-700">
+              Stato attuale: Incassato da liquidare — usa «Segna Liquidato»
+              quando hai liquidato i collaboratori.
             </p>
           ) : null}
           {adjustmentsAfterReport > 0 ? (

@@ -113,10 +113,10 @@ export type HeliosImportRowStatus =
   | "not_found"
   | "ambiguous";
 
-/** Etichette UI: import rendiconto = Incassato, non Pagato collaboratore. */
+/** Etichette UI: import rendiconto = Incassato da liquidare, non Liquidato collaboratore. */
 export const HELIOS_IMPORT_STATUS_LABEL: Record<HeliosImportRowStatus, string> = {
-  will_pay: "Da segnare incassato",
-  already_paid: "Già incassato",
+  will_pay: "Da segnare Incassato da liquidare",
+  already_paid: "Già Incassato da liquidare",
   not_yet_payable: "Competenza non ancora pagabile (lag M+2)",
   not_found: "POD non in CRM",
   ambiguous: "Più contratti",

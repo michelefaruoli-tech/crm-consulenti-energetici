@@ -161,6 +161,12 @@ export default async function LiquidazioneDetailPage({
         <p className="mt-1 text-sm text-slate-600">
           Periodo {periodLabel(run.period)} · creata da {run.createdBy.name}
         </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Ciclo: applicazione file →{" "}
+          <strong>Incassato da liquidare</strong> → segna{" "}
+          <strong>Liquidato</strong> ai collaboratori. Stesso linguaggio di
+          Provvigioni.
+        </p>
       </div>
 
       <PayoutRunDetail
