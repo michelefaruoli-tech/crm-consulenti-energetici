@@ -7,9 +7,20 @@ import { Button } from "@/components/ui/button";
 import { ContractsFilterTable } from "@/components/contracts/contracts-filter-table";
 import { PaginationNav } from "@/components/ui/pagination-nav";
 import { ListSearchForm } from "@/components/ui/list-search-form";
+import { StornoStatusFilters } from "@/components/ui/storno-status-filters";
 import { toCollaboratorOption, toContractRows } from "@/lib/contract-row";
 import { PAGE_SIZE, pageSkip, parsePage } from "@/lib/pagination";
 import { contractTextSearchWhere } from "@/lib/list-search";
+import {
+  andStornoStatusWhere,
+  buildStornoStatusWhere,
+  formatStornoStatusFilters,
+  loadDoppiaPosizioneContractIds,
+  parseStornoStatusFilters,
+  stornoFilterAllowsHistorical,
+  stornoFilterHintLabels,
+  stornoFilterNeedsDoppiaIds,
+} from "@/lib/storno-filters";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +32,15 @@ export default async function ContrattiPage({
     collab?: string;
     page?: string;
     q?: string;
+    storno?: string;
   }>;
 }) {
   const session = await requireSession();
-  const { vista, collab, page: pageRaw, q } = await searchParams;
+  const { vista, collab, page: pageRaw, q, storno: stornoRaw } = await searchParams;
   const page = parsePage(pageRaw);
+  const now = new Date();
+  const stornoIds = parseStornoStatusFilters(stornoRaw);
+  const stornoParam = formatStornoStatusFilters(stornoIds) ?? undefined;
   const canViewAll = hasPermission(session.role, "contracts.edit_all");
   const canChangeCollaborator = hasPermission(
     session.role,
@@ -45,12 +60,14 @@ export default async function ContrattiPage({
   const { contractVisibilityWhere } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
   const textSearch = contractTextSearchWhere(q);
+  const allowHistorical =
+    stornoFilterAllowsHistorical(stornoIds) || mode !== "attivi";
 
-  const where = {
+  const baseWhere = {
     deletedAt: null as null,
     ...visibility,
     ...(collabFilter ? { collaboratorId: collabFilter } : {}),
-    ...(mode === "attivi"
+    ...(mode === "attivi" && !stornoFilterAllowsHistorical(stornoIds)
       ? { isHistorical: false as const }
       : mode === "storico"
         ? { isHistorical: true as const }
@@ -58,9 +75,23 @@ export default async function ContrattiPage({
     ...(textSearch ? { AND: [textSearch] } : {}),
   };
 
+  const doppiaIds = stornoFilterNeedsDoppiaIds(stornoIds)
+    ? await loadDoppiaPosizioneContractIds(prisma, {
+        deletedAt: null,
+        ...visibility,
+        ...(collabFilter ? { collaboratorId: collabFilter } : {}),
+      })
+    : undefined;
+
+  const stornoWhere = buildStornoStatusWhere(stornoIds, {
+    now,
+    doppiaIds,
+  });
+  const where = andStornoStatusWhere(baseWhere, stornoWhere);
+
   const chipWhere = {
     deletedAt: null as null,
-    ...(mode === "attivi"
+    ...(mode === "attivi" && !stornoFilterAllowsHistorical(stornoIds)
       ? { isHistorical: false as const }
       : mode === "storico"
         ? { isHistorical: true as const }
@@ -68,6 +99,9 @@ export default async function ContrattiPage({
   };
 
   const qParam = q?.trim() ? `&q=${encodeURIComponent(q.trim())}` : "";
+  const stornoQs = stornoParam
+    ? `&storno=${encodeURIComponent(stornoParam)}`
+    : "";
   const vistaQ = mode === "tutti" ? "tutti" : mode;
 
   try {
@@ -142,7 +176,9 @@ export default async function ContrattiPage({
       vista: vistaQ,
       collab: collabFilter,
       q: q?.trim() || undefined,
+      storno: stornoParam,
     };
+    const stornoHint = stornoFilterHintLabels(stornoIds);
 
     return (
       <div className="space-y-6">
@@ -151,8 +187,10 @@ export default async function ContrattiPage({
             <h1 className="text-2xl font-bold text-slate-900">Contratti</h1>
             <p className="text-slate-500">
               {total} contratti
-              {q?.trim() ? ` trovati per «${q.trim()}»` : " in questa vista"} · ordinati per
-              data inserimento (più recenti prima)
+              {q?.trim() ? ` trovati per «${q.trim()}»` : " in questa vista"}
+              {stornoHint ? ` · ${stornoHint}` : ""}
+              {" · "}
+              ordinati per data inserimento (più recenti prima)
               {canViewAll
                 ? ` · accesso ${roleLabel} (${session.email})`
                 : ` · solo i tuoi`}
@@ -161,6 +199,13 @@ export default async function ContrattiPage({
               <p className="mt-1 text-xs text-amber-800">
                 Il tuo ruolo ({roleLabel}) vede solo i contratti assegnati a te. Serve ruolo
                 Admin o Segreteria per vedere tutti.
+              </p>
+            ) : null}
+            {allowHistorical &&
+            mode === "attivi" &&
+            stornoFilterAllowsHistorical(stornoIds) ? (
+              <p className="mt-1 text-xs text-slate-600">
+                Filtro Storico attivo: inclusa anche l’archivio POD ricontrattualizzato.
               </p>
             ) : null}
           </div>
@@ -184,12 +229,13 @@ export default async function ContrattiPage({
           hidden={{
             vista: vistaQ,
             collab: collabFilter,
+            storno: stornoParam,
           }}
         />
 
         <div className="flex flex-wrap gap-2 text-sm">
           <Link
-            href={`/contratti?vista=attivi${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}`}
+            href={`/contratti?vista=attivi${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}${stornoQs}`}
             className={
               mode === "attivi"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
@@ -199,7 +245,7 @@ export default async function ContrattiPage({
             Attivi
           </Link>
           <Link
-            href={`/contratti?vista=storico${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}`}
+            href={`/contratti?vista=storico${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}${stornoQs}`}
             className={
               mode === "storico"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
@@ -209,7 +255,7 @@ export default async function ContrattiPage({
             Storico
           </Link>
           <Link
-            href={`/contratti?vista=tutti${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}`}
+            href={`/contratti?vista=tutti${collabFilter ? `&collab=${collabFilter}` : ""}${qParam}${stornoQs}`}
             className={
               mode === "tutti"
                 ? "rounded-lg bg-emerald-600 px-3 py-1.5 text-white"
@@ -220,10 +266,20 @@ export default async function ContrattiPage({
           </Link>
         </div>
 
+        <StornoStatusFilters
+          path="/contratti"
+          selected={stornoIds}
+          queryBase={{
+            vista: vistaQ,
+            collab: collabFilter,
+            q: q?.trim() || undefined,
+          }}
+        />
+
         {canViewAll ? (
           <div className="flex flex-wrap gap-2 text-sm">
             <Link
-              href={`/contratti?vista=${vistaQ}${qParam}`}
+              href={`/contratti?vista=${vistaQ}${qParam}${stornoQs}`}
               className={
                 !collabFilter
                   ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"
@@ -235,7 +291,7 @@ export default async function ContrattiPage({
             {allCollabCounts.map((c) => (
               <Link
                 key={c.id}
-                href={`/contratti?vista=${vistaQ}&collab=${c.id}${qParam}`}
+                href={`/contratti?vista=${vistaQ}&collab=${c.id}${qParam}${stornoQs}`}
                 className={
                   collabFilter === c.id
                     ? "rounded-lg bg-slate-800 px-3 py-1.5 text-white"

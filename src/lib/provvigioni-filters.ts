@@ -47,6 +47,11 @@ export type ProvvigioniFilters = {
   columnWhere?: Prisma.ContractWhereInput[] | null;
   /** Mese competenza YYYY-MM — allinea filtro Incassato/Liquidato alle rate mensili */
   competencePeriod?: string | null;
+  /**
+   * P1.2 B4: con filtro storno «Storico» non forzare `isHistorical: false`
+   * (altrimenti l’OR con storico sarebbe sempre vuoto).
+   */
+  includeHistorical?: boolean;
 };
 
 /**
@@ -369,7 +374,7 @@ export function buildProvvigioniContractWhere(
       OR: [
         {
           AND: [
-            { isHistorical: false },
+            ...(f.includeHistorical ? [] : [{ isHistorical: false as const }]),
             { status: { notIn: [...KO_STATUSES] } },
           ],
         },
@@ -377,7 +382,9 @@ export function buildProvvigioniContractWhere(
       ],
     });
   } else {
-    and.push({ isHistorical: false });
+    if (!f.includeHistorical) {
+      and.push({ isHistorical: false });
+    }
     and.push({ status: { notIn: [...KO_STATUSES] } });
   }
 
@@ -641,6 +648,10 @@ export function buildProvvigioniListWhere(
       ],
     };
   } else if (opts.focus === "fuori-storno") {
+    /**
+     * Legacy: preferire `?storno=fuori_storno` (B4). Se il caller ha già
+     * applicato i filtri storno, non passare focus=fuori-storno.
+     */
     where = { AND: [where, fuoriStornoWhere()] };
   } else if (opts.focus === "anomalie") {
     /**
