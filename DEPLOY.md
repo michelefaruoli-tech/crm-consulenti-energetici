@@ -44,7 +44,7 @@ npm run db:seed
 npm run dev
 ```
 
-Verifica login: `admin@crm.local` / `Admin123!`
+Verifica login: `admin@crm.local` / `AdminSecure123!`
 
 ## 3) GitHub (necessario per Vercel)
 

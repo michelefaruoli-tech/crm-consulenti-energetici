@@ -569,7 +569,14 @@ async function analyzeWithOpenRouterModel(
 
 /** OCR.space (testo) + LLM testo (Groq/Gemini) — ultima spiaggia gratuita */
 async function ocrSpaceExtractText(file: OcrFileInput): Promise<string> {
-  const apiKey = process.env.OCRSPACE_API_KEY || "K87899142388957"; // free demo key
+  const apiKey = process.env.OCRSPACE_API_KEY?.trim();
+  if (!apiKey) {
+    throw new ProviderError(
+      "OCR.space non configurato (OCRSPACE_API_KEY)",
+      true,
+      "ocrspace",
+    );
+  }
   const form = new FormData();
   const mime = file.mimeType === "image/jpg" ? "image/jpeg" : file.mimeType;
   const bytes = Buffer.from(file.base64, "base64");
@@ -739,13 +746,14 @@ function hasKey(provider: OcrProviderName): boolean {
   if (provider === "groq") return Boolean(process.env.GROQ_API_KEY);
   if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY);
   if (provider === "openrouter") return Boolean(process.env.OPENROUTER_API_KEY);
-  // ocrspace: chiave demo sempre disponibile; serve almeno un LLM per strutturare
+  // ocrspace: richiede OCRSPACE_API_KEY (niente chiave demo in codice)
   if (provider === "ocrspace") {
     return Boolean(
-      process.env.GROQ_API_KEY ||
-        process.env.GEMINI_API_KEY ||
-        process.env.GOOGLE_AI_API_KEY ||
-        process.env.OPENROUTER_API_KEY,
+      process.env.OCRSPACE_API_KEY?.trim() &&
+        (process.env.GROQ_API_KEY ||
+          process.env.GEMINI_API_KEY ||
+          process.env.GOOGLE_AI_API_KEY ||
+          process.env.OPENROUTER_API_KEY),
     );
   }
   return false;

@@ -76,7 +76,7 @@ export function AdminSetPasswordButton({
         name="newPassword"
         type="password"
         required
-        minLength={8}
+        minLength={12}
         placeholder="Es. Casa2026"
         autoComplete="new-password"
         className="rounded border border-slate-300 px-2 py-1 text-xs"
@@ -85,7 +85,7 @@ export function AdminSetPasswordButton({
         name="confirmPassword"
         type="password"
         required
-        minLength={8}
+        minLength={12}
         placeholder="Conferma password"
         autoComplete="new-password"
         className="rounded border border-slate-300 px-2 py-1 text-xs"
