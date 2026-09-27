@@ -16,7 +16,9 @@ function stripBucketFocus(
     if (!v) continue;
     if (
       k === "focus" &&
-      (v === "incassato-da-liquidare" || v === "ut-da-incassare")
+      (v === "incassato-da-liquidare" ||
+        v === "ut-da-incassare" ||
+        v === "anomalie")
     ) {
       continue;
     }
