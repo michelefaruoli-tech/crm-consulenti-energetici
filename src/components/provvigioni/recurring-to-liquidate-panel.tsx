@@ -17,7 +17,7 @@ export type ToLiquidateAlert = {
 };
 
 /**
- * Rate già Incassate: qui segni Pagato e la riga scompare.
+ * Rate già Incassate dal fornitore: qui segni Liquidato e la riga scompare.
  * Se la lista è vuota non mostriamo nulla (niente box grigio inutile).
  */
 export function RecurringToLiquidatePanel({
@@ -39,13 +39,13 @@ export function RecurringToLiquidatePanel({
   return (
     <section className="rounded-xl border border-sky-300 bg-sky-50 p-4 shadow-sm">
       <h2 className="text-base font-semibold text-sky-950">
-        {titleKind}: già incassati → segna Pagato ({alerts.length})
+        {titleKind}: già incassati → segna Liquidato ({alerts.length})
       </h2>
       <p className="mt-1 text-xs text-sky-900/80">
-        Questi mesi sono <strong>Incassato</strong> (fornitore ok). Clicca{" "}
-        <strong>Pagato</strong> quando hai liquidato il collaboratore: la riga viene{" "}
-        <strong>eliminata</strong> da questa lista. Sotto in tabella resta la data
-        dell&apos;ultimo mese pagato.
+        Questi mesi sono <strong>Incassato da liquidare</strong> (fornitore ok).
+        Clicca <strong>Liquidato</strong> quando hai liquidato il collaboratore:
+        la riga viene <strong>eliminata</strong> da questa lista. Sotto in
+        tabella resta la data dell&apos;ultimo mese liquidato.
       </p>
 
       <ul className="mt-3 max-h-72 space-y-2 overflow-auto text-sm">
@@ -72,7 +72,7 @@ export function RecurringToLiquidatePanel({
                   ? ` · rendiconto ${periodLabel(a.settledPeriod)}`
                   : ""}
                 {a.amount != null ? ` · € ${a.amount}` : ""}
-                {" · stato: Incassato"}
+                {" · stato: Incassato da liquidare"}
               </p>
             </div>
             <form action={updateRecurringMonthStatusAction}>
@@ -82,7 +82,7 @@ export function RecurringToLiquidatePanel({
                 type="submit"
                 className="rounded bg-teal-700 px-3 py-1 text-xs font-medium text-white hover:bg-teal-800"
               >
-                Pagato
+                Liquidato
               </button>
             </form>
           </li>

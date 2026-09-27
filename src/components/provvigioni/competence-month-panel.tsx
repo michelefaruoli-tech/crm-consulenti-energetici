@@ -1,10 +1,9 @@
-"use client";
-
 import Link from "next/link";
 import { formatCurrency } from "@/lib/commission";
 import { periodLabel } from "@/lib/recurring";
 import type { CompetenceMonthStats } from "@/lib/provvigioni-competence";
 import { incassatoCompetenceTotals } from "@/lib/provvigioni-competence";
+import { canonicalizeProvvigioneStato } from "@/lib/provvigioni-stato";
 
 function buildHref(
   base: Record<string, string | undefined>,
@@ -50,10 +49,13 @@ export function CompetenceMonthPanel({
     return `rounded-lg border px-3 py-1.5 text-sm font-medium transition ${colors[color]}`;
   }
 
+  const statoCanon = activeStato
+    ? canonicalizeProvvigioneStato(activeStato)
+    : "";
   const isAll = !activeStato || activeStato === "Tutti";
-  const isIncassato = activeStato === "Incassato";
-  const isDaIncassare = activeStato === "Da incassare";
-  const isPagato = activeStato === "Pagato";
+  const isIncassato = statoCanon === "Incassato";
+  const isDaIncassare = statoCanon === "Da incassare";
+  const isPagato = statoCanon === "Pagato";
 
   return (
     <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-4 shadow-sm sm:p-5">
@@ -122,10 +124,14 @@ export function CompetenceMonthPanel({
           Tutte ({stats.totalRates})
         </Link>
         <Link
-          href={buildHref(queryBase, { competence: period, stato: "Incassato" })}
+          href={buildHref(queryBase, {
+            competence: period,
+            stato: "Incassato da liquidare",
+          })}
           className={chipClass(isIncassato, "emerald")}
         >
-          Incassate ({incassato.count}) · {formatCurrency(incassato.amount)}
+          Incassato da liquidare ({incassato.count}) ·{" "}
+          {formatCurrency(incassato.amount)}
         </Link>
         <Link
           href={buildHref(queryBase, { competence: period, stato: "Da incassare" })}
@@ -134,10 +140,10 @@ export function CompetenceMonthPanel({
           Da incassare ({stats.missingCount}) · {formatCurrency(stats.missingAmount)}
         </Link>
         <Link
-          href={buildHref(queryBase, { competence: period, stato: "Pagato" })}
+          href={buildHref(queryBase, { competence: period, stato: "Liquidato" })}
           className={chipClass(isPagato, "indigo")}
         >
-          Pagate collab. ({stats.liquidatedCount})
+          Liquidato ({stats.liquidatedCount})
         </Link>
       </div>
     </section>

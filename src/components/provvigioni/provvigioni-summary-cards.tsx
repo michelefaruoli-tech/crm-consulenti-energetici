@@ -44,14 +44,14 @@ export function ProvvigioniSummaryCards({
       </div>
 
       <Link
-        href={buildHref(queryBase, "Incassato")}
+        href={buildHref(queryBase, "Incassato da liquidare")}
         className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm transition hover:border-emerald-300 hover:shadow-md"
       >
         <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
-          Incassato
+          Incassato da liquidare
         </p>
         <p className="mt-1 text-xs text-emerald-700/80">
-          Dal fornitore · da liquidare · {periodHint}
+          Incassato dal fornitore · non ancora liquidato · {periodHint}
         </p>
         <p className="mt-2 text-3xl font-bold text-emerald-900">
           {summary.incassatoCount}
@@ -69,7 +69,7 @@ export function ProvvigioniSummaryCards({
           Da incassare
         </p>
         <p className="mt-1 text-xs text-amber-700/80">
-          In attesa dal fornitore · {periodHint}
+          Atteso / in attesa dal fornitore · {periodHint}
         </p>
         <p className="mt-2 text-3xl font-bold text-amber-950">
           {summary.daIncassareCount}
@@ -80,11 +80,11 @@ export function ProvvigioniSummaryCards({
       </Link>
 
       <Link
-        href={buildHref(queryBase, "Pagato")}
+        href={buildHref(queryBase, "Liquidato")}
         className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md"
       >
         <p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">
-          Pagato
+          Liquidato
         </p>
         <p className="mt-1 text-xs text-indigo-700/80">
           Liquidato al collaboratore · {periodHint}

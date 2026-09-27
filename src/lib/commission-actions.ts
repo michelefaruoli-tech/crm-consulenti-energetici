@@ -18,6 +18,7 @@ import {
 import {
   effectiveGettone,
   operationTypeFromLabel,
+  provvigioneStatoActionKind,
 } from "@/lib/provvigioni-stato";
 import {
   computeSupplyStartDate,
@@ -547,7 +548,7 @@ async function applyCommissionField(
       data: { notes: value.trim() || null },
     });
   } else if (field === "stato") {
-    const raw = value.trim().toLowerCase();
+    const actionKind = provvigioneStatoActionKind(value);
     const contractId = commission.contractId;
     const periodRaw = opts?.competencePeriod?.trim() ?? "";
     const period = /^\d{4}-\d{2}$/.test(periodRaw) ? periodRaw : "";
@@ -556,12 +557,19 @@ async function applyCommissionField(
     const wasTerminal = ["KO", "ANNULLATO", "CHIUSO"].includes(
       commission.contract.status,
     );
-    if (annual && period && !/ko|cessat|annull|chius|controll|^storn/.test(raw)) {
-      const kind = /pagat/.test(raw)
-        ? "pagato"
-        : /incass/.test(raw) && !/da\s*incass/.test(raw)
-          ? "incassato"
-          : "da-incassare";
+    if (
+      annual &&
+      period &&
+      actionKind !== "ko" &&
+      actionKind !== "controllare" &&
+      actionKind !== "stornato"
+    ) {
+      const kind =
+        actionKind === "liquidato"
+          ? "pagato"
+          : actionKind === "incassato"
+            ? "incassato"
+            : "da-incassare";
       const existing = await prisma.recurringMonth.findUnique({
         where: { contractId_period: { contractId, period } },
       });
@@ -570,12 +578,18 @@ async function applyCommissionField(
       }
       // La prima annualità resta sulla riga contratto (collectionDate); poi sync crea +12.
     }
-    if (monthly && !/ko|cessat|annull|chius|controll|^storn/.test(raw)) {
-      const kind = /pagat/.test(raw)
-        ? "pagato"
-        : /incass/.test(raw) && !/da\s*incass/.test(raw)
-          ? "incassato"
-          : "da-incassare";
+    if (
+      monthly &&
+      actionKind !== "ko" &&
+      actionKind !== "controllare" &&
+      actionKind !== "stornato"
+    ) {
+      const kind =
+        actionKind === "liquidato"
+          ? "pagato"
+          : actionKind === "incassato"
+            ? "incassato"
+            : "da-incassare";
       const periods: string[] = [];
       if (period) {
         periods.push(period);
@@ -607,7 +621,7 @@ async function applyCommissionField(
       });
       return;
     }
-    if (/ko|cessat|annull|chius/.test(raw)) {
+    if (actionKind === "ko") {
       const wasPaid = Boolean(commission.contract.collectionDate);
       await prisma.contract.update({
         where: { id: contractId },
@@ -630,7 +644,7 @@ async function applyCommissionField(
       // Helios paga solo in fornitura: lo storno gettone si mette solo a mano
       // (colonna Storno Sì/No) o se altrove cambia il periodo di storno.
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
-    } else if (/controll/.test(raw)) {
+    } else if (actionKind === "controllare") {
       // Inserito ma non ancora contrattualizzato: da visionare e aggiornare
       await prisma.contract.update({
         where: { id: contractId },
@@ -640,7 +654,7 @@ async function applyCommissionField(
           ...(wasTerminal ? reactivateContractFields() : {}),
         },
       });
-    } else if (/^storn/.test(raw)) {
+    } else if (actionKind === "stornato") {
       // Gettone recuperato: esce dalla lista storni da applicare
       const amount = Math.abs(
         Number(commission.stornoAmount ?? 0) ||
@@ -665,8 +679,8 @@ async function applyCommissionField(
           ...(wasTerminal ? reactivateContractFields() : {}),
         },
       });
-    } else if (/pagat/.test(raw)) {
-      // Pagato collaboratore: liquidazione provvigione
+    } else if (actionKind === "liquidato") {
+      // Liquidato al collaboratore (alias UI: Pagato)
       const received = Number(commission.received ?? 0) || 0;
       const paid = Number(commission.paid ?? 0) || 0;
       const remaining = Math.max(0, received - paid);
@@ -721,7 +735,7 @@ async function applyCommissionField(
         },
       });
       await syncRecurringMonthsForContract(contractId).catch(() => undefined);
-    } else if (/incass/.test(raw) && !/da\s*incass/.test(raw) && !/^no$/.test(raw)) {
+    } else if (actionKind === "incassato") {
       const dates = fixFutureDatesForPayment({
         insertionDate: commission.contract.insertionDate,
         supplyStartDate: commission.contract.supplyStartDate,

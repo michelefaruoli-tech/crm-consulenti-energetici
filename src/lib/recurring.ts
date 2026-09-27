@@ -64,8 +64,8 @@ export const RECURRENCE_OPTIONS = [
 ] as const;
 
 export const RECURRING_STATUS_LABELS: Record<string, string> = {
-  PAID: "Incassato",
-  LIQUIDATED: "Pagato",
+  PAID: "Incassato da liquidare",
+  LIQUIDATED: "Liquidato",
   PENDING: "In attesa",
   MISSING: "Mancato",
   CLOSED: "Chiuso",

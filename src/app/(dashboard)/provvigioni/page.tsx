@@ -852,7 +852,7 @@ export default async function ProvvigioniPage({
           {importedNotFound > 0
             ? ` · ${importedNotFound} righe del file senza contratto nel CRM`
             : ""}
-          . Qui sotto vedi le provvigioni con stato «Incassato».
+          . Qui sotto vedi le provvigioni «Incassato da liquidare».
         </p>
       ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">

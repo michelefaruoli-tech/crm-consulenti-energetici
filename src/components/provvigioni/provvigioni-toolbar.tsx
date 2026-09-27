@@ -122,8 +122,9 @@ export function ProvvigioniToolbar({
       ) : null}
 
       <p className="text-xs text-slate-500">
-        UT = gettone mese dopo ingresso · M = ogni mese · R = ogni 12 mesi. Clicca
-        sulle card per filtrare per stato.
+        Ciclo: atteso → da incassare → incassato dal fornitore → da liquidare →
+        liquidato al collaboratore. UT = gettone · M = ogni mese · R = ogni 12
+        mesi. Clicca sulle card per filtrare per stato.
       </p>
     </div>
   );

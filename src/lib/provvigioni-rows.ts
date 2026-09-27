@@ -1,7 +1,7 @@
 /**
  * Espansione righe Provvigioni: un clone per ogni rata ricorrente (M mensile
  * e R annuale) quando si visualizzano tutti i periodi con filtro
- * Incassato / Da incassare / Pagato. Le copie annuali +12 restano nascoste
+ * Incassato da liquidare / Da incassare / Liquidato. Le copie annuali +12 restano nascoste
  * in periodo storno.
  */
 import type { Prisma } from "@/generated/prisma/client";
@@ -44,6 +44,7 @@ import {
   effectiveGettone,
   operationTypeLabel,
   provvigioneAgencyLabel,
+  canonicalizeProvvigioneStato,
   provvigioneDisplayAmount,
   simplifiedProvvigioneStato,
   type ProvvigioneRow,
@@ -196,22 +197,23 @@ function rateStatusesForMode(
   return rateStatusesForStatoFilter(stato);
 }
 
-/** La riga visibile deve coincidere con il filtro Stato (niente «Da incassare» in Incassato). */
+/** La riga visibile deve coincidere con il filtro Stato (niente «Da incassare» in Incassato da liquidare). */
 export function rowMatchesStatoFilter(
   row: ProvvigioneRow,
   stato?: string | null,
 ): boolean {
   const parts = parseStatoFilter(stato);
   if (parts.length === 0 || parts.includes("Tutti")) return true;
+  const rowCanon = canonicalizeProvvigioneStato(row.stato);
   return parts.some((p) => {
     if (p === "Stornato") {
       return (
-        row.stato === "Stornato" ||
+        rowCanon === "Stornato" ||
         (row.stornoFlag === "Sì" &&
-          (row.stato === "Incassato" || row.stato === "Pagato"))
+          (rowCanon === "Incassato" || rowCanon === "Pagato"))
       );
     }
-    return row.stato === p;
+    return rowCanon === p;
   });
 }
 
@@ -219,7 +221,7 @@ function monthNoteForMode(mode: RecurringExpandMode, period: string): string {
   const label = periodLabel(period);
   if (mode === "incassato") return `Competenza ${label} · incassato, da liquidare`;
   if (mode === "da-incassare") return `Competenza ${label} · da incassare`;
-  if (mode === "pagato") return `Competenza ${label} · pagato al collaboratore`;
+  if (mode === "pagato") return `Competenza ${label} · liquidato al collaboratore`;
   return `Competenza ${label}`;
 }
 
@@ -350,9 +352,9 @@ function buildSingleRow(
   const competencePeriod = monthOverride?.period ?? opts.effectiveCompetence;
   const expandStato = monthOverride
     ? monthOverride.status === "PAID"
-      ? "Incassato"
+      ? "Incassato da liquidare"
       : monthOverride.status === "LIQUIDATED"
-        ? "Pagato"
+        ? "Liquidato"
         : "Da incassare"
     : null;
 
@@ -373,20 +375,24 @@ function buildSingleRow(
     monthOverride!.status !== "PAID" &&
     monthOverride!.status !== "LIQUIDATED";
 
+  const expandCanon = expandStato
+    ? canonicalizeProvvigioneStato(expandStato)
+    : null;
+
   const hasDate = inPagamento
     ? false
     : unpaidAnnualRate
       ? false
-      : expandStato === "Incassato" ||
-        expandStato === "Pagato" ||
+      : expandCanon === "Incassato" ||
+        expandCanon === "Pagato" ||
         Boolean(effectiveCollection) ||
         paidRecurringForCompetence;
 
   const paidLabel =
-    expandStato === "Pagato"
-      ? "Pagato"
-      : expandStato === "Incassato" || hasDate
-        ? "Incassato"
+    expandCanon === "Pagato"
+      ? "Liquidato"
+      : expandCanon === "Incassato" || hasDate
+        ? "Incassato da liquidare"
         : "Da incassare";
 
   const collectionMonth = monthOverride
