@@ -21,9 +21,11 @@ export type CtePdfParseResult = {
     | "soluzione-energia"
     | "duferco-business"
     | "duferco-flex-condomini"
+    | "duferco-fix-family"
     | "dolomiti-listino"
     | "enel-corporate-listino"
     | "sev-iren-listino"
+    | "iren-tovaglietta"
     | "compara-semplice"
     | "generic";
   supplierName: string | null;

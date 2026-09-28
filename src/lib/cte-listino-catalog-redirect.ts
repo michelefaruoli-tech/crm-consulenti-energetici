@@ -18,6 +18,13 @@ export function listinoCatalogLanding(kind: CteListinoKind): ListinoCatalogLandi
         prezzo: "VARIABILE",
         fornitore: "Duferco",
       };
+    case "duferco-fix-family":
+      return {
+        categoria: "RESIDENZIALE",
+        utility: "LUCE",
+        prezzo: "FISSO",
+        fornitore: "Duferco",
+      };
     case "dolomiti":
       return {
         categoria: "RESIDENZIALE",
@@ -36,6 +43,15 @@ export function listinoCatalogLanding(kind: CteListinoKind): ListinoCatalogLandi
     case "sev-iren":
       // LOCK&FIX / SUPER LUCE FIX sono FISSO residenziale sotto fornitore catalogo «Iren»
       // (brand SEV/Serviren). Le variabili (SUMMER, …) si vedono cambiando Tipologia.
+      return {
+        categoria: "RESIDENZIALE",
+        utility: "LUCE",
+        prezzo: "FISSO",
+        fornitore: "Iren",
+      };
+    case "iren":
+      // Tovaglietta Iren-6: fissi residenziali (SOTTOCASA, DAY, STAY…).
+      // Business / variabili: cambia Segmento o Tipologia.
       return {
         categoria: "RESIDENZIALE",
         utility: "LUCE",

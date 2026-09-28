@@ -1,5 +1,5 @@
 /**
- * Verifica listini CTE Enel Corporate, SEV Iren, Compara Semplice.
+ * Verifica listini CTE Enel Corporate, SEV Iren, Iren Tovaglietta, Duferco Fix Family, Compara.
  * Uso: npx tsx scripts/check-cte-listini.ts
  */
 import { createHash } from "node:crypto";
@@ -9,6 +9,14 @@ import { COMPARA_SEMPLICE_LISTINO, COMPARA_SKIPPED } from "../src/lib/cte-compar
 import { detectListinoFromImageHash, detectListinoFromPdf } from "../src/lib/cte-listino-detect";
 import { listinoOfferToParseResult } from "../src/lib/cte-listino-shared";
 import { ENEL_CORPORATE_LISTINO } from "../src/lib/cte-enel-corporate-listino";
+import {
+  DUFERCO_FIX_FAMILY_LISTINO,
+  isDufercoFixFamilyListinoText,
+} from "../src/lib/cte-duferco-fix-family-listino";
+import {
+  IREN_TOVAGLIETTA_LISTINO,
+  IREN_TOVAGLIETTA_PDF_HASH,
+} from "../src/lib/cte-iren-tovaglietta-listino";
 import { isSevIrenListinoText, SEV_IREN_LISTINO, SEV_IREN_OBSOLETE_OFFER_NAMES } from "../src/lib/cte-sev-iren-listino";
 import { buildCatalogRedirectAfterListinoImport } from "../src/lib/cte-listino-catalog-redirect";
 import { extractCtePdfText } from "../src/lib/cte-pdf-text";
@@ -16,6 +24,8 @@ import { extractCtePdfText } from "../src/lib/cte-pdf-text";
 const SAMPLES =
   process.env.CTE_PDF_SAMPLES_DIR ||
   "/cursor/stores/bc-13eb74be-095d-494b-8617-c7fbc59dbb56/internal/campioni-cte/prova-upload";
+
+const DUFERCO_FIX_DIR = join(SAMPLES, "duferco-fix-family");
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -70,6 +80,54 @@ assert(sevRedirect.includes("fornitore=Iren"), "redirect SEV → Iren");
 assert(sevRedirect.includes("prezzo=FISSO"), "redirect SEV → fissi");
 assert(sevRedirect.includes("importato=sev-iren"), "redirect SEV → importato");
 
+assert(IREN_TOVAGLIETTA_LISTINO.length === 25, "iren tovaglietta 25");
+assert(
+  IREN_TOVAGLIETTA_LISTINO.every((o) => o.supplierName === "Iren"),
+  "iren tovaglietta fornitore Iren",
+);
+assert(
+  !IREN_TOVAGLIETTA_LISTINO.some((o) => /^SEV\b/i.test(o.offerName)),
+  "tovaglietta senza nomi SEV",
+);
+const sotto = IREN_TOVAGLIETTA_LISTINO.find(
+  (o) => o.offerName === "SOTTOCASA NEW" && o.utility === "LUCE",
+);
+assert(sotto?.bands[0]?.energyPrice === 0.1581 && sotto.ccvAnnual === 159, "sottocasa luce");
+const day = IREN_TOVAGLIETTA_LISTINO.find((o) => o.offerName === "IREN DAY PREZZO FISSO LUCE");
+assert(day?.bands.length === 3 && day.bands[0]?.energyPrice === 0.1435, "day F1");
+assert(day?.ccvAnnual === 147, "day CCV 147");
+const perDue = IREN_TOVAGLIETTA_LISTINO.find((o) => o.offerName === "10 PER DUE");
+assert(perDue?.spread === 0.0199 && perDue.ccvAnnual === 75, "10 per due");
+const irenRedirect = buildCatalogRedirectAfterListinoImport({
+  kind: "iren",
+  created: 25,
+  updated: 0,
+  label: "Iren",
+});
+assert(irenRedirect.includes("importato=iren"), "redirect iren");
+assert(irenRedirect.includes("fornitore=Iren"), "redirect iren fornitore");
+
+assert(DUFERCO_FIX_FAMILY_LISTINO.length === 5, "duferco fix family 5");
+assert(
+  DUFERCO_FIX_FAMILY_LISTINO.every(
+    (o) =>
+      o.supplierName === "Duferco Energia" && o.category === "RESIDENZIALE" && o.utility === "LUCE",
+  ),
+  "duferco fix family residenziale luce",
+);
+const xs = DUFERCO_FIX_FAMILY_LISTINO.find((o) => o.offerName.includes("SEMPRE ZERO XS"));
+assert(xs?.bands[0]?.energyPrice === 0.14531 && xs.ccvAnnual === 133.23, "xs mono/qcv");
+const cun2 = DUFERCO_FIX_FAMILY_LISTINO.find((o) => o.offerName.includes("CUN 2"));
+assert(cun2?.bands[0]?.energyPrice === 0.12441 && cun2.ccvAnnual === 193.23, "cun2");
+const dufercoRedirect = buildCatalogRedirectAfterListinoImport({
+  kind: "duferco-fix-family",
+  created: 5,
+  updated: 0,
+  label: "Duferco Fix Family",
+});
+assert(dufercoRedirect.includes("importato=duferco-fix-family"), "redirect fix family");
+assert(dufercoRedirect.includes("categoria=RESIDENZIALE"), "redirect fix family residenziale");
+
 assert(COMPARA_SEMPLICE_LISTINO.length === 15, "compara 15 energia");
 assert(
   !COMPARA_SEMPLICE_LISTINO.some((o) => o.offerName.includes("BUSINESS SUPER LUCE")),
@@ -117,6 +175,31 @@ async function main(): Promise<void> {
     console.log("pdf SEV-10 assente, skip extract");
   }
 
+  const irenPath = join(SAMPLES, "Tovaglietta_Iren-6.pdf");
+  if (existsSync(irenPath)) {
+    const buf = readFileSync(irenPath);
+    const hash = createHash("sha256").update(buf).digest("hex");
+    assert(hash === IREN_TOVAGLIETTA_PDF_HASH, `hash iren-6 ${hash}`);
+    const known = detectListinoFromPdf(hash, "");
+    assert(known?.offers.length === 25, "pdf iren-6 → 25");
+    console.log("pdf Iren-6 hash: ok");
+  } else {
+    console.log("pdf Iren-6 assente, skip hash");
+  }
+
+  const xsPdf = join(DUFERCO_FIX_DIR, "FIX_FAMILY_SEMPRE_ZERO_XS_24_MESI_d3f8.pdf");
+  if (existsSync(xsPdf)) {
+    const buf = readFileSync(xsPdf);
+    const hash = createHash("sha256").update(buf).digest("hex");
+    const extracted = await extractCtePdfText(new Uint8Array(buf));
+    assert(isDufercoFixFamilyListinoText(extracted.text), "testo Fix Family riconosciuto");
+    const known = detectListinoFromPdf(hash, extracted.text);
+    assert(known?.offers.length === 5, "pdf Fix Family → 5");
+    console.log("pdf Duferco Fix Family: ok");
+  } else {
+    console.log("pdf Duferco Fix Family assente, skip extract");
+  }
+
   const comparaPath = join(SAMPLES, "Offerta-commerciale-9.pdf");
   if (existsSync(comparaPath)) {
     const buf = readFileSync(comparaPath);
@@ -128,7 +211,9 @@ async function main(): Promise<void> {
     console.log("pdf Compara assente, skip hash");
   }
 
-  console.log("check-cte-listini: ok (7 corporate + 19 SEV + 15 Compara)");
+  console.log(
+    "check-cte-listini: ok (7 corporate + 19 SEV + 25 Iren + 5 Duferco Fix Family + 15 Compara)",
+  );
 }
 
 void main().catch((e) => {
