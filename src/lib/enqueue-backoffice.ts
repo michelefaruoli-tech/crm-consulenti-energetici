@@ -10,12 +10,14 @@ const STATUSES_TO_LAVORAZIONE = new Set([
 /**
  * Mette i contratti in coda lavorazione e li assegna al back office
  * (visibili in /lavorazione). Lo stato diventa IN_LAVORAZIONE solo se
- * era ancora bozza/inserito.
+ * era ancora bozza/inserito. Traccia autore e data invio (P1.4).
  */
 export async function enqueueContractsForBackoffice(opts: {
   contractIds: string[];
   userId: string;
+  note?: string;
 }): Promise<void> {
+  const now = new Date();
   for (const id of opts.contractIds) {
     const contract = await prisma.contract.findUnique({
       where: { id },
@@ -23,6 +25,7 @@ export async function enqueueContractsForBackoffice(opts: {
         status: true,
         sendToMaster: true,
         assignedToMaster: true,
+        sentToMasterAt: true,
       },
     });
     if (!contract) continue;
@@ -37,6 +40,7 @@ export async function enqueueContractsForBackoffice(opts: {
         sendToMaster: true,
         assignedToMaster: true,
         toWork: true,
+        ...(contract.sentToMasterAt ? {} : { sentToMasterAt: now }),
         ...(nextStatus !== contract.status ? { status: nextStatus } : {}),
       },
     });
@@ -49,7 +53,22 @@ export async function enqueueContractsForBackoffice(opts: {
           toStatus: nextStatus,
           changedById: opts.userId,
           changeReason: "Invio al back office",
-          note: "Contratto messo in lavorazione e assegnato al back office del fornitore",
+          note:
+            opts.note?.trim() ||
+            "Contratto messo in lavorazione e assegnato al back office del fornitore",
+        },
+      });
+    } else if (!contract.sendToMaster || !contract.assignedToMaster) {
+      await prisma.contractStatusHistory.create({
+        data: {
+          contractId: id,
+          fromStatus: contract.status,
+          toStatus: contract.status,
+          changedById: opts.userId,
+          changeReason: "Invio al back office",
+          note:
+            opts.note?.trim() ||
+            "Pratica assegnata / reinviata al back office (stato invariato)",
         },
       });
     }

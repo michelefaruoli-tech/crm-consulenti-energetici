@@ -17,6 +17,7 @@ import { MasterStatusForm } from "@/components/contracts/master-status-form";
 import { LavorazioneEditForm } from "@/components/contracts/lavorazione-edit-form";
 import { LavorazioneUploadAttachments } from "@/components/contracts/lavorazione-upload-attachments";
 import { DeleteRowButton } from "@/components/ui/delete-row-button";
+import { BackOfficeFlowTracker } from "@/components/contracts/backoffice-flow-tracker";
 
 export const dynamic = "force-dynamic";
 
@@ -157,6 +158,19 @@ export default async function LavorazioneSchedaPage({
             : "Aggiornamento salvato."}
         </div>
       ) : null}
+
+      <BackOfficeFlowTracker
+        status={contract.status}
+        sendToMaster={contract.sendToMaster}
+        assignedToMaster={contract.assignedToMaster}
+        sentToMasterAt={contract.sentToMasterAt}
+        history={contract.statusHistory}
+        integrationNotes={
+          contract.status === "DOCUMENTAZIONE_INCOMPLETA"
+            ? contract.workNotes || contract.notes || contract.masterNotes
+            : null
+        }
+      />
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-4 font-semibold text-slate-900">Dati pratica</h2>

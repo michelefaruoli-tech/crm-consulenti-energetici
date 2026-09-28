@@ -3,7 +3,21 @@ import { requireApiSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientDisplayName } from "@/lib/utils";
 import { contractVisibilityWhere } from "@/lib/user-scope";
-import { normalizePodKey } from "@/lib/storno-status";
+import {
+  markEarlyReswitchContracts,
+  markLatestContractsByPod,
+  normalizePodKey,
+  resolveStornoInfo,
+} from "@/lib/storno-status";
+import {
+  resolveStornoBadges,
+  type StornoBadgeDef,
+} from "@/lib/storno-badges";
+import {
+  podPeerSwitchHintLabel,
+  resolvePodPeerSwitchHint,
+} from "@/lib/contract-pod-peers";
+import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 /**
  * Limite per utente sulle sonde POD: la risposta anonima
@@ -21,7 +35,6 @@ function isProbeRateLimited(userId: string): boolean {
   );
   recent.push(now);
   probes.set(userId, recent);
-  // Evita crescita illimitata della mappa sull'istanza
   if (probes.size > 500) {
     for (const [id, times] of probes) {
       if (times.every((t) => now - t >= PROBE_WINDOW_MS)) probes.delete(id);
@@ -29,6 +42,21 @@ function isProbeRateLimited(userId: string): boolean {
   }
   return recent.length > PROBE_MAX;
 }
+
+export type PodCheckMatch = {
+  id: string;
+  contractNumber: string;
+  client: string;
+  supplier: string;
+  status: string;
+  supplyStartDate: string | null;
+  archived: boolean;
+  badges: StornoBadgeDef[];
+  switchHint: "switch_certo" | "switch_possibile";
+  switchHintLabel: string;
+  riskSwitch: boolean;
+  riskStorno: boolean;
+};
 
 export async function GET(request: Request) {
   const session = await requireApiSession();
@@ -45,7 +73,6 @@ export async function GET(request: Request) {
     );
   }
 
-  // Solo contratti nel perimetro dell'utente: il POD di altri non è enumerabile
   const visibility = await contractVisibilityWhere(session);
   const podWhere = {
     deletedAt: null,
@@ -60,35 +87,115 @@ export async function GET(request: Request) {
     where: { AND: [visibility], ...podWhere },
     select: {
       id: true,
+      contractNumber: true,
       status: true,
       pod: true,
       pdr: true,
       podPdr: true,
       supplyStartDate: true,
+      insertionDate: true,
+      createdAt: true,
+      collectionDate: true,
+      stornoEndDate: true,
+      expiryDate: true,
+      durationMonths: true,
       isHistorical: true,
-      client: { select: { type: true, firstName: true, lastName: true, companyName: true } },
-      supplier: { select: { name: true } },
+      recurrence: true,
+      operationType: true,
+      clientId: true,
+      supplierId: true,
+      client: {
+        select: {
+          type: true,
+          firstName: true,
+          lastName: true,
+          companyName: true,
+        },
+      },
+      supplier: { select: { name: true, stornoMonths: true } },
+      commission: { select: { stornoDate: true } },
     },
     orderBy: { createdAt: "desc" },
     take: 10,
   });
 
-  const matches = rows
-    .filter((row) => normalizePodKey(row.pod || row.pdr || row.podPdr) === key)
-    .map((row) => ({
+  const filtered = rows.filter(
+    (row) => normalizePodKey(row.pod || row.pdr || row.podPdr) === key,
+  );
+
+  const forMark = filtered.map((c) => {
+    const supply =
+      c.supplyStartDate ??
+      (c.operationType
+        ? computeSupplyStartDate(c.insertionDate, c.operationType)
+        : null);
+    return {
+      id: c.id,
+      clientId: c.clientId,
+      supplierId: c.supplierId,
+      podPdr: c.podPdr || c.pod || c.pdr,
+      supplyStartDate: supply,
+      insertionDate: c.insertionDate,
+      createdAt: c.createdAt,
+      collectionDate: c.collectionDate,
+      stornoMonths: c.supplier.stornoMonths ?? null,
+      stornoEndDate: c.stornoEndDate,
+    };
+  });
+  const latestMap = markLatestContractsByPod(forMark);
+  const earlyMap = markEarlyReswitchContracts(forMark);
+  const hasActivePeer = filtered.some((c) => !c.isHistorical);
+
+  const matches: PodCheckMatch[] = filtered.map((row) => {
+    const supply =
+      row.supplyStartDate ??
+      (row.operationType
+        ? computeSupplyStartDate(row.insertionDate, row.operationType)
+        : null);
+    const stornoInfo = resolveStornoInfo({
+      status: row.status,
+      recurrence: row.recurrence,
+      supplyStartDate: supply,
+      stornoMonths: row.supplier.stornoMonths,
+      stornoEndDate: row.stornoEndDate,
+      expiryDate: row.expiryDate,
+      durationMonths: row.durationMonths,
+      isLatestForPod: latestMap.get(row.id) ?? true,
+      collectionDate: row.collectionDate,
+      isEarlyReswitch: earlyMap.get(row.id) ?? false,
+    });
+    const badges = resolveStornoBadges({
+      stornoKind: stornoInfo.kind,
+      isHistorical: row.isHistorical === true,
+      isEarlyReswitch: earlyMap.get(row.id) === true,
+      isStornato:
+        row.status === "STORNATO" || Boolean(row.commission?.stornoDate),
+      hasActivePodPeer: hasActivePeer || filtered.length > 1,
+    });
+    const switchHint = resolvePodPeerSwitchHint(row.operationType);
+    const riskStorno = badges.some(
+      (b) =>
+        b.id === "in_storno" ||
+        b.id === "storno_in_scadenza" ||
+        b.id === "doppia_posizione",
+    );
+
+    return {
       id: row.id,
+      contractNumber: row.contractNumber,
       client: clientDisplayName(row.client),
       supplier: row.supplier.name,
       status: row.status,
-      supplyStartDate: row.supplyStartDate?.toISOString() ?? null,
+      supplyStartDate: supply?.toISOString() ?? null,
       archived: row.isHistorical,
-    }));
+      badges,
+      switchHint,
+      switchHintLabel: podPeerSwitchHintLabel(switchHint),
+      riskSwitch: true,
+      riskStorno,
+    };
+  });
 
-  /**
-   * Fuori perimetro si dice solo che il POD esiste: nessun id, cliente,
-   * fornitore, stato o data, così l'avviso di ricontrattualizzazione resta
-   * utile senza rendere leggibili i contratti di altri.
-   */
   const seesEverything = Object.keys(visibility).length === 0;
   const visibleIds = new Set(matches.map((m) => m.id));
   const others = seesEverything
@@ -104,5 +211,11 @@ export async function GET(request: Request) {
       normalizePodKey(row.pod || row.pdr || row.podPdr) === key,
   );
 
-  return NextResponse.json({ matches, existsOutsideScope });
+  const riskSummary = {
+    hasDuplicates: matches.length > 0 || existsOutsideScope,
+    riskStorno: matches.some((m) => m.riskStorno),
+    riskSwitch: matches.length > 0 || existsOutsideScope,
+  };
+
+  return NextResponse.json({ matches, existsOutsideScope, riskSummary });
 }

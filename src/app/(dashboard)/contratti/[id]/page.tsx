@@ -35,6 +35,7 @@ import { resolveUtilityDisplay } from "@/lib/utility-display";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { ContractCommissionTimeline } from "@/components/contracts/contract-commission-timeline";
 import { ContractPodPeersSection } from "@/components/contracts/contract-pod-peers";
+import { BackOfficeFlowTracker } from "@/components/contracts/backoffice-flow-tracker";
 import { buildContractFinanceView } from "@/lib/contract-commission-finance";
 import { isRecurring, recurrenceKindOf } from "@/lib/recurring";
 import { ContractAttachmentsManager } from "@/components/contracts/contract-attachments-manager";
@@ -590,6 +591,19 @@ export default async function ContrattoDetailPage({
       </div>
 
       <ContractPodPeersSection podKey={podKey} rows={podPeerRows} />
+
+      <BackOfficeFlowTracker
+        status={contract.status}
+        sendToMaster={contract.sendToMaster}
+        assignedToMaster={contract.assignedToMaster}
+        sentToMasterAt={contract.sentToMasterAt}
+        history={contract.statusHistory}
+        integrationNotes={
+          contract.status === "DOCUMENTAZIONE_INCOMPLETA"
+            ? contract.workNotes || contract.notes || contract.masterNotes
+            : null
+        }
+      />
 
       <ContractCommissionTimeline
         totals={finance.totals}

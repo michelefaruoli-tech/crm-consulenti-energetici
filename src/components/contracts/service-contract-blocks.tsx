@@ -158,10 +158,10 @@ export function ServiceContractBlocks({
     : null;
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900">
-          {index === 0 ? "Dati contratto" : `Servizio aggiuntivo ${index + 1}`}
+          {index === 0 ? "Servizio pratica" : `Servizio aggiuntivo ${index + 1}`}
           <span className="ml-2 font-normal text-slate-500">
             {line.service === "LUCE"
               ? "Luce"
@@ -181,6 +181,9 @@ export function ServiceContractBlocks({
         ) : null}
       </div>
 
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        2 · Utenza / POD-PDR
+      </p>
       <div
         className={`grid gap-3 ${classificationOptions ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
       >
@@ -333,6 +336,9 @@ export function ServiceContractBlocks({
         </Field>
       ) : null}
 
+      <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        3 · Fornitore e servizio · 4 · Dati contrattuali
+      </p>
       <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
         <input
           type="checkbox"
@@ -519,6 +525,9 @@ export function ServiceContractBlocks({
         </Field>
       ) : null}
 
+      <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        5 · Provvigione e ricorrenza (da listino — sola lettura importi)
+      </p>
       {isHelios ? (
         <p className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900">
           <strong>Helios</strong> — ricorrente mensile:{" "}
