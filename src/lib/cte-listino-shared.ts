@@ -237,13 +237,22 @@ export async function deactivateListinoOffersByName(
   if (offerNames.length === 0) return 0;
   const match = matchSupplierId(supplierName, suppliers);
   if (!match.supplierId) return 0;
-  const result = await prisma.cteOffer.updateMany({
+  // update uno-a-uno: updateMany non supportato in HTTP mode Neon
+  const rows = await prisma.cteOffer.findMany({
     where: {
       supplierId: match.supplierId,
       offerName: { in: [...offerNames] },
       active: true,
     },
-    data: { active: false },
+    select: { id: true },
   });
-  return result.count;
+  let deactivated = 0;
+  for (const row of rows) {
+    await prisma.cteOffer.update({
+      where: { id: row.id },
+      data: { active: false },
+    });
+    deactivated += 1;
+  }
+  return deactivated;
 }
