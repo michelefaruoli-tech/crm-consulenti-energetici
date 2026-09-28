@@ -32,16 +32,25 @@ assert(superLuce?.validTo === "2026-10-01", "super validTo 1 ott");
 assert(superLuce?.ccvAnnual == null, "CCV corporate non inventata");
 
 assert(SEV_IREN_LISTINO.length === 19, "sev 19");
-const sevFix = SEV_IREN_LISTINO.find((o) => o.offerName === "SEV 13X24 PREZZO FISSO LUCE");
-assert(sevFix?.bands[0]?.energyPrice === 0.13 && sevFix.ccvAnnual === 155.88, "13x24");
-assert(sevFix?.networkLosses === "INCLUDED", "13x24 perdite incluse");
+const lockFix = SEV_IREN_LISTINO.find((o) => o.offerName === "SEV IREN LOCK&FIX LUCE");
+assert(lockFix?.bands[0]?.energyPrice === 0.155 && lockFix.ccvAnnual === 147, "lock&fix");
+assert(lockFix?.networkLosses === "INCLUDED", "lock&fix perdite incluse");
+assert(/36 mesi/.test(lockFix?.notes ?? ""), "lock&fix durata 36");
+const superLuceFix = SEV_IREN_LISTINO.find((o) => o.offerName === "SEV SUPER LUCE FIX");
+assert(superLuceFix?.bands[0]?.energyPrice === 0.159 && superLuceFix.ccvAnnual === 155.88, "super luce");
+const superGasFix = SEV_IREN_LISTINO.find((o) => o.offerName === "SEV SUPER GAS FIX");
+assert(superGasFix?.bands[0]?.energyPrice === 0.68 && superGasFix.ccvAnnual === 144, "super gas");
 const summer = SEV_IREN_LISTINO.find((o) => o.offerName === "SEV SUMMER LUCE");
-assert(summer?.spread === 0, "summer pun senza +X → 0");
+assert(summer?.spread === 0 && summer.ccvAnnual === 119.88, "summer pun senza +X → 0, CCOM 119,88");
 const tutela = SEV_IREN_LISTINO.find((o) => o.offerName === "SEV GAS TUTELA VULNERABILITÀ");
 assert(tutela?.spread == null, "cmamm non inventato come spread");
 assert(
   SEV_IREN_LISTINO.every((o) => o.supplierName === "Iren"),
   "sev fornitore Iren",
+);
+assert(
+  !SEV_IREN_LISTINO.some((o) => /13X24|QUICK/i.test(o.offerName)),
+  "niente 13X24/QUICK in SEV-10",
 );
 
 assert(COMPARA_SEMPLICE_LISTINO.length === 15, "compara 15 energia");
@@ -76,17 +85,19 @@ async function main(): Promise<void> {
     console.log("screenshot corporate assente, skip hash");
   }
 
-  const sevPath = join(SAMPLES, "OFFERTE_SEV-9.pdf");
+  const sevPath = join(SAMPLES, "OFFERTE_SEV-10.pdf");
   if (existsSync(sevPath)) {
     const buf = readFileSync(sevPath);
     const hash = createHash("sha256").update(buf).digest("hex");
     const extracted = await extractCtePdfText(new Uint8Array(buf));
-    assert(isSevIrenListinoText(extracted.text), "testo SEV riconosciuto");
+    assert(isSevIrenListinoText(extracted.text), "testo SEV-10 riconosciuto");
     const known = detectListinoFromPdf(hash, extracted.text);
-    assert(known?.offers.length === 19, "pdf SEV → 19");
-    console.log("pdf SEV: ok");
+    assert(known?.offers.length === 19, "pdf SEV-10 → 19");
+    const lock = known?.offers.find((o) => o.offerName === "SEV IREN LOCK&FIX LUCE");
+    assert(lock?.bands[0]?.energyPrice === 0.155, "detect lock&fix prezzo");
+    console.log("pdf SEV-10: ok");
   } else {
-    console.log("pdf SEV assente, skip extract");
+    console.log("pdf SEV-10 assente, skip extract");
   }
 
   const comparaPath = join(SAMPLES, "Offerta-commerciale-9.pdf");

@@ -10,14 +10,26 @@ function n(months: number | null, extra: string[]): string {
 
 const OPS = {
   full: "Operazioni: switch, subentri, attivazioni, nuovi allacci.",
+  fullCambioNoVoltura:
+    "Operazioni: switch, subentri, attivazioni, nuovi allacci e cambio offerta.",
   fullVoltura: "Operazioni: switch, subentri, attivazioni, nuovi allacci, volture e cambio offerta.",
-  switchAttivCambio: "Operazioni: switch, nuove attivazioni e cambio offerta.",
   switchOnly: "Operazioni: solo switch.",
   noAllaccio: "Operazioni: switch, subentri, attivazioni, volture e cambio offerta.",
 };
 
 function base(
-  partial: Omit<CteListinoOffer, "supplierName" | "category" | "ccvMonthly" | "powerKwMin" | "powerKwMax" | "annualConsumptionMin" | "annualConsumptionMax" | "validFrom" | "validTo">,
+  partial: Omit<
+    CteListinoOffer,
+    | "supplierName"
+    | "category"
+    | "ccvMonthly"
+    | "powerKwMin"
+    | "powerKwMax"
+    | "annualConsumptionMin"
+    | "annualConsumptionMax"
+    | "validFrom"
+    | "validTo"
+  >,
 ): CteListinoOffer {
   return {
     supplierName: "Iren",
@@ -33,42 +45,50 @@ function base(
   };
 }
 
-/** PDF OFFERTE SEV-9 — domestiche SEV Iren. */
+/**
+ * PDF OFFERTE SEV-10 — domestiche SEV Iren / Serviren.
+ * Sostituisce SEV-9: via 13X24 e QUICK; entrano LOCK&FIX e SUPER FIX; SUMMER CCOM aggiornato.
+ */
 export const SEV_IREN_LISTINO: CteListinoOffer[] = [
   base({
-    offerName: "SEV 13X24 PREZZO FISSO LUCE",
+    offerName: "SEV IREN LOCK&FIX LUCE",
     utility: "LUCE",
     commercialSegment: null,
     priceKind: "FISSO",
-    bands: [{ timeBand: "MONO", energyPrice: 0.13 }],
+    bands: [{ timeBand: "MONO", energyPrice: 0.155 }],
+    spread: null,
+    ccvAnnual: 147,
+    networkLosses: "INCLUDED",
+    notes: n(36, [
+      "Prezzo fisso 0,155 €/kWh (perdite incluse).",
+      OPS.full,
+      "Bonus 12 € al 12° mese di fatturazione.",
+      "Oneri di recesso anticipato: 130 € prima del 1° anno, 80 € prima del 2°, 40 € prima del 3°.",
+    ]),
+    warnings: [],
+  }),
+  base({
+    offerName: "SEV SUPER LUCE FIX",
+    utility: "LUCE",
+    commercialSegment: null,
+    priceKind: "FISSO",
+    bands: [{ timeBand: "MONO", energyPrice: 0.159 }],
     spread: null,
     ccvAnnual: 155.88,
     networkLosses: "INCLUDED",
-    notes: n(24, ["Prezzo fisso 0,13 €/kWh (perdite incluse).", OPS.full]),
+    notes: n(24, ["Prezzo fisso 0,159 €/kWh (perdite incluse).", OPS.fullCambioNoVoltura]),
     warnings: [],
   }),
   base({
-    offerName: "SEV IREN QUICK LUCE",
-    utility: "LUCE",
-    commercialSegment: null,
-    priceKind: "FISSO",
-    bands: [{ timeBand: "MONO", energyPrice: 0.135 }],
-    spread: null,
-    ccvAnnual: 149,
-    networkLosses: "INCLUDED",
-    notes: n(24, ["Prezzo fisso 0,135 €/kWh (perdite incluse).", OPS.fullVoltura]),
-    warnings: [],
-  }),
-  base({
-    offerName: "SEV IREN QUICK GAS",
+    offerName: "SEV SUPER GAS FIX",
     utility: "GAS",
     commercialSegment: null,
     priceKind: "FISSO",
-    bands: [{ timeBand: "MONO", energyPrice: 0.63 }],
+    bands: [{ timeBand: "MONO", energyPrice: 0.68 }],
     spread: null,
-    ccvAnnual: 149,
+    ccvAnnual: 144,
     networkLosses: "NOT_APPLICABLE",
-    notes: n(24, ["Prezzo fisso 0,63 €/Smc.", OPS.fullVoltura]),
+    notes: n(24, ["Prezzo fisso 0,68 €/Smc.", OPS.fullVoltura]),
     warnings: [],
   }),
   base({
@@ -78,11 +98,11 @@ export const SEV_IREN_LISTINO: CteListinoOffer[] = [
     priceKind: "VARIABILE",
     bands: [],
     spread: 0,
-    ccvAnnual: 119,
+    ccvAnnual: 119.88,
     networkLosses: "INCLUDED",
     notes: n(12, [
       "Prezzo: PUN (maggiorazione non stampata → spread 0).",
-      OPS.switchAttivCambio,
+      OPS.fullVoltura,
       "Fatturazione bimestrale per potenze inferiori a 15 kW.",
     ]),
     warnings: ["Listino: solo «PUN», senza +X — spread impostato a 0, non inventato un altro valore."],
@@ -94,11 +114,11 @@ export const SEV_IREN_LISTINO: CteListinoOffer[] = [
     priceKind: "VARIABILE",
     bands: [],
     spread: 0,
-    ccvAnnual: 119,
+    ccvAnnual: 119.88,
     networkLosses: "NOT_APPLICABLE",
     notes: n(12, [
       "Prezzo: PSV (maggiorazione non stampata → spread 0).",
-      OPS.switchAttivCambio,
+      OPS.fullVoltura,
       "Fatturazione bimestrale per consumi inferiori a 5000 Smc/anno.",
     ]),
     warnings: ["Listino: solo «PSV», senza +X — spread impostato a 0, non inventato un altro valore."],
@@ -325,7 +345,19 @@ export const SEV_IREN_LISTINO: CteListinoOffer[] = [
   }),
 ];
 
+/** Offerte SEV-9 uscite dal listino SEV-10 (da disattivare in Admin dopo re-import). */
+export const SEV_IREN_OBSOLETE_OFFER_NAMES = [
+  "SEV 13X24 PREZZO FISSO LUCE",
+  "SEV IREN QUICK LUCE",
+  "SEV IREN QUICK GAS",
+] as const;
+
 export function isSevIrenListinoText(text: string): boolean {
   const t = text.replace(/\s+/g, " ");
-  return /SEV 13X24/i.test(t) && /SEV IREN\s+QUICK/i.test(t) && /OFFERTE SEV/i.test(t);
+  if (!/OFFERTE SEV/i.test(t)) return false;
+  // SEV-10
+  if (/SEV IREN\s+LOCK/i.test(t) && /SEV SUPER\s+LUCE\s+FIX/i.test(t)) return true;
+  // SEV-9 legacy (map anyway to listino corrente)
+  if (/SEV 13X24/i.test(t) && /SEV IREN\s+QUICK/i.test(t)) return true;
+  return false;
 }
