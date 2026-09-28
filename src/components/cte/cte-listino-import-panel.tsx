@@ -32,7 +32,7 @@ const ITEMS: Array<{
   {
     kind: "sev-iren",
     title: "SEV Iren",
-    body: "19 offerte domestiche dal PDF OFFERTE SEV-9.",
+    body: "19 offerte domestiche dal PDF OFFERTE SEV-10 (LOCK&FIX, SUPER FIX, SUMMER aggiornato).",
   },
   {
     kind: "compara",
