@@ -339,7 +339,13 @@ export function ServiceContractBlocks({
       <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
         3 · Fornitore e servizio · 4 · Dati contrattuali
       </p>
-      <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
+      <label
+        className={
+          supplySame
+            ? "flex items-start gap-3 rounded-lg border border-emerald-300 bg-emerald-100 px-3 py-2.5 text-sm text-emerald-950"
+            : "flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-100 px-3 py-2.5 text-sm text-amber-950"
+        }
+      >
         <input
           type="checkbox"
           className="mt-1 h-5 w-5 shrink-0"
