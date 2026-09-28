@@ -316,8 +316,10 @@ const LISTINO_KINDS: CteListinoKind[] = [
   "dolomiti",
   "enel-corporate",
   "sev-iren",
+  "iren",
   "compara",
   "duferco-flex-condomini",
+  "duferco-fix-family",
 ];
 
 export async function importCteListinoAction(

@@ -168,6 +168,20 @@ export default async function CatalogoCtePage({
                 altre variabili cambia Tipologia → Variabili.
               </>
             ) : null}
+            {importato === "iren" ? (
+              <>
+                {" "}
+                Tovaglietta Iren-6 (non SEV). Per business (Tua Azienda) cambia Segmento; per
+                variabili (10 PER DUE/TRE, …) Tipologia → Variabili.
+              </>
+            ) : null}
+            {importato === "duferco-fix-family" ? (
+              <>
+                {" "}
+                Fix Family residenziali (Sempre Zero XS/S/M, CUN 1/2). Flex Condomini resta listino
+                separato.
+              </>
+            ) : null}
           </p>
         </div>
       ) : null}

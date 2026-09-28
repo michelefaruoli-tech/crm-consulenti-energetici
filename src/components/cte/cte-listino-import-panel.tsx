@@ -9,9 +9,11 @@ import { buildCatalogRedirectAfterListinoImport } from "@/lib/cte-listino-catalo
 import type { CteListinoKind } from "@/lib/cte-listino-detect";
 
 const ITEMS: Array<{ kind: CteListinoKind; title: string }> = [
-  { kind: "duferco-flex-condomini", title: "Duferco" },
+  { kind: "duferco-fix-family", title: "Duferco Fix Family" },
+  { kind: "duferco-flex-condomini", title: "Duferco Flex" },
   { kind: "dolomiti", title: "Dolomiti" },
   { kind: "enel-corporate", title: "Enel" },
+  { kind: "iren", title: "Iren" },
   { kind: "sev-iren", title: "SEV Iren" },
   { kind: "compara", title: "Compara" },
 ];
@@ -72,7 +74,7 @@ export function CteListinoImportPanel() {
         Un click aggiorna le CTE del fornitore nel catalogo (idempotente). In alternativa carica il
         file CTE/PDF sotto.
       </p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
         {ITEMS.map((item) => (
           <div
             key={item.kind}

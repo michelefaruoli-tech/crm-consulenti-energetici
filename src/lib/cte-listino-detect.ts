@@ -1,10 +1,16 @@
 import { COMPARA_SEMPLICE_LISTINO, COMPARA_SEMPLICE_PDF_HASH } from "@/lib/cte-compara-listino";
 import { allDolomitiListinoOffers, dolomitiOffersForScreenshotHash } from "@/lib/cte-dolomiti-listino";
+import { allDufercoFixFamilyOffers, isDufercoFixFamilyListinoText } from "@/lib/cte-duferco-fix-family-listino";
 import { allDufercoFlexCondominiOffers } from "@/lib/cte-duferco-flex-condomini";
 import {
   ENEL_CORPORATE_LISTINO,
   ENEL_CORPORATE_SCREENSHOT_HASH,
 } from "@/lib/cte-enel-corporate-listino";
+import {
+  IREN_TOVAGLIETTA_LISTINO,
+  IREN_TOVAGLIETTA_PDF_HASH,
+  isIrenTovagliettaListinoText,
+} from "@/lib/cte-iren-tovaglietta-listino";
 import type { CteListinoOffer, KnownCteListino } from "@/lib/cte-listino-shared";
 import { isSevIrenListinoText, SEV_IREN_LISTINO } from "@/lib/cte-sev-iren-listino";
 
@@ -12,8 +18,10 @@ export type CteListinoKind =
   | "dolomiti"
   | "enel-corporate"
   | "sev-iren"
+  | "iren"
   | "compara"
-  | "duferco-flex-condomini";
+  | "duferco-flex-condomini"
+  | "duferco-fix-family";
 
 function dolomitiToShared(rows: ReturnType<typeof allDolomitiListinoOffers>): CteListinoOffer[] {
   return rows.map((row) => ({
@@ -55,6 +63,12 @@ export function listinoByKind(kind: CteListinoKind): KnownCteListino {
       };
     case "sev-iren":
       return { kind: "sev-iren-listino", layout: "sev-iren-listino", offers: SEV_IREN_LISTINO };
+    case "iren":
+      return {
+        kind: "iren-tovaglietta",
+        layout: "iren-tovaglietta",
+        offers: IREN_TOVAGLIETTA_LISTINO,
+      };
     case "compara":
       return {
         kind: "compara-semplice",
@@ -66,6 +80,12 @@ export function listinoByKind(kind: CteListinoKind): KnownCteListino {
         kind: "duferco-flex-condomini",
         layout: "duferco-flex-condomini",
         offers: allDufercoFlexCondominiOffers(),
+      };
+    case "duferco-fix-family":
+      return {
+        kind: "duferco-fix-family",
+        layout: "duferco-fix-family",
+        offers: allDufercoFixFamilyOffers(),
       };
   }
 }
@@ -87,11 +107,21 @@ export function detectListinoFromImageHash(hex: string): KnownCteListino | null 
 }
 
 export function detectListinoFromPdf(hex: string, text: string): KnownCteListino | null {
-  if (hex.toLowerCase() === COMPARA_SEMPLICE_PDF_HASH) {
+  const h = hex.toLowerCase();
+  if (h === COMPARA_SEMPLICE_PDF_HASH) {
     return listinoByKind("compara");
+  }
+  if (h === IREN_TOVAGLIETTA_PDF_HASH) {
+    return listinoByKind("iren");
   }
   if (isSevIrenListinoText(text)) {
     return listinoByKind("sev-iren");
+  }
+  if (isIrenTovagliettaListinoText(text)) {
+    return listinoByKind("iren");
+  }
+  if (isDufercoFixFamilyListinoText(text)) {
+    return listinoByKind("duferco-fix-family");
   }
   return null;
 }
@@ -100,6 +130,8 @@ export const LISTINO_KIND_LABEL: Record<CteListinoKind, string> = {
   dolomiti: "Dolomiti",
   "enel-corporate": "Enel / Soluzione Energia Corporate",
   "sev-iren": "SEV Iren",
+  iren: "Iren",
   compara: "Compara Semplice",
   "duferco-flex-condomini": "Duferco Flex Condomini",
+  "duferco-fix-family": "Duferco Fix Family",
 };
