@@ -6,9 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import {
   formatEmailList,
-  getLavorazioneNotifyEmails,
   userCanAccessContract,
 } from "@/lib/user-scope";
+import {
+  formatBackofficeDestinationMessage,
+  resolveBackofficeDestination,
+} from "@/lib/backoffice-destination";
 import { buildBatchContractNotificationBody } from "@/lib/contract-notification-email";
 import {
   attachmentConfig,
@@ -24,6 +27,10 @@ export const maxDuration = 60;
 /**
  * Invio email UNICA per più contratti creati insieme (Luce + Gas…).
  * Body: anagrafica + blocco per ogni servizio + allegati.
+ *
+ * Sempre: enqueue → IN_LAVORAZIONE + flag coda (anche senza BO dedicato).
+ * L’assenza di destinatario BO “classico” (es. Serviren) non fa fallire
+ * l’operazione: ritorna queued=true + warning esplicito.
  */
 export async function POST(request: Request) {
   try {
@@ -44,7 +51,7 @@ export async function POST(request: Request) {
 
     if (contractIds.length === 0) {
       return NextResponse.json(
-        { success: false, emailSent: false, message: "Nessun contratto da notificare" },
+        { success: false, queued: false, emailSent: false, message: "Nessun contratto da notificare" },
         { status: 400 },
       );
     }
@@ -70,7 +77,7 @@ export async function POST(request: Request) {
 
     if (contracts.length === 0) {
       return NextResponse.json(
-        { success: false, emailSent: false, message: "Contratti non trovati" },
+        { success: false, queued: false, emailSent: false, message: "Contratti non trovati" },
         { status: 404 },
       );
     }
@@ -78,16 +85,45 @@ export async function POST(request: Request) {
     for (const c of contracts) {
       if (!(await userCanAccessContract(session, c))) {
         return NextResponse.json(
-          { success: false, emailSent: false, message: "Permesso negato su uno dei contratti" },
+          { success: false, queued: false, emailSent: false, message: "Permesso negato su uno dei contratti" },
           { status: 403 },
         );
       }
     }
 
-    await enqueueContractsForBackoffice({
+    const enqueueResults = await enqueueContractsForBackoffice({
       contractIds: contracts.map((c) => c.id),
       userId: session.id,
     });
+    const queuedCount = enqueueResults.filter((r) => r.queued).length;
+
+    // Destinazione BO: unione per i fornitori coinvolti (warning se manca dedicato)
+    const destBySupplier = new Map<
+      string,
+      Awaited<ReturnType<typeof resolveBackofficeDestination>>
+    >();
+    for (const c of contracts) {
+      const sid = c.supplierId;
+      if (!destBySupplier.has(sid)) {
+        destBySupplier.set(sid, await resolveBackofficeDestination(sid));
+      }
+    }
+    const destinations = [...destBySupplier.values()];
+    const hasAnyDedicated = destinations.some((d) => d.hasDedicatedBo);
+    const warnings = destinations
+      .map((d) => d.warning)
+      .filter((w): w is string => Boolean(w));
+    const recipientSet = new Set<string>();
+    for (const d of destinations) {
+      for (const e of d.recipients) recipientSet.add(e);
+    }
+    const recipients = [...recipientSet];
+    const toEmail = formatEmailList(recipients);
+    const primaryDest = destinations[0]!;
+    const boWarning =
+      warnings.length > 0
+        ? warnings.join(" ")
+        : null;
 
     // Copia allegati dal contratto più ricco agli altri senza documenti (evita perdita Luce/Gas)
     const richest = [...contracts].sort(
@@ -136,13 +172,34 @@ export async function POST(request: Request) {
         .filter(Boolean) as typeof contracts;
     }
 
-    const recipientSet = new Set<string>();
-    for (const c of contracts) {
-      const list = await getLavorazioneNotifyEmails(c.supplierId);
-      for (const e of list) recipientSet.add(e);
+    // Nessun destinatario email (admin non configurato e nessun BO): coda ok, no mail
+    if (recipients.length === 0) {
+      const message = formatBackofficeDestinationMessage(
+        {
+          ...primaryDest,
+          recipients: [],
+          warning:
+            boWarning ||
+            "Nessun destinatario email configurato (MASTER_EMAIL / Back Office). La pratica è comunque in coda In lavorazione.",
+        },
+        { queued: true, emailSent: false },
+      );
+      return NextResponse.json({
+        success: true,
+        queued: true,
+        queuedCount,
+        emailSent: false,
+        contractIds: contracts.map((c) => c.id),
+        contractCount: contracts.length,
+        recipients: "",
+        hasDedicatedBo: hasAnyDedicated,
+        boWarning:
+          boWarning ||
+          "Nessun destinatario email configurato. Pratica in lavorazione senza notifica.",
+        message,
+        code: "QUEUED_NO_RECIPIENTS",
+      });
     }
-    const recipients = [...recipientSet];
-    const toEmail = formatEmailList(recipients);
 
     const { subject, body, docsWithContent } = buildBatchContractNotificationBody(contracts);
 
@@ -160,10 +217,17 @@ export async function POST(request: Request) {
     if (already) {
       return NextResponse.json({
         success: true,
+        queued: true,
+        queuedCount,
         emailSent: true,
-        message: "Email batch già inviata",
+        message: boWarning
+          ? `Email batch già inviata. ${boWarning}`
+          : "Email batch già inviata",
         contractIds: contracts.map((c) => c.id),
         recipients: toEmail,
+        hasDedicatedBo: hasAnyDedicated,
+        boWarning,
+        code: "OK_ALREADY_SENT",
       });
     }
 
@@ -219,8 +283,8 @@ export async function POST(request: Request) {
           emailAttempts: { increment: 1 },
           emailLastAttemptAt: attemptAt,
           emailIdempotencyKey: hash,
-          sentToMasterAt: mail.ok ? attemptAt : undefined,
-          workEmailDate: mail.ok ? attemptAt : undefined,
+          // sentToMasterAt già impostato da enqueue; aggiorna solo se email ok
+          ...(mail.ok ? { sentToMasterAt: attemptAt, workEmailDate: attemptAt } : {}),
           masterEmail: recipients[0] ?? undefined,
         },
       });
@@ -250,27 +314,47 @@ export async function POST(request: Request) {
       });
     }
 
+    const baseMsg = mail.ok
+      ? contracts.length > 1
+        ? `Email unica inviata a ${toEmail} con ${contracts.length} contratti.`
+        : `Contratto inviato a ${toEmail}.`
+      : mail.error || "Invio email non riuscito";
+
+    const message = [
+      "Pratiche in coda In lavorazione (IN_LAVORAZIONE).",
+      baseMsg,
+      boWarning,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
     return NextResponse.json({
-      success: mail.ok,
+      // success = coda ok (non dipende solo dall’email): evita «sparizione» silenziosa
+      success: true,
+      queued: true,
+      queuedCount,
       emailSent: mail.ok,
       contractIds: contracts.map((c) => c.id),
       contractCount: contracts.length,
       recipients: toEmail,
       attachmentsInEmail: atts.length,
-      message: mail.ok
-        ? contracts.length > 1
-          ? `Email unica inviata a ${toEmail} con ${contracts.length} contratti (anagrafica + blocchi servizio + allegati).`
-          : `Contratto inviato a ${toEmail}.`
-        : mail.error || "Invio email non riuscito",
-      code: mail.ok ? "OK" : "EMAIL_SEND_FAILED",
+      hasDedicatedBo: hasAnyDedicated,
+      boWarning,
+      message,
+      code: mail.ok
+        ? hasAnyDedicated
+          ? "OK"
+          : "QUEUED_ADMIN_ONLY"
+        : "QUEUED_EMAIL_FAILED",
     });
   } catch (e) {
     console.error("[notify-batch]", e);
     return NextResponse.json(
       {
         success: false,
+        queued: false,
         emailSent: false,
-        message: "Errore durante l'invio email batch",
+        message: "Errore durante l'invio / messa in coda Back Office",
       },
       { status: 500 },
     );

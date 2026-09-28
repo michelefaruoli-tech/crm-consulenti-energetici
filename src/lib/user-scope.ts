@@ -1,7 +1,6 @@
 import "server-only";
 import type { Prisma, Role } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getMasterEmail } from "@/lib/mail";
 import { hasPermission } from "@/lib/permissions";
 import {
   COLLABORATOR_ROLES,
@@ -193,42 +192,18 @@ export async function userCanAccessContract(
  * - sempre Admin (MASTER_EMAIL)
  * - tutti i Backoffice attivi con scope su quel fornitore
  * - eventuali email salvate sul fornitore (campo email, più indirizzi separati da virgola)
+ *
+ * Per sapere se c’è un BO “dedicato” (oltre al solo Master) usa
+ * `resolveBackofficeDestination` in `@/lib/backoffice-destination`.
  */
 export async function getLavorazioneNotifyEmails(
   supplierId: string | null | undefined,
 ): Promise<string[]> {
-  const admin = getMasterEmail().trim().toLowerCase();
-  const set = new Set<string>();
-  if (admin) set.add(admin);
-
-  if (supplierId) {
-    const [users, supplier] = await Promise.all([
-      prisma.user.findMany({
-        where: {
-          active: true,
-          role: "BACKOFFICE",
-          supplierScopes: { some: { supplierId } },
-        },
-        select: { email: true },
-      }),
-      prisma.supplier.findUnique({
-        where: { id: supplierId },
-        select: { email: true },
-      }),
-    ]);
-    for (const u of users) {
-      const e = u.email.trim().toLowerCase();
-      if (e && !e.startsWith("deleted_")) set.add(e);
-    }
-    if (supplier?.email) {
-      for (const part of supplier.email.split(/[,;\s]+/)) {
-        const e = part.trim().toLowerCase();
-        if (e.includes("@") && !e.startsWith("deleted_")) set.add(e);
-      }
-    }
-  }
-
-  return [...set];
+  const { resolveBackofficeDestination } = await import(
+    "@/lib/backoffice-destination"
+  );
+  const dest = await resolveBackofficeDestination(supplierId);
+  return dest.recipients;
 }
 
 export function formatEmailList(emails: string[]): string {

@@ -1,23 +1,39 @@
 import { prisma } from "@/lib/prisma";
+import { SEND_TO_BACKOFFICE_STATUS } from "@/lib/contract-bo-flow";
 
 const STATUSES_TO_LAVORAZIONE = new Set([
   "BOZZA",
   "INSERITO",
   "DOCUMENTAZIONE_COMPLETA",
   "DOCUMENTAZIONE_INCOMPLETA",
+  "DA_CONTROLLARE",
+  "DA_LAVORARE",
 ]);
 
+export type EnqueueBackofficeItemResult = {
+  contractId: string;
+  previousStatus: string;
+  status: string;
+  queued: boolean;
+};
+
 /**
- * Mette i contratti in coda lavorazione e li assegna al back office
- * (visibili in /lavorazione). Lo stato diventa IN_LAVORAZIONE solo se
- * era ancora bozza/inserito. Traccia autore e data invio (P1.4).
+ * Mette i contratti in coda lavorazione (IN_LAVORAZIONE se ancora pre-BO)
+ * e li marca sendToMaster / assignedToMaster / toWork.
+ *
+ * Sempre: la pratica resta tracciata e visibile in /lavorazione e nel
+ * percorso Provvigioni — anche se non c’è destinatario BO dedicato
+ * (es. Serviren senza UserSupplierScope). L’avviso destinazione è a carico
+ * del chiamante (notify-batch / UI).
  */
 export async function enqueueContractsForBackoffice(opts: {
   contractIds: string[];
   userId: string;
   note?: string;
-}): Promise<void> {
+}): Promise<EnqueueBackofficeItemResult[]> {
   const now = new Date();
+  const results: EnqueueBackofficeItemResult[] = [];
+
   for (const id of opts.contractIds) {
     const contract = await prisma.contract.findUnique({
       where: { id },
@@ -28,11 +44,25 @@ export async function enqueueContractsForBackoffice(opts: {
         sentToMasterAt: true,
       },
     });
-    if (!contract) continue;
+    if (!contract) {
+      results.push({
+        contractId: id,
+        previousStatus: "",
+        status: "",
+        queued: false,
+      });
+      continue;
+    }
 
     const nextStatus = STATUSES_TO_LAVORAZIONE.has(contract.status)
-      ? "IN_LAVORAZIONE"
-      : contract.status;
+      ? SEND_TO_BACKOFFICE_STATUS
+      : contract.status === "IN_LAVORAZIONE"
+        ? contract.status
+        : contract.status;
+
+    // Se già oltre la fase lavorazione (es. ATTIVATO), non forzare regressione
+    // di stato ma assicuriamo i flag coda se ancora pre-lavorazione.
+    const forceLavorazione = STATUSES_TO_LAVORAZIONE.has(contract.status);
 
     await prisma.contract.update({
       where: { id },
@@ -41,21 +71,25 @@ export async function enqueueContractsForBackoffice(opts: {
         assignedToMaster: true,
         toWork: true,
         ...(contract.sentToMasterAt ? {} : { sentToMasterAt: now }),
-        ...(nextStatus !== contract.status ? { status: nextStatus } : {}),
+        ...(forceLavorazione && nextStatus !== contract.status
+          ? { status: nextStatus }
+          : {}),
       },
     });
 
-    if (nextStatus !== contract.status) {
+    const finalStatus = forceLavorazione ? nextStatus : contract.status;
+
+    if (finalStatus !== contract.status) {
       await prisma.contractStatusHistory.create({
         data: {
           contractId: id,
           fromStatus: contract.status,
-          toStatus: nextStatus,
+          toStatus: finalStatus,
           changedById: opts.userId,
           changeReason: "Invio al back office",
           note:
             opts.note?.trim() ||
-            "Contratto messo in lavorazione e assegnato al back office del fornitore",
+            "Contratto messo in lavorazione (IN_LAVORAZIONE) e messo in coda Back Office",
         },
       });
     } else if (!contract.sendToMaster || !contract.assignedToMaster) {
@@ -68,9 +102,18 @@ export async function enqueueContractsForBackoffice(opts: {
           changeReason: "Invio al back office",
           note:
             opts.note?.trim() ||
-            "Pratica assegnata / reinviata al back office (stato invariato)",
+            "Pratica assegnata / reinviata in coda Back Office (stato invariato)",
         },
       });
     }
+
+    results.push({
+      contractId: id,
+      previousStatus: contract.status,
+      status: finalStatus,
+      queued: true,
+    });
   }
+
+  return results;
 }

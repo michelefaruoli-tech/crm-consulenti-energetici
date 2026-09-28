@@ -251,20 +251,23 @@ export function ClientSheet({
         });
         const json = (await res.json().catch(() => null)) as {
           success?: boolean;
+          queued?: boolean;
           emailSent?: boolean;
           message?: string;
           recipients?: string;
+          boWarning?: string | null;
+          hasDedicatedBo?: boolean;
         } | null;
-        if (!res.ok || !json?.emailSent) {
-          setErr(json?.message || "Invio email non riuscito");
+        if (!res.ok || !json?.success) {
+          setErr(json?.message || "Invio / messa in coda non riuscita");
           return;
         }
-        setMsg(
-          json.message ||
-            (ids.length > 1
-              ? `Email inviata per ${ids.length} contratti (${labels}).`
-              : `Email inviata per ${labels}.`),
-        );
+        const parts = [json.message];
+        if (json.boWarning) parts.push(json.boWarning);
+        if (!json.emailSent) {
+          parts.push("Email non inviata: riprova con Reinvia. Stato In lavorazione attivo.");
+        }
+        setMsg(parts.filter(Boolean).join(" "));
         router.refresh();
       } catch (e) {
         setErr(e instanceof Error ? e.message : "Errore di rete");
@@ -1397,6 +1400,7 @@ export function ClientSheet({
             <SendBackofficePanel
               contractIds={siblingContractIds(selected.id)}
               supplierName={selected.supplierName}
+              supplierId={selected.supplierId}
               attachmentCount={selected.documents?.length ?? 0}
               alreadyQueued={Boolean(selected.sendToMaster || selected.assignedToMaster)}
             />
