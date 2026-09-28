@@ -575,6 +575,7 @@ async function createFullContractActionInner(
             supplyCountry: "Italia",
             sendToMaster,
             assignedToMaster: sendToMaster,
+            sentToMasterAt: sendToMaster ? new Date() : null,
             masterEmail,
             emailIdempotencyKey: idempotencyKey,
             emailStatus: sendToMaster ? "PENDING" : null,

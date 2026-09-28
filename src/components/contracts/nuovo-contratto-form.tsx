@@ -29,6 +29,12 @@ import type { OcrApplyPayload } from "@/lib/ocr/schema";
 import { format } from "date-fns";
 import { ContractAttachmentsPanel } from "@/components/contracts/contract-attachments-panel";
 import { splitItalianPersonName } from "@/lib/italian-person-name";
+import { FormBlock, FormBlockNav } from "@/components/contracts/form-block";
+import { PodDuplicateAlert } from "@/components/contracts/pod-duplicate-alert";
+import { ContractCompletenessBar } from "@/components/contracts/contract-completeness-bar";
+import { DocumentChecklistPanel } from "@/components/contracts/document-checklist-panel";
+import { computeContractCompleteness } from "@/lib/contract-completeness";
+import type { StornoBadgeDef } from "@/lib/storno-badges";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -39,14 +45,15 @@ function fillStatus(active: boolean, filled: boolean): "off" | "empty" | "filled
   return filled ? "filled" : "empty";
 }
 
-function SectionTitle({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="mb-4">
-      <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-      <p className="mt-0.5 text-sm text-slate-500">{description}</p>
-    </div>
-  );
-}
+const FORM_BLOCKS = [
+  { step: 1, title: "Cliente" },
+  { step: 2, title: "Utenza" },
+  { step: 3, title: "Fornitore" },
+  { step: 4, title: "Contratto" },
+  { step: 5, title: "Provvigione" },
+  { step: 6, title: "Documenti" },
+  { step: 7, title: "Invio" },
+] as const;
 
 const CLASSIFICATION_BY_CLIENT_TYPE = {
   PRIVATO: [
@@ -136,11 +143,16 @@ export function NuovoContrattoForm({
   ]);
   const [podMatches, setPodMatches] = useState<Array<{
     id: string;
+    contractNumber?: string;
     client: string;
     supplier: string;
     status: string;
     supplyStartDate: string | null;
     archived: boolean;
+    badges?: StornoBadgeDef[];
+    switchHint?: "switch_certo" | "switch_possibile";
+    switchHintLabel?: string;
+    riskStorno?: boolean;
   }>>([]);
   /** POD già in archivio su un contratto fuori dal tuo perimetro (nessun dettaglio) */
   const [podOutsideScope, setPodOutsideScope] = useState(false);
@@ -235,18 +247,6 @@ export function NuovoContrattoForm({
     };
   }, [podValues]);
 
-  // Se arrivi da scheda cliente con id già noto, carica tutto in automatico
-  useEffect(() => {
-    if (!initialClientId) return;
-    void fetch(`/api/clients/search?id=${encodeURIComponent(initialClientId)}`)
-      .then((r) => r.json())
-      .then((data: { item?: AutocompleteItem | null }) => {
-        if (data.item) applyClientFromAnagrafica(data.item);
-      })
-      .catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al mount / cambio id iniziale
-  }, [initialClientId]);
-
   const req = sendToMaster;
   /** Evidenza campi minimi anche senza invio al Master. */
   const reqBase = true;
@@ -261,6 +261,62 @@ export function NuovoContrattoForm({
       ? Boolean(firstName.trim() && lastName.trim())
       : Boolean(companyName.trim());
   const clientOk = Boolean(clientId) || (creatingClient && clientNameOk);
+
+  const utenzaOk = services.every((s) => {
+    if (s.service === "LUCE" || s.service === "DUAL") return Boolean(s.pod?.trim());
+    if (s.service === "GAS") return Boolean(s.pdr?.trim());
+    if (s.service === "TELEFONIA") {
+      return Boolean((s.migrationCode || s.techNotes || "").trim());
+    }
+    return Boolean((s.migrationCode || s.techNotes || s.pod || s.pdr || "").trim());
+  });
+  const supplierOk = services.every((s) => Boolean(s.supplierId || s.supplierName?.trim()));
+  const operationOk = services.every((s) => Boolean(s.operationType));
+  const paymentOk = services.every((s) => Boolean(s.paymentMethod));
+  const offerOk = services.every(
+    (s) => Boolean(s.commissionRuleId || s.productName?.trim()),
+  );
+
+  const completeness = useMemo(
+    () =>
+      computeContractCompleteness({
+        clientOk,
+        addressOk,
+        utenzaOk,
+        supplierOk,
+        operationOk,
+        paymentOk,
+        offerOk,
+        datesOk: Boolean(registrationDate),
+        checklist: {
+          clientType,
+          service: primary?.service,
+          supplierName:
+            suppliers.find((s) => s.id === primary?.supplierId)?.name ??
+            primary?.supplierName ??
+            null,
+          paymentMethod: primary?.paymentMethod,
+        },
+        attachments,
+      }),
+    [
+      clientOk,
+      addressOk,
+      utenzaOk,
+      supplierOk,
+      operationOk,
+      paymentOk,
+      offerOk,
+      registrationDate,
+      clientType,
+      primary?.service,
+      primary?.supplierId,
+      primary?.supplierName,
+      primary?.paymentMethod,
+      suppliers,
+      attachments,
+    ],
+  );
 
   /** Compila tutta la sezione “Dati cliente” da un record anagrafica. */
   function applyClientFromAnagrafica(item: AutocompleteItem) {
@@ -293,6 +349,17 @@ export function NuovoContrattoForm({
     setClassification(String(item.classification ?? ""));
     setInvoiceEmail(String(item.email ?? ""));
   }
+
+  // Se arrivi da scheda cliente con id già noto, carica tutto in automatico
+  useEffect(() => {
+    if (!initialClientId) return;
+    void fetch(`/api/clients/search?id=${encodeURIComponent(initialClientId)}`)
+      .then((r) => r.json())
+      .then((data: { item?: AutocompleteItem | null }) => {
+        if (data.item) applyClientFromAnagrafica(data.item);
+      })
+      .catch(() => undefined);
+  }, [initialClientId]);
 
   /** Seleziona cliente: usa i dati della ricerca e ricarica per id (sicurezza). */
   async function selectExistingClient(item: AutocompleteItem) {
@@ -355,11 +422,11 @@ export function NuovoContrattoForm({
     ]);
   }
 
-  function buildPayload(draft: boolean): NewContractPayload {
+  function buildPayload(draft: boolean, sendToBackOffice: boolean): NewContractPayload {
     const first = services[0];
     return {
       draft,
-      sendToMaster,
+      sendToMaster: sendToBackOffice,
       collaboratorId,
       clientId,
       idempotencyKey:
@@ -433,10 +500,10 @@ export function NuovoContrattoForm({
     };
   }
 
-  function submit(draft: boolean) {
+  function submit(draft: boolean, sendToBackOffice = sendToMaster) {
     setErrors([]);
     setMessage(null);
-    if (sendToMaster && !draft) {
+    if (sendToBackOffice && !draft) {
       const missing: string[] = [];
       if (!clientOk) missing.push("Cliente (nome/cognome o ragione sociale)");
       if (!classification.trim()) missing.push("Classificazione");
@@ -469,6 +536,11 @@ export function NuovoContrattoForm({
       if (attachments.length === 0) {
         missing.push("Allega almeno un documento (qualsiasi tipo)");
       }
+      if (!completeness.docs.requiredComplete) {
+        for (const label of completeness.docs.missingRequiredLabels) {
+          missing.push(`Documento obbligatorio: ${label}`);
+        }
+      }
       if (missing.length) {
         setErrors([
           "Per inviare al BACK OFFICE completa i campi evidenziati in giallo:",
@@ -478,7 +550,7 @@ export function NuovoContrattoForm({
       }
       const ok = window.confirm(
         "CONFERMA CREAZIONE E INVIO AL BACK OFFICE\n\n" +
-          "Il contratto verrà creato e inviato al back office per essere lavorato.\n\n" +
+          "Il contratto viene creato con stato «In lavorazione» (DA_LAVORARE/IN_LAVORAZIONE mappati sugli stati esistenti) e assegnato al Back Office del fornitore.\n\n" +
           "Confermi?",
       );
       if (!ok) return;
@@ -528,7 +600,9 @@ export function NuovoContrattoForm({
     }
     startTransition(async () => {
       try {
-        const result = await createFullContractAction(buildPayload(draft));
+        const result = await createFullContractAction(
+          buildPayload(draft, sendToBackOffice),
+        );
         if (!result?.ok) {
           setErrors(result?.errors ?? ["Non è stato possibile salvare il contratto."]);
           return;
@@ -628,9 +702,9 @@ export function NuovoContrattoForm({
           }
         }
 
-        if (sendToMaster && !draft) {
+        if (sendToBackOffice && !draft) {
           await new Promise((r) => setTimeout(r, 400));
-          // UNA sola email con anagrafica + tutti i blocchi servizio (Luce, Gas, â€¦)
+          // UNA sola email con anagrafica + tutti i blocchi servizio (Luce, Gas, …)
           const mailRes = await fetch(`/api/contracts/notify-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -786,7 +860,7 @@ export function NuovoContrattoForm({
   const classificationOptions = CLASSIFICATION_BY_CLIENT_TYPE[clientType];
 
   return (
-    <div className="space-y-4 pb-24 sm:space-y-5 sm:pb-0">
+    <div className="space-y-4 pb-28 sm:space-y-5 sm:pb-0">
       <DocumentAutoFillPanel
         canUseMistralOcr
         onApply={applyOcrPayload}
@@ -794,6 +868,10 @@ export function NuovoContrattoForm({
           void attachOcrFiles(items);
         }}
       />
+
+      <FormBlockNav blocks={FORM_BLOCKS} />
+
+      <ContractCompletenessBar completeness={completeness} compact />
 
       <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-end sm:p-4">
         {canPickCollaborator ? (
@@ -834,16 +912,19 @@ export function NuovoContrattoForm({
             Invia al back office
           </span>
           <span className="text-xs font-semibold">
-            {sendToMaster ? "Attivato" : "Clicca per attivare"}
+            {sendToMaster
+              ? "Attivato — stato In lavorazione"
+              : "Clicca per attivare all’invio"}
           </span>
         </button>
       </div>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionTitle
-          title="Anagrafica"
-          description="Cerca un cliente già in archivio oppure compilane uno nuovo: resta salvato per le prossime ricontrattualizzazioni."
-        />
+      <div id="form-block-1">
+      <FormBlock
+        step={1}
+        title="Cliente"
+        description="Cerca un cliente già in archivio (debounce) oppure compilane uno nuovo."
+      >
 
         <div className="flex gap-2">
           {(["PRIVATO", "AZIENDA"] as const).map((type) => (
@@ -1082,13 +1163,32 @@ export function NuovoContrattoForm({
             </Select>
           </Field>
         </div>
-      </section>
+      </FormBlock>
+      </div>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <SectionTitle
-          title="Contratto"
-          description="Solo i dati della pratica. Per un secondo servizio si ripetono questi campi, non l'anagrafica."
+      <div id="form-block-2">
+      <FormBlock
+        step={2}
+        title="Utenza / POD-PDR"
+        description="Inserisci POD o PDR normalizzato: verifica duplicati in tempo reale con badge storno (B1) e avviso switch."
+      >
+        <PodDuplicateAlert
+          matches={podMatches}
+          existsOutsideScope={podOutsideScope}
         />
+        <p className="text-xs text-slate-500">
+          I campi POD/PDR sono nel blocco servizio sotto (passi 2–5). Latest UI resta
+          cliente+fornitore+POD (D1): non è un archivio POD globale.
+        </p>
+      </FormBlock>
+      </div>
+
+      <div id="form-block-3">
+      <FormBlock
+        step={3}
+        title="Fornitore, servizio e dati contrattuali"
+        description="Passi 3–5: fornitore, offerta listino, dates e pagamento. Gli importi provvigione restano quelli del listino (nessun ricalcolo)."
+      >
         <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-slate-700">
@@ -1187,42 +1287,27 @@ export function NuovoContrattoForm({
         <AddServiceButton onClick={addService} />
 
         {primaryRule ? (
-          <p className="text-sm text-slate-600">
-            Offerta listino: <strong>{primaryRule.name}</strong>
-            {primaryRule.gettoneTotale ? ` · gettone ${euro(primaryRule.gettoneTotale)}` : ""}
-            {hasMonthlyRecurrence ? ` · prima competenza ${firstRecurringLabel}` : ""}
-            {" · "}
-            {selectedCollaboratorName}
-          </p>
-        ) : null}
-
-        {podMatches.length > 0 || podOutsideScope ? (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-            <p className="font-semibold">POD/PDR già in archivio: ricontrattualizzazione</p>
-            {podMatches.length > 0 ? (
-              <ul className="mt-2 space-y-1">
-                {podMatches.map((match) => (
-                  <li key={match.id} className="flex flex-wrap justify-between gap-2">
-                    <span>
-                      {match.client} · {match.supplier} · {match.status}
-                    </span>
-                    <a href={`/contratti/${match.id}`} target="_blank" className="font-semibold text-sky-700 hover:underline">
-                      Apri
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {podOutsideScope ? (
-              <p className="mt-2">
-                Questo POD/PDR risulta già presente in archivio su un contratto
-                fuori dal tuo perimetro: non puoi vederne i dettagli. Se stai
-                inserendo una ricontrattualizzazione procedi, altrimenti chiedi
-                conferma al back office prima di salvare.
-              </p>
-            ) : null}
+          <div
+            id="form-block-5"
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              5 · Provvigione e ricorrenza
+            </p>
+            <p className="mt-1">
+              Offerta listino: <strong>{primaryRule.name}</strong>
+              {primaryRule.gettoneTotale ? ` · gettone ${euro(primaryRule.gettoneTotale)}` : ""}
+              {hasMonthlyRecurrence ? ` · prima competenza ${firstRecurringLabel}` : ""}
+              {" · "}
+              {selectedCollaboratorName}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Nessuna modifica alle regole di calcolo, storno o switch: solo
+              visualizzazione da listino.
+            </p>
           </div>
         ) : null}
+
         {supplyStartBeforeRegistration ? (
           <p className="text-sm font-medium text-amber-800">
             Attenzione: l&apos;ingresso è precedente alla data di inserimento.
@@ -1237,13 +1322,83 @@ export function NuovoContrattoForm({
             <Textarea rows={3} value={masterNotes} onChange={(e) => setMasterNotes(e.target.value)} />
           </Field>
         </div>
+      </FormBlock>
+      </div>
 
+      <div id="form-block-6">
+      <FormBlock
+        step={6}
+        title="Documenti"
+        description="Checklist configurabile per fornitore/servizio; upload multiplo e drag-and-drop."
+      >
+        <DocumentChecklistPanel
+          coverage={completeness.docs}
+          requireForBackOffice={sendToMaster}
+        />
         <ContractAttachmentsPanel
           attachments={attachments}
           onChange={setAttachments}
           requireDocs={req}
           clientType={clientType}
         />
+      </FormBlock>
+      </div>
+
+      <div id="form-block-7">
+      <FormBlock
+        step={7}
+        title="Riepilogo e invio"
+        description="Bozza (BOZZA) distinta da Inserito (INSERITO). Invio BO → stato IN_LAVORAZIONE sugli enum esistenti."
+      >
+        <ContractCompletenessBar completeness={completeness} />
+
+        <dl className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-slate-500">Cliente</dt>
+            <dd className="font-medium text-slate-900">{clientIdentity}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">CF / P.IVA</dt>
+            <dd className="font-mono text-slate-900">{clientCf || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">Fornitore</dt>
+            <dd className="font-medium text-slate-900">
+              {suppliers.find((s) => s.id === primary?.supplierId)?.name ||
+                primary?.supplierName ||
+                "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">POD / PDR</dt>
+            <dd className="font-mono text-slate-900">
+              {[primary?.pod, primary?.pdr].filter(Boolean).join(" · ") || "—"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">Stato all’invio</dt>
+            <dd className="font-medium text-slate-900">
+              {sendToMaster
+                ? "In lavorazione (IN_LAVORAZIONE)"
+                : "Inserito (INSERITO) — non inviato al BO"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">Documenti</dt>
+            <dd className="font-medium text-slate-900">
+              {completeness.docs.requiredPresent}/{completeness.docs.requiredTotal}{" "}
+              obbligatori · {attachments.length} file
+            </dd>
+          </div>
+        </dl>
+
+        {sendToMaster && completeness.blockersForBackOffice.length > 0 ? (
+          <PersistentAlert
+            title="Manca qualcosa per il Back Office"
+            messages={completeness.blockersForBackOffice}
+            tone="warning"
+          />
+        ) : null}
 
         {errors.length > 0 ? (
           <PersistentAlert
@@ -1268,20 +1423,39 @@ export function NuovoContrattoForm({
             variant="secondary"
             className="min-h-12 flex-1 sm:flex-none"
             disabled={pending}
-            onClick={() => submit(true)}
+            onClick={() => submit(true, false)}
+            title="Salva con stato BOZZA"
           >
-            Bozza
+            Salva bozza
           </Button>
           <Button
             type="button"
-            className="min-h-12 flex-[1.4] sm:min-h-12 sm:flex-none sm:px-8 sm:font-bold"
+            variant="secondary"
+            className="min-h-12 flex-1 sm:flex-none"
             disabled={pending}
-            onClick={() => submit(false)}
+            onClick={() => {
+              setSendToMaster(false);
+              submit(false, false);
+            }}
+            title="Salva con stato INSERITO (non invia al BO)"
           >
-            {sendToMaster ? "Crea e invia al back office" : "Crea contratto"}
+            Salva inserito
+          </Button>
+          <Button
+            type="button"
+            className="min-h-12 flex-[1.4] bg-emerald-700 hover:bg-emerald-800 sm:min-h-12 sm:flex-none sm:px-8 sm:font-bold"
+            disabled={pending}
+            onClick={() => {
+              setSendToMaster(true);
+              submit(false, true);
+            }}
+            title="Valida, crea e mette in IN_LAVORAZIONE per il Back Office"
+          >
+            {pending ? "Invio…" : "Invia al Back Office"}
           </Button>
         </div>
-      </section>
+      </FormBlock>
+      </div>
     </div>
   );
 }
