@@ -58,7 +58,7 @@ export function P01ChecklistBanner() {
             Catalogo CTE → Duferco Flex Condomini
           </Link>
           {" — "}
-          un click «Aggiungi» (18 offerte, senza scadenza). Idempotente.
+          un click «Aggiorna» (18 offerte, senza scadenza). Idempotente.
         </li>
       </ol>
       <p className="mt-3 text-xs text-amber-800">

@@ -11,7 +11,11 @@ import {
   listinoByKind,
   type CteListinoKind,
 } from "@/lib/cte-listino-detect";
-import { upsertListinoOffers } from "@/lib/cte-listino-shared";
+import {
+  deactivateListinoOffersByName,
+  upsertListinoOffers,
+} from "@/lib/cte-listino-shared";
+import { SEV_IREN_OBSOLETE_OFFER_NAMES } from "@/lib/cte-sev-iren-listino";
 import { userCanManageCteOffer } from "@/lib/cte-scope";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -319,7 +323,14 @@ const LISTINO_KINDS: CteListinoKind[] = [
 export async function importCteListinoAction(
   kind: CteListinoKind,
 ): Promise<
-  | { ok: true; created: number; updated: number; skipped: string[]; label: string }
+  | {
+      ok: true;
+      created: number;
+      updated: number;
+      deactivated: number;
+      skipped: string[];
+      label: string;
+    }
   | { ok: false; error: string }
 > {
   const session = await requireSession();
@@ -345,13 +356,23 @@ export async function importCteListinoAction(
 
   const result = await upsertListinoOffers(prisma, usable, pack.offers);
 
+  let deactivated = 0;
+  if (kind === "sev-iren") {
+    deactivated = await deactivateListinoOffersByName(
+      prisma,
+      usable,
+      "Iren",
+      SEV_IREN_OBSOLETE_OFFER_NAMES,
+    );
+  }
+
   await writeAuditLog({
     userId: session.id,
     action: "IMPORT_CTE_LISTINO",
     entity: "CteOffer",
-    details: { source: pack.kind, ...result },
+    details: { source: pack.kind, ...result, deactivated },
   });
 
   revalidatePath("/catalogo-cte");
-  return { ok: true, ...result, label: LISTINO_KIND_LABEL[kind] };
+  return { ok: true, ...result, deactivated, label: LISTINO_KIND_LABEL[kind] };
 }
