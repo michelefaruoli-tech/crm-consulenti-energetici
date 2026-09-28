@@ -226,3 +226,33 @@ export async function upsertListinoOffers(
 
   return { created, updated, skipped };
 }
+
+/** Soft-delete CTE obsolete per nome (idempotente: solo `active: true`). */
+export async function deactivateListinoOffersByName(
+  prisma: PrismaClient,
+  suppliers: Array<{ id: string; name: string; code?: string | null }>,
+  supplierName: string,
+  offerNames: readonly string[],
+): Promise<number> {
+  if (offerNames.length === 0) return 0;
+  const match = matchSupplierId(supplierName, suppliers);
+  if (!match.supplierId) return 0;
+  // update uno-a-uno: updateMany non supportato in HTTP mode Neon
+  const rows = await prisma.cteOffer.findMany({
+    where: {
+      supplierId: match.supplierId,
+      offerName: { in: [...offerNames] },
+      active: true,
+    },
+    select: { id: true },
+  });
+  let deactivated = 0;
+  for (const row of rows) {
+    await prisma.cteOffer.update({
+      where: { id: row.id },
+      data: { active: false },
+    });
+    deactivated += 1;
+  }
+  return deactivated;
+}

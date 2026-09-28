@@ -9,7 +9,8 @@ import { COMPARA_SEMPLICE_LISTINO, COMPARA_SKIPPED } from "../src/lib/cte-compar
 import { detectListinoFromImageHash, detectListinoFromPdf } from "../src/lib/cte-listino-detect";
 import { listinoOfferToParseResult } from "../src/lib/cte-listino-shared";
 import { ENEL_CORPORATE_LISTINO } from "../src/lib/cte-enel-corporate-listino";
-import { isSevIrenListinoText, SEV_IREN_LISTINO } from "../src/lib/cte-sev-iren-listino";
+import { isSevIrenListinoText, SEV_IREN_LISTINO, SEV_IREN_OBSOLETE_OFFER_NAMES } from "../src/lib/cte-sev-iren-listino";
+import { buildCatalogRedirectAfterListinoImport } from "../src/lib/cte-listino-catalog-redirect";
 import { extractCtePdfText } from "../src/lib/cte-pdf-text";
 
 const SAMPLES =
@@ -52,6 +53,22 @@ assert(
   !SEV_IREN_LISTINO.some((o) => /13X24|QUICK/i.test(o.offerName)),
   "niente 13X24/QUICK in SEV-10",
 );
+assert(SEV_IREN_OBSOLETE_OFFER_NAMES.length === 3, "3 obsolete SEV-9");
+assert(
+  SEV_IREN_OBSOLETE_OFFER_NAMES.includes("SEV IREN QUICK LUCE"),
+  "quick luce in obsolete",
+);
+
+const sevRedirect = buildCatalogRedirectAfterListinoImport({
+  kind: "sev-iren",
+  created: 0,
+  updated: 19,
+  deactivated: 3,
+  label: "SEV Iren",
+});
+assert(sevRedirect.includes("fornitore=Iren"), "redirect SEV → Iren");
+assert(sevRedirect.includes("prezzo=FISSO"), "redirect SEV → fissi");
+assert(sevRedirect.includes("importato=sev-iren"), "redirect SEV → importato");
 
 assert(COMPARA_SEMPLICE_LISTINO.length === 15, "compara 15 energia");
 assert(

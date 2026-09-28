@@ -5,52 +5,25 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { PersistentAlert } from "@/components/ui/persistent-alert";
 import { importCteListinoAction, importDolomitiListinoAction } from "@/lib/cte-actions";
+import { buildCatalogRedirectAfterListinoImport } from "@/lib/cte-listino-catalog-redirect";
 import type { CteListinoKind } from "@/lib/cte-listino-detect";
 
-const ITEMS: Array<{
-  kind: CteListinoKind;
-  title: string;
-  body: string;
-  highlight?: boolean;
-}> = [
-  {
-    kind: "duferco-flex-condomini",
-    title: "Duferco Flex Condomini",
-    body: "P0.1 — 18 CTE (8 luce + 10 gas) variabili, sezione Condomini, validFrom/validTo vuoti. Un click, idempotente.",
-    highlight: true,
-  },
-  {
-    kind: "dolomiti",
-    title: "Dolomiti",
-    body: "17 offerte con prezzo dagli screenshot (senza righe «/»).",
-  },
-  {
-    kind: "enel-corporate",
-    title: "Enel Corporate Power",
-    body: "7 CTE business fisse (Enel + Soluzione Energia), F1/F2/F3, perdite escluse.",
-  },
-  {
-    kind: "sev-iren",
-    title: "SEV Iren",
-    body: "19 offerte domestiche dal PDF OFFERTE SEV-10 (LOCK&FIX, SUPER FIX, SUMMER aggiornato).",
-  },
-  {
-    kind: "compara",
-    title: "Compara Semplice",
-    body: "15 luce/gas dal volantino, senza gettoni. Super Luce Enel non ripetuta (già Corporate).",
-  },
+const ITEMS: Array<{ kind: CteListinoKind; title: string }> = [
+  { kind: "duferco-flex-condomini", title: "Duferco" },
+  { kind: "dolomiti", title: "Dolomiti" },
+  { kind: "enel-corporate", title: "Enel" },
+  { kind: "sev-iren", title: "SEV Iren" },
+  { kind: "compara", title: "Compara" },
 ];
 
 export function CteListinoImportPanel() {
   const router = useRouter();
   const [pending, setPending] = useState<CteListinoKind | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onImport(kind: CteListinoKind) {
     setPending(kind);
     setError(null);
-    setMessage(null);
     try {
       if (kind === "dolomiti") {
         const res = await importDolomitiListinoAction();
@@ -58,21 +31,32 @@ export function CteListinoImportPanel() {
           setError(res.error);
           return;
         }
-        setMessage(
-          `Listino Dolomiti: ${res.created} create, ${res.updated} aggiornate (${res.supplierName}). Righe senza prezzo non importate.`,
+        router.push(
+          buildCatalogRedirectAfterListinoImport({
+            kind,
+            created: res.created,
+            updated: res.updated,
+            label: "Dolomiti",
+          }),
         );
-      } else {
-        const res = await importCteListinoAction(kind);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        const skip =
-          res.skipped.length > 0 ? ` Non inserite: ${res.skipped.join("; ")}.` : "";
-        setMessage(
-          `Listino ${res.label}: ${res.created} create, ${res.updated} aggiornate.${skip}`,
-        );
+        router.refresh();
+        return;
       }
+
+      const res = await importCteListinoAction(kind);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      router.push(
+        buildCatalogRedirectAfterListinoImport({
+          kind,
+          created: res.created,
+          updated: res.updated,
+          deactivated: res.deactivated,
+          label: res.label,
+        }),
+      );
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import non riuscito");
@@ -83,41 +67,29 @@ export function CteListinoImportPanel() {
 
   return (
     <div id="duferco-flex-condomini" className="rounded-xl border border-sky-200 bg-sky-50/70 p-4">
-      <h2 className="font-semibold text-slate-900">Listini da screenshot / PDF</h2>
+      <h2 className="font-semibold text-slate-900">Listini</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Aggiunge le offerte al catalogo. I numeri assenti restano vuoti; i compensi Compara non
-        vengono importati. In alternativa carica il file: si apre la coda offerta per offerta.
-        Nessun seed automatico in build: serve un click esplicito (idempotente).
+        Un click aggiorna le CTE del fornitore nel catalogo (idempotente). In alternativa carica il
+        file CTE/PDF sotto.
       </p>
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         {ITEMS.map((item) => (
           <div
             key={item.kind}
-            className={
-              item.highlight
-                ? "rounded-lg border-2 border-emerald-400 bg-emerald-50/90 p-3 shadow-sm ring-1 ring-emerald-200"
-                : "rounded-lg border border-sky-100 bg-white/80 p-3"
-            }
+            className="flex flex-col items-stretch gap-2 rounded-lg border border-sky-100 bg-white/80 p-3"
           >
-            {item.highlight ? (
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                Residuo P0.1 — un click
-              </p>
-            ) : null}
             <p className="font-medium text-slate-900">{item.title}</p>
-            <p className="mt-1 text-sm text-slate-600">{item.body}</p>
             <Button
               type="button"
-              className="mt-2"
+              className="w-full"
               disabled={pending != null}
               onClick={() => void onImport(item.kind)}
             >
-              {pending === item.kind ? "Importazione…" : `Aggiungi ${item.title}`}
+              {pending === item.kind ? "Aggiornamento…" : "Aggiorna"}
             </Button>
           </div>
         ))}
       </div>
-      {message ? <p className="mt-3 text-sm text-emerald-800">{message}</p> : null}
       {error ? (
         <div className="mt-3">
           <PersistentAlert title="Import listino" messages={[error]} tone="error" />

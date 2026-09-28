@@ -33,6 +33,7 @@ export function CteCatalogClient({
     powerKw: string;
     validFrom: string;
     validTo: string;
+    fornitore: string;
   };
   rankingActive: boolean;
   showGasNoRankBanner: boolean;
@@ -44,6 +45,9 @@ export function CteCatalogClient({
   const pushFilters = useCallback(
     (patch: Record<string, string | undefined>) => {
       const next = new URLSearchParams(searchParams.toString());
+      for (const key of ["importato", "c", "u", "d", "label"] as const) {
+        next.delete(key);
+      }
       for (const [k, v] of Object.entries(patch)) {
         if (v == null || v === "") next.delete(k);
         else next.set(k, v);
@@ -150,6 +154,17 @@ export function CteCatalogClient({
             defaultValue={filters.validTo}
             key={`validTo-${filters.validTo}`}
             onBlur={(e) => pushFilters({ validTo: e.target.value || undefined })}
+          />
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-xs font-medium text-slate-600">Fornitore</span>
+          <Input
+            type="text"
+            className="w-40"
+            placeholder="es. Iren"
+            defaultValue={filters.fornitore}
+            key={`fornitore-${filters.fornitore}`}
+            onBlur={(e) => pushFilters({ fornitore: e.target.value.trim() || undefined })}
           />
         </label>
         {canManage ? (

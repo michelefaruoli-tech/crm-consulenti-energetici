@@ -34,6 +34,12 @@ function parseOptionalNumber(v: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function parseNonNegInt(v: string | undefined): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 export default async function CatalogoCtePage({
   searchParams,
 }: {
@@ -52,6 +58,12 @@ export default async function CatalogoCtePage({
   const powerKw = parseOptionalNumber(params.potenza);
   const validFrom = params.validFrom?.trim() || null;
   const validTo = params.validTo?.trim() || null;
+  const fornitore = params.fornitore?.trim() || null;
+  const importato = params.importato?.trim() || null;
+  const importLabel = params.label?.trim() || null;
+  const importCreated = parseNonNegInt(params.c);
+  const importUpdated = parseNonNegInt(params.u);
+  const importDeactivated = parseNonNegInt(params.d);
 
   const visibility = await cteCatalogVisibilityWhere(session);
 
@@ -61,6 +73,13 @@ export default async function CatalogoCtePage({
       category,
       utility,
       priceKind,
+      ...(fornitore
+        ? {
+            supplier: {
+              name: { contains: fornitore, mode: "insensitive" },
+            },
+          }
+        : {}),
       ...(validFrom
         ? {
             OR: [{ validFrom: null }, { validFrom: { lte: new Date(validFrom) } }],
@@ -110,6 +129,9 @@ export default async function CatalogoCtePage({
       })
     : 0;
 
+  const showImportBanner =
+    Boolean(importato) && importCreated != null && importUpdated != null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -120,6 +142,46 @@ export default async function CatalogoCtePage({
         </p>
       </div>
 
+      {showImportBanner ? (
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+          <p className="font-semibold">
+            Listino {importLabel ?? importato} aggiornato
+          </p>
+          <p className="mt-1">
+            {importCreated} create, {importUpdated} aggiornate
+            {importDeactivated != null && importDeactivated > 0
+              ? `, ${importDeactivated} obsolete disattivate`
+              : ""}
+            . Qui sotto:{" "}
+            {category === "RESIDENZIALE"
+              ? "Residenziale"
+              : category === "BUSINESS"
+                ? "Business"
+                : "Condomini"}{" "}
+            · {utility === "LUCE" ? "Luce" : "Gas"} ·{" "}
+            {priceKind === "FISSO" ? "Fissi" : "Variabili"}
+            {fornitore ? ` · fornitore «${fornitore}»` : ""}.
+            {importato === "sev-iren" ? (
+              <>
+                {" "}
+                Le CTE SEV sono sotto fornitore <strong>Iren</strong> (non «Serviren»). Per SUMMER e
+                altre variabili cambia Tipologia → Variabili.
+              </>
+            ) : null}
+          </p>
+        </div>
+      ) : null}
+
+      {fornitore && !showImportBanner ? (
+        <p className="rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-2 text-sm text-sky-950">
+          Filtro fornitore: <strong>{fornitore}</strong>
+          {" · "}
+          <a href="/catalogo-cte" className="underline">
+            togli filtro
+          </a>
+        </p>
+      ) : null}
+
       {canManage && dufercoFlexCount < 18 ? (
         <div className="rounded-xl border-2 border-emerald-400 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
           <p className="font-semibold">P0.1 — Duferco Flex Condomini non completo</p>
@@ -127,7 +189,7 @@ export default async function CatalogoCtePage({
             In catalogo risultano {dufercoFlexCount}/18 offerte FLEX CONDOMINI senza scadenza.
             Un click su{" "}
             <a href="/catalogo-cte/nuovo#duferco-flex-condomini" className="font-medium underline">
-              Nuova CTE → Aggiungi Duferco Flex Condomini
+              Nuova CTE → Aggiorna Duferco
             </a>{" "}
             (upsert idempotente). Non viene eseguito in automatico al deploy.
           </p>
@@ -152,6 +214,7 @@ export default async function CatalogoCtePage({
             powerKw: powerKw?.toString() ?? "",
             validFrom: validFrom ?? "",
             validTo: validTo ?? "",
+            fornitore: fornitore ?? "",
           }}
           rankingActive={rankingActive}
           showGasNoRankBanner={showGasNoRankBanner}

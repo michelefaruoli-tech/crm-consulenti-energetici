@@ -345,7 +345,7 @@ export const SEV_IREN_LISTINO: CteListinoOffer[] = [
   }),
 ];
 
-/** Offerte SEV-9 uscite dal listino SEV-10 (da disattivare in Admin dopo re-import). */
+/** Offerte SEV-9 uscite dal listino SEV-10 (disattivate in automatico da import «Aggiorna»). */
 export const SEV_IREN_OBSOLETE_OFFER_NAMES = [
   "SEV 13X24 PREZZO FISSO LUCE",
   "SEV IREN QUICK LUCE",
