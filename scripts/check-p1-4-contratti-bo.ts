@@ -174,6 +174,42 @@ check(
   "richiesta_integrazione",
 );
 
+console.log("\n• Destinazione BO (logica warning senza dedicato)");
+// Pure: warning solo se !hasDedicatedBo — mirror del contratto API
+function warnIfNoDedicated(opts: {
+  supplierName: string;
+  dedicatedCount: number;
+  admin: string | null;
+}): string | null {
+  if (opts.dedicatedCount > 0) return null;
+  return `Nessun Back Office assegnato a «${opts.supplierName}»`;
+}
+check(
+  "Serviren senza BO → warning",
+  Boolean(
+    warnIfNoDedicated({
+      supplierName: "Serviren",
+      dedicatedCount: 0,
+      admin: "admin@example.com",
+    }),
+  ),
+  true,
+);
+check(
+  "con BO dedicato → no warning",
+  warnIfNoDedicated({
+    supplierName: "Enel",
+    dedicatedCount: 2,
+    admin: "admin@example.com",
+  }),
+  null,
+);
+check(
+  "enqueue pre-BO → IN_LAVORAZIONE (stato target)",
+  SEND_TO_BACKOFFICE_STATUS,
+  "IN_LAVORAZIONE",
+);
+
 if (failures > 0) {
   console.error(`\nP1.4 check FAILED: ${failures} asserzioni`);
   process.exit(1);

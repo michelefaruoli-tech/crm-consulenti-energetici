@@ -4,20 +4,35 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
+type NotifyJson = {
+  success?: boolean;
+  queued?: boolean;
+  emailSent?: boolean;
+  message?: string;
+  recipients?: string;
+  hasDedicatedBo?: boolean;
+  boWarning?: string | null;
+  code?: string;
+};
+
 export function SendBackofficePanel({
   contractIds,
   supplierName,
+  supplierId,
   attachmentCount,
   alreadyQueued,
 }: {
   contractIds: string[];
   supplierName: string;
+  /** Se noto, usato per pre-caricare l’avviso destinazione BO. */
+  supplierId?: string | null;
   attachmentCount: number;
   alreadyQueued?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [warn, setWarn] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const count = contractIds.length;
@@ -35,13 +50,14 @@ export function SendBackofficePanel({
     }
     const ok = window.confirm(
       alreadyQueued
-        ? `REINVIA AL BACK OFFICE\n\nFornitore: ${supplierName}\nPratiche: ${label}\n\nL'email va al back office assegnato a questo fornitore.\n\nConfermi?`
-        : `INVIA AL BACK OFFICE\n\nFornitore: ${supplierName}\nPratiche: ${label}\n\nIl contratto entra in lavorazione e l'email va al back office del fornitore.\n\nConfermi?`,
+        ? `REINVIA AL BACK OFFICE\n\nFornitore: ${supplierName}\nPratiche: ${label}\n\nLa pratica resta In lavorazione; l'email va ai destinatari del fornitore (o solo Master se non c’è BO dedicato).\n\nConfermi?`
+        : `INVIA AL BACK OFFICE\n\nFornitore: ${supplierName}\nPratiche: ${label}\n\nIl contratto entra in In lavorazione (IN_LAVORAZIONE) e nel percorso Provvigioni. L'email va al BO del fornitore se assegnato, altrimenti solo al Master con avviso.\n\nConfermi?`,
     );
     if (!ok) return;
 
     setErr(null);
     setMsg(null);
+    setWarn(null);
     start(async () => {
       try {
         const res = await fetch("/api/contracts/notify-batch", {
@@ -49,19 +65,34 @@ export function SendBackofficePanel({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contractIds }),
         });
-        const json = (await res.json().catch(() => null)) as {
-          success?: boolean;
-          emailSent?: boolean;
-          message?: string;
-          recipients?: string;
-        } | null;
-        if (!res.ok || !json?.emailSent) {
-          setErr(json?.message || "Invio email non riuscito");
+        const json = (await res.json().catch(() => null)) as NotifyJson | null;
+        // Coda ok = successo operativo (non far sparire la pratica se manca email/BO)
+        if (!res.ok || !json?.success) {
+          setErr(json?.message || "Invio / messa in coda non riuscita");
           return;
+        }
+        if (json.boWarning) {
+          setWarn(json.boWarning);
+        } else if (json.hasDedicatedBo === false) {
+          setWarn(
+            `Nessun Back Office dedicato per «${supplierName}». Pratica comunque in lavorazione.`,
+          );
+        }
+        if (!json.emailSent) {
+          setWarn((w) =>
+            [
+              w,
+              "Email non inviata: puoi riprovare con Reinvia. Stato In lavorazione già attivo.",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          );
         }
         setMsg(
           json.message ||
-            `Inviato al back office di ${supplierName}${json.recipients ? ` (${json.recipients})` : ""}.`,
+            (json.emailSent
+              ? `In coda e notificato${json.recipients ? ` (${json.recipients})` : ""}.`
+              : `In coda In lavorazione per ${supplierName}.`),
         );
         router.refresh();
       } catch (e) {
@@ -77,12 +108,19 @@ export function SendBackofficePanel({
       </h3>
       <p className="text-sm text-emerald-900">
         Destinatari: back office assegnato a <strong>{supplierName}</strong>{" "}
-        (più Master). L&apos;email contiene anagrafica, dati contratto e
-        allegati
-        {count > 1 ? ` · ${count} pratiche collegate (es. Luce + Gas)` : ""}.
+        (più Master). Se il fornitore non ha BO in scope, la pratica resta
+        comunque <strong>In lavorazione</strong> e in Provvigioni — con avviso
+        esplicito, senza sparire.
+        {count > 1 ? ` · ${count} pratiche collegate (es. Luce + Gas)` : ""}
+        {supplierId ? null : null}
       </p>
       {msg ? (
         <p className="rounded-lg bg-white px-3 py-2 text-sm text-emerald-800">{msg}</p>
+      ) : null}
+      {warn ? (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {warn}
+        </p>
       ) : null}
       {err ? (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{err}</p>

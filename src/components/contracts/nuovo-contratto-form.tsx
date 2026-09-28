@@ -33,6 +33,7 @@ import { FormBlock, FormBlockNav } from "@/components/contracts/form-block";
 import { PodDuplicateAlert } from "@/components/contracts/pod-duplicate-alert";
 import { ContractCompletenessBar } from "@/components/contracts/contract-completeness-bar";
 import { DocumentChecklistPanel } from "@/components/contracts/document-checklist-panel";
+import { ReadyForBackofficePanel } from "@/components/contracts/ready-for-backoffice-panel";
 import { computeContractCompleteness } from "@/lib/contract-completeness";
 import type { StornoBadgeDef } from "@/lib/storno-badges";
 
@@ -103,6 +104,17 @@ export function NuovoContrattoForm({
   const [message, setMessage] = useState<string | null>(null);
 
   const [sendToMaster, setSendToMaster] = useState(false);
+  const [boDest, setBoDest] = useState<{
+    forSupplierId: string | null;
+    hasDedicatedBo: boolean | null;
+    warning: string | null;
+    recipients: string[];
+  }>({
+    forSupplierId: null,
+    hasDedicatedBo: null,
+    warning: null,
+    recipients: [],
+  });
   const [collaboratorId, setCollaboratorId] = useState(session.id);
   const [clientId, setClientId] = useState<string | undefined>(initialClientId);
   const [clientLabel, setClientLabel] = useState<string | undefined>();
@@ -317,6 +329,83 @@ export function NuovoContrattoForm({
       attachments,
     ],
   );
+
+  const primarySupplierId = primary?.supplierId ?? "";
+  const primarySupplierName =
+    suppliers.find((s) => s.id === primarySupplierId)?.name ||
+    primary?.supplierName ||
+    null;
+
+  // Destinazione BO (Serviren senza scope → avviso, non blocco)
+  useEffect(() => {
+    if (!sendToMaster || !primarySupplierId) return;
+    let cancelled = false;
+    void fetch(
+      `/api/contracts/backoffice-destination?supplierId=${encodeURIComponent(primarySupplierId)}`,
+    )
+      .then((r) => r.json())
+      .then((json: {
+        ok?: boolean;
+        hasDedicatedBo?: boolean;
+        warning?: string | null;
+        recipients?: string[];
+      }) => {
+        if (cancelled) return;
+        if (!json?.ok) {
+          setBoDest({
+            forSupplierId: primarySupplierId,
+            hasDedicatedBo: false,
+            warning: "Impossibile verificare i destinatari Back Office.",
+            recipients: [],
+          });
+          return;
+        }
+        setBoDest({
+          forSupplierId: primarySupplierId,
+          hasDedicatedBo: Boolean(json.hasDedicatedBo),
+          warning: json.warning ?? null,
+          recipients: json.recipients ?? [],
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBoDest({
+            forSupplierId: primarySupplierId,
+            hasDedicatedBo: false,
+            warning: "Verifica destinazione Back Office non riuscita.",
+            recipients: [],
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sendToMaster, primarySupplierId]);
+
+  const boDestForPanel = !sendToMaster
+    ? {
+        hasDedicatedBo: null as boolean | null,
+        warning: null as string | null,
+        recipients: [] as string[],
+      }
+    : !primarySupplierId
+      ? {
+          hasDedicatedBo: false as boolean | null,
+          warning:
+            "Seleziona un fornitore: senza fornitore non c’è Back Office dedicato.",
+          recipients: [] as string[],
+        }
+      : boDest.forSupplierId === primarySupplierId
+        ? {
+            hasDedicatedBo: boDest.hasDedicatedBo,
+            warning: boDest.warning,
+            recipients: boDest.recipients,
+          }
+        : {
+            hasDedicatedBo: null as boolean | null,
+            warning: null as string | null,
+            recipients: [] as string[],
+          };
 
   /** Compila tutta la sezione “Dati cliente” da un record anagrafica. */
   function applyClientFromAnagrafica(item: AutocompleteItem) {
@@ -550,7 +639,8 @@ export function NuovoContrattoForm({
       }
       const ok = window.confirm(
         "CONFERMA CREAZIONE E INVIO AL BACK OFFICE\n\n" +
-          "Il contratto viene creato con stato «In lavorazione» (DA_LAVORARE/IN_LAVORAZIONE mappati sugli stati esistenti) e assegnato al Back Office del fornitore.\n\n" +
+          "Il contratto viene creato con stato «In lavorazione» (IN_LAVORAZIONE) e entra nel percorso Provvigioni.\n" +
+          "Se il fornitore non ha Back Office dedicato (es. Serviren), la pratica resta comunque in coda con avviso — non sparisce.\n\n" +
           "Confermi?",
       );
       if (!ok) return;
@@ -690,9 +780,27 @@ export function NuovoContrattoForm({
           }
           if (savedTotal === 0) {
             setErrors([
-              `I contratti sono stati salvati, ma nessun allegato è stato caricato. ${failReasons.slice(0, 3).join(" · ")}. Apri le pratiche e allega di nuovo, poi usa «Reinvia».`,
+              `I contratti sono stati salvati${sendToBackOffice ? " in In lavorazione" : ""}, ma nessun allegato è stato caricato. ${failReasons.slice(0, 3).join(" · ")}. Apri le pratiche e allega di nuovo, poi usa «Reinvia».`,
             ]);
-            setMessage(null);
+            setMessage(
+              sendToBackOffice
+                ? `Pratiche in coda. Apri /lavorazione/${contractId} per allegati e reinvio.`
+                : null,
+            );
+            if (sendToBackOffice) {
+              // Coda già impostata in create; prova comunque notify (senza allegati)
+              try {
+                await fetch(`/api/contracts/notify-batch`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ contractIds }),
+                });
+              } catch {
+                /* ignore */
+              }
+              router.push(`/lavorazione/${contractId}?ok=queued`);
+              router.refresh();
+            }
             return;
           }
           if (failReasons.length > 0) {
@@ -712,28 +820,50 @@ export function NuovoContrattoForm({
           });
           const mailJson = (await mailRes.json().catch(() => null)) as {
             success?: boolean;
+            queued?: boolean;
             emailSent?: boolean;
             message?: string;
             contractCount?: number;
             recipients?: string;
+            hasDedicatedBo?: boolean;
+            boWarning?: string | null;
+            code?: string;
           } | null;
 
-          if (!mailRes.ok || !mailJson?.emailSent) {
+          // Coda ok = successo: non far sembrare che il contratto sia sparito
+          if (!mailRes.ok || !mailJson?.success) {
             setErrors([
               mailJson?.message ||
-                "I contratti sono stati salvati, ma l'email non è stata inviata. Usa «Reinvia» dalla scheda lavorazione.",
+                "I contratti sono in In lavorazione, ma la notifica Back Office non è andata a buon fine. Apri la scheda e usa «Reinvia».",
             ]);
-            setMessage(`Pratiche create. Apri /lavorazione/${contractId} per reinviare l'email.`);
+            setMessage(
+              `Pratiche create (IN_LAVORAZIONE). Apri /lavorazione/${contractId} per reinviare.`,
+            );
+            router.push(`/lavorazione/${contractId}`);
+            router.refresh();
             return;
           }
+
+          const notes: string[] = [];
+          if (mailJson.boWarning) notes.push(mailJson.boWarning);
+          if (!mailJson.emailSent) {
+            notes.push(
+              "Email non inviata: puoi usare «Reinvia» dalla scheda. Stato In lavorazione attivo.",
+            );
+          }
+          if (notes.length) setErrors(notes);
 
           setMessage(
             mailJson.message ||
               (contractIds.length > 1
-                ? `${contractIds.length} contratti inviati in un'unica email al back office.`
-                : "Contratto creato e inviato al back office."),
+                ? `${contractIds.length} contratti in coda Back Office.`
+                : "Contratto creato e messo in lavorazione."),
           );
-          router.push(`/lavorazione/${contractId}?ok=email`);
+          router.push(
+            mailJson.hasDedicatedBo === false || !mailJson.emailSent
+              ? `/lavorazione/${contractId}?ok=queued`
+              : `/lavorazione/${contractId}?ok=email`,
+          );
           router.refresh();
           return;
         }
@@ -918,6 +1048,18 @@ export function NuovoContrattoForm({
           </span>
         </button>
       </div>
+
+      <ReadyForBackofficePanel
+        open={sendToMaster}
+        canSend={completeness.canSendToBackOffice}
+        percent={completeness.percent}
+        label={completeness.label}
+        blockers={completeness.blockersForBackOffice}
+        supplierName={primarySupplierName}
+        hasDedicatedBo={boDestForPanel.hasDedicatedBo}
+        destinationWarning={boDestForPanel.warning}
+        destinationRecipients={boDestForPanel.recipients}
+      />
 
       <div id="form-block-1">
       <FormBlock
@@ -1396,6 +1538,17 @@ export function NuovoContrattoForm({
           <PersistentAlert
             title="Manca qualcosa per il Back Office"
             messages={completeness.blockersForBackOffice}
+            tone="warning"
+          />
+        ) : null}
+
+        {sendToMaster &&
+        completeness.canSendToBackOffice &&
+        boDestForPanel.hasDedicatedBo === false &&
+        boDestForPanel.warning ? (
+          <PersistentAlert
+            title="Nessun Back Office dedicato"
+            messages={[boDestForPanel.warning]}
             tone="warning"
           />
         ) : null}

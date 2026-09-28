@@ -723,6 +723,7 @@ export default async function ContrattoDetailPage({
           <SendBackofficePanel
             contractIds={siblingIds}
             supplierName={contract.supplier.name}
+            supplierId={contract.supplierId}
             attachmentCount={contract.documents.length}
             alreadyQueued={Boolean(contract.sendToMaster || contract.assignedToMaster)}
           />
