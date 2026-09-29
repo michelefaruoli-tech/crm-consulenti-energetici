@@ -5,7 +5,12 @@ import { useRouter } from "next/navigation";
 import { createUserAction } from "@/lib/user-actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
-import { ROLE_LABELS, type AppRole } from "@/lib/constants";
+import {
+  USER_PROMOTABLE_ROLES,
+  USER_PROMOTION_ROLE_LABELS,
+  type AppRole,
+  type UserPromotableRole,
+} from "@/lib/constants";
 
 type Opt = { id: string; name: string };
 
@@ -23,15 +28,27 @@ export function CreateUserForm({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const roleOptions = useMemo(() => {
-    const entries = Object.entries(ROLE_LABELS) as [AppRole, string][];
-    if (!allowedRoles?.length) return entries;
-    return entries.filter(([v]) => allowedRoles.includes(v));
+  const roleOptions = useMemo((): [AppRole, string][] => {
+    if (allowedRoles?.length) {
+      return allowedRoles.map((v) => [
+        v,
+        v === "COLLABORATORE" || v === "COMMERCIALE"
+          ? v === "COLLABORATORE"
+            ? "Collaboratore"
+            : "Commerciale (deprecato)"
+          : USER_PROMOTION_ROLE_LABELS[v as UserPromotableRole] ?? v,
+      ]);
+    }
+    return USER_PROMOTABLE_ROLES.map((v) => [
+      v,
+      USER_PROMOTION_ROLE_LABELS[v],
+    ]);
   }, [allowedRoles]);
 
   const [role, setRole] = useState<AppRole>(
     () => roleOptions[0]?.[0] ?? "COLLABORATORE",
   );
+  const [backofficeSupplierId, setBackofficeSupplierId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [supplierSelected, setSupplierSelected] = useState<Set<string>>(
@@ -49,7 +66,8 @@ export function CreateUserForm({
     role === "COLLABORATORE" ||
     role === "COMMERCIALE";
   const showCollabScope = role === "BACKOFFICE" || role === "AREA_MANAGER";
-  const suppliersRequired = role === "BACKOFFICE";
+  const backofficeSingleSupplier = role === "BACKOFFICE";
+  const suppliersRequired = backofficeSingleSupplier;
 
   const roleHelp = useMemo(() => {
     if (role === "BACKOFFICE") {
@@ -85,7 +103,10 @@ export function CreateUserForm({
     fd.delete("allCollaborators");
     fd.delete("allSuppliers");
 
-    if (allSuppliers) {
+    if (backofficeSingleSupplier) {
+      fd.set("allSuppliers", "0");
+      if (backofficeSupplierId) fd.append("supplierIds", backofficeSupplierId);
+    } else if (allSuppliers) {
       fd.set("allSuppliers", "1");
     } else {
       fd.set("allSuppliers", "0");
@@ -146,7 +167,11 @@ export function CreateUserForm({
         <Select
           name="role"
           value={role}
-          onChange={(e) => setRole(e.target.value as AppRole)}
+          onChange={(e) => {
+            const next = e.target.value as AppRole;
+            setRole(next);
+            if (next === "BACKOFFICE") setAllSuppliers(false);
+          }}
         >
           {roleOptions.map(([value, label]) => (
             <option key={value} value={value}>
@@ -166,9 +191,27 @@ export function CreateUserForm({
         <div className="md:col-span-2 space-y-3">
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium text-slate-800">
-              Fornitori{suppliersRequired ? " (obbligatorio)" : ""}
+              Fornitori
+              {suppliersRequired ? " (uno obbligatorio)" : ""}
             </p>
           </div>
+          {backofficeSingleSupplier ? (
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={backofficeSupplierId}
+              onChange={(e) => setBackofficeSupplierId(e.target.value)}
+              required
+            >
+              <option value="">— Seleziona fornitore —</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {!backofficeSingleSupplier ? (
+          <>
           <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm">
             <input
               type="radio"
@@ -237,6 +280,8 @@ export function CreateUserForm({
                 ))}
               </div>
             </div>
+          ) : null}
+          </>
           ) : null}
         </div>
       ) : null}

@@ -5,7 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ROLE_LABELS, type AppRole } from "@/lib/constants";
+import { roleDisplayLabel, ROLE_LABELS, type AppRole } from "@/lib/constants";
+import { EditUserRoleForm } from "@/components/utenti/edit-user-role-form";
 import { DeleteAllUsersButton } from "@/components/utenti/delete-all-users-button";
 import { AdminSetPasswordButton } from "@/components/utenti/admin-set-password-button";
 import { CreateUserForm } from "@/components/utenti/create-user-form";
@@ -194,8 +195,26 @@ export default async function UtentiPage({
                 <td className="px-4 py-3">
                   <div className="space-y-1">
                     <p>
-                      {ROLE_LABELS[user.role as AppRole] ?? String(user.role)}
+                      {roleDisplayLabel(user.role as AppRole, user.email)}
                     </p>
+                    {isAdmin && user.id !== session.id ? (
+                      <EditUserRoleForm
+                        user={{
+                          id: user.id,
+                          name: user.name,
+                          role: user.role as AppRole,
+                          email: user.email,
+                        }}
+                        suppliers={supplierOptions}
+                        collaborators={collaborators}
+                        selectedSupplierIds={(user.supplierScopes ?? []).map(
+                          (s) => s.supplierId,
+                        )}
+                        selectedCollaboratorIds={(
+                          user.collaboratorScopes ?? []
+                        ).map((c) => c.collaboratorId)}
+                      />
+                    ) : null}
                     {roleSupportsSupplierScope(user.role) ? (
                       <>
                         <p className="text-xs text-slate-500">
