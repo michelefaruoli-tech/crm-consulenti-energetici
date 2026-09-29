@@ -29,12 +29,41 @@ export type AppContractStatus =
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   ADMIN: "Amministratore",
-  SEGRETERIA: "Segreteria",
-  BACKOFFICE: "Backoffice",
+  SEGRETERIA: "Segreteria (deprecato)",
+  BACKOFFICE: "Back Office",
   AREA_MANAGER: "Area Manager",
   COLLABORATORE: "Collaboratore",
-  COMMERCIALE: "Commerciale",
+  COMMERCIALE: "Commerciale (deprecato)",
 };
+
+/**
+ * Ruoli assegnabili in creazione/promozione (UI Utenti).
+ * SEGRETERIA e COMMERCIALE restano in DB/enum ma non si offrono in select nuove.
+ */
+export const USER_PROMOTABLE_ROLES = [
+  "COLLABORATORE",
+  "AREA_MANAGER",
+  "BACKOFFICE",
+  "ADMIN",
+] as const satisfies readonly AppRole[];
+
+export type UserPromotableRole = (typeof USER_PROMOTABLE_ROLES)[number];
+
+export const USER_PROMOTION_ROLE_LABELS: Record<UserPromotableRole, string> = {
+  COLLABORATORE: "Collaboratore",
+  AREA_MANAGER: "Area Manager",
+  BACKOFFICE: "Back Office",
+  ADMIN: "Amministratore",
+};
+
+/** Etichetta lista utenti: account Master (email Michele) vs altri Admin. */
+export function roleDisplayLabel(role: AppRole, email: string): string {
+  const normalized = email.trim().toLowerCase();
+  if (role === "ADMIN" && normalized === MASTER_EMAIL.toLowerCase()) {
+    return "Master";
+  }
+  return ROLE_LABELS[role] ?? role;
+}
 
 /** Ruoli selezionabili come collaboratore su un contratto. */
 export const ASSIGNABLE_COLLABORATOR_ROLES = [

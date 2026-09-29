@@ -28,9 +28,12 @@ export function EditUserScopesForm({
   const [allCollaborators, setAllCollaborators] = useState(
     selectedCollaboratorIds.length === 0,
   );
+  const isBackoffice = user.role === "BACKOFFICE";
   const [allSuppliers, setAllSuppliers] = useState(
-    selectedSupplierIds.length === 0 &&
-      user.role !== "BACKOFFICE",
+    !isBackoffice && selectedSupplierIds.length === 0,
+  );
+  const [backofficeSupplierId, setBackofficeSupplierId] = useState(
+    selectedSupplierIds[0] ?? "",
   );
 
   const showCollab =
@@ -64,7 +67,13 @@ export function EditUserScopesForm({
         setSaving(true);
         setMessage(null);
         const fd = new FormData(e.currentTarget);
-        if (allSuppliers) {
+        if (isBackoffice) {
+          fd.set("allSuppliers", "0");
+          fd.delete("supplierIds");
+          if (backofficeSupplierId) {
+            fd.append("supplierIds", backofficeSupplierId);
+          }
+        } else if (allSuppliers) {
           fd.set("allSuppliers", "1");
           fd.delete("supplierIds");
         } else {
@@ -93,7 +102,25 @@ export function EditUserScopesForm({
       </p>
 
       <div className="space-y-2">
-        <p className="text-xs font-medium text-slate-600">Fornitori</p>
+        <p className="text-xs font-medium text-slate-600">
+          Fornitori{isBackoffice ? " (uno)" : ""}
+        </p>
+        {isBackoffice ? (
+          <select
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            value={backofficeSupplierId}
+            onChange={(e) => setBackofficeSupplierId(e.target.value)}
+            required
+          >
+            <option value="">— Seleziona —</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="radio"
@@ -143,6 +170,8 @@ export function EditUserScopesForm({
             </div>
           </div>
         ) : null}
+          </>
+        )}
       </div>
 
       {showCollab ? (

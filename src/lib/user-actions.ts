@@ -9,6 +9,11 @@ import {
   roleSupportsCollaboratorScope,
   roleSupportsSupplierScope,
 } from "@/lib/user-scope";
+import {
+  MASTER_EMAIL,
+  USER_PROMOTABLE_ROLES,
+  type UserPromotableRole,
+} from "@/lib/constants";
 
 const ROLES: Role[] = [
   "ADMIN",
@@ -35,6 +40,36 @@ function parseIds(formData: FormData, key: string): string[] {
 
 function parseRole(raw: string): Role | null {
   return ROLES.includes(raw as Role) ? (raw as Role) : null;
+}
+
+function parsePromotableRole(raw: string): UserPromotableRole | null {
+  return USER_PROMOTABLE_ROLES.includes(raw as UserPromotableRole)
+    ? (raw as UserPromotableRole)
+    : null;
+}
+
+function assertBackofficeSupplierScope(
+  role: Role,
+  supplierIds: string[],
+  allSuppliers: boolean,
+): { error?: string; supplierIds: string[] } {
+  if (role !== "BACKOFFICE") {
+    return { supplierIds };
+  }
+  if (allSuppliers || supplierIds.length === 0) {
+    return {
+      error:
+        "Il Back Office deve avere esattamente un fornitore in scope (es. Enel).",
+      supplierIds,
+    };
+  }
+  if (supplierIds.length > 1) {
+    return {
+      error: "Il Back Office può avere un solo fornitore: selezionane uno.",
+      supplierIds: [supplierIds[0]!],
+    };
+  }
+  return { supplierIds };
 }
 
 async function replaceUserScopes(opts: {
@@ -132,12 +167,13 @@ export async function createUserAction(
       }
     }
 
-    if (role === "BACKOFFICE" && supplierIds.length === 0 && !allSuppliers) {
-      return {
-        error:
-          "Per un Backoffice seleziona almeno un fornitore (es. Enel). I collaboratori puoi lasciare «Tutti».",
-      };
-    }
+    const boCheck = assertBackofficeSupplierScope(
+      role,
+      supplierIds,
+      allSuppliers,
+    );
+    if (boCheck.error) return { error: boCheck.error };
+    supplierIds = boCheck.supplierIds;
 
     if (role === "AREA_MANAGER" && supplierIds.length === 0 && !allSuppliers) {
       // Area Manager può partire senza fornitori = tutti; ok
@@ -270,9 +306,13 @@ export async function updateUserScopesAction(
         ? parseIds(formData, "collaboratorIds")
         : [];
 
-    if (user.role === "BACKOFFICE" && supplierIds.length === 0 && !allSuppliers) {
-      return { error: "Seleziona almeno un fornitore" };
-    }
+    const boScopeCheck = assertBackofficeSupplierScope(
+      user.role,
+      supplierIds,
+      allSuppliers,
+    );
+    if (boScopeCheck.error) return { error: boScopeCheck.error };
+    supplierIds = boScopeCheck.supplierIds;
 
     if (!isAdmin && session.role === "AREA_MANAGER" && userId !== session.id) {
       const mySuppliers = await prisma.userSupplierScope.findMany({
@@ -315,6 +355,99 @@ export async function updateUserScopesAction(
           "Errore database Neon (transazioni). Riprova tra qualche secondo.",
       };
     }
+    return { error: msg.slice(0, 200) };
+  }
+}
+
+/**
+ * Cambia ruolo utente (solo Admin / Master operativo).
+ * Accetta scope fornitori/collaboratori quando il nuovo ruolo li richiede.
+ */
+export async function updateUserRoleAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: boolean }> {
+  try {
+    const session = await requireSession();
+    if (!hasPermission(session.role, "users.manage")) {
+      return {
+        error: "Permesso negato: solo Amministratori possono cambiare ruolo",
+      };
+    }
+
+    const userId = String(formData.get("userId") ?? "");
+    const newRole = parsePromotableRole(String(formData.get("role") ?? ""));
+    if (!userId) return { error: "Utente mancante" };
+    if (!newRole) return { error: "Ruolo non valido o non assegnabile" };
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active) return { error: "Utente non trovato" };
+
+    const masterEmail = MASTER_EMAIL.trim().toLowerCase();
+    const targetEmail = user.email.trim().toLowerCase();
+    if (targetEmail === masterEmail && newRole !== "ADMIN") {
+      return {
+        error:
+          "L’account Master non può essere declassato: usa un altro profilo Admin se serve.",
+      };
+    }
+    if (userId === session.id && newRole !== session.role) {
+      return { error: "Non puoi cambiare il tuo ruolo da solo" };
+    }
+
+    const allCollaborators =
+      String(formData.get("allCollaborators") ?? "") === "1" ||
+      String(formData.get("allCollaborators") ?? "") === "on";
+    const allSuppliers =
+      String(formData.get("allSuppliers") ?? "") === "1" ||
+      String(formData.get("allSuppliers") ?? "") === "on";
+
+    let supplierIds = allSuppliers ? [] : parseIds(formData, "supplierIds");
+    const collaboratorIds =
+      roleSupportsCollaboratorScope(newRole) && !allCollaborators
+        ? parseIds(formData, "collaboratorIds")
+        : [];
+
+    const boCheck = assertBackofficeSupplierScope(
+      newRole,
+      supplierIds,
+      allSuppliers,
+    );
+    if (boCheck.error) return { error: boCheck.error };
+    supplierIds = boCheck.supplierIds;
+
+    if (newRole === user.role) {
+      if (roleSupportsSupplierScope(newRole)) {
+        await replaceUserScopes({
+          userId,
+          supplierIds: allSuppliers ? [] : supplierIds,
+          collaboratorIds,
+        });
+      }
+      revalidatePath("/utenti");
+      return { ok: true };
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { role: newRole },
+    });
+
+    if (roleSupportsSupplierScope(newRole)) {
+      await replaceUserScopes({
+        userId,
+        supplierIds: allSuppliers ? [] : supplierIds,
+        collaboratorIds,
+      });
+    } else {
+      await prisma.userSupplierScope.deleteMany({ where: { userId } });
+      await prisma.userCollaboratorScope.deleteMany({ where: { userId } });
+    }
+
+    revalidatePath("/utenti");
+    return { ok: true };
+  } catch (e) {
+    console.error("[updateUserRoleAction]", e);
+    const msg = e instanceof Error ? e.message : "Errore cambio ruolo";
     return { error: msg.slice(0, 200) };
   }
 }
