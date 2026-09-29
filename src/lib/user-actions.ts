@@ -103,7 +103,7 @@ function canManageUsers(role: Role): boolean {
 
 /**
  * Crea utente.
- * - Admin: qualsiasi ruolo + scope
+ * - Admin/Master: qualsiasi ruolo + scope; Collaboratore/Commerciale → areaManagerId obbligatorio
  * - Area Manager: solo Collaboratore/Commerciale, aggiunti al proprio team
  */
 export async function createUserAction(
@@ -122,6 +122,7 @@ export async function createUserAction(
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
     const role = parseRole(String(formData.get("role") ?? "COLLABORATORE"));
+    const areaManagerId = String(formData.get("areaManagerId") ?? "").trim();
     const allCollaborators =
       String(formData.get("allCollaborators") ?? "") === "1" ||
       String(formData.get("allCollaborators") ?? "") === "on";
@@ -140,6 +141,32 @@ export async function createUserAction(
             "Come Area Manager puoi creare solo Collaboratori o Commerciali",
         };
       }
+    }
+
+    // Admin/Master: collaboratore (o commerciale legacy) → Area Manager obbligatorio
+    let assignToAreaManagerId: string | null = null;
+    if (isAdmin && TEAM_CREATABLE.includes(role)) {
+      if (!areaManagerId) {
+        return {
+          error:
+            "Seleziona l’Area Manager a cui assegnare il collaboratore",
+        };
+      }
+      const am = await prisma.user.findFirst({
+        where: {
+          id: areaManagerId,
+          role: "AREA_MANAGER",
+          active: true,
+        },
+        select: { id: true },
+      });
+      if (!am) {
+        return { error: "Area Manager non valido o non attivo" };
+      }
+      assignToAreaManagerId = am.id;
+    } else if (!isAdmin && areaManagerId) {
+      // Solo Admin/Master può assegnare a un AM arbitrario
+      return { error: "Non puoi assegnare collaboratori ad altri Area Manager" };
     }
 
     const { validatePassword } = await import("@/lib/password-policy");
@@ -224,10 +251,17 @@ export async function createUserAction(
       }
     }
 
-    // Area Manager: il nuovo collaboratore entra nel suo team
+    // Team: UserCollaboratorScope(userId=AM, collaboratorId=nuovo)
     if (isAreaManager && !isAdmin && TEAM_CREATABLE.includes(role)) {
       await prisma.userCollaboratorScope.create({
         data: { userId: session.id, collaboratorId: user.id },
+      }).catch(() => undefined);
+    } else if (assignToAreaManagerId) {
+      await prisma.userCollaboratorScope.create({
+        data: {
+          userId: assignToAreaManagerId,
+          collaboratorId: user.id,
+        },
       }).catch(() => undefined);
     }
 

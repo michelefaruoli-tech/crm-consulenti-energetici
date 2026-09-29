@@ -55,7 +55,8 @@ export default async function UtentiPage({
       ).map((c) => c.collaboratorId)
     : [];
 
-  const [users, deletedUsers, suppliers, collaborators] = await Promise.all([
+  const [users, deletedUsers, suppliers, collaborators, areaManagers] =
+    await Promise.all([
     prisma.user.findMany({
       where: isAdmin
         ? { active: true }
@@ -80,6 +81,13 @@ export default async function UtentiPage({
             collaborator: { select: { name: true } },
           },
         },
+        scopedByBackoffices: {
+          select: {
+            user: {
+              select: { id: true, name: true, role: true, active: true },
+            },
+          },
+        },
       },
     }),
     isAdmin
@@ -101,6 +109,13 @@ export default async function UtentiPage({
       select: { id: true, name: true },
     }),
     loadVisibleCollaboratorOptions(session),
+    isAdmin
+      ? prisma.user.findMany({
+          where: { active: true, role: "AREA_MANAGER" },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Area Manager: fornitori limitati al proprio scope (se impostato)
@@ -147,11 +162,11 @@ export default async function UtentiPage({
 
       {isAdmin ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Per ogni ruolo (Backoffice, Area Manager, Collaboratore, Commerciale)
-          puoi assegnare <strong>tutti</strong> o <strong>parte dei fornitori</strong>.
-          L&apos;<strong>Area Manager</strong> può creare collaboratori e vedere i
-          loro contratti. I Backoffice ricevono le email «da lavorare» sui
-          fornitori assegnati.
+          Per ogni ruolo (Backoffice, Area Manager, Collaboratore) puoi
+          assegnare <strong>tutti</strong> o <strong>parte dei fornitori</strong>.
+          Creando un <strong>Collaboratore</strong> scegli l&apos;
+          <strong>Area Manager</strong> a cui assegnarlo (entra nel suo team).
+          I Backoffice ricevono le email «da lavorare» sui fornitori assegnati.
         </p>
       ) : (
         <p className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
@@ -163,6 +178,7 @@ export default async function UtentiPage({
       <CreateUserForm
         suppliers={supplierOptions}
         collaborators={collaborators}
+        areaManagers={areaManagers}
         allowedRoles={
           isAreaManager && !isAdmin
             ? ["COLLABORATORE", "COMMERCIALE"]
@@ -234,6 +250,29 @@ export default async function UtentiPage({
                                 : "tutti"}
                           </p>
                         ) : null}
+                        {isAdmin &&
+                        (user.role === "COLLABORATORE" ||
+                          user.role === "COMMERCIALE")
+                          ? (() => {
+                              const amNames = (
+                                user.scopedByBackoffices ?? []
+                              )
+                                .filter(
+                                  (s) =>
+                                    s.user.active &&
+                                    s.user.role === "AREA_MANAGER",
+                                )
+                                .map((s) => s.user.name);
+                              return (
+                                <p className="text-xs text-slate-500">
+                                  Area Manager:{" "}
+                                  {amNames.length
+                                    ? amNames.join(", ")
+                                    : "non assegnato"}
+                                </p>
+                              );
+                            })()
+                          : null}
                         {isAdmin || user.id === session.id || teamIds.includes(user.id) ? (
                           <EditUserScopesForm
                             user={{
