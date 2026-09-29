@@ -402,7 +402,7 @@ export async function updateUserRoleAction(
       String(formData.get("allSuppliers") ?? "") === "on";
 
     let supplierIds = allSuppliers ? [] : parseIds(formData, "supplierIds");
-    let collaboratorIds =
+    const collaboratorIds =
       roleSupportsCollaboratorScope(newRole) && !allCollaborators
         ? parseIds(formData, "collaboratorIds")
         : [];
