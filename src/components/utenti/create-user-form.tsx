@@ -17,11 +17,14 @@ type Opt = { id: string; name: string };
 export function CreateUserForm({
   suppliers,
   collaborators,
+  areaManagers = [],
   allowedRoles,
   isAreaManager = false,
 }: {
   suppliers: Opt[];
   collaborators: Opt[];
+  /** Area Manager attivi (solo Admin/Master, per assegnare il collaboratore). */
+  areaManagers?: Opt[];
   /** Se impostato, limita i ruoli selezionabili (Area Manager). */
   allowedRoles?: AppRole[];
   isAreaManager?: boolean;
@@ -48,6 +51,7 @@ export function CreateUserForm({
   const [role, setRole] = useState<AppRole>(
     () => roleOptions[0]?.[0] ?? "COLLABORATORE",
   );
+  const [areaManagerId, setAreaManagerId] = useState("");
   const [backofficeSupplierId, setBackofficeSupplierId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +72,9 @@ export function CreateUserForm({
   const showCollabScope = role === "BACKOFFICE" || role === "AREA_MANAGER";
   const backofficeSingleSupplier = role === "BACKOFFICE";
   const suppliersRequired = backofficeSingleSupplier;
+  const showAreaManagerAssign =
+    !isAreaManager &&
+    (role === "COLLABORATORE" || role === "COMMERCIALE");
 
   const roleHelp = useMemo(() => {
     if (role === "BACKOFFICE") {
@@ -77,10 +84,13 @@ export function CreateUserForm({
       return "L’Area Manager gestisce un team di collaboratori: può crearli e vedere i loro contratti. Puoi limitare i fornitori (tutti o solo alcuni).";
     }
     if (role === "COLLABORATORE" || role === "COMMERCIALE") {
+      if (!isAreaManager) {
+        return "Assegna il collaboratore a un Area Manager: entra nel suo team e l’AM vede i suoi contratti. Puoi anche limitare i fornitori.";
+      }
       return "Puoi limitare i fornitori su cui può inserire/lavorare. «Tutti i fornitori» = nessun limite.";
     }
     return null;
-  }, [role]);
+  }, [role, isAreaManager]);
 
   function toggleSet(
     set: Set<string>,
@@ -132,11 +142,15 @@ export function CreateUserForm({
         setMessage(
           isAreaManager
             ? "Collaboratore creato e aggiunto al tuo team."
-            : "Utente creato.",
+            : showAreaManagerAssign
+              ? "Collaboratore creato e assegnato all’Area Manager."
+              : "Utente creato.",
         );
       }
       (e.target as HTMLFormElement).reset();
       setRole(roleOptions[0]?.[0] ?? "COLLABORATORE");
+      setAreaManagerId("");
+      setBackofficeSupplierId("");
       setSupplierSelected(new Set());
       setAllSuppliers(true);
       setAllCollaborators(true);
@@ -171,6 +185,9 @@ export function CreateUserForm({
             const next = e.target.value as AppRole;
             setRole(next);
             if (next === "BACKOFFICE") setAllSuppliers(false);
+            if (next !== "COLLABORATORE" && next !== "COMMERCIALE") {
+              setAreaManagerId("");
+            }
           }}
         >
           {roleOptions.map(([value, label]) => (
@@ -180,6 +197,42 @@ export function CreateUserForm({
           ))}
         </Select>
       </Field>
+
+      {showAreaManagerAssign ? (
+        <div className="md:col-span-2 space-y-2">
+          <Field label="Area Manager">
+            <Select
+              name="areaManagerId"
+              value={areaManagerId}
+              onChange={(e) => setAreaManagerId(e.target.value)}
+              required
+              disabled={areaManagers.length === 0}
+            >
+              <option value="">
+                {areaManagers.length === 0
+                  ? "— Nessun Area Manager attivo —"
+                  : "— Seleziona Area Manager —"}
+              </option>
+              {areaManagers.map((am) => (
+                <option key={am.id} value={am.id}>
+                  {am.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {areaManagers.length === 0 ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Crea prima un utente con ruolo Area Manager, poi potrai
+              assegnargli i collaboratori.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Il collaboratore entra nel team dell’Area Manager selezionato
+              (stesso collegamento usato quando l’AM crea da solo).
+            </p>
+          )}
+        </div>
+      ) : null}
 
       {roleHelp ? (
         <p className="md:col-span-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
