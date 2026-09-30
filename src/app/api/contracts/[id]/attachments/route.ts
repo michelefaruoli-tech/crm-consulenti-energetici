@@ -351,7 +351,10 @@ export async function PUT(
     }
 
     const attemptAt = new Date();
-    const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
+    const recipients = await getLavorazioneNotifyEmails(contract.supplierId, {
+      collaboratorId: contract.collaboratorId,
+      createdById: contract.createdById,
+    });
     const toEmail = formatEmailList(recipients);
     const mail = await sendMail({
       to: recipients,

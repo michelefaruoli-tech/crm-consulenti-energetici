@@ -246,7 +246,7 @@ function operationForSubject(contract: ContractLike): string {
   return operationTypeLabel(raw);
 }
 
-/** Oggetto email lavorazione: Cliente – Operazione – Fisso/Variabile. */
+/** Oggetto email lavorazione: Contratto inviato per la firma – Cliente – Operazione – Fisso/Variabile. */
 function buildLavorazioneSubject(
   contract: ContractLike,
   opts?: { resend?: boolean },
@@ -256,7 +256,7 @@ function buildLavorazioneSubject(
   const price = priceTypeLabel(contract.priceType) || priceFromNotes(contract);
 
   const parts = [
-    opts?.resend ? "REINVIO" : null,
+    opts?.resend ? "REINVIO" : "Contratto inviato per la firma",
     clientName,
     operation || null,
     price || null,
@@ -314,7 +314,7 @@ export function buildContractNotificationBody(
   const body = compactLines(
     isResend
       ? `REINVIO richiesto da ${opts?.resentBy || "admin"}`
-      : "Il contratto è nella coda «In lavorazione» (invio al BACK OFFICE).",
+      : "Contratto inviato per la firma — pratica in coda «In lavorazione» (Back Office).",
     line("Motivo reinvio", opts?.resendReason),
     "",
     ...anagraficaBlock(contract),
@@ -359,6 +359,7 @@ export function buildBatchContractNotificationBody(
     ),
   ].join("/");
   const subject = [
+    "Contratto inviato per la firma",
     clientName,
     operations || null,
     prices || null,
@@ -368,6 +369,7 @@ export function buildBatchContractNotificationBody(
   const att = attachmentsBlock(contracts, appUrl);
 
   const body = compactLines(
+    "Contratti inviati per la firma — pratiche in coda «In lavorazione» (Back Office).",
     ...anagraficaBlock(first),
     ...contracts.flatMap((c, i) => serviceBlock(c, i, contracts.length)),
     ...clientDataBlock(first),

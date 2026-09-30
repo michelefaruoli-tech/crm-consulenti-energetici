@@ -3,13 +3,21 @@ import type { ContractStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import { clientDisplayName } from "@/lib/utils";
+import { resolveContractStakeholderEmails } from "@/lib/backoffice-destination";
+import { formatEmailList } from "@/lib/user-scope";
 
-/** Stati Master per cui avvisare l’agente. */
+/** Stati Master per cui avvisare Master + inseritore/collaboratore. */
 const NOTIFY_TO: ContractStatus[] = [
   "IN_ATTESA_PAGAMENTO",
   "DOCUMENTAZIONE_INCOMPLETA",
   "KO",
 ];
+
+const STATUS_OUTCOME_LABEL: Partial<Record<ContractStatus, string>> = {
+  IN_ATTESA_PAGAMENTO: "Conclusa — in attesa di pagamento",
+  DOCUMENTAZIONE_INCOMPLETA: "Richiesta integrazione documenti",
+  KO: "Pratica KO",
+};
 
 export function shouldNotifyAgentStatusChange(
   from: ContractStatus | string,
@@ -20,9 +28,8 @@ export function shouldNotifyAgentStatusChange(
 }
 
 /**
- * Email all’agente quando Back Office/Admin cambia lo stato.
- * Oggetto: Nome Cognome Fornitore
- * Corpo: solo le note (cosa deve fare l’agente).
+ * Email a Master + inseritore/collaboratore quando Back Office completa / risponde.
+ * Destinatari: sempre MASTER_EMAIL e email di chi ha inserito (+ collaboratore se diverso).
  * Non blocca il flusso se SMTP fallisce.
  */
 export async function notifyCollaboratorStatusChange(opts: {
@@ -53,6 +60,8 @@ export async function notifyCollaboratorStatusChange(opts: {
       select: {
         id: true,
         contractNumber: true,
+        collaboratorId: true,
+        createdById: true,
         supplier: { select: { name: true } },
         client: {
           select: {
@@ -62,30 +71,56 @@ export async function notifyCollaboratorStatusChange(opts: {
             companyName: true,
           },
         },
-        collaborator: {
-          select: { id: true, name: true, email: true, active: true },
-        },
       },
     });
 
     if (!contract) return { sent: false, error: "contratto_non_trovato" };
 
-    const to = contract.collaborator.email?.trim();
-    if (!to || !contract.collaborator.active) {
+    const stakeholders = await resolveContractStakeholderEmails({
+      collaboratorId: contract.collaboratorId,
+      createdById: contract.createdById,
+    });
+    const recipients = stakeholders.recipients;
+    if (recipients.length === 0) {
       console.warn(
-        "[notifyCollaboratorStatusChange] agente senza email o inattivo",
+        "[notifyCollaboratorStatusChange] nessun destinatario (Master/inseritore)",
         contract.contractNumber,
       );
-      return { sent: false, skipped: true, error: "agente_senza_email" };
+      return { sent: false, skipped: true, error: "nessun_destinatario" };
     }
 
     const cliente = clientDisplayName(contract.client);
     const fornitore = (contract.supplier?.name ?? "").trim();
-    const subject = [cliente, fornitore].filter(Boolean).join(" ").trim() || cliente;
+    const outcomeLabel =
+      STATUS_OUTCOME_LABEL[opts.toStatus as ContractStatus] ??
+      String(opts.toStatus);
+    const subject =
+      [
+        "Esito lavorazione Back Office",
+        cliente,
+        fornitore || null,
+      ]
+        .filter(Boolean)
+        .join(" – ") || `Esito lavorazione – ${cliente}`;
 
-    const text = agentNotes;
+    const text = [
+      "Esito lavorazione Back Office",
+      "",
+      `Cliente: ${cliente}`,
+      fornitore ? `Fornitore: ${fornitore}` : null,
+      `Contratto: ${contract.contractNumber}`,
+      `Esito: ${outcomeLabel}`,
+      `Aggiornato da: ${opts.changedByName}`,
+      "",
+      "Note / istruzioni:",
+      agentNotes,
+    ]
+      .filter((line): line is string => line != null)
+      .join("\n");
+
+    const toEmail = formatEmailList(recipients);
     const result = await sendMail({
-      to,
+      to: recipients,
       subject,
       text,
       html: textToHtmlParagraphs(text),
@@ -100,20 +135,22 @@ export async function notifyCollaboratorStatusChange(opts: {
       return { sent: false, skipped: result.skipped, error: result.error };
     }
 
-    await prisma.contractEmailLog.create({
-      data: {
-        contractId: contract.id,
-        toEmail: to,
-        subject,
-        status: "SENT",
-        emailType: "AGENT_STATUS_NOTES",
-        messageId: result.messageId,
-        sentById: null,
-        sentAt: new Date(),
-      },
-    }).catch((e) => {
-      console.warn("[notifyCollaboratorStatusChange] log email", e);
-    });
+    await prisma.contractEmailLog
+      .create({
+        data: {
+          contractId: contract.id,
+          toEmail,
+          subject,
+          status: "SENT",
+          emailType: "AGENT_STATUS_NOTES",
+          messageId: result.messageId,
+          sentById: null,
+          sentAt: new Date(),
+        },
+      })
+      .catch((e) => {
+        console.warn("[notifyCollaboratorStatusChange] log email", e);
+      });
 
     return { sent: true };
   } catch (e) {

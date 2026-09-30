@@ -10,6 +10,7 @@ import {
 } from "@/lib/user-scope";
 import {
   formatBackofficeDestinationMessage,
+  mergeBackofficeAndStakeholderRecipients,
   resolveBackofficeDestination,
 } from "@/lib/backoffice-destination";
 import { buildBatchContractNotificationBody } from "@/lib/contract-notification-email";
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
         client: true,
         supplier: true,
         collaborator: true,
+        createdBy: { select: { id: true, email: true, name: true, active: true } },
         documents: {
           where: { deletedAt: null },
           orderBy: { uploadedAt: "desc" },
@@ -97,26 +99,29 @@ export async function POST(request: Request) {
     });
     const queuedCount = enqueueResults.filter((r) => r.queued).length;
 
-    // Destinazione BO: unione per i fornitori coinvolti (warning se manca dedicato)
+    // Destinazione BO + Master + inseritore/collaboratore per ogni pratica
     const destBySupplier = new Map<
       string,
       Awaited<ReturnType<typeof resolveBackofficeDestination>>
     >();
+    const recipientSet = new Set<string>();
     for (const c of contracts) {
       const sid = c.supplierId;
+      const merged = await mergeBackofficeAndStakeholderRecipients({
+        supplierId: sid,
+        collaboratorId: c.collaboratorId,
+        createdById: c.createdById,
+      });
       if (!destBySupplier.has(sid)) {
-        destBySupplier.set(sid, await resolveBackofficeDestination(sid));
+        destBySupplier.set(sid, merged.destination);
       }
+      for (const e of merged.recipients) recipientSet.add(e);
     }
     const destinations = [...destBySupplier.values()];
     const hasAnyDedicated = destinations.some((d) => d.hasDedicatedBo);
     const warnings = destinations
       .map((d) => d.warning)
       .filter((w): w is string => Boolean(w));
-    const recipientSet = new Set<string>();
-    for (const d of destinations) {
-      for (const e of d.recipients) recipientSet.add(e);
-    }
     const recipients = [...recipientSet];
     const toEmail = formatEmailList(recipients);
     const primaryDest = destinations[0]!;
@@ -160,6 +165,7 @@ export async function POST(request: Request) {
           client: true,
           supplier: true,
           collaborator: true,
+          createdBy: { select: { id: true, email: true, name: true, active: true } },
           documents: {
             where: { deletedAt: null },
             orderBy: { uploadedAt: "desc" },
