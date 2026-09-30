@@ -5,6 +5,10 @@
  *
  * Caso Serviren: spesso nessun UserSupplierScope BACKOFFICE → solo MASTER_EMAIL.
  * La pratica deve comunque entrare in IN_LAVORAZIONE + Provvigioni; l’UI avvisa.
+ *
+ * Destinatari stakeholder (Master + inseritore): vedi
+ * `resolveContractStakeholderEmails` — richiesti da Michele Faruoli per
+ * invio BO e per esito lavorazione.
  */
 import "server-only";
 
@@ -24,6 +28,12 @@ export type BackofficeDestination = {
   /** Avviso UI quando manca assegnazione BO “classica”. */
   warning: string | null;
 };
+
+function normalizeEmail(raw: string | null | undefined): string | null {
+  const e = (raw ?? "").trim().toLowerCase();
+  if (!e || !e.includes("@") || e.startsWith("deleted_")) return null;
+  return e;
+}
 
 function parseSupplierEmails(raw: string | null | undefined): string[] {
   if (!raw) return [];
@@ -91,7 +101,7 @@ export async function resolveBackofficeDestination(
   const name = supplier?.name?.trim() || "questo fornitore";
   const warning = hasDedicatedBo
     ? null
-    : `Nessun Back Office assegnato a «${name}» (nessun utente BACKOFFICE in scope né email fornitore). La pratica resta comunque In lavorazione e visibile in coda/Provvigioni; notifica email solo al Master admin${admin ? ` (${admin})` : ""}.`;
+    : `Nessun Back Office assegnato a «${name}» (nessun utente BACKOFFICE in scope né email fornitore). La pratica resta comunque In lavorazione e visibile in coda/Provvigioni; notifica email a Master${admin ? ` (${admin})` : ""} e all’inseritore/collaboratore della pratica.`;
 
   return {
     supplierId,
@@ -126,4 +136,93 @@ export function formatBackofficeDestinationMessage(
     );
   }
   return parts.join(" ");
+}
+
+export type ContractStakeholderEmails = {
+  /** Sempre MASTER_EMAIL / env se configurata. */
+  masterEmail: string | null;
+  /**
+   * Chi ha inserito: preferisce `createdBy` (AM / altro inseritore),
+   * altrimenti il collaboratore assegnato sulla pratica.
+   */
+  inserterEmail: string | null;
+  /** Collaboratore commerciale sulla pratica (può coincidere con inserter). */
+  collaboratorEmail: string | null;
+  /** Unione deduplicata Master + inseritore (+ collaboratore se diverso). */
+  recipients: string[];
+};
+
+/**
+ * Master + email di chi ha inserito / collaboratore della pratica.
+ * Usato all’invio BO e all’esito lavorazione (presa in carico / conclusa / risposta).
+ */
+export async function resolveContractStakeholderEmails(opts: {
+  collaboratorId?: string | null;
+  createdById?: string | null;
+}): Promise<ContractStakeholderEmails> {
+  const masterEmail = normalizeEmail(getMasterEmail());
+  const ids = [
+    ...new Set(
+      [opts.createdById, opts.collaboratorId]
+        .filter((id): id is string => Boolean(id?.trim()))
+        .map((id) => id.trim()),
+    ),
+  ];
+
+  const users =
+    ids.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: ids }, active: true },
+          select: { id: true, email: true },
+        })
+      : [];
+  const byId = new Map(users.map((u) => [u.id, normalizeEmail(u.email)]));
+
+  const createdByEmail = opts.createdById
+    ? byId.get(opts.createdById) ?? null
+    : null;
+  const collaboratorEmail = opts.collaboratorId
+    ? byId.get(opts.collaboratorId) ?? null
+    : null;
+  // Preferisci chi ha creato la pratica; fallback al collaboratore assegnato
+  const inserterEmail = createdByEmail ?? collaboratorEmail;
+
+  const recipients = new Set<string>();
+  if (masterEmail) recipients.add(masterEmail);
+  if (inserterEmail) recipients.add(inserterEmail);
+  // Se AM ha inserito per un collaboratore, notifica anche il collaboratore
+  if (collaboratorEmail) recipients.add(collaboratorEmail);
+
+  return {
+    masterEmail,
+    inserterEmail,
+    collaboratorEmail,
+    recipients: [...recipients],
+  };
+}
+
+/**
+ * Unisce destinatari BO (Master + BO dedicato + email fornitore)
+ * con Master + inseritore/collaboratore della pratica.
+ */
+export async function mergeBackofficeAndStakeholderRecipients(opts: {
+  supplierId: string | null | undefined;
+  collaboratorId?: string | null;
+  createdById?: string | null;
+}): Promise<{
+  destination: BackofficeDestination;
+  stakeholders: ContractStakeholderEmails;
+  recipients: string[];
+}> {
+  const [destination, stakeholders] = await Promise.all([
+    resolveBackofficeDestination(opts.supplierId),
+    resolveContractStakeholderEmails({
+      collaboratorId: opts.collaboratorId,
+      createdById: opts.createdById,
+    }),
+  ]);
+  const recipients = [
+    ...new Set([...destination.recipients, ...stakeholders.recipients]),
+  ];
+  return { destination, stakeholders, recipients };
 }

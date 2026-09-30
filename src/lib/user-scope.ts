@@ -190,6 +190,7 @@ export async function userCanAccessContract(
 /**
  * Destinatari email pratica da lavorare:
  * - sempre Admin (MASTER_EMAIL)
+ * - email di chi ha inserito / collaboratore (se passati gli id)
  * - tutti i Backoffice attivi con scope su quel fornitore
  * - eventuali email salvate sul fornitore (campo email, più indirizzi separati da virgola)
  *
@@ -198,12 +199,20 @@ export async function userCanAccessContract(
  */
 export async function getLavorazioneNotifyEmails(
   supplierId: string | null | undefined,
+  opts?: {
+    collaboratorId?: string | null;
+    createdById?: string | null;
+  },
 ): Promise<string[]> {
-  const { resolveBackofficeDestination } = await import(
+  const { mergeBackofficeAndStakeholderRecipients } = await import(
     "@/lib/backoffice-destination"
   );
-  const dest = await resolveBackofficeDestination(supplierId);
-  return dest.recipients;
+  const { recipients } = await mergeBackofficeAndStakeholderRecipients({
+    supplierId,
+    collaboratorId: opts?.collaboratorId,
+    createdById: opts?.createdById,
+  });
+  return recipients;
 }
 
 export function formatEmailList(emails: string[]): string {

@@ -84,6 +84,8 @@ export async function sendStaleLavorazioneAlerts(opts?: {
       pdr: true,
       podPdr: true,
       supplierId: true,
+      collaboratorId: true,
+      createdById: true,
       supplier: { select: { name: true } },
       collaborator: { select: { name: true } },
       commissionRule: { select: { name: true } },
@@ -165,7 +167,10 @@ export async function sendStaleLavorazioneAlerts(opts?: {
       `Scheda: ${appUrl}/lavorazione/${contract.id}`,
     ].join("\n");
 
-    const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
+    const recipients = await getLavorazioneNotifyEmails(contract.supplierId, {
+      collaboratorId: contract.collaboratorId,
+      createdById: contract.createdById,
+    });
     const toEmail = formatEmailList(recipients);
     const mail = await sendMail({
       to: recipients,

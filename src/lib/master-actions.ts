@@ -269,7 +269,10 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     redirect("/lavorazione?error=not_found");
   }
 
-  const recipients = await getLavorazioneNotifyEmails(contract.supplierId);
+  const recipients = await getLavorazioneNotifyEmails(contract.supplierId, {
+    collaboratorId: contract.collaboratorId,
+    createdById: contract.createdById,
+  });
   const toEmail = formatEmailList(recipients);
   const { subject, body } = buildContractNotificationBody(contract, {
     resendReason: reason,
