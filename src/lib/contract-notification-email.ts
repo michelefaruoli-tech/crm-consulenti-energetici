@@ -2,6 +2,7 @@ import "server-only";
 import { clientDisplayName } from "@/lib/utils";
 import { operationTypeLabel } from "@/lib/provvigioni-stato";
 import { serviceIdentifierLines } from "@/lib/contract-service-identifier";
+import { formatMissingDocsIntegrationNote } from "@/lib/document-checklist";
 
 type ClientLike = {
   type: string;
@@ -210,6 +211,29 @@ function notesBlock(contracts: ContractLike[]): string[] {
   return compactLines("", "NOTE", ...[...new Set(notes)]);
 }
 
+/** Avviso checklist documenti mancanti (integrazione) — non bloccante. */
+function docsIntegrationBlock(contracts: ContractLike[]): string[] {
+  const notes = new Set<string>();
+  for (const c of contracts) {
+    const clientType =
+      String(c.client.type ?? "").toUpperCase() === "AZIENDA"
+        ? "AZIENDA"
+        : "PRIVATO";
+    const note = formatMissingDocsIntegrationNote(
+      {
+        clientType,
+        service: c.utilityType,
+        supplierName: c.supplier?.name,
+        paymentMethod: c.paymentMethod,
+      },
+      c.documents,
+    );
+    if (note) notes.add(note);
+  }
+  if (notes.size === 0) return [];
+  return compactLines("", "DOCUMENTI DA INTEGRARE", ...notes);
+}
+
 function priceTypeLabel(raw: string | null | undefined): string {
   const v = (raw ?? "").trim().toUpperCase();
   if (!v) return "";
@@ -317,6 +341,7 @@ export function buildContractNotificationBody(
       : "Contratto inviato per la firma — pratica in coda «In lavorazione» (Back Office).",
     line("Motivo reinvio", opts?.resendReason),
     "",
+    ...docsIntegrationBlock([contract]),
     ...anagraficaBlock(contract),
     ...serviceBlock(contract, 0, 1),
     ...clientDataBlock(contract),
@@ -370,6 +395,7 @@ export function buildBatchContractNotificationBody(
 
   const body = compactLines(
     "Contratti inviati per la firma — pratiche in coda «In lavorazione» (Back Office).",
+    ...docsIntegrationBlock(contracts),
     ...anagraficaBlock(first),
     ...contracts.flatMap((c, i) => serviceBlock(c, i, contracts.length)),
     ...clientDataBlock(first),

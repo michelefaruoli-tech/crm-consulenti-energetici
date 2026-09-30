@@ -1,6 +1,9 @@
 /**
  * P1.4 — indicatore completezza pratica (form nuovo contratto).
  * Solo UI: non altera calcoli provvigioni / storno.
+ *
+ * Regola invio BO: dati minimi + almeno un allegato.
+ * Checklist documenti mancanti → warning (integrazione), non hard-block.
  */
 
 import {
@@ -36,7 +39,10 @@ export type CompletenessResult = {
   canSaveDraft: boolean;
   canSaveInserito: boolean;
   canSendToBackOffice: boolean;
+  /** Blocchi hard: senza questi non si può inviare al BO */
   blockersForBackOffice: string[];
+  /** Avvisi amber: documenti checklist da integrare (non bloccano se c’è almeno un allegato) */
+  warningsForBackOffice: string[];
 };
 
 /**
@@ -46,14 +52,17 @@ export function computeContractCompleteness(
   input: CompletenessFieldInput,
 ): CompletenessResult {
   const docs = evaluateDocumentChecklist(input.checklist, input.attachments);
+  const hasAttachment = input.attachments.length > 0;
 
   const blocks = [
     { id: "cliente", label: "Cliente", ok: input.clientOk, weight: 15 },
     { id: "utenza", label: "Utenza / POD-PDR", ok: input.utenzaOk, weight: 15 },
     {
       id: "fornitore",
+      // Solo fornitore: offerta/prodotto non deve far risultare «incompleto»
+      // se Enel (o altro) è già selezionato.
       label: "Fornitore e servizio",
-      ok: input.supplierOk && input.offerOk,
+      ok: input.supplierOk,
       weight: 15,
     },
     {
@@ -71,7 +80,7 @@ export function computeContractCompleteness(
     {
       id: "allegati",
       label: "Almeno un allegato",
-      ok: input.attachments.length > 0,
+      ok: hasAttachment,
       weight: 10,
     },
   ];
@@ -87,8 +96,20 @@ export function computeContractCompleteness(
   if (!input.supplierOk) blockersForBackOffice.push("Fornitore mancante");
   if (!input.operationOk) blockersForBackOffice.push("Tipo operazione mancante");
   if (!input.paymentOk) blockersForBackOffice.push("Metodo di pagamento mancante");
+  if (!hasAttachment) {
+    blockersForBackOffice.push("Allega almeno un documento");
+  }
+
+  const warningsForBackOffice: string[] = [];
   for (const label of docs.missingRequiredLabels) {
-    blockersForBackOffice.push(`Documento mancante: ${label}`);
+    warningsForBackOffice.push(
+      `Documento da integrare (non blocca l’invio): ${label}`,
+    );
+  }
+  if (!input.offerOk && input.supplierOk) {
+    warningsForBackOffice.push(
+      "Offerta / prodotto non indicato (facoltativo per l’invio)",
+    );
   }
 
   const canSaveDraft = input.clientOk || input.utenzaOk || input.supplierOk;
@@ -97,15 +118,18 @@ export function computeContractCompleteness(
     input.utenzaOk &&
     input.supplierOk &&
     input.operationOk;
+  /** Invio BO: dati minimi + almeno un allegato. Checklist mancante = warning. */
   const canSendToBackOffice =
     canSaveInserito &&
     input.addressOk &&
     input.paymentOk &&
-    docs.requiredComplete;
+    hasAttachment;
 
   let label = "Pratica incompleta";
   if (percent >= 100) label = "Contratto completo";
-  else if (percent >= 75) label = "Quasi completo";
+  else if (canSendToBackOffice && warningsForBackOffice.length > 0) {
+    label = "Pronto per il BO (documenti da integrare)";
+  } else if (percent >= 75) label = "Quasi completo";
   else if (percent >= 40) label = "In compilazione";
   else label = "All’inizio";
 
@@ -118,5 +142,6 @@ export function computeContractCompleteness(
     canSaveInserito,
     canSendToBackOffice,
     blockersForBackOffice,
+    warningsForBackOffice,
   };
 }

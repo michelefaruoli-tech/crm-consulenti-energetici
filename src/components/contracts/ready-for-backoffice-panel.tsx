@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Riquadro sotto «Invio al Back Office»: solo pratiche complete da far lavorare.
- * Mostra stato target, percorso Provvigioni e avviso se manca BO dedicato.
+ * Riquadro sotto «Invio al Back Office»: pratiche pronte da far lavorare.
+ * Documenti checklist mancanti → warning amber (integrazione), non hard-block
+ * se c’è almeno un allegato e i dati minimi sono ok.
  */
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
   percent: number;
   label: string;
   blockers: string[];
+  warnings?: string[];
   supplierName: string | null;
   /** null = ancora in caricamento */
   hasDedicatedBo: boolean | null;
@@ -24,6 +26,7 @@ export function ReadyForBackofficePanel({
   percent,
   label,
   blockers,
+  warnings = [],
   supplierName,
   hasDedicatedBo,
   destinationWarning,
@@ -39,7 +42,7 @@ export function ReadyForBackofficePanel({
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-black uppercase tracking-wide text-emerald-950">
-          Contratti completi da far lavorare
+          Contratti da far lavorare
         </h3>
         <span className="text-xs font-semibold text-emerald-800">
           Completezza {percent}% · {label}
@@ -48,21 +51,20 @@ export function ReadyForBackofficePanel({
 
       {!canSend ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          <p className="font-semibold">Pratica non ancora completa per il Back Office</p>
+          <p className="font-semibold">Pratica non ancora inviabile al Back Office</p>
           <ul className="mt-1 list-disc pl-5">
             {blockers.length > 0 ? (
               blockers.map((b) => <li key={b}>{b}</li>)
             ) : (
-              <li>Completa i blocchi evidenziati prima di inviare.</li>
+              <li>Completa i dati minimi e allega almeno un documento.</li>
             )}
           </ul>
         </div>
       ) : (
         <ul className="space-y-1.5 text-sm text-emerald-950">
           <li>
-            All’invio lo stato diventa{" "}
-            <strong>In lavorazione (IN_LAVORAZIONE)</strong> — enum già in uso,
-            nessun nuovo stato.
+            Puoi inviare: all’invio lo stato diventa{" "}
+            <strong>In lavorazione (IN_LAVORAZIONE)</strong>.
           </li>
           <li>
             La pratica entra / resta nel percorso <strong>Provvigioni</strong>{" "}
@@ -73,6 +75,23 @@ export function ReadyForBackofficePanel({
           </li>
         </ul>
       )}
+
+      {canSend && warnings.length > 0 ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p className="font-semibold">
+            Documenti da integrare — l’invio è comunque consentito
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs">
+            Il Back Office potrà richiedere i documenti mancanti; la pratica non
+            resta bloccata.
+          </p>
+        </div>
+      ) : null}
 
       {canSend && hasDedicatedBo === false ? (
         <div className="rounded-xl border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-950">
