@@ -7,7 +7,7 @@ export type DocumentChecklistItem = {
   /** Chiave allineata a DOC_TYPE_OPTIONS / Document.docType */
   docType: string;
   label: string;
-  /** Obbligatorio prima di «Invia al Back Office» */
+  /** In checklist (consigliato per integrazione; non hard-block se c’è almeno un allegato) */
   required: boolean;
   /** Suggerito ma non bloccante */
   recommended?: boolean;
@@ -155,6 +155,23 @@ export type ChecklistCoverage = {
   percent: number;
   missingRequiredLabels: string[];
 };
+
+/**
+ * Testo per email / note: documenti checklist mancanti (non bloccanti se ci sono allegati).
+ * Null se la checklist required è completa.
+ */
+export function formatMissingDocsIntegrationNote(
+  input: DocumentChecklistInput,
+  attached: ReadonlyArray<{ docType?: string | null; filename?: string | null }>,
+): string | null {
+  const coverage = evaluateDocumentChecklist(input, attached);
+  if (coverage.requiredComplete) return null;
+  if (coverage.missingRequiredLabels.length === 0) return null;
+  return (
+    `⚠ Documenti checklist da integrare: ${coverage.missingRequiredLabels.join(", ")}. ` +
+    "Invio consentito con allegati presenti; il Back Office può richiedere i file mancanti."
+  );
+}
 
 export function evaluateDocumentChecklist(
   input: DocumentChecklistInput,

@@ -60,14 +60,29 @@ export function ContractCompletenessBar({
               key={b.id}
               className={cn(
                 "flex items-center gap-2 text-xs",
-                b.ok ? "text-emerald-800" : "text-slate-500",
+                b.ok
+                  ? "text-emerald-800"
+                  : completeness.canSendToBackOffice
+                    ? "text-amber-800"
+                    : "text-slate-500",
               )}
             >
-              <span aria-hidden>{b.ok ? "✓" : "○"}</span>
+              <span aria-hidden>{b.ok ? "✓" : completeness.canSendToBackOffice ? "!" : "○"}</span>
               {b.label}
             </li>
           ))}
         </ul>
+      ) : null}
+      {!compact &&
+      completeness.canSendToBackOffice &&
+      completeness.warningsForBackOffice.length > 0 ? (
+        <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-950 ring-1 ring-amber-200">
+          Invio consentito con allegati.{" "}
+          {completeness.warningsForBackOffice[0]}
+          {completeness.warningsForBackOffice.length > 1
+            ? ` (+${completeness.warningsForBackOffice.length - 1})`
+            : ""}
+        </p>
       ) : null}
     </div>
   );

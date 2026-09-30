@@ -7,10 +7,16 @@ import type { ChecklistCoverage } from "@/lib/document-checklist";
 export function DocumentChecklistPanel({
   coverage,
   requireForBackOffice,
+  /** true se c’è già almeno un allegato (invio BO permesso anche con checklist incompleta) */
+  hasAttachments = false,
 }: {
   coverage: ChecklistCoverage;
   requireForBackOffice: boolean;
+  hasAttachments?: boolean;
 }) {
+  const showMissing = requireForBackOffice && !coverage.requiredComplete;
+  const canSendDespiteMissing = showMissing && hasAttachments;
+
   return (
     <div
       className="rounded-xl border border-slate-200 bg-slate-50/80 p-3"
@@ -28,10 +34,20 @@ export function DocumentChecklistPanel({
         </span>
       </div>
 
-      {requireForBackOffice && !coverage.requiredComplete ? (
+      {canSendDespiteMissing ? (
         <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-950 ring-1 ring-amber-200">
-          Prima di inviare al Back Office allega:{" "}
+          Mancano ancora:{" "}
           <strong>{coverage.missingRequiredLabels.join(", ")}</strong>
+          {" — "}puoi comunque inviare al Back Office; verranno segnalati per
+          integrazione.
+        </p>
+      ) : null}
+
+      {showMissing && !hasAttachments ? (
+        <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-950 ring-1 ring-amber-200">
+          Consigliati per il Back Office:{" "}
+          <strong>{coverage.missingRequiredLabels.join(", ")}</strong>
+          {" — "}per inviare allega almeno un file (anche se non è in checklist).
         </p>
       ) : null}
 
@@ -61,7 +77,7 @@ export function DocumentChecklistPanel({
               {item.label}
               {item.required ? (
                 <span className="ml-1 text-[10px] font-semibold uppercase text-amber-800">
-                  obbligatorio
+                  checklist
                 </span>
               ) : item.recommended ? (
                 <span className="ml-1 text-[10px] font-semibold uppercase text-slate-500">

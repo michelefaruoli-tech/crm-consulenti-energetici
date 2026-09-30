@@ -116,6 +116,63 @@ const high = computeContractCompleteness({
 check("percent 100 con tutto", high.percent, 100);
 check("può inviare BO", high.canSendToBackOffice, true);
 
+console.log("\n• Invio BO con allegati ma checklist incompleta (Visura)");
+const aziendaPartial = computeContractCompleteness({
+  clientOk: true,
+  addressOk: true,
+  utenzaOk: true,
+  supplierOk: true,
+  operationOk: true,
+  paymentOk: true,
+  offerOk: false,
+  datesOk: true,
+  checklist: { clientType: "AZIENDA", service: "LUCE", supplierName: "Enel" },
+  attachments: [
+    { docType: "BOLLETTA", filename: "bolletta.pdf" },
+    { docType: "ALTRO", filename: "altro.pdf" },
+  ],
+});
+check(
+  "con allegati può inviare anche senza Visura",
+  aziendaPartial.canSendToBackOffice,
+  true,
+);
+check(
+  "Visura non è hard-blocker",
+  aziendaPartial.blockersForBackOffice.some((b) =>
+    b.toLowerCase().includes("visura"),
+  ),
+  false,
+);
+check(
+  "Visura in warning integrazione",
+  aziendaPartial.warningsForBackOffice.some((w) =>
+    w.toLowerCase().includes("visura"),
+  ),
+  true,
+);
+check(
+  "Fornitore Enel senza offerta → blocco fornitore ok",
+  aziendaPartial.blocks.find((b) => b.id === "fornitore")?.ok,
+  true,
+);
+check(
+  "senza allegati non può inviare",
+  computeContractCompleteness({
+    clientOk: true,
+    addressOk: true,
+    utenzaOk: true,
+    supplierOk: true,
+    operationOk: true,
+    paymentOk: true,
+    offerOk: true,
+    datesOk: true,
+    checklist: { clientType: "AZIENDA", service: "LUCE" },
+    attachments: [],
+  }).canSendToBackOffice,
+  false,
+);
+
 console.log("\n• Mapping flussi BO (stati esistenti)");
 check(
   "BOZZA → bozza",

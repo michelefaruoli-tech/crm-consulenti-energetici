@@ -76,9 +76,12 @@ export function ContractAttachmentsPanel({
       <div>
         <h2 className="text-base font-semibold text-slate-900">Documenti / Allegati</h2>
         <p className="text-xs text-slate-500">
-          {requireDocs ? "Documento obbligatorio se invii al back office. " : null}
-          Fattura consigliata
-          {isBusiness ? "; visura consigliata per business" : null}.
+          {requireDocs
+            ? "Per inviare al back office serve almeno un allegato. "
+            : null}
+          Checklist (visura, bolletta, …) consigliata: se manca qualcosa si
+          segnala per integrazione, senza bloccare l’invio.
+          {isBusiness ? " Per business la visura resta consigliata." : null}
         </p>
       </div>
 
@@ -92,7 +95,7 @@ export function ContractAttachmentsPanel({
           )}
         >
           {hasAny
-            ? `✓ ${attachments.length} file — puoi inviare al back office.`
+            ? `✓ ${attachments.length} file — puoi inviare al back office (eventuali documenti checklist mancanti verranno segnalati per integrazione).`
             : "Allega almeno un documento per inviare al back office."}
         </p>
       ) : null}

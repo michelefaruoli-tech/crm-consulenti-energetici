@@ -583,7 +583,16 @@ export function NuovoContrattoForm({
           ? email
           : first?.invoiceEmail || invoiceEmail,
       notes,
-      masterNotes,
+      masterNotes: (() => {
+        if (!sendToBackOffice) return masterNotes;
+        const missing = completeness.docs.missingRequiredLabels;
+        if (missing.length === 0) return masterNotes;
+        const integrationNote =
+          `⚠ Documenti checklist da integrare: ${missing.join(", ")}. ` +
+          "Invio consentito con allegati presenti; il BO può richiedere i file mancanti.";
+        const base = masterNotes.trim();
+        return base ? `${base}\n\n${integrationNote}` : integrationNote;
+      })(),
       services,
       attachments: [],
     };
@@ -625,11 +634,7 @@ export function NuovoContrattoForm({
       if (attachments.length === 0) {
         missing.push("Allega almeno un documento (qualsiasi tipo)");
       }
-      if (!completeness.docs.requiredComplete) {
-        for (const label of completeness.docs.missingRequiredLabels) {
-          missing.push(`Documento obbligatorio: ${label}`);
-        }
-      }
+      // Checklist documenti mancanti NON blocca: si segnalano per integrazione.
       if (missing.length) {
         setErrors([
           "Per inviare al BACK OFFICE completa i campi evidenziati in giallo:",
@@ -637,11 +642,17 @@ export function NuovoContrattoForm({
         ]);
         return;
       }
+      const docWarn = completeness.docs.missingRequiredLabels;
+      const warnLines =
+        docWarn.length > 0
+          ? `\n\nDocumenti checklist ancora mancanti (si procede comunque; segnalati per integrazione):\n- ${docWarn.join("\n- ")}\n`
+          : "";
       const ok = window.confirm(
         "CONFERMA CREAZIONE E INVIO AL BACK OFFICE\n\n" +
           "Il contratto viene creato con stato «In lavorazione» (IN_LAVORAZIONE) e entra nel percorso Provvigioni.\n" +
-          "Se il fornitore non ha Back Office dedicato (es. Serviren), la pratica resta comunque in coda con avviso — non sparisce.\n\n" +
-          "Confermi?",
+          "Se il fornitore non ha Back Office dedicato (es. Serviren), la pratica resta comunque in coda con avviso — non sparisce." +
+          warnLines +
+          "\nConfermi?",
       );
       if (!ok) return;
     } else if (!draft) {
@@ -1055,6 +1066,7 @@ export function NuovoContrattoForm({
         percent={completeness.percent}
         label={completeness.label}
         blockers={completeness.blockersForBackOffice}
+        warnings={completeness.warningsForBackOffice}
         supplierName={primarySupplierName}
         hasDedicatedBo={boDestForPanel.hasDedicatedBo}
         destinationWarning={boDestForPanel.warning}
@@ -1476,6 +1488,7 @@ export function NuovoContrattoForm({
         <DocumentChecklistPanel
           coverage={completeness.docs}
           requireForBackOffice={sendToMaster}
+          hasAttachments={attachments.length > 0}
         />
         <ContractAttachmentsPanel
           attachments={attachments}
@@ -1534,10 +1547,22 @@ export function NuovoContrattoForm({
           </div>
         </dl>
 
-        {sendToMaster && completeness.blockersForBackOffice.length > 0 ? (
+        {sendToMaster &&
+        !completeness.canSendToBackOffice &&
+        completeness.blockersForBackOffice.length > 0 ? (
           <PersistentAlert
             title="Manca qualcosa per il Back Office"
             messages={completeness.blockersForBackOffice}
+            tone="warning"
+          />
+        ) : null}
+
+        {sendToMaster &&
+        completeness.canSendToBackOffice &&
+        completeness.warningsForBackOffice.length > 0 ? (
+          <PersistentAlert
+            title="Puoi inviare — documenti da integrare"
+            messages={completeness.warningsForBackOffice}
             tone="warning"
           />
         ) : null}
