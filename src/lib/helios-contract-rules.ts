@@ -1,19 +1,124 @@
 import { canonicalSupplierName } from "@/lib/supplier-names";
-import { addMonths, toPeriod } from "@/lib/recurring";
+import { addMonths, monthsBetween, toPeriod } from "@/lib/recurring";
+import type { RecurringWindow } from "@/lib/recurring-window";
+import { isPeriodInRecurringWindow, lastGeneratedPeriod } from "@/lib/recurring-window";
 
 export const HELIOS_MONTHLY_RESIDENTE = 4;
 export const HELIOS_MONTHLY_ALTRO = 6;
 
 /**
- * Helios: lag fisso M+2 (vincolante).
+ * Helios: lag fisso M+2 (vincolante) — regola generale sulle ricorrenze mensili.
  * Genera la riga solo nel mese di pagamento/liquidazione, con mese rif. = competenza.
  *
  * Esempi (calendario → competenza creabile):
  * - settembre → solo fino a luglio (agosto NO: si crea a ottobre)
  * - ottobre → fino ad agosto (settembre NO: si crea a novembre)
  * - novembre → fino a settembre
+ *
+ * Eccezione (Michele 2026-10): per **nuova attivazione / voltura / switch**
+ * la **prima** competenza (= mese ingresso fornitura) si crea e si mostra subito
+ * con mese di riferimento, anche se oltre lastPayable. Le rate mensili successive
+ * restano M+2. Vedi `isHeliosFirstMonthVisibleOperation`.
  */
 export const HELIOS_RECURRING_GENERATION_LAG_MONTHS = 2;
+
+/**
+ * Valori `Contract.operationType` (già in schema/UI — non inventati) per cui
+ * Helios espone subito la prima rata con mese riferimento.
+ * Sottoinsieme di OPERATION_OPTIONS + alias legacy `CAMBIO` (= Switch).
+ * Esclusi: CESSAZIONE, RINNOVO, ALTRO, ecc.
+ */
+export const HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES = [
+  "SWITCH",
+  "CAMBIO",
+  "CAMBIO_FORNITORE",
+  "VOLTURA",
+  "ATTIVAZIONE",
+  "NUOVA_ATTIVAZIONE",
+  "SUBENTRO",
+] as const;
+
+/** True se il tipo operazione rientra nell’eccezione prima competenza Helios. */
+export function isHeliosFirstMonthVisibleOperation(
+  operationType: string | null | undefined,
+): boolean {
+  const v = String(operationType ?? "")
+    .trim()
+    .toUpperCase();
+  if (!v) return false;
+  return (HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES as readonly string[]).includes(
+    v,
+  );
+}
+
+/**
+ * Prima competenza = mese di ingresso fornitura (`window.start`).
+ * Solo per attivazione/voltura/switch: visibile/creabile anche se > lastPayable.
+ */
+export function isHeliosFirstCompetenceLagException(opts: {
+  operationType: string | null | undefined;
+  competencePeriod: string;
+  supplyStartPeriod: string;
+}): boolean {
+  if (!isHeliosFirstMonthVisibleOperation(opts.operationType)) return false;
+  const period = validYearMonth(opts.competencePeriod);
+  const start = validYearMonth(opts.supplyStartPeriod);
+  if (!period || !start) return false;
+  return period === start;
+}
+
+/**
+ * Periodi mensili da generare per un contratto.
+ * Helios: fino a lastPayable (M+2), più eventuale prima competenza
+ * (attivazione/voltura/switch) se ancora oltre il lag ma ≤ mese calendario.
+ */
+export function monthlyPeriodsDueForContract(opts: {
+  supplierName: string | null | undefined;
+  operationType: string | null | undefined;
+  window: RecurringWindow;
+  now: Date;
+}): string[] {
+  const lag = recurringGenerationLagMonths(opts.supplierName);
+  const lastPeriod = lastGeneratedPeriod(opts.window, opts.now, lag);
+  const base =
+    opts.window.start <= lastPeriod
+      ? monthsBetween(opts.window.start, lastPeriod)
+      : [];
+
+  if (lag <= 0) return base;
+  if (!isHeliosFirstMonthVisibleOperation(opts.operationType)) return base;
+  if (opts.window.start <= lastPeriod) return base;
+
+  const nowPeriod = toPeriod(opts.now);
+  if (opts.window.start > nowPeriod) return base;
+  if (!isPeriodInRecurringWindow(opts.window, opts.window.start)) return base;
+
+  return [opts.window.start];
+}
+
+/**
+ * True se una competenza Helios oltre lastPayable va nascosta in lista.
+ * False per la prima competenza di attivazione/voltura/switch (eccezione).
+ */
+export function isHeliosCompetenceHiddenByLag(opts: {
+  period: string;
+  operationType?: string | null;
+  supplyStartPeriod?: string | null;
+  now?: Date;
+}): boolean {
+  if (!isHeliosCompetenceNotYetPayable(opts.period, opts.now)) return false;
+  if (
+    opts.supplyStartPeriod &&
+    isHeliosFirstCompetenceLagException({
+      operationType: opts.operationType,
+      competencePeriod: opts.period,
+      supplyStartPeriod: opts.supplyStartPeriod,
+    })
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /** Ritardo generazione rate ricorrenti per fornitore (0 = mese calendario corrente). */
 export function recurringGenerationLagMonths(

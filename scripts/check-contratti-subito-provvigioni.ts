@@ -50,7 +50,7 @@ console.log("\n• Da incassare: bozze fuori lista");
   check("esclude BOZZA dallo status notIn", s.includes("BOZZA"), true);
 }
 
-console.log("\n• Helios appena inserito (ingresso set): nessuna rata a ottobre (lag)");
+console.log("\n• Helios NUOVA_ATTIVAZIONE ingresso set: a ottobre crea set (eccezione prima competenza)");
 {
   const contract: Contract = {
     id: "h1",
@@ -76,11 +76,47 @@ console.log("\n• Helios appena inserito (ingresso set): nessuna rata a ottobre
     statusHistory: [],
     recurringMonths: [],
   };
-  // A ottobre lastPayable = agosto; start = settembre → nessuna rata da creare
+  // Eccezione: prima competenza (set) subito, anche se lastPayable = agosto
   const expected = expectedPeriodsFor(contract, now);
-  check("nessun periodo Helios anticipato", expected, []);
-  check("findMissing null (lag rispettato)", findMissing(contract, now), null);
-  check("piano vuoto", planBackfillForContract(contract, now), []);
+  check("prima competenza set", expected, ["2026-09"]);
+  check(
+    "findMissing set",
+    findMissing(contract, now)?.missingPeriods,
+    ["2026-09"],
+  );
+  check("piano set", planBackfillForContract(contract, now).map((p) => p.period), [
+    "2026-09",
+  ]);
+}
+
+console.log("\n• Helios ALTRO ingresso set: nessuna rata a ottobre (lag M+2 invariato)");
+{
+  const contract: Contract = {
+    id: "h1b",
+    podPdr: "IT001E998",
+    pod: null,
+    pdr: null,
+    recurrence: "M",
+    recurrenceKind: "M",
+    collectionDate: null,
+    insertionDate: new Date(2026, 8, 20),
+    supplyStartDate: new Date(2026, 8, 1),
+    operationType: "ALTRO",
+    status: "INSERITO",
+    expiryDate: null,
+    supplier: { name: "Helios" },
+    collaborator: { name: "Michele" },
+    client: {
+      type: "PRIVATO",
+      companyName: null,
+      firstName: "Test",
+      lastName: "Altro",
+    },
+    statusHistory: [],
+    recurringMonths: [],
+  };
+  check("nessun periodo Helios ALTRO", expectedPeriodsFor(contract, now), []);
+  check("findMissing null (lag)", findMissing(contract, now), null);
 }
 
 console.log("\n• Helios con ingresso luglio: a ottobre crea fino ad agosto");

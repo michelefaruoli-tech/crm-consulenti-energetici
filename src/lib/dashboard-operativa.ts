@@ -7,7 +7,10 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { formatCurrency } from "@/lib/commission";
 import { buildPageHref } from "@/lib/pagination";
-import { heliosLastPayableCompetence } from "@/lib/helios-contract-rules";
+import {
+  HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES,
+  heliosLastPayableCompetence,
+} from "@/lib/helios-contract-rules";
 import {
   loadDashboardMoneyTotals,
   type DashboardMoneyTotals,
@@ -479,6 +482,19 @@ export async function loadOperativaAlerts(opts: {
             supplier: {
               name: { contains: "helios", mode: "insensitive" },
             },
+          },
+          // Escludi prima competenza attivazione/voltura/switch (eccezione mese rif.)
+          {
+            OR: [
+              { operationType: null },
+              {
+                NOT: {
+                  operationType: {
+                    in: [...HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES],
+                  },
+                },
+              },
+            ],
           },
         ],
       },

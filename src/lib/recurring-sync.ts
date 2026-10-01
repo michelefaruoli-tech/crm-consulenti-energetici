@@ -6,7 +6,6 @@ import {
   isRecurring,
   isRecurringAnnual,
   isRecurringMonthly,
-  monthsBetween,
   nextAnnualDuePeriod,
   normalizeRecurrence,
   recurrenceWriteData,
@@ -23,8 +22,10 @@ import {
   type RecurringWindow,
 } from "@/lib/recurring-window";
 import {
-  isHeliosCompetenceNotYetPayable,
+  isHeliosCompetenceHiddenByLag,
+  isHeliosFirstCompetenceLagException,
   isHeliosSupplier,
+  monthlyPeriodsDueForContract,
   recurringGenerationLagMonths,
 } from "@/lib/helios-contract-rules";
 import {
@@ -141,11 +142,17 @@ export async function isPeriodAllowedForContract(
   if (!isPeriodInRecurringWindow(recurringWindow(contract), period)) {
     return false;
   }
-  if (
-    isHeliosSupplier(contract.supplier?.name) &&
-    isHeliosCompetenceNotYetPayable(period)
-  ) {
-    return false;
+  if (isHeliosSupplier(contract.supplier?.name)) {
+    const window = recurringWindow(contract);
+    if (
+      isHeliosCompetenceHiddenByLag({
+        period,
+        operationType: contract.operationType,
+        supplyStartPeriod: window.start,
+      })
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -292,7 +299,6 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   const nowDate = new Date();
   const now = toPeriod(nowDate);
   const window = recurringWindow(contract, nowDate);
-  const start = window.start;
 
   // Rate fuori intervallo (prima dell'ingresso o dopo la chiusura): via.
   // Restano solo quelle con valore economico, da decidere a mano.
@@ -324,18 +330,25 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
 
   if (!isRecurringMonthly(contract.recurrence)) return;
 
-  const lastPeriod = lastGeneratedPeriod(
+  const lagLastPeriod = lastGeneratedPeriod(
     window,
     nowDate,
     recurringGenerationLagMonths(contract.supplier?.name),
   );
+  const periodsDue = monthlyPeriodsDueForContract({
+    supplierName: contract.supplier?.name,
+    operationType: contract.operationType,
+    window,
+    now: nowDate,
+  });
 
-  // Helios: rate oltre lastPeriod (anche PAID/LIQUIDATED errate) → chiudi/elimina.
+  // Helios: rate oltre lastPayable (anche PAID/LIQUIDATED errate) → chiudi/elimina.
+  // Eccezione: la prima competenza di attivazione/voltura/switch resta (mese rif.).
   if (isHeliosSupplier(contract.supplier?.name)) {
     const anticipatory = await prisma.recurringMonth.findMany({
       where: {
         contractId,
-        period: { gt: lastPeriod },
+        period: { gt: lagLastPeriod },
       },
       select: {
         id: true,
@@ -347,6 +360,15 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       },
     });
     for (const row of anticipatory) {
+      if (
+        isHeliosFirstCompetenceLagException({
+          operationType: contract.operationType,
+          competencePeriod: row.period,
+          supplyStartPeriod: window.start,
+        })
+      ) {
+        continue;
+      }
       if (row.note === AUTO_CLOSED_HELIOS_LAG && row.status === "CLOSED") continue;
       const hasEconomic =
         row.paidAt != null ||
@@ -382,11 +404,8 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
     }
   }
 
-  if (start <= lastPeriod) {
-    const periods = monthsBetween(start, lastPeriod);
-    for (const period of periods) {
-      await upsertMonthStatus(contractId, period, now, amount);
-    }
+  for (const period of periodsDue) {
+    await upsertMonthStatus(contractId, period, now, amount);
   }
 }
 
@@ -821,16 +840,16 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
     if (!isRecurringMonthly(contract.recurrence)) continue;
     if (contract.status === "ANNULLATO" || contract.status === "KO") continue;
 
-    const start = window.start;
-    const lastPeriod = lastGeneratedPeriod(
+    const periodsDue = monthlyPeriodsDueForContract({
+      supplierName: contract.supplier?.name,
+      operationType: contract.operationType,
       window,
-      nowDate,
-      recurringGenerationLagMonths(contract.supplier?.name),
-    );
+      now: nowDate,
+    });
     const amount = Number(contract.commission?.expected ?? 0) || null;
     const existing = new Map(contract.recurringMonths.map((row) => [row.period, row]));
 
-    for (const period of monthsBetween(start, lastPeriod)) {
+    for (const period of periodsDue) {
       const finalStatus = period < now ? "MISSING" : "PENDING";
       const row = existing.get(period);
       if (!row) {
@@ -997,12 +1016,17 @@ export async function getMissingRecurringAlerts(
     take: 1000,
   });
   return rows.filter((row) => {
-    if (!isPeriodInRecurringWindow(recurringWindow(row.contract), row.period)) {
+    const window = recurringWindow(row.contract);
+    if (!isPeriodInRecurringWindow(window, row.period)) {
       return false;
     }
     if (
       isHeliosSupplier(row.contract.supplier.name) &&
-      isHeliosCompetenceNotYetPayable(row.period)
+      isHeliosCompetenceHiddenByLag({
+        period: row.period,
+        operationType: row.contract.operationType,
+        supplyStartPeriod: window.start,
+      })
     ) {
       return false;
     }

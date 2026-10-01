@@ -4,7 +4,10 @@
  * vivono in RecurringMonth e vanno sommate a parte.
  */
 import type { Prisma } from "@/generated/prisma/client";
-import { heliosLastPayableCompetence } from "@/lib/helios-contract-rules";
+import {
+  HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES,
+  heliosLastPayableCompetence,
+} from "@/lib/helios-contract-rules";
 import { prisma } from "@/lib/prisma";
 import {
   parseFilterList,
@@ -32,6 +35,16 @@ export function reportRecurringHeliosLagWhere(
         {
           contract: {
             supplier: { name: { contains: "helios", mode: "insensitive" } },
+            OR: [
+              { operationType: null },
+              {
+                NOT: {
+                  operationType: {
+                    in: [...HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES],
+                  },
+                },
+              },
+            ],
           },
         },
       ],
