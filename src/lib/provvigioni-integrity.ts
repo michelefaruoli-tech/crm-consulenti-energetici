@@ -22,7 +22,10 @@ import {
   recurringWindow,
   type RecurringWindowContract,
 } from "@/lib/recurring-window";
-import { recurringGenerationLagMonths } from "@/lib/helios-contract-rules";
+import {
+  isHeliosFirstCompetenceLagException,
+  recurringGenerationLagMonths,
+} from "@/lib/helios-contract-rules";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import {
   keepBothWhileInStorno,
@@ -73,6 +76,14 @@ export function findEarlyMonthlyRows<
     .filter((row) => row.period > lastPeriod)
     .filter((row) => row.status === "PENDING" || row.status === "MISSING")
     .filter((row) => !row.paidAt && !row.settledPeriod)
+    .filter(
+      (row) =>
+        !isHeliosFirstCompetenceLagException({
+          operationType: contract.operationType,
+          competencePeriod: row.period,
+          supplyStartPeriod: window.start,
+        }),
+    )
     .map((row) => ({ id: row.id, period: row.period, status: row.status }));
 }
 

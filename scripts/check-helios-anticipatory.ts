@@ -72,8 +72,8 @@ const syncSrc = readFileSync(
   "utf8",
 );
 check(
-  "isPeriodAllowedForContract blocca Helios oltre lastPayable",
-  syncSrc.includes("isHeliosCompetenceNotYetPayable(period)") &&
+  "isPeriodAllowedForContract rispetta lag Helios (con eccezione prima competenza)",
+  syncSrc.includes("isHeliosCompetenceHiddenByLag") &&
     syncSrc.includes("isPeriodAllowedForContract"),
   true,
 );

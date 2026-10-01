@@ -28,10 +28,12 @@ import {
   notAnnualNextHiddenWhere,
   periodLabel,
 } from "@/lib/recurring";
+import { recurringWindow } from "@/lib/recurring-window";
 import {
-  isHeliosSupplier,
-  isHeliosCompetenceNotYetPayable,
+  HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES,
   heliosLastPayableCompetence,
+  isHeliosCompetenceHiddenByLag,
+  isHeliosSupplier,
 } from "@/lib/helios-contract-rules";
 import {
   expectedPayableLabel,
@@ -160,8 +162,8 @@ function expandedRateWhere(
           ],
         },
       },
-      // Helios M+2: nascondi QUALSIASI rata (anche PAID/LIQUIDATED) oltre lastPayable.
-      // Rate anticipate errate restano in DB finché bonificate; non devono comparire in lista.
+      // Helios M+2: nascondi rate oltre lastPayable, tranne la prima competenza
+      // di attivazione/voltura/switch (eccezione mese riferimento).
       {
         NOT: {
           AND: [
@@ -169,6 +171,16 @@ function expandedRateWhere(
             {
               contract: {
                 supplier: { name: { contains: "helios", mode: "insensitive" } },
+                OR: [
+                  { operationType: null },
+                  {
+                    NOT: {
+                      operationType: {
+                        in: [...HELIOS_FIRST_MONTH_VISIBLE_OPERATION_TYPES],
+                      },
+                    },
+                  },
+                ],
               },
             },
           ],
@@ -580,7 +592,13 @@ export function expandContractsToProvvigioneRows(
       .filter((m) => !isAnnualNextHidden(m.note))
       .filter((m) => {
         if (!isHeliosSupplier(contract.supplier.name)) return true;
-        return !isHeliosCompetenceNotYetPayable(m.period, now);
+        const window = recurringWindow(contract, now);
+        return !isHeliosCompetenceHiddenByLag({
+          period: m.period,
+          operationType: contract.operationType,
+          supplyStartPeriod: window.start,
+          now,
+        });
       })
       .sort((a, b) => b.period.localeCompare(a.period));
 

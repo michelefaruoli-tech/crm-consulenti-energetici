@@ -9,17 +9,15 @@ import {
   addMonths,
   isContractRecurringAnnual,
   isContractRecurringMonthly,
-  monthsBetween,
   nextAnnualDuePeriod,
   toPeriod,
 } from "@/lib/recurring";
 import {
   isPeriodInRecurringWindow,
-  lastGeneratedPeriod,
   periodSatisfiedForBackfill,
   recurringWindow,
 } from "@/lib/recurring-window";
-import { recurringGenerationLagMonths } from "@/lib/helios-contract-rules";
+import { monthlyPeriodsDueForContract } from "@/lib/helios-contract-rules";
 import {
   recurringAnnualWhereOr,
   recurringMonthlyWhereOr,
@@ -198,14 +196,12 @@ export function expectedPeriodsFor(
   }
 
   if (isContractRecurringMonthly(contract)) {
-    const window = recurringWindow(contract, now);
-    const lastPeriod = lastGeneratedPeriod(
-      window,
+    return monthlyPeriodsDueForContract({
+      supplierName: contract.supplier?.name,
+      operationType: contract.operationType,
+      window: recurringWindow(contract, now),
       now,
-      recurringGenerationLagMonths(contract.supplier?.name),
-    );
-    if (window.start > lastPeriod) return [];
-    return monthsBetween(window.start, lastPeriod);
+    });
   }
 
   return [];

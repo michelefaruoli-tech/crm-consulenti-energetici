@@ -11,11 +11,15 @@ import { prisma } from "@/lib/prisma";
 import {
   heliosLastPayableCompetence,
   isHeliosCompetenceNotYetPayable,
+  isHeliosFirstCompetenceLagException,
   isHeliosSupplier,
 } from "@/lib/helios-contract-rules";
 import { periodLabel } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
-import { RECURRING_AUTO_CLOSED_NOTE } from "@/lib/recurring-window";
+import {
+  RECURRING_AUTO_CLOSED_NOTE,
+  recurringWindow,
+} from "@/lib/recurring-window";
 import {
   HELIOS_ANTICIPATORY_APPLY_BATCH,
   HELIOS_ANTICIPATORY_AUTO_MAX_BATCHES,
@@ -92,6 +96,17 @@ export async function scanHeliosAnticipatoryRates(opts?: {
         select: {
           id: true,
           podPdr: true,
+          operationType: true,
+          insertionDate: true,
+          supplyStartDate: true,
+          status: true,
+          expiryDate: true,
+          statusHistory: {
+            where: { toStatus: "CHIUSO" as const },
+            select: { changedAt: true },
+            orderBy: { changedAt: "desc" as const },
+            take: 1,
+          },
           collaborator: { select: { name: true } },
           client: {
             select: {
@@ -117,6 +132,16 @@ export async function scanHeliosAnticipatoryRates(opts?: {
   for (const m of page) {
     if (!isHeliosSupplier(m.contract.supplier.name)) continue;
     if (!isHeliosCompetenceNotYetPayable(m.period, now)) continue;
+    const window = recurringWindow(m.contract, now);
+    if (
+      isHeliosFirstCompetenceLagException({
+        operationType: m.contract.operationType,
+        competencePeriod: m.period,
+        supplyStartPeriod: window.start,
+      })
+    ) {
+      continue;
+    }
     // Già chiuse col lag: restano in anteprima solo se Michele vuole eliminarle.
     const clientLabel = clientDisplayName(m.contract.client);
     const pod = m.contract.podPdr?.trim() || "—";
@@ -187,6 +212,17 @@ export async function applyHeliosAnticipatoryCleanup(opts: {
       note: true,
       contract: {
         select: {
+          operationType: true,
+          insertionDate: true,
+          supplyStartDate: true,
+          status: true,
+          expiryDate: true,
+          statusHistory: {
+            where: { toStatus: "CHIUSO" as const },
+            select: { changedAt: true },
+            orderBy: { changedAt: "desc" as const },
+            take: 1,
+          },
           supplier: { select: { name: true } },
         },
       },
@@ -204,6 +240,17 @@ export async function applyHeliosAnticipatoryCleanup(opts: {
       continue;
     }
     if (!isHeliosCompetenceNotYetPayable(m.period, now) || m.period <= lastPayable) {
+      skipped += 1;
+      continue;
+    }
+    const window = recurringWindow(m.contract, now);
+    if (
+      isHeliosFirstCompetenceLagException({
+        operationType: m.contract.operationType,
+        competencePeriod: m.period,
+        supplyStartPeriod: window.start,
+      })
+    ) {
       skipped += 1;
       continue;
     }
@@ -305,6 +352,12 @@ export async function runHeliosAnticipatoryCleanupAuto(opts?: {
     deleted += result.deleted;
     skipped += result.skipped;
     monthIds.push(...result.monthIds);
+
+    // Solo eccezioni prima competenza (o già saltate): evita loop infinito.
+    if (result.closed + result.deleted === 0) {
+      done = true;
+      break;
+    }
 
     if (pending.length < HELIOS_ANTICIPATORY_APPLY_BATCH) {
       done = true;
