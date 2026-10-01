@@ -197,7 +197,7 @@ async function applyContractFieldUpdate(
           status === "KO" || status === "ANNULLATO" ? resolvedClosureReason : null,
       },
     });
-    if (terminal) {
+    if (status !== contract.status || terminal) {
       const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
       await syncRecurringMonthsForContract(contractId);
     }

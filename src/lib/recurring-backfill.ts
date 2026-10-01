@@ -277,25 +277,53 @@ export async function applyBackfillPlanForContract(
 /**
  * Anteprima a lotti: analizza `batchSize` contratti ricorrenti a partire da
  * `cursor`. Non scrive nulla. Richiamare finché `nextCursor` non è null.
+ *
+ * `insertedSinceDays`: se valorizzato, limita ai contratti con
+ * `insertionDate` (fallback `createdAt`) negli ultimi N giorni — bonifica
+ * «ultimo mese» richiesta da Michele.
  */
 export async function scanMissingProvvigioniRows(opts?: {
   cursor?: string | null;
   batchSize?: number;
+  /** Solo contratti inseriti/creati negli ultimi N giorni (es. 30). */
+  insertedSinceDays?: number | null;
 }): Promise<BackfillScanResult> {
   const batchSize = opts?.batchSize ?? BACKFILL_SCAN_BATCH;
   const cursor = opts?.cursor ?? null;
+  const sinceDays =
+    typeof opts?.insertedSinceDays === "number" && opts.insertedSinceDays > 0
+      ? opts.insertedSinceDays
+      : null;
+
+  const sinceDate =
+    sinceDays != null
+      ? new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
+      : null;
+
+  const recentWhere = sinceDate
+    ? {
+        OR: [
+          { insertionDate: { gte: sinceDate } },
+          { createdAt: { gte: sinceDate } },
+        ],
+      }
+    : null;
 
   const contracts = (await prisma.contract.findMany({
     where: {
       deletedAt: null,
       isHistorical: false,
-      OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr],
+      status: { notIn: ["BOZZA", "KO", "ANNULLATO"] },
+      AND: [
+        { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] },
+        ...(recentWhere ? [recentWhere] : []),
+      ],
     },
     select: CANDIDATE_SELECT,
     orderBy: { id: "asc" },
     take: batchSize,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  })) as CandidateContract[];
+  })) as unknown as CandidateContract[];
 
   const now = new Date();
   const findings: MissingProvvigioneRow[] = [];
@@ -313,6 +341,73 @@ export async function scanMissingProvvigioniRows(opts?: {
     scannedContracts: contracts.length,
     missingContractsCount: findings.length,
     missingPeriodsCount,
+    nextCursor:
+      contracts.length === batchSize ? contracts.at(-1)?.id ?? null : null,
+  };
+}
+
+/**
+ * Catch-up idempotente: per i contratti ricorrenti degli ultimi N giorni
+ * (non bozza / non KO) richiama `syncRecurringMonthsForContract`.
+ * Crea le rate dovute; Helios nel lag resta senza rate ma diventa visibile
+ * via `neverSyncedMonthlyWhere`. Non scrive rate anticipate.
+ */
+export async function syncRecentRecurringContracts(opts?: {
+  days?: number;
+  batchSize?: number;
+  cursor?: string | null;
+}): Promise<{
+  scanned: number;
+  synced: number;
+  errors: Array<{ contractId: string; message: string }>;
+  nextCursor: string | null;
+}> {
+  const days = opts?.days && opts.days > 0 ? opts.days : 30;
+  const batchSize = opts?.batchSize ?? BACKFILL_APPLY_BATCH;
+  const cursor = opts?.cursor ?? null;
+  const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
+
+  const contracts = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      isHistorical: false,
+      status: { notIn: ["BOZZA", "KO", "ANNULLATO"] },
+      AND: [
+        { OR: [...recurringMonthlyWhereOr, ...recurringAnnualWhereOr] },
+        {
+          OR: [
+            { insertionDate: { gte: sinceDate } },
+            { createdAt: { gte: sinceDate } },
+          ],
+        },
+      ],
+    },
+    select: { id: true },
+    orderBy: { id: "asc" },
+    take: batchSize,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+  });
+
+  let synced = 0;
+  const errors: Array<{ contractId: string; message: string }> = [];
+  for (const row of contracts) {
+    try {
+      await syncRecurringMonthsForContract(row.id);
+      synced += 1;
+    } catch (e) {
+      errors.push({
+        contractId: row.id,
+        message: e instanceof Error ? e.message.slice(0, 200) : "Errore sync",
+      });
+    }
+  }
+
+  return {
+    scanned: contracts.length,
+    synced,
+    errors,
     nextCursor:
       contracts.length === batchSize ? contracts.at(-1)?.id ?? null : null,
   };

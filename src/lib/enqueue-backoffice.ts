@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { SEND_TO_BACKOFFICE_STATUS } from "@/lib/contract-bo-flow";
+import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 
 const STATUSES_TO_LAVORAZIONE = new Set([
   "BOZZA",
@@ -25,6 +26,10 @@ export type EnqueueBackofficeItemResult = {
  * percorso Provvigioni — anche se non c’è destinatario BO dedicato
  * (es. Serviren senza UserSupplierScope). L’avviso destinazione è a carico
  * del chiamante (notify-batch / UI).
+ *
+ * Dopo l’enqueue sincronizza le rate ricorrenti (idempotente): le bozze
+ * salvate e poi inviate al BO non passavano da `createContract` con
+ * `draft=false`, quindi restavano senza RecurringMonth e fuori Provvigioni.
  */
 export async function enqueueContractsForBackoffice(opts: {
   contractIds: string[];
@@ -105,6 +110,13 @@ export async function enqueueContractsForBackoffice(opts: {
             "Pratica assegnata / reinviata in coda Back Office (stato invariato)",
         },
       });
+    }
+
+    // Rate Provvigioni subito all’invio BO (anche da BOZZA / reinoltro).
+    try {
+      await syncRecurringMonthsForContract(id);
+    } catch (e) {
+      console.error("[enqueueContractsForBackoffice] syncRecurring", id, e);
     }
 
     results.push({
