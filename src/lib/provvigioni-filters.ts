@@ -83,32 +83,30 @@ export const nonRecurringWhere: Prisma.ContractWhereInput = {
   recurrenceKind: "UT",
 };
 
+export const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
+
 /**
- * Contratti mensili ricorrenti (M), non Helios, senza ancora nessuna rata
- * `RecurringMonth` generata: dati storici pre-PR #19 (la sincronizzazione al
- * salvataggio esiste solo da quel commit) o un giro di sync fallito in
- * background (vedi `syncRecurringMonthsForContract`, chiamata in try/catch).
+ * Contratti mensili ricorrenti (M) senza ancora nessuna rata `RecurringMonth`
+ * generata: dati storici pre-PR #19, sync fallito in background, oppure
+ * Helios ancora nel lag M+2 (nessuna competenza pagabile → sync non crea
+ * rate, vedi docs/regola-helios-lag.md).
  *
- * Senza questo ramo questi contratti sparivano da «Da incassare»: nessuna
- * rata da abbinare e stato normale (non IN_ATTESA_PAGAMENTO), quindi
- * nessun'altra clausola li includeva. Restano «Da incassare» con il gettone
- * previsto finché la sincronizzazione non genera la prima rata.
+ * Senza questo ramo i contratti sparivano da «Da incassare»: nessuna rata
+ * da abbinare e stato normale (non IN_ATTESA_PAGAMENTO). Restano «Da
+ * incassare» con il gettone previsto finché nasce la prima rata dovuta.
  *
- * Helios è escluso di proposito: l'assenza di rate durante il lag di
- * generazione M+2 è voluta (vedi docs/regola-helios-lag.md) e non è un gap
- * da correggere qui — quel caso è gestito solo dal pannello di bonifica
- * dedicato in Backup.
+ * Helios è incluso di proposito (richiesta Michele 2026-10): il contratto
+ * salvato/inviato BO deve comparire subito in Provvigioni; il lag M+2
+ * resta solo sulla *creazione* delle rate (non creare agosto a settembre).
+ * Se poi c’è un problema, Michele mette KO a mano.
  */
 export const neverSyncedMonthlyWhere: Prisma.ContractWhereInput = {
   AND: [
     { recurrenceKind: "M" },
-    { status: { not: "PROVVIGIONE_LIQUIDATA" } },
+    { status: { notIn: ["PROVVIGIONE_LIQUIDATA", "BOZZA", ...KO_STATUSES] } },
     { recurringMonths: { none: {} } },
-    { supplier: { NOT: { name: { contains: "helios", mode: "insensitive" } } } },
   ],
 };
-
-export const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
 export {
   FILTER_LIST_SEP,
@@ -276,8 +274,10 @@ function provvigioneStatoWhereOne(
       ...(competence ? { period: competence } : {}),
       ...notAnnualNextHiddenWhere,
     };
+    // BOZZA esclusa: in Provvigioni entrano solo contratti salvati (INSERITO+)
+    // o inviati al BO — non le bozze incomplete.
     return {
-      status: { notIn: ["DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
+      status: { notIn: ["BOZZA", "DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
       OR: [
         { status: "IN_ATTESA_PAGAMENTO" },
         {

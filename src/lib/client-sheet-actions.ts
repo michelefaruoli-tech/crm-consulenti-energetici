@@ -277,10 +277,10 @@ async function updateClientOfferBlockActionInner(formData: FormData): Promise<vo
           koReason,
         },
       });
-      if (terminal) {
-        const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
-        await syncRecurringMonthsForContract(contractId);
-      }
+      // Qualsiasi cambio stato (BOZZA→INSERITO, invio BO, KO…): allinea rate
+      // Provvigioni. Prima solo i terminali → bozze salvate restavano fuori lista.
+      const { syncRecurringMonthsForContract } = await import("@/lib/recurring-sync");
+      await syncRecurringMonthsForContract(contractId);
     } else {
       await prisma.contract.update({
         where: { id: contractId },

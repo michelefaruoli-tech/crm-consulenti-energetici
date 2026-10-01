@@ -697,12 +697,13 @@ async function createFullContractActionInner(
   // Email Master inviata dal client via API dopo upload allegati (evita body/timeout Server Action)
 
   // Ogni contratto salvato (non bozza) deve entrare subito in Provvigioni come
-  // "Da incassare": per i ricorrenti (M/R, qualsiasi fornitore, non solo Helios)
-  // serve la riga RecurringMonth. Prima si sincronizzava solo Helios: gli altri
-  // contratti ricorrenti restavano invisibili finché non arrivava un giro di
-  // sync in background (visita a /provvigioni) — da qui il bug "contratto
-  // salvato ma non in Provvigioni". I gettoni una tantum non hanno bisogno di
-  // RecurringMonth (righe unità sempre visibili): la funzione esce subito.
+  // "Da incassare": per i ricorrenti (M/R, qualsiasi fornitore, incluso Helios)
+  // serve la riga RecurringMonth quando la competenza è pagabile. Helios nel
+  // lag M+2 può restare senza rate: compare comunque via neverSyncedMonthlyWhere.
+  // Prima si sincronizzava solo Helios: gli altri contratti ricorrenti restavano
+  // invisibili finché non arrivava un giro di sync in background. I gettoni
+  // una tantum non hanno bisogno di RecurringMonth (righe unità sempre visibili).
+  // L’invio BO da bozza richiama di nuovo sync in enqueueContractsForBackoffice.
   if (!payload.draft && createdIds.length > 0) {
     for (const contractId of createdIds) {
       try {
