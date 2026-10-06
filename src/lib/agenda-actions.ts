@@ -295,3 +295,65 @@ export async function deleteAgendaItemAction(
     };
   }
 }
+
+export type AgendaGenericNoteDto = {
+  text: string;
+  updatedAt: string | null;
+};
+
+export async function getAgendaGenericNoteAction(): Promise<
+  { ok: true; note: AgendaGenericNoteDto } | { ok: false; error: string }
+> {
+  try {
+    const session = await requireSession();
+    const note = await prisma.agendaGenericNote.findUnique({
+      where: { userId: session.id },
+    });
+    return {
+      ok: true,
+      note: {
+        text: note?.text ?? "",
+        updatedAt: note?.updatedAt.toISOString() ?? null,
+      },
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Caricamento note non riuscito",
+    };
+  }
+}
+
+export async function saveAgendaGenericNoteAction(
+  text: string,
+): Promise<{ ok: true; updatedAt: string } | { ok: false; error: string }> {
+  try {
+    const session = await requireSession();
+    const trimmed = text.trimEnd();
+    if (trimmed.length > 50_000) {
+      return { ok: false, error: "Nota troppo lunga (max 50.000 caratteri)" };
+    }
+
+    // Neon HTTP: niente upsert/createMany/updateMany/$transaction — find + create/update.
+    const existing = await prisma.agendaGenericNote.findUnique({
+      where: { userId: session.id },
+    });
+
+    const saved = existing
+      ? await prisma.agendaGenericNote.update({
+          where: { id: existing.id },
+          data: { text: trimmed },
+        })
+      : await prisma.agendaGenericNote.create({
+          data: { userId: session.id, text: trimmed },
+        });
+
+    revalidatePath("/agenda");
+    return { ok: true, updatedAt: saved.updatedAt.toISOString() };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Salvataggio nota non riuscito",
+    };
+  }
+}
