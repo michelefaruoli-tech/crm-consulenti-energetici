@@ -57,6 +57,8 @@ export type ProvvigioniSummaryContext = {
   allowExpand?: boolean;
   /** Filtri di colonna che valgono su rata / riga contratto (mese rif., gettone…). */
   rowScope?: ProvvigioniRowFilterScope;
+  /** `?archiviate=1`: include liquidate annuali precedenti nei totali espansi. */
+  includeArchivedAnnual?: boolean;
 };
 
 function isActiveDaIncassareCard(
@@ -109,6 +111,7 @@ async function summaryForStato(
         competenceForAmount,
         stato,
         ctx.rowScope,
+        ctx.includeArchivedAnnual,
       ),
     };
   }
@@ -151,7 +154,13 @@ async function summaryForStato(
 
   const [count, amount] = await Promise.all([
     expandMode
-      ? countExpandedListRows(where, expandMode, stato, ctx.rowScope)
+      ? countExpandedListRows(
+          where,
+          expandMode,
+          stato,
+          ctx.rowScope,
+          ctx.includeArchivedAnnual,
+        )
       : prisma.contract.count({ where }),
     sumExpandedAmountForStato(
       where,
@@ -159,6 +168,7 @@ async function summaryForStato(
       competenceForAmount,
       stato,
       ctx.rowScope,
+      ctx.includeArchivedAnnual,
     ),
   ]);
   return { count, amount };

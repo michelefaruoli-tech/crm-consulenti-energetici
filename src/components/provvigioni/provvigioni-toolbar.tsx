@@ -19,6 +19,8 @@ export function ProvvigioniToolbar({
   collabCounts,
   selectedCollabIds,
   totalCollabCount,
+  showAnnualArchiveHint,
+  includeArchivedAnnual,
 }: {
   q?: string;
   competencePeriod: string | null;
@@ -31,6 +33,9 @@ export function ProvvigioniToolbar({
   collabCounts: CollabChip[];
   selectedCollabIds: string[];
   totalCollabCount: number;
+  /** Vista Annuali: spiega filtro liquidate archiviate. */
+  showAnnualArchiveHint?: boolean;
+  includeArchivedAnnual?: boolean;
 }) {
   const router = useRouter();
 
@@ -126,6 +131,28 @@ export function ProvvigioniToolbar({
         liquidato al collaboratore. UT = gettone · M = ogni mese · R = ogni 12
         mesi. Clicca sulle card per filtrare per stato.
       </p>
+      {showAnnualArchiveHint ? (
+        <p className="text-xs text-slate-500">
+          Ricorrenti annuali: in elenco solo l’ultima liquidata e quella da
+          incassare (le liquidate precedenti restano in archivio, senza
+          cancellarle).{" "}
+          {includeArchivedAnnual ? (
+            <Link
+              href={hrefWith({ archiviate: null, page: null })}
+              className="font-medium text-slate-700 underline underline-offset-2"
+            >
+              Nascondi archiviate
+            </Link>
+          ) : (
+            <Link
+              href={hrefWith({ archiviate: "1", page: null })}
+              className="font-medium text-slate-700 underline underline-offset-2"
+            >
+              Mostra archiviate
+            </Link>
+          )}
+        </p>
+      ) : null}
     </div>
   );
 }
