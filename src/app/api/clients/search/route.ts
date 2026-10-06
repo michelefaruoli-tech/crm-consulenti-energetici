@@ -175,6 +175,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();
   const id = (searchParams.get("id") ?? "").trim();
+  const excludeId = (searchParams.get("excludeId") ?? "").trim();
 
   // Solo clienti nel perimetro dell'utente (creati da lui o con un suo contratto)
   const visibility = await clientVisibilityWhere(session);
@@ -220,7 +221,13 @@ export async function GET(request: Request) {
 
   // Prendi più righe del necessario, poi ordina per pertinenza e deduplica
   const clients = await prisma.client.findMany({
-    where: { AND: [buildWhere(q), visibility] },
+    where: {
+      AND: [
+        buildWhere(q),
+        visibility,
+        excludeId ? { id: { not: excludeId } } : {},
+      ],
+    },
     // Solo i campi che servono a identificare la persona in elenco:
     // l'anagrafica completa si carica con ?id= dopo la selezione
     select: {
@@ -233,6 +240,9 @@ export async function GET(request: Request) {
       vatNumber: true,
       phone: true,
       updatedAt: true,
+      _count: {
+        select: { contracts: { where: { deletedAt: null } } },
+      },
     },
     take: 80,
     orderBy: [{ lastName: "asc" }, { firstName: "asc" }, { updatedAt: "desc" }],
@@ -253,10 +263,12 @@ export async function GET(request: Request) {
   return NextResponse.json({
     items: unique.map((c) => {
       const { label, sublabel } = clientLabel(c);
+      const n = c._count.contracts;
+      const countBit = `${n} contrat${n === 1 ? "to" : "ti"}`;
       return {
         id: c.id,
         label,
-        sublabel,
+        sublabel: sublabel ? `${sublabel} · ${countBit}` : countBit,
         type: c.type,
         firstName: c.firstName,
         lastName: c.lastName,
@@ -264,6 +276,7 @@ export async function GET(request: Request) {
         fiscalCode: c.fiscalCode,
         vatNumber: c.vatNumber,
         phone: c.phone,
+        contractCount: n,
       };
     }),
   });

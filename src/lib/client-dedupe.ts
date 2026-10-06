@@ -83,6 +83,175 @@ function mergeField(keeper: string | null, other: string | null): string | null 
   return keeper ?? other;
 }
 
+export type MergeClientIntoResult = {
+  contractsMoved: number;
+  documentsMoved: number;
+  agendaMoved: number;
+  keeperId: string;
+  sourceId: string;
+};
+
+type MergeClientFields = {
+  companyName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  fiscalCode: string | null;
+  vatNumber: string | null;
+  phone: string | null;
+  email: string | null;
+  pec: string | null;
+  iban: string | null;
+  address: string | null;
+  street: string | null;
+  streetNumber: string | null;
+  zipCode: string | null;
+  city: string | null;
+  province: string | null;
+  region: string | null;
+  notes: string | null;
+};
+
+/**
+ * Unisce `sourceId` sotto `keeperId`: sposta contratti/documenti/agenda,
+ * completa i campi vuoti del keeper, soft-delete della fonte.
+ * Neon HTTP: niente `$transaction` / `updateMany` — solo `$executeRawUnsafe`.
+ */
+export async function mergeClientIntoKeeper(
+  sourceId: string,
+  keeperId: string,
+): Promise<MergeClientIntoResult> {
+  if (sourceId === keeperId) {
+    throw new Error("Seleziona un’anagrafica diversa da quella corrente");
+  }
+
+  const [source, keeper] = await Promise.all([
+    prisma.client.findFirst({
+      where: { id: sourceId, deletedAt: null },
+      select: {
+        id: true,
+        companyName: true,
+        firstName: true,
+        lastName: true,
+        fiscalCode: true,
+        vatNumber: true,
+        phone: true,
+        email: true,
+        pec: true,
+        iban: true,
+        address: true,
+        street: true,
+        streetNumber: true,
+        zipCode: true,
+        city: true,
+        province: true,
+        region: true,
+        notes: true,
+        _count: {
+          select: {
+            contracts: { where: { deletedAt: null } },
+            documents: true,
+            agendaItems: true,
+          },
+        },
+      },
+    }),
+    prisma.client.findFirst({
+      where: { id: keeperId, deletedAt: null },
+      select: {
+        id: true,
+        companyName: true,
+        firstName: true,
+        lastName: true,
+        fiscalCode: true,
+        vatNumber: true,
+        phone: true,
+        email: true,
+        pec: true,
+        iban: true,
+        address: true,
+        street: true,
+        streetNumber: true,
+        zipCode: true,
+        city: true,
+        province: true,
+        region: true,
+        notes: true,
+      },
+    }),
+  ]);
+
+  if (!source) throw new Error("Anagrafica da unire non trovata");
+  if (!keeper) throw new Error("Anagrafica di destinazione non trovata");
+
+  const contractsMoved = source._count.contracts;
+  const documentsMoved = source._count.documents;
+  const agendaMoved = source._count.agendaItems;
+
+  // SQL grezzo: Prisma avvolge updateMany in una transazione, non supportata
+  // dall'adapter Neon HTTP.
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Contract" SET "clientId" = $1 WHERE "clientId" = $2`,
+    keeper.id,
+    source.id,
+  );
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Document" SET "clientId" = $1 WHERE "clientId" = $2`,
+    keeper.id,
+    source.id,
+  );
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AgendaItem" SET "clientId" = $1 WHERE "clientId" = $2`,
+    keeper.id,
+    source.id,
+  );
+  await prisma.$executeRawUnsafe(
+    `UPDATE "ClientHistory" SET "clientId" = $1 WHERE "clientId" = $2`,
+    keeper.id,
+    source.id,
+  );
+
+  const patched: MergeClientFields = {
+    companyName: mergeField(keeper.companyName, source.companyName),
+    firstName: mergeField(keeper.firstName, source.firstName),
+    lastName: mergeField(keeper.lastName, source.lastName),
+    fiscalCode: mergeField(keeper.fiscalCode, source.fiscalCode),
+    vatNumber: mergeField(keeper.vatNumber, source.vatNumber),
+    phone: mergeField(keeper.phone, source.phone),
+    email: mergeField(keeper.email, source.email),
+    pec: mergeField(keeper.pec, source.pec),
+    iban: mergeField(keeper.iban, source.iban),
+    address: mergeField(keeper.address, source.address),
+    street: mergeField(keeper.street, source.street),
+    streetNumber: mergeField(keeper.streetNumber, source.streetNumber),
+    zipCode: mergeField(keeper.zipCode, source.zipCode),
+    city: mergeField(keeper.city, source.city),
+    province: mergeField(keeper.province, source.province),
+    region: mergeField(keeper.region, source.region),
+    notes: mergeField(keeper.notes, source.notes),
+  };
+
+  await prisma.client.update({
+    where: { id: keeper.id },
+    data: patched,
+  });
+
+  await prisma.client.update({
+    where: { id: source.id },
+    data: {
+      deletedAt: new Date(),
+      notes: `[UNITO in ${keeper.id}] ${source.notes ?? ""}`.slice(0, 2000),
+    },
+  });
+
+  return {
+    contractsMoved,
+    documentsMoved,
+    agendaMoved,
+    keeperId: keeper.id,
+    sourceId: source.id,
+  };
+}
+
 /**
  * Unisce anagrafiche duplicate.
  * Sposta contratti/documenti sul keeper e soft-delete le altre.
@@ -152,54 +321,11 @@ export async function mergeDuplicateClientsOnce(): Promise<{
     if (!sources.length) continue;
 
     for (const src of sources) {
-      // SQL grezzo: Prisma avvolge updateMany in una transazione, non supportata
-      // dall'adapter Neon HTTP.
-      await prisma.$executeRawUnsafe(
-        `UPDATE "Contract" SET "clientId" = $1 WHERE "clientId" = $2`,
-        keeper.id,
-        src.id,
-      );
-      await prisma.$executeRawUnsafe(
-        `UPDATE "Document" SET "clientId" = $1 WHERE "clientId" = $2`,
-        keeper.id,
-        src.id,
-      );
-
-      await prisma.client.update({
-        where: { id: keeper.id },
-        data: {
-          companyName: mergeField(keeper.companyName, src.companyName),
-          firstName: mergeField(keeper.firstName, src.firstName),
-          lastName: mergeField(keeper.lastName, src.lastName),
-          fiscalCode: mergeField(keeper.fiscalCode, src.fiscalCode),
-          vatNumber: mergeField(keeper.vatNumber, src.vatNumber),
-          phone: mergeField(keeper.phone, src.phone),
-          email: mergeField(keeper.email, src.email),
-          pec: mergeField(keeper.pec, src.pec),
-          iban: mergeField(keeper.iban, src.iban),
-          address: mergeField(keeper.address, src.address),
-          street: mergeField(keeper.street, src.street),
-          streetNumber: mergeField(keeper.streetNumber, src.streetNumber),
-          zipCode: mergeField(keeper.zipCode, src.zipCode),
-          city: mergeField(keeper.city, src.city),
-          province: mergeField(keeper.province, src.province),
-          region: mergeField(keeper.region, src.region),
-          notes: mergeField(keeper.notes, src.notes),
-        },
-      });
-
+      const result = await mergeClientIntoKeeper(src.id, keeper.id);
       keeper.companyName = mergeField(keeper.companyName, src.companyName);
       keeper.fiscalCode = mergeField(keeper.fiscalCode, src.fiscalCode);
       keeper.vatNumber = mergeField(keeper.vatNumber, src.vatNumber);
-      keeper._count.contracts += src._count.contracts;
-
-      await prisma.client.update({
-        where: { id: src.id },
-        data: {
-          deletedAt: new Date(),
-          notes: `[UNITO in ${keeper.id}] ${src.notes ?? ""}`.slice(0, 2000),
-        },
-      });
+      keeper._count.contracts += result.contractsMoved;
       clientsRemoved++;
     }
     mergedGroups++;
