@@ -176,6 +176,35 @@ console.log("\n• Annuale (+12): scadenza già maturata e mai creata → backfi
   ]);
 }
 
+console.log(
+  "\n• Annuale (+12) CON expiry formale 12 mesi (caso Quadrifoglio/Vitucci): backfill non salta",
+);
+{
+  // ingresso 01/06/2025, durata 12 → expiry 01/06/2026 → window.end = 2025-05… no:
+  // dayBefore(2026-06-01) = 2026-05-31 → window.end = 2026-05; nextDue = 2026-06
+  const contract: Contract = {
+    ...base,
+    recurrence: "R",
+    recurrenceKind: "R",
+    supplier: { name: "Etruria Energy" },
+    supplyStartDate: new Date(2025, 5, 1), // giugno 2025
+    collectionDate: new Date(2025, 5, 15),
+    expiryDate: new Date(2026, 5, 1), // +12 mesi
+    recurringMonths: [],
+  };
+  const missing = findMissing(contract, now);
+  check(
+    "competenza 2026-06 dovuta oltre expiry formale",
+    missing?.missingPeriods,
+    ["2026-06"],
+  );
+  check(
+    "piano backfill include 2026-06",
+    planBackfillForContract(contract, now).map((p) => p.period),
+    ["2026-06"],
+  );
+}
+
 console.log("\n• Annuale: primo anno non incassato → nessun backfill (allineato al sync)");
 {
   const contract: Contract = {

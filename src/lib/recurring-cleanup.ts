@@ -11,7 +11,13 @@
  * Nessuna transazione (adapter Neon HTTP): solo `deleteMany` a lotti.
  */
 import { prisma } from "@/lib/prisma";
-import { isAnnualNextHidden, periodLabel } from "@/lib/recurring";
+import {
+  isAnnualNextHidden,
+  isRecurringAnnual,
+  listAnnualDuePeriodsThrough,
+  periodLabel,
+  toPeriod,
+} from "@/lib/recurring";
 import {
   isDisposableRecurringMonth,
   isPeriodInRecurringWindow,
@@ -65,6 +71,8 @@ const CONTRACT_SELECT = {
   insertionDate: true,
   supplyStartDate: true,
   operationType: true,
+  collectionDate: true,
+  recurrence: true,
   status: true,
   expiryDate: true,
   supplier: { select: { name: true } },
@@ -103,6 +111,8 @@ type ContractWithMonths = {
   insertionDate: Date | null;
   supplyStartDate: Date | null;
   operationType: string | null;
+  collectionDate: Date | null;
+  recurrence: string | null;
   status: string | null;
   expiryDate: Date | null;
   supplier: { name: string } | null;
@@ -143,7 +153,22 @@ export function findOutOfWindowMonths(
   const removable: OutOfWindowMonth[] = [];
   const manual: OutOfWindowMonth[] = [];
 
+  let preserveAnnual: ReadonlySet<string> | undefined;
+  if (isRecurringAnnual(contract.recurrence)) {
+    const paidPeriods = contract.recurringMonths
+      .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
+      .map((m) => m.period);
+    const firstYearCollected =
+      Boolean(contract.collectionDate) || paidPeriods.length > 0;
+    if (firstYearCollected) {
+      preserveAnnual = new Set(
+        listAnnualDuePeriodsThrough(window.start, paidPeriods, toPeriod(now)),
+      );
+    }
+  }
+
   for (const month of contract.recurringMonths) {
+    if (preserveAnnual?.has(month.period)) continue;
     if (isPeriodInRecurringWindow(window, month.period)) continue;
     if (isAnnualNextHidden(month.note)) continue;
     const row: OutOfWindowMonth = {

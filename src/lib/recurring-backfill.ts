@@ -6,14 +6,12 @@
  */
 import { prisma } from "@/lib/prisma";
 import {
-  addMonths,
   isContractRecurringAnnual,
   isContractRecurringMonthly,
-  nextAnnualDuePeriod,
+  listAnnualDuePeriodsThrough,
   toPeriod,
 } from "@/lib/recurring";
 import {
-  isPeriodInRecurringWindow,
   periodSatisfiedForBackfill,
   recurringWindow,
 } from "@/lib/recurring-window";
@@ -161,25 +159,12 @@ function expectedAnnualPeriods(contract: CandidateContract, now: Date): string[]
   const paidPeriods = contract.recurringMonths
     .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
     .map((m) => m.period);
-  const rowsByPeriod = new Map(contract.recurringMonths.map((m) => [m.period, m]));
 
-  const due: string[] = [];
-  let nextDue = nextAnnualDuePeriod(window.start, paidPeriods);
-  for (let i = 0; i < 10; i++) {
-    if (nextDue > nowPeriod) break;
-    const row = rowsByPeriod.get(nextDue);
-    if (row && (row.status === "PAID" || row.status === "LIQUIDATED")) {
-      nextDue = addMonths(nextDue, 12);
-      continue;
-    }
-    if (!isPeriodInRecurringWindow(window, nextDue)) {
-      nextDue = addMonths(nextDue, 12);
-      continue;
-    }
-    due.push(nextDue);
-    nextDue = addMonths(nextDue, 12);
-  }
-  return due;
+  // La competenza +12 cade spesso dopo expiry formale (finestra mensile):
+  // non usare isPeriodInRecurringWindow/end — altrimenti backfill salta la 2026.
+  return listAnnualDuePeriodsThrough(window.start, paidPeriods, nowPeriod).filter(
+    (period) => period >= window.start,
+  );
 }
 
 /**
