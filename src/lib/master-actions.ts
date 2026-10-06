@@ -310,6 +310,25 @@ export async function resendMasterEmailAction(formData: FormData): Promise<void>
     attachments: atts,
   });
 
+  try {
+    const {
+      createAppNotificationsForUsers,
+      resolveActiveUserIdsByEmails,
+    } = await import("@/lib/app-notifications");
+    const { clientDisplayName } = await import("@/lib/utils");
+    const userIds = await resolveActiveUserIdsByEmails(recipients);
+    if (userIds.length > 0) {
+      await createAppNotificationsForUsers(userIds, {
+        type: "CONTRACT_SENT_BO",
+        title: `Reinvio BO — ${clientDisplayName(contract.client)}`,
+        body: `Motivo: ${reason.slice(0, 200)} · da ${session.name}`,
+        link: `/lavorazione/${contractId}`,
+      });
+    }
+  } catch (e) {
+    console.warn("[resendToMasterAction] in-app", e);
+  }
+
   await prisma.contractEmailLog.create({
     data: {
       contractId,

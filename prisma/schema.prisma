@@ -131,6 +131,8 @@ model User {
   payoutAdjustmentsCreated PayoutAdjustment[] @relation("PayoutAdjustmentCreatedBy")
   payoutReportRunsCreated  PayoutReportRun[]  @relation("PayoutReportRunCreatedBy")
   payoutReportItems        PayoutReportItem[] @relation("PayoutReportItemCollaborator")
+  /// Notifiche in-app (campana header)
+  appNotifications         AppNotification[]
 }
 
 model Client {
@@ -1079,4 +1081,21 @@ model CtePriceBand {
 
   @@unique([cteOfferId, timeBand])
   @@index([cteOfferId])
+}
+
+/// Notifica in-app per utente (campana header). Tipi: CTE_UPDATE, CONTRACT_SENT_BO, CONTRACT_OUTCOME, INFO.
+model AppNotification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// CTE_UPDATE | CONTRACT_SENT_BO | CONTRACT_OUTCOME | INFO
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
