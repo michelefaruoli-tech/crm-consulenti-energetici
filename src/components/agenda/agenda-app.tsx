@@ -4,25 +4,26 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import {
   addDays,
   addMonths,
+  addWeeks,
   endOfMonth,
   endOfWeek,
   format,
+  isSameMonth,
   isToday,
   startOfMonth,
   startOfWeek,
   subMonths,
+  subWeeks,
 } from "date-fns";
 import { it } from "date-fns/locale";
 import { formatInTimeZone } from "date-fns-tz";
 import {
   Bell,
-  Calendar,
   Check,
   ChevronLeft,
   ChevronRight,
-  Clock,
-  ListTodo,
   Plus,
+  Star,
   StickyNote,
   Trash2,
   X,
@@ -33,26 +34,30 @@ import { cn } from "@/lib/cn";
 import {
   createAgendaItemAction,
   deleteAgendaItemAction,
+  getAgendaGenericNoteAction,
   listAgendaItemsAction,
-  listPendingTasksAction,
+  saveAgendaGenericNoteAction,
   toggleAgendaCompleteAction,
   updateAgendaItemAction,
   type AgendaItemDto,
 } from "@/lib/agenda-actions";
 import { APP_TZ, romeDateString } from "@/lib/timezone";
 
-type ViewMode = "today" | "week" | "tasks";
+type ViewMode = "month" | "week" | "day" | "notes";
 
-const PRIORITY_LABELS = {
-  LOW: "Bassa",
-  MEDIUM: "Media",
-  HIGH: "Alta",
-} as const;
+const WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"] as const;
 
-const PRIORITY_STYLES = {
-  LOW: "bg-slate-100 text-slate-600",
-  MEDIUM: "bg-amber-100 text-amber-800",
-  HIGH: "bg-red-100 text-red-800",
+const DOT_COLORS = {
+  APPOINTMENT: {
+    LOW: "bg-sky-500",
+    MEDIUM: "bg-emerald-500",
+    HIGH: "bg-rose-500",
+  },
+  TASK: {
+    LOW: "bg-slate-400",
+    MEDIUM: "bg-amber-500",
+    HIGH: "bg-orange-500",
+  },
 } as const;
 
 function toRomeDate(iso: string): string {
@@ -75,12 +80,12 @@ function emptyForm(dateYmd: string, noDate = false): FormState {
     id: null,
     title: "",
     notes: "",
-    type: "TASK",
+    type: "APPOINTMENT",
     priority: "MEDIUM",
     noDate,
     date: noDate ? "" : dateYmd,
     time: "09:00",
-    allDay: true,
+    allDay: false,
     alertDate: "",
     alertTime: "09:00",
     hasAlert: false,
@@ -120,39 +125,89 @@ function itemToForm(item: AgendaItemDto): FormState {
   };
 }
 
+function sortItems(a: AgendaItemDto, b: AgendaItemDto): number {
+  const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : 0;
+  const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : 0;
+  if (aTime !== bTime) return aTime - bTime;
+  if (a.priority === "HIGH" && b.priority !== "HIGH") return -1;
+  if (b.priority === "HIGH" && a.priority !== "HIGH") return 1;
+  return a.title.localeCompare(b.title, "it");
+}
+
+function EventChip({
+  item,
+  compact = false,
+  onClick,
+}: {
+  item: AgendaItemDto;
+  compact?: boolean;
+  onClick: () => void;
+}) {
+  const timeLabel =
+    item.scheduledAt && !item.allDay ? toRomeTime(item.scheduledAt) : item.allDay ? "Tutto giorno" : "";
+  const dot = DOT_COLORS[item.type][item.priority];
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        "flex w-full items-start gap-1.5 rounded-md text-left transition-colors hover:bg-slate-100/80",
+        compact ? "px-0.5 py-0.5" : "px-1.5 py-1",
+        item.completed && "opacity-50",
+      )}
+      title={item.title}
+    >
+      <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dot)} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span
+          className={cn(
+            "flex items-baseline gap-1 text-[11px] leading-tight sm:text-xs",
+            item.completed && "line-through",
+          )}
+        >
+          {timeLabel ? (
+            <span className="shrink-0 font-semibold tabular-nums text-slate-700">{timeLabel}</span>
+          ) : null}
+          <span className="truncate font-medium text-slate-800">{item.title}</span>
+          {item.priority === "HIGH" ? (
+            <Star className="inline h-3 w-3 shrink-0 fill-amber-400 text-amber-500" aria-label="Priorità alta" />
+          ) : null}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 export function AgendaApp({
   initialItems,
-  initialTasks,
+  initialNoteText,
   userName,
 }: {
   initialItems: AgendaItemDto[];
-  initialTasks: AgendaItemDto[];
+  initialNoteText: string;
   userName: string;
 }) {
   const todayYmd = romeDateString();
-  const [view, setView] = useState<ViewMode>("today");
-  const [selectedDate, setSelectedDate] = useState(todayYmd);
-  const [weekAnchor, setWeekAnchor] = useState(todayYmd);
-  const [monthAnchor, setMonthAnchor] = useState(todayYmd);
+  const [view, setView] = useState<ViewMode>("month");
+  const [cursor, setCursor] = useState(todayYmd);
   const [items, setItems] = useState(initialItems);
-  const [tasks, setTasks] = useState(initialTasks);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm(todayYmd));
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [noteText, setNoteText] = useState(initialNoteText);
+  const [noteSavedAt, setNoteSavedAt] = useState<string | null>(null);
+  const [noteDirty, setNoteDirty] = useState(false);
+  const [noteMsg, setNoteMsg] = useState<string | null>(null);
   const notifiedRef = useRef<Set<string>>(new Set());
 
-  const weekStart = useMemo(() => {
-    const d = new Date(`${weekAnchor}T12:00:00`);
-    return startOfWeek(d, { weekStartsOn: 1 });
-  }, [weekAnchor]);
+  const cursorDate = useMemo(() => new Date(`${cursor}T12:00:00`), [cursor]);
 
-  const weekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
-    [weekStart],
-  );
-
-  const monthStart = useMemo(() => startOfMonth(new Date(`${monthAnchor}T12:00:00`)), [monthAnchor]);
+  const monthStart = useMemo(() => startOfMonth(cursorDate), [cursorDate]);
 
   const calendarDays = useMemo(() => {
     const start = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -166,46 +221,63 @@ export function AgendaApp({
     return days;
   }, [monthStart]);
 
-  const reloadRange = useCallback(
-    (from: string, to: string) => {
-      startTransition(async () => {
-        const res = await listAgendaItemsAction({ from, to });
-        if (res.ok) setItems(res.items);
-      });
-    },
-    [],
+  const weekStart = useMemo(
+    () => startOfWeek(cursorDate, { weekStartsOn: 1 }),
+    [cursorDate],
   );
 
-  const reloadTasks = useCallback(() => {
+  const weekDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
+    [weekStart],
+  );
+
+  const rangeFromTo = useMemo(() => {
+    if (view === "week") {
+      return {
+        from: format(weekDays[0], "yyyy-MM-dd"),
+        to: format(weekDays[6], "yyyy-MM-dd"),
+      };
+    }
+    if (view === "day") {
+      return { from: cursor, to: cursor };
+    }
+    // month (+ notes: keep month cache warm)
+    return {
+      from: format(startOfWeek(monthStart, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+      to: format(endOfWeek(endOfMonth(monthStart), { weekStartsOn: 1 }), "yyyy-MM-dd"),
+    };
+  }, [view, weekDays, cursor, monthStart]);
+
+  const reloadRange = useCallback((from: string, to: string) => {
     startTransition(async () => {
-      const res = await listPendingTasksAction();
-      if (res.ok) setTasks(res.items);
+      const res = await listAgendaItemsAction({ from, to });
+      if (res.ok) setItems(res.items);
     });
   }, []);
 
   useEffect(() => {
-    if (view === "today") {
-      const monthStartYmd = format(startOfMonth(new Date(`${monthAnchor}T12:00:00`)), "yyyy-MM-dd");
-      const monthEndYmd = format(endOfMonth(new Date(`${monthAnchor}T12:00:00`)), "yyyy-MM-dd");
-      reloadRange(monthStartYmd, monthEndYmd);
-    } else if (view === "week") {
-      const from = format(weekDays[0], "yyyy-MM-dd");
-      const to = format(weekDays[6], "yyyy-MM-dd");
-      reloadRange(from, to);
-    }
-  }, [view, selectedDate, weekDays, monthAnchor, reloadRange]);
+    if (view === "notes") return;
+    reloadRange(rangeFromTo.from, rangeFromTo.to);
+  }, [view, rangeFromTo, reloadRange]);
 
   useEffect(() => {
-    reloadTasks();
-  }, [reloadTasks]);
+    if (view !== "notes") return;
+    startTransition(async () => {
+      const res = await getAgendaGenericNoteAction();
+      if (res.ok) {
+        setNoteText(res.note.text);
+        setNoteSavedAt(res.note.updatedAt);
+        setNoteDirty(false);
+      }
+    });
+  }, [view]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
 
     const tick = () => {
       const now = Date.now();
-      const all = [...items, ...tasks];
-      for (const item of all) {
+      for (const item of items) {
         if (!item.alertAt || item.completed) continue;
         const alertMs = new Date(item.alertAt).getTime();
         if (alertMs > now || alertMs < now - 60_000) continue;
@@ -224,17 +296,11 @@ export function AgendaApp({
     const id = window.setInterval(tick, 30_000);
     tick();
     return () => window.clearInterval(id);
-  }, [items, tasks]);
-
-  const requestNotifications = () => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      void Notification.requestPermission();
-    }
-  };
+  }, [items]);
 
   const openCreate = (dateYmd?: string, noDate = false) => {
     setError(null);
-    setForm(emptyForm(dateYmd ?? selectedDate, noDate || view === "tasks"));
+    setForm(emptyForm(dateYmd ?? cursor, noDate));
     setFormOpen(true);
   };
 
@@ -273,14 +339,7 @@ export function AgendaApp({
         return;
       }
       setFormOpen(false);
-      if (view === "today") {
-        const monthStartYmd = format(startOfMonth(new Date(`${monthAnchor}T12:00:00`)), "yyyy-MM-dd");
-        const monthEndYmd = format(endOfMonth(new Date(`${monthAnchor}T12:00:00`)), "yyyy-MM-dd");
-        reloadRange(monthStartYmd, monthEndYmd);
-      } else if (view === "week") {
-        reloadRange(format(weekDays[0], "yyyy-MM-dd"), format(weekDays[6], "yyyy-MM-dd"));
-      }
-      reloadTasks();
+      reloadRange(rangeFromTo.from, rangeFromTo.to);
     });
   };
 
@@ -291,7 +350,6 @@ export function AgendaApp({
       setItems((prev) =>
         prev.map((i) => (i.id === item.id ? { ...i, completed: !i.completed } : i)),
       );
-      reloadTasks();
     });
   };
 
@@ -301,20 +359,23 @@ export function AgendaApp({
       const res = await deleteAgendaItemAction(id);
       if (!res.ok) return;
       setItems((prev) => prev.filter((i) => i.id !== id));
-      reloadTasks();
       setFormOpen(false);
     });
   };
 
-  const todayItems = items.filter(
-    (i) => i.scheduledAt && toRomeDate(i.scheduledAt) === selectedDate,
-  );
-  const sortedToday = [...todayItems].sort((a, b) => {
-    const aTime = a.scheduledAt ? new Date(a.scheduledAt).getTime() : 0;
-    const bTime = b.scheduledAt ? new Date(b.scheduledAt).getTime() : 0;
-    return aTime - bTime;
-  });
-  const undatedNotes = tasks.filter((i) => !i.scheduledAt);
+  const saveNote = () => {
+    setNoteMsg(null);
+    startTransition(async () => {
+      const res = await saveAgendaGenericNoteAction(noteText);
+      if (!res.ok) {
+        setNoteMsg(res.error);
+        return;
+      }
+      setNoteSavedAt(res.updatedAt);
+      setNoteDirty(false);
+      setNoteMsg("Nota salvata");
+    });
+  };
 
   const itemsByDay = useMemo(() => {
     const map = new Map<string, AgendaItemDto[]>();
@@ -325,285 +386,431 @@ export function AgendaApp({
       list.push(item);
       map.set(key, list);
     }
+    for (const [, list] of map) list.sort(sortItems);
     return map;
   }, [items]);
 
+  const dayItems = useMemo(() => {
+    return (itemsByDay.get(cursor) ?? []).slice().sort(sortItems);
+  }, [itemsByDay, cursor]);
+
+  const goToday = () => setCursor(todayYmd);
+
+  const goPrev = () => {
+    if (view === "week") {
+      setCursor(format(subWeeks(cursorDate, 1), "yyyy-MM-dd"));
+    } else if (view === "day") {
+      setCursor(format(addDays(cursorDate, -1), "yyyy-MM-dd"));
+    } else {
+      setCursor(format(subMonths(monthStart, 1), "yyyy-MM-dd"));
+    }
+  };
+
+  const goNext = () => {
+    if (view === "week") {
+      setCursor(format(addWeeks(cursorDate, 1), "yyyy-MM-dd"));
+    } else if (view === "day") {
+      setCursor(format(addDays(cursorDate, 1), "yyyy-MM-dd"));
+    } else {
+      setCursor(format(addMonths(monthStart, 1), "yyyy-MM-dd"));
+    }
+  };
+
+  const periodLabel = useMemo(() => {
+    if (view === "day") {
+      return format(cursorDate, "EEEE d MMMM yyyy", { locale: it });
+    }
+    if (view === "week") {
+      return `${format(weekDays[0], "d MMM", { locale: it })} – ${format(weekDays[6], "d MMM yyyy", { locale: it })}`;
+    }
+    return format(monthStart, "MMMM yyyy", { locale: it });
+  }, [view, cursorDate, weekDays, monthStart]);
+
+  const viewTabs: Array<{ key: ViewMode; label: string }> = [
+    { key: "month", label: "Mese" },
+    { key: "week", label: "Settimana" },
+    { key: "day", label: "Giorno" },
+    { key: "notes", label: "Note generiche" },
+  ];
+
   return (
-    <div className="relative pb-24">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="relative pb-20 sm:pb-8">
+      <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Agenda</h1>
-          <p className="text-sm text-slate-500">
-            La tua agenda personale · {userName}
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+            Agenda Appuntamenti
+          </h1>
+          <p className="text-sm text-slate-500">{userName}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (typeof window !== "undefined" && "Notification" in window) {
+                void Notification.requestPermission();
+              }
+            }}
+          >
+            <Bell className="mr-1.5 h-4 w-4" />
+            Alert
+          </Button>
+          <Button type="button" size="sm" onClick={() => openCreate(cursor)}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            Nuovo Appuntamento
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:p-2.5">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={goPrev}
+            className="rounded-lg p-2 text-slate-600 hover:bg-slate-50"
+            aria-label="Periodo precedente"
+            disabled={view === "notes"}
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            className="rounded-lg p-2 text-slate-600 hover:bg-slate-50"
+            aria-label="Periodo successivo"
+            disabled={view === "notes"}
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={goToday}
+            disabled={view === "notes"}
+            className="ml-1"
+          >
+            Oggi
+          </Button>
+          <p className="ml-2 truncate text-sm font-semibold capitalize text-slate-800 sm:text-base">
+            {view === "notes" ? "Note personali" : periodLabel}
           </p>
         </div>
-        <Button type="button" variant="secondary" size="sm" onClick={requestNotifications}>
-          <Bell className="mr-1.5 h-4 w-4" />
-          Alert
-        </Button>
+
+        <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 sm:flex sm:w-auto">
+          {viewTabs.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setView(key)}
+              className={cn(
+                "rounded-md px-2.5 py-2 text-center text-xs font-semibold transition-colors sm:px-3 sm:text-sm",
+                view === key
+                  ? "bg-white text-emerald-700 shadow-sm"
+                  : "text-slate-600 hover:text-slate-900",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="mb-4 flex rounded-xl border border-slate-200 bg-white p-1">
-        {(
-          [
-            ["today", "Oggi", Calendar],
-            ["week", "Settimana", Clock],
-            ["tasks", "Da fare", ListTodo],
-          ] as const
-        ).map(([key, label, Icon]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setView(key)}
-            className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-sm font-medium transition-colors",
-              view === key
-                ? "bg-emerald-600 text-white"
-                : "text-slate-600 hover:bg-slate-50",
-            )}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="hidden xs:inline sm:inline">{label}</span>
-          </button>
-        ))}
-      </div>
-
-      {view === "today" ? (
-        <>
-          <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
-            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-              <button
-                type="button"
-                className="rounded-lg p-2 hover:bg-slate-50"
-                onClick={() => {
-                  const d = addDays(new Date(`${selectedDate}T12:00:00`), -1);
-                  setSelectedDate(format(d, "yyyy-MM-dd"));
-                }}
+      {view === "month" ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
+            {WEEKDAY_LABELS.map((label) => (
+              <div
+                key={label}
+                className="px-1 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs"
               >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <p className="text-sm font-semibold capitalize text-slate-800">
-                {format(new Date(`${selectedDate}T12:00:00`), "EEEE d MMMM yyyy", {
-                  locale: it,
-                })}
-              </p>
-              <button
-                type="button"
-                className="rounded-lg p-2 hover:bg-slate-50"
-                onClick={() => {
-                  const d = addDays(new Date(`${selectedDate}T12:00:00`), 1);
-                  setSelectedDate(format(d, "yyyy-MM-dd"));
-                }}
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="grid grid-cols-7 gap-1 p-2">
-              {calendarDays.map((day) => {
-                const ymd = format(day, "yyyy-MM-dd");
-                const inMonth = day.getMonth() === monthStart.getMonth();
-                const selected = ymd === selectedDate;
-                const hasItems = (itemsByDay.get(ymd)?.length ?? 0) > 0;
-                return (
-                  <button
-                    key={ymd}
-                    type="button"
-                    onClick={() => setSelectedDate(ymd)}
-                    className={cn(
-                      "relative flex aspect-square flex-col items-center justify-center rounded-lg text-sm",
-                      !inMonth && "text-slate-300",
-                      inMonth && "text-slate-700",
-                      selected && "bg-emerald-600 font-semibold text-white",
-                      !selected && isToday(day) && "ring-2 ring-emerald-400",
-                      !selected && "hover:bg-slate-50",
-                    )}
-                  >
-                    {format(day, "d")}
-                    {hasItems && !selected ? (
-                      <span className="absolute bottom-1 h-1 w-1 rounded-full bg-emerald-500" />
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex justify-between border-t border-slate-100 px-3 py-2">
-              <button
-                type="button"
-                className="text-xs font-medium text-emerald-700"
-                onClick={() => {
-                  setMonthAnchor(format(subMonths(monthStart, 1), "yyyy-MM-dd"));
-                }}
-              >
-                ← Mese prec.
-              </button>
-              <button
-                type="button"
-                className="text-xs font-medium text-emerald-700"
-                onClick={() => {
-                  setSelectedDate(todayYmd);
-                  setMonthAnchor(todayYmd);
-                }}
-              >
-                Oggi
-              </button>
-              <button
-                type="button"
-                className="text-xs font-medium text-emerald-700"
-                onClick={() => {
-                  setMonthAnchor(format(addMonths(monthStart, 1), "yyyy-MM-dd"));
-                }}
-              >
-                Mese succ. →
-              </button>
-            </div>
-          </div>
-
-          <AgendaItemList
-            items={sortedToday}
-            emptyLabel="Nessun impegno per questo giorno"
-            onToggle={toggleComplete}
-            onEdit={openEdit}
-            pending={pending}
-          />
-
-          {undatedNotes.length > 0 ? (
-            <div className="mt-6">
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-slate-700">Note senza data</h2>
-                <button
-                  type="button"
-                  className="text-xs font-medium text-emerald-700"
-                  onClick={() => openCreate(undefined, true)}
-                >
-                  + Nota
-                </button>
+                {label}
               </div>
-              <AgendaItemList
-                items={undatedNotes}
-                emptyLabel="Nessuna nota"
-                onToggle={toggleComplete}
-                onEdit={openEdit}
-                pending={pending}
-              />
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {view === "week" ? (
-        <>
-          <div className="mb-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-            <button
-              type="button"
-              className="rounded-lg p-2 hover:bg-slate-50"
-              onClick={() => {
-                setWeekAnchor(format(addDays(weekStart, -7), "yyyy-MM-dd"));
-              }}
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <p className="text-sm font-semibold text-slate-800">
-              {format(weekDays[0], "d MMM", { locale: it })} –{" "}
-              {format(weekDays[6], "d MMM yyyy", { locale: it })}
-            </p>
-            <button
-              type="button"
-              className="rounded-lg p-2 hover:bg-slate-50"
-              onClick={() => {
-                setWeekAnchor(format(addDays(weekStart, 7), "yyyy-MM-dd"));
-              }}
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
+            ))}
           </div>
-
-          <div className="-mx-1 flex gap-2 overflow-x-auto pb-2">
-            {weekDays.map((day) => {
+          <div className="grid grid-cols-7 auto-rows-fr">
+            {calendarDays.map((day) => {
               const ymd = format(day, "yyyy-MM-dd");
-              const dayItems = itemsByDay.get(ymd) ?? [];
+              const inMonth = isSameMonth(day, monthStart);
+              const dayList = itemsByDay.get(ymd) ?? [];
+              const maxShow = 3;
+              const extra = dayList.length - maxShow;
               return (
                 <div
                   key={ymd}
-                  className="min-w-[10.5rem] flex-1 rounded-xl border border-slate-200 bg-white"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setCursor(ymd);
+                    setView("day");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setCursor(ymd);
+                      setView("day");
+                    }
+                  }}
+                  className={cn(
+                    "min-h-[4.5rem] border-b border-r border-slate-100 p-1 text-left align-top sm:min-h-[7.5rem] sm:p-1.5",
+                    !inMonth && "bg-slate-50/70",
+                    isToday(day) && "bg-emerald-50/60",
+                  )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedDate(ymd);
-                      setView("today");
-                    }}
-                    className={cn(
-                      "w-full border-b border-slate-100 px-3 py-2 text-left",
-                      isToday(day) && "bg-emerald-50",
-                    )}
-                  >
-                    <p className="text-xs uppercase text-slate-500">
-                      {format(day, "EEE", { locale: it })}
-                    </p>
-                    <p className="text-lg font-bold text-slate-900">{format(day, "d")}</p>
-                  </button>
-                  <div className="space-y-2 p-2">
-                    {dayItems.length === 0 ? (
-                      <p className="px-1 py-4 text-center text-xs text-slate-400">Vuoto</p>
-                    ) : (
-                      dayItems.slice(0, 4).map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => openEdit(item)}
-                          className={cn(
-                            "w-full rounded-lg border px-2 py-1.5 text-left text-xs",
-                            item.completed && "opacity-60",
-                            item.priority === "HIGH"
-                              ? "border-red-200 bg-red-50"
-                              : "border-slate-100 bg-slate-50",
-                          )}
-                        >
-                          <p className="truncate font-medium">{item.title}</p>
-                          {item.scheduledAt && !item.allDay ? (
-                            <p className="text-slate-500">{toRomeTime(item.scheduledAt)}</p>
-                          ) : null}
-                        </button>
-                      ))
-                    )}
-                    {dayItems.length > 4 ? (
-                      <p className="text-center text-[10px] text-slate-400">
-                        +{dayItems.length - 4} altri
-                      </p>
+                  <div className="mb-0.5 flex items-center justify-between gap-1">
+                    <span
+                      className={cn(
+                        "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold sm:h-7 sm:w-7 sm:text-sm",
+                        isToday(day) && "bg-emerald-600 text-white",
+                        !isToday(day) && inMonth && "text-slate-800",
+                        !isToday(day) && !inMonth && "text-slate-300",
+                      )}
+                    >
+                      {format(day, "d")}
+                    </span>
+                    <button
+                      type="button"
+                      className="hidden rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-emerald-600 sm:inline-flex"
+                      aria-label={`Nuovo appuntamento il ${ymd}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCreate(ymd);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="hidden space-y-0.5 sm:block">
+                    {dayList.slice(0, maxShow).map((item) => (
+                      <EventChip
+                        key={item.id}
+                        item={item}
+                        compact
+                        onClick={() => openEdit(item)}
+                      />
+                    ))}
+                    {extra > 0 ? (
+                      <p className="px-0.5 text-[10px] font-medium text-slate-400">+{extra} altri</p>
                     ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-0.5 sm:hidden">
+                    {dayList.slice(0, 4).map((item) => (
+                      <span
+                        key={item.id}
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          DOT_COLORS[item.type][item.priority],
+                        )}
+                      />
+                    ))}
                   </div>
                 </div>
               );
             })}
           </div>
-        </>
+        </div>
       ) : null}
 
-      {view === "tasks" ? (
-        <>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm text-slate-500">Cose da fare e note, anche senza data</p>
-            <Button type="button" size="sm" onClick={() => openCreate(undefined, true)}>
-              <StickyNote className="mr-1.5 h-4 w-4" />
-              Nota
+      {view === "week" ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="-mx-0 flex gap-0 overflow-x-auto md:grid md:grid-cols-7">
+            {weekDays.map((day) => {
+              const ymd = format(day, "yyyy-MM-dd");
+              const dayList = itemsByDay.get(ymd) ?? [];
+              return (
+                <div
+                  key={ymd}
+                  className="min-w-[9.5rem] flex-1 border-r border-slate-100 last:border-r-0 md:min-w-0"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCursor(ymd);
+                      setView("day");
+                    }}
+                    className={cn(
+                      "flex w-full items-center justify-between border-b border-slate-100 px-2.5 py-2 text-left",
+                      isToday(day) && "bg-emerald-50",
+                    )}
+                  >
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase text-slate-500">
+                        {format(day, "EEE", { locale: it })}
+                      </p>
+                      <p
+                        className={cn(
+                          "text-lg font-bold",
+                          isToday(day) ? "text-emerald-700" : "text-slate-900",
+                        )}
+                      >
+                        {format(day, "d")}
+                      </p>
+                    </div>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="rounded p-1 text-slate-400 hover:bg-white hover:text-emerald-600"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCreate(ymd);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openCreate(ymd);
+                        }
+                      }}
+                      aria-label={`Nuovo il ${ymd}`}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </span>
+                  </button>
+                  <div className="min-h-[12rem] space-y-1 p-1.5">
+                    {dayList.length === 0 ? (
+                      <p className="px-1 py-6 text-center text-xs text-slate-400">—</p>
+                    ) : (
+                      dayList.map((item) => (
+                        <EventChip key={item.id} item={item} onClick={() => openEdit(item)} />
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {view === "day" ? (
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+            <p className="text-sm font-semibold capitalize text-slate-800">
+              {format(cursorDate, "EEEE d MMMM yyyy", { locale: it })}
+            </p>
+            <Button type="button" size="sm" onClick={() => openCreate(cursor)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Aggiungi
             </Button>
           </div>
-          <AgendaItemList
-            items={tasks}
-            emptyLabel="Nessuna attività o nota in sospeso"
-            onToggle={toggleComplete}
-            onEdit={openEdit}
-            pending={pending}
-            showDate
+          {dayItems.length === 0 ? (
+            <div className="px-4 py-16 text-center">
+              <StickyNote className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+              <p className="text-sm text-slate-500">Nessun appuntamento per questo giorno</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {dayItems.map((item) => (
+                <li key={item.id} className="flex gap-3 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleComplete(item)}
+                    disabled={pending}
+                    className={cn(
+                      "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2",
+                      item.completed
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-slate-300 hover:border-emerald-500",
+                    )}
+                    aria-label={item.completed ? "Segna come da fare" : "Segna come completato"}
+                  >
+                    {item.completed ? <Check className="h-3.5 w-3.5" /> : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openEdit(item)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-2.5 w-2.5 rounded-full",
+                          DOT_COLORS[item.type][item.priority],
+                        )}
+                      />
+                      {item.scheduledAt && !item.allDay ? (
+                        <span className="text-sm font-semibold tabular-nums text-slate-700">
+                          {toRomeTime(item.scheduledAt)}
+                        </span>
+                      ) : (
+                        <span className="text-sm font-medium text-slate-500">Tutto il giorno</span>
+                      )}
+                      <span
+                        className={cn(
+                          "font-medium text-slate-900",
+                          item.completed && "line-through opacity-60",
+                        )}
+                      >
+                        {item.title}
+                      </span>
+                      {item.priority === "HIGH" ? (
+                        <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+                      ) : null}
+                    </div>
+                    {item.notes ? (
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-600">{item.notes}</p>
+                    ) : null}
+                    {item.alertAt ? (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                        <Bell className="h-3 w-3" />
+                        Alert {formatInTimeZone(item.alertAt, APP_TZ, "dd/MM/yyyy HH:mm")}
+                      </p>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      {view === "notes" ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Note generiche</h2>
+              <p className="text-sm text-slate-500">
+                Appunti personali, indipendenti dagli appuntamenti
+              </p>
+            </div>
+            <Button type="button" size="sm" onClick={saveNote} disabled={pending || !noteDirty}>
+              {pending ? "Salvataggio..." : "Salva nota"}
+            </Button>
+          </div>
+          <Textarea
+            rows={14}
+            value={noteText}
+            onChange={(e) => {
+              setNoteText(e.target.value);
+              setNoteDirty(true);
+              setNoteMsg(null);
+            }}
+            placeholder="Scrivi qui note libere, promemoria, contatti utili..."
+            className="min-h-[16rem] font-normal"
           />
-        </>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            {noteDirty ? <span className="text-amber-700">Modifiche non salvate</span> : null}
+            {noteMsg ? <span className="text-emerald-700">{noteMsg}</span> : null}
+            {noteSavedAt && !noteDirty ? (
+              <span>
+                Ultimo salvataggio{" "}
+                {formatInTimeZone(noteSavedAt, APP_TZ, "dd/MM/yyyy HH:mm")}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {pending && view !== "notes" ? (
+        <p className="mt-2 text-center text-xs text-slate-400">Aggiornamento...</p>
       ) : null}
 
       <button
         type="button"
-        onClick={() => openCreate()}
-        className="fixed bottom-6 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg hover:bg-emerald-700 md:right-8"
-        aria-label="Nuovo impegno"
+        onClick={() => openCreate(cursor)}
+        className="fixed bottom-5 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg hover:bg-emerald-700 sm:hidden"
+        aria-label="Nuovo appuntamento"
       >
         <Plus className="h-6 w-6" />
       </button>
@@ -613,11 +820,7 @@ export function AgendaApp({
           <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl sm:rounded-2xl sm:p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-900">
-                {form.id
-                  ? "Modifica"
-                  : form.noDate
-                    ? "Nuova nota"
-                    : "Nuovo impegno"}
+                {form.id ? "Modifica" : "Nuovo Appuntamento"}
               </h2>
               <button
                 type="button"
@@ -637,7 +840,7 @@ export function AgendaApp({
                 <Input
                   value={form.title}
                   onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                  placeholder="Es. Richiamare cliente, idea, visita in sede..."
+                  placeholder="Es. Visita cliente, call fornitore..."
                   autoFocus
                 />
               </Field>
@@ -652,16 +855,13 @@ export function AgendaApp({
                         ...f,
                         type,
                         noDate: type === "APPOINTMENT" ? false : f.noDate,
-                        date:
-                          type === "APPOINTMENT" && !f.date
-                            ? selectedDate
-                            : f.date,
+                        date: type === "APPOINTMENT" && !f.date ? cursor : f.date,
                         allDay: type === "TASK" ? f.allDay : false,
                       }));
                     }}
                   >
-                    <option value="TASK">Da fare / nota</option>
                     <option value="APPOINTMENT">Appuntamento</option>
+                    <option value="TASK">Da fare / nota</option>
                   </Select>
                 </Field>
                 <Field label="Priorità">
@@ -676,7 +876,7 @@ export function AgendaApp({
                   >
                     <option value="LOW">Bassa</option>
                     <option value="MEDIUM">Media</option>
-                    <option value="HIGH">Alta</option>
+                    <option value="HIGH">Alta (★)</option>
                   </Select>
                 </Field>
               </div>
@@ -690,7 +890,7 @@ export function AgendaApp({
                     setForm((f) => ({
                       ...f,
                       noDate: e.target.checked,
-                      date: e.target.checked ? "" : f.date || selectedDate,
+                      date: e.target.checked ? "" : f.date || cursor,
                       allDay: e.target.checked ? true : f.allDay,
                     }))
                   }
@@ -800,110 +1000,5 @@ export function AgendaApp({
         </div>
       ) : null}
     </div>
-  );
-}
-
-function AgendaItemList({
-  items,
-  emptyLabel,
-  onToggle,
-  onEdit,
-  pending,
-  showDate = false,
-}: {
-  items: AgendaItemDto[];
-  emptyLabel: string;
-  onToggle: (item: AgendaItemDto) => void;
-  onEdit: (item: AgendaItemDto) => void;
-  pending: boolean;
-  showDate?: boolean;
-}) {
-  if (items.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center">
-        <StickyNote className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-        <p className="text-sm text-slate-500">{emptyLabel}</p>
-      </div>
-    );
-  }
-
-  return (
-    <ul className="space-y-2">
-      {items.map((item) => (
-        <li
-          key={item.id}
-          className={cn(
-            "flex gap-3 rounded-xl border bg-white p-3 shadow-sm",
-            item.completed && "opacity-60",
-            item.priority === "HIGH" ? "border-red-200" : "border-slate-200",
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => onToggle(item)}
-            disabled={pending}
-            className={cn(
-              "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2",
-              item.completed
-                ? "border-emerald-600 bg-emerald-600 text-white"
-                : "border-slate-300 hover:border-emerald-500",
-            )}
-            aria-label={item.completed ? "Segna come da fare" : "Segna come completato"}
-          >
-            {item.completed ? <Check className="h-3.5 w-3.5" /> : null}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onEdit(item)}
-            className="min-w-0 flex-1 text-left"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "font-medium text-slate-900",
-                  item.completed && "line-through",
-                )}
-              >
-                {item.title}
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
-                  PRIORITY_STYLES[item.priority],
-                )}
-              >
-                {PRIORITY_LABELS[item.priority]}
-              </span>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                {item.type === "APPOINTMENT"
-                  ? "Appuntamento"
-                  : item.scheduledAt
-                    ? "Da fare"
-                    : "Nota"}
-              </span>
-            </div>
-            <p className="mt-0.5 text-sm text-slate-500">
-              {showDate
-                ? formatItemWhen(item)
-                : !item.scheduledAt
-                  ? "Senza data"
-                  : item.allDay
-                    ? "Tutto il giorno"
-                    : toRomeTime(item.scheduledAt)}
-            </p>
-            {item.notes ? (
-              <p className="mt-1 line-clamp-2 text-sm text-slate-600">{item.notes}</p>
-            ) : null}
-            {item.alertAt ? (
-              <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
-                <Bell className="h-3 w-3" />
-                Alert {formatInTimeZone(item.alertAt, APP_TZ, "dd/MM/yyyy HH:mm")}
-              </p>
-            ) : null}
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }
