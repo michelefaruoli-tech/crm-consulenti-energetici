@@ -4,10 +4,15 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CapAddressFields } from "@/components/contracts/cap-address-fields";
+import {
+  ExistingClientHints,
+  type ClientSearchItem,
+} from "@/components/contracts/existing-client-hints";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { updateClientAction } from "@/lib/actions";
+import { mergeClientIntoAction } from "@/lib/client-merge-actions";
 import {
   updateClientContractBlockAction,
   updateClientOfferBlockAction,
@@ -295,6 +300,51 @@ export function ClientSheet({
   const [street, setStreet] = useState(client.street ?? client.address ?? "");
   const [streetNumber, setStreetNumber] = useState(client.streetNumber ?? "");
   const [clientType, setClientType] = useState(client.type);
+  const [companyName, setCompanyName] = useState(client.companyName ?? "");
+  const [firstName, setFirstName] = useState(client.firstName ?? "");
+  const [lastName, setLastName] = useState(client.lastName ?? "");
+  const [fiscalCode, setFiscalCode] = useState(client.fiscalCode ?? "");
+  const [vatNumber, setVatNumber] = useState(client.vatNumber ?? "");
+  const [merging, setMerging] = useState(false);
+
+  /** Query typeahead: CF/P.IVA se abbastanza lunghi, altrimenti ragione sociale o nome. */
+  const anagraficaSearchQuery = useMemo(() => {
+    if (fiscalCode.trim().length >= 5) return fiscalCode.trim();
+    if (vatNumber.trim().length >= 5) return vatNumber.trim();
+    if (clientType === "AZIENDA") return companyName.trim();
+    return [lastName.trim(), firstName.trim()].filter(Boolean).join(" ");
+  }, [clientType, companyName, firstName, lastName, fiscalCode, vatNumber]);
+
+  function unifyWithExistingClient(item: ClientSearchItem) {
+    const name = item.label.split(" · ")[0] ?? item.label;
+    const ok = window.confirm(
+      `UNIFICA ANAGRAFICA\n\nI contratti di questa scheda passeranno sotto:\n«${name}»\n\nQuesta anagrafica verrà archiviata (niente duplicato).\nConfermi?`,
+    );
+    if (!ok) return;
+    setErr(null);
+    setMsg(null);
+    setMerging(true);
+    start(async () => {
+      try {
+        const result = await mergeClientIntoAction(client.id, item.id);
+        if (!result.ok) {
+          setErr(result.message);
+          return;
+        }
+        setMsg(result.message);
+        if (result.redirectTo) {
+          router.push(result.redirectTo);
+          router.refresh();
+        } else {
+          router.refresh();
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Errore unificazione");
+      } finally {
+        setMerging(false);
+      }
+    });
+  }
 
   // Blocco 2 state
   const [utilityType, setUtilityType] = useState(() =>
@@ -475,16 +525,38 @@ export function ClientSheet({
             {clientType === "PRIVATO" ? (
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Cognome">
-                  <Input name="lastName" defaultValue={client.lastName ?? ""} />
+                  <Input
+                    name="lastName"
+                    value={lastName}
+                    onChange={(e) => {
+                      setLastName(e.target.value);
+                      markClientDirty();
+                    }}
+                  />
                 </Field>
                 <Field label="Nome">
-                  <Input name="firstName" defaultValue={client.firstName ?? ""} />
+                  <Input
+                    name="firstName"
+                    value={firstName}
+                    onChange={(e) => {
+                      setFirstName(e.target.value);
+                      markClientDirty();
+                    }}
+                  />
                 </Field>
               </div>
             ) : (
               <>
                 <Field label="Ragione sociale">
-                  <Input name="companyName" defaultValue={client.companyName ?? ""} />
+                  <Input
+                    name="companyName"
+                    value={companyName}
+                    autoComplete="off"
+                    onChange={(e) => {
+                      setCompanyName(e.target.value);
+                      markClientDirty();
+                    }}
+                  />
                 </Field>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label="Nome referente / amministratore">
@@ -495,7 +567,15 @@ export function ClientSheet({
                   </Field>
                 </div>
                 <Field label="Partita IVA">
-                  <Input name="vatNumber" defaultValue={client.vatNumber ?? ""} />
+                  <Input
+                    name="vatNumber"
+                    value={vatNumber}
+                    autoComplete="off"
+                    onChange={(e) => {
+                      setVatNumber(e.target.value);
+                      markClientDirty();
+                    }}
+                  />
                 </Field>
                 <Field label="Codice destinatario (SDI)">
                   <Input name="sdiCode" defaultValue={client.sdiCode ?? ""} />
@@ -504,8 +584,27 @@ export function ClientSheet({
             )}
 
             <Field label="Codice fiscale">
-              <Input name="fiscalCode" defaultValue={client.fiscalCode ?? ""} />
+              <Input
+                name="fiscalCode"
+                value={fiscalCode}
+                autoComplete="off"
+                onChange={(e) => {
+                  setFiscalCode(e.target.value);
+                  markClientDirty();
+                }}
+              />
             </Field>
+
+            <ExistingClientHints
+              enabled={canEditClient && !merging}
+              mode="merge"
+              excludeId={client.id}
+              query={anagraficaSearchQuery}
+              onPick={unifyWithExistingClient}
+            />
+            {merging ? (
+              <p className="text-sm text-amber-900">Unificazione in corso…</p>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Telefono">
                 <Input name="phone" defaultValue={client.phone ?? ""} />

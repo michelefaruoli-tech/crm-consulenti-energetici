@@ -6,8 +6,9 @@ import { clientDisplayName, formatDate, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { deleteClientAction } from "@/lib/delete-actions";
 import { hasPermission } from "@/lib/permissions";
-import { loadVisibleCollaboratorOptions } from "@/lib/user-scope";
+import { clientVisibilityWhere, loadVisibleCollaboratorOptions } from "@/lib/user-scope";
 import { ClientSheet } from "@/components/clients/client-sheet";
+import { DuplicateClientsBanner } from "@/components/clients/duplicate-clients-banner";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 import {
   markEarlyReswitchContracts,
@@ -270,13 +271,14 @@ export default async function ClienteDetailPage({
       : null,
   ].filter(Boolean) as object[];
 
+  const visibility = await clientVisibilityWhere(session);
   const duplicateClients =
     orSameIdentity.length > 0
       ? await prisma.client.findMany({
           where: {
             id: { not: client.id },
             deletedAt: null,
-            OR: orSameIdentity,
+            AND: [{ OR: orSameIdentity }, visibility],
           },
           select: {
             id: true,
@@ -319,32 +321,14 @@ export default async function ClienteDetailPage({
       </div>
 
       {duplicateClients.length > 0 ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <p className="font-medium">
-            Attenzione: esistono altre anagrafiche con lo stesso nome / CF / P.IVA.
-          </p>
-          <p className="mt-1 text-xs text-amber-900/80">
-            In Provvigioni puoi vedere contratti di clienti diversi omonimi. Apri anche queste
-            schede:
-          </p>
-          <ul className="mt-2 space-y-1">
-            {duplicateClients.map((d) => (
-              <li key={d.id}>
-                <Link
-                  href={`/clienti/${d.id}`}
-                  className="font-medium text-emerald-800 underline"
-                >
-                  {clientDisplayName(d)}
-                </Link>
-                <span className="text-xs text-amber-900/70">
-                  {" "}
-                  · {d._count.contracts} contrat
-                  {d._count.contracts === 1 ? "to" : "ti"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <DuplicateClientsBanner
+          currentClientId={client.id}
+          duplicates={duplicateClients.map((d) => ({
+            id: d.id,
+            label: clientDisplayName(d),
+            contractCount: d._count.contracts,
+          }))}
+        />
       ) : null}
 
       <ClientSheet
