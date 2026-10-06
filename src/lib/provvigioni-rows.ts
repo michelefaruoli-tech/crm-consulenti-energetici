@@ -49,6 +49,10 @@ import {
   recurringMonthlyWhereOr,
 } from "@/lib/provvigioni-filters";
 import {
+  filterVisibleAnnualRecurringMonths,
+  shouldShowAnnualUnitLiquidatedRow,
+} from "@/lib/provvigioni-annual-archive";
+import {
   effectiveGettone,
   operationTypeLabel,
   provvigioneAgencyLabel,
@@ -101,6 +105,7 @@ function expandedUnitWhere(
   expandMode: RecurringExpandMode,
   rateStatuses: string[],
   scope?: ProvvigioniRowFilterScope,
+  includeArchivedAnnual?: boolean,
 ): Prisma.ContractWhereInput {
   if (scope?.excludeUnitRows) return NO_ROW_WHERE;
   const rateExtra = scope?.rate ?? [];
@@ -109,18 +114,32 @@ function expandedUnitWhere(
   const ut: Prisma.ContractWhereInput = {
     AND: [...base, NON_RECURRING_WHERE],
   };
+  /** Annuali liquidate con rate LIQUIDATED successive: unità nascosta (archivio). */
+  const archiveUnitClause: Prisma.ContractWhereInput | null =
+    includeArchivedAnnual
+      ? null
+      : {
+          NOT: {
+            AND: [
+              { recurrenceKind: "R" },
+              { status: "PROVVIGIONE_LIQUIDATA" },
+              { recurringMonths: { some: { status: "LIQUIDATED" } } },
+            ],
+          },
+        };
+  const annualBase: Prisma.ContractWhereInput[] = [
+    ...base,
+    { recurrenceKind: "R" },
+    ...(archiveUnitClause ? [archiveUnitClause] : []),
+  ];
   const annual: Prisma.ContractWhereInput =
     expandMode === "da-incassare"
-      ? { AND: [...base, { recurrenceKind: "R" }, { collectionDate: null }] }
+      ? { AND: [...annualBase, { collectionDate: null }] }
       : expandMode === "incassato"
         ? {
-            AND: [
-              ...base,
-              { recurrenceKind: "R" },
-              { collectionDate: { not: null } },
-            ],
+            AND: [...annualBase, { collectionDate: { not: null } }],
           }
-        : { AND: [...base, { recurrenceKind: "R" }] };
+        : { AND: annualBase };
   const unitOrs: Prisma.ContractWhereInput[] = [ut, annual];
   if (expandMode === "da-incassare" || expandMode === "all") {
     unitOrs.push({
@@ -140,15 +159,66 @@ function expandedUnitWhere(
   return { OR: unitOrs };
 }
 
+/**
+ * ID delle rate annuali liquidate da nascondere (tutte tranne l’ultima
+ * per contratto), nello scope dei contratti dati.
+ *
+ * Solo filtro UI/query (Michele): nessun soft-delete DB.
+ */
+export async function loadArchivedAnnualLiquidatedRateIds(
+  contractWhere: Prisma.ContractWhereInput,
+): Promise<string[]> {
+  const rates = await prisma.recurringMonth.findMany({
+    where: {
+      status: "LIQUIDATED",
+      contract: {
+        AND: [contractWhere, { recurrenceKind: "R" }],
+      },
+    },
+    select: { id: true, contractId: true, period: true },
+    orderBy: [{ contractId: "asc" }, { period: "desc" }],
+    take: 30_000,
+  });
+  const seenContract = new Set<string>();
+  const archived: string[] = [];
+  for (const rate of rates) {
+    if (seenContract.has(rate.contractId)) {
+      archived.push(rate.id);
+    } else {
+      seenContract.add(rate.contractId);
+    }
+  }
+  return archived;
+}
+
+/** Clausola opzionale: escludi ID archiviati (chunk se lista lunga). */
+function notInArchivedIds(
+  archivedIds: string[] | null | undefined,
+): Prisma.RecurringMonthWhereInput[] {
+  if (!archivedIds || archivedIds.length === 0) return [];
+  const CHUNK = 8000;
+  if (archivedIds.length <= CHUNK) {
+    return [{ id: { notIn: archivedIds } }];
+  }
+  const parts: Prisma.RecurringMonthWhereInput[] = [];
+  for (let i = 0; i < archivedIds.length; i += CHUNK) {
+    parts.push({ id: { notIn: archivedIds.slice(i, i + CHUNK) } });
+  }
+  return [{ AND: parts }];
+}
+
 /** Where rate mensili della lista espansa, con i filtri di colonna applicati. */
 function expandedRateWhere(
   contractWhere: Prisma.ContractWhereInput,
   statuses: string[],
   scope?: ProvvigioniRowFilterScope,
   now: Date = new Date(),
+  archivedAnnualIds?: string[] | null,
 ): Prisma.RecurringMonthWhereInput | null {
   if (statuses.length === 0) return null;
   const lastHelios = heliosLastPayableCompetence(now);
+  const needsArchiveFilter =
+    statuses.includes("LIQUIDATED") && Array.isArray(archivedAnnualIds);
   return {
     AND: [
       { status: { in: statuses } },
@@ -186,8 +256,18 @@ function expandedRateWhere(
           ],
         },
       },
+      ...(needsArchiveFilter ? notInArchivedIds(archivedAnnualIds) : []),
     ],
   };
+}
+
+async function resolveArchivedAnnualIds(
+  contractWhere: Prisma.ContractWhereInput,
+  statuses: string[],
+  includeArchived: boolean | undefined,
+): Promise<string[] | null> {
+  if (includeArchived || !statuses.includes("LIQUIDATED")) return null;
+  return loadArchivedAnnualLiquidatedRateIds(contractWhere);
 }
 
 /** Stati rata da mostrare in base al filtro colonna Stato. */
@@ -326,6 +406,11 @@ export type BuildProvvigioneRowsOpts = {
   now?: Date;
   /** Filtro stato URL, per espandere solo le rate coerenti (Incassato ≠ Mancante). */
   statoFilter?: string | null;
+  /**
+   * `?archiviate=1`: mostra anche le liquidate annuali precedenti
+   * (default: solo ultima liquidata + da incassare / PAID).
+   */
+  includeArchivedAnnual?: boolean;
 };
 
 function monthAmount(
@@ -580,6 +665,7 @@ export function expandContractsToProvvigioneRows(
   const statuses = rateStatusesForMode(mode, opts.statoFilter);
   const rows: ProvvigioneRow[] = [];
   const now = opts.now ?? new Date();
+  const includeArchived = opts.includeArchivedAnnual === true;
 
   for (const contract of contracts) {
     if (!isRecurring(contract.recurrence)) {
@@ -587,7 +673,8 @@ export function expandContractsToProvvigioneRows(
       continue;
     }
 
-    const months = (contract.recurringMonths ?? [])
+    const isAnnual = isRecurringAnnual(contract.recurrence);
+    const rawMonths = (contract.recurringMonths ?? [])
       .filter((m) => statuses.includes(m.status))
       .filter((m) => !isAnnualNextHidden(m.note))
       .filter((m) => {
@@ -599,16 +686,32 @@ export function expandContractsToProvvigioneRows(
           supplyStartPeriod: window.start,
           now,
         });
-      })
-      .sort((a, b) => b.period.localeCompare(a.period));
+      });
 
-    if (isRecurringAnnual(contract.recurrence)) {
+    // Annuali R: nascondi liquidate precedenti (solo ultima + operative).
+    const months = (
+      isAnnual
+        ? filterVisibleAnnualRecurringMonths(rawMonths, { includeArchived })
+        : rawMonths
+    ).sort((a, b) => b.period.localeCompare(a.period));
+
+    if (isAnnual) {
+      const hasLiquidatedMonth = (contract.recurringMonths ?? []).some(
+        (m) => m.status === "LIQUIDATED",
+      );
       const showFirstYear =
         mode === "all" ||
         (mode === "da-incassare" && !contract.collectionDate) ||
         (mode === "incassato" && Boolean(contract.collectionDate)) ||
         (mode === "pagato" && contract.status === "PROVVIGIONE_LIQUIDATA");
-      if (showFirstYear) {
+      const showUnit =
+        showFirstYear &&
+        shouldShowAnnualUnitLiquidatedRow({
+          contractStatus: contract.status,
+          hasLiquidatedRecurringMonth: hasLiquidatedMonth,
+          includeArchived,
+        });
+      if (showUnit) {
         rows.push(buildSingleRow(contract, opts));
       }
     }
@@ -626,7 +729,7 @@ export function expandContractsToProvvigioneRows(
 
     if (
       months.length === 0 &&
-      !isRecurringAnnual(contract.recurrence) &&
+      !isAnnual &&
       contract.status === "IN_ATTESA_PAGAMENTO" &&
       (mode === "da-incassare" || mode === "all")
     ) {
@@ -674,9 +777,21 @@ async function countRecurringRates(
   mode: RecurringExpandMode,
   stato?: string | null,
   scope?: ProvvigioniRowFilterScope,
+  includeArchivedAnnual?: boolean,
 ): Promise<number> {
   const statuses = rateStatusesForMode(mode, stato);
-  const where = expandedRateWhere(contractWhere, statuses, scope);
+  const archivedIds = await resolveArchivedAnnualIds(
+    contractWhere,
+    statuses,
+    includeArchivedAnnual,
+  );
+  const where = expandedRateWhere(
+    contractWhere,
+    statuses,
+    scope,
+    new Date(),
+    archivedIds,
+  );
   if (!where) return 0;
   return prisma.recurringMonth.count({ where });
 }
@@ -686,10 +801,17 @@ async function countNonRecurringContracts(
   expandMode: RecurringExpandMode,
   stato?: string | null,
   scope?: ProvvigioniRowFilterScope,
+  includeArchivedAnnual?: boolean,
 ): Promise<number> {
   const statuses = rateStatusesForMode(expandMode, stato);
   return prisma.contract.count({
-    where: expandedUnitWhere(contractWhere, expandMode, statuses, scope),
+    where: expandedUnitWhere(
+      contractWhere,
+      expandMode,
+      statuses,
+      scope,
+      includeArchivedAnnual,
+    ),
   });
 }
 
@@ -699,13 +821,26 @@ export async function countExpandedListRows(
   expandMode: RecurringExpandMode | null,
   stato?: string | null,
   scope?: ProvvigioniRowFilterScope,
+  includeArchivedAnnual?: boolean,
 ): Promise<number> {
   if (!expandMode) {
     return prisma.contract.count({ where: contractWhere });
   }
   const [rateCount, utCount] = await Promise.all([
-    countRecurringRates(contractWhere, expandMode, stato, scope),
-    countNonRecurringContracts(contractWhere, expandMode, stato, scope),
+    countRecurringRates(
+      contractWhere,
+      expandMode,
+      stato,
+      scope,
+      includeArchivedAnnual,
+    ),
+    countNonRecurringContracts(
+      contractWhere,
+      expandMode,
+      stato,
+      scope,
+      includeArchivedAnnual,
+    ),
   ]);
   return rateCount + utCount;
 }
@@ -738,6 +873,7 @@ export async function sumExpandedAmountForStato(
   competencePeriod: string | null,
   stato?: string | null,
   scope?: ProvvigioniRowFilterScope,
+  includeArchivedAnnual?: boolean,
 ): Promise<number> {
   if (!expandMode) {
     const contracts = await prisma.contract.findMany({
@@ -779,7 +915,13 @@ export async function sumExpandedAmountForStato(
   const statuses = rateStatusesForMode(expandMode, stato);
   if (statuses.length === 0) {
     const utContracts = await prisma.contract.findMany({
-      where: expandedUnitWhere(contractWhere, expandMode, statuses, scope),
+      where: expandedUnitWhere(
+        contractWhere,
+        expandMode,
+        statuses,
+        scope,
+        includeArchivedAnnual,
+      ),
       select: {
         client: { select: { type: true } },
         supplier: { select: { name: true } },
@@ -797,7 +939,19 @@ export async function sumExpandedAmountForStato(
       0,
     );
   }
-  const baseRateWhere = expandedRateWhere(contractWhere, statuses, scope) ?? {};
+  const archivedIds = await resolveArchivedAnnualIds(
+    contractWhere,
+    statuses,
+    includeArchivedAnnual,
+  );
+  const baseRateWhere =
+    expandedRateWhere(
+      contractWhere,
+      statuses,
+      scope,
+      new Date(),
+      archivedIds,
+    ) ?? {};
   const [rateAgg, fallbackRates, utContracts] = await Promise.all([
     prisma.recurringMonth.aggregate({
       where: {
@@ -824,7 +978,13 @@ export async function sumExpandedAmountForStato(
       take: 5000,
     }),
     prisma.contract.findMany({
-      where: expandedUnitWhere(contractWhere, expandMode, statuses, scope),
+      where: expandedUnitWhere(
+        contractWhere,
+        expandMode,
+        statuses,
+        scope,
+        includeArchivedAnnual,
+      ),
       select: {
         client: { select: { type: true } },
         supplier: { select: { name: true } },
@@ -989,17 +1149,26 @@ export async function fetchExpandedProvvigionePage(args: {
   const statuses = rateStatusesForMode(args.expandMode, args.buildOpts.statoFilter);
   const skip = paginationSkip(args.page, args.pageSize);
   const take = args.pageSize;
+  const includeArchived = args.buildOpts.includeArchivedAnnual === true;
+  const archivedIds = await resolveArchivedAnnualIds(
+    args.contractWhere,
+    statuses,
+    includeArchived,
+  );
 
   const utWhere: Prisma.ContractWhereInput = expandedUnitWhere(
     args.contractWhere,
     args.expandMode,
     statuses,
     args.scope,
+    includeArchived,
   );
   const rateWhere: Prisma.RecurringMonthWhereInput | null = expandedRateWhere(
     args.contractWhere,
     statuses,
     args.scope,
+    new Date(),
+    archivedIds,
   );
 
   type PageItem =

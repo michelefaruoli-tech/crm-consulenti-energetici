@@ -78,6 +78,7 @@ import {
   loadStornoContractsForMaps,
   type ContractForProvvigioneRow,
 } from "@/lib/provvigioni-rows";
+import { parseIncludeArchivedAnnual } from "@/lib/provvigioni-annual-archive";
 import { Button } from "@/components/ui/button";
 import { addMonths, periodLabel, toPeriod } from "@/lib/recurring";
 import type { Prisma } from "@/generated/prisma/client";
@@ -114,6 +115,8 @@ type SearchParams = {
   storno?: string;
   /** Mese di competenza YYYY-MM delle ricorrenze */
   competence?: string;
+  /** `1` = mostra anche liquidate annuali archiviate (default nascoste) */
+  archiviate?: string;
   /** Filtri di colonna (agenzia, tipo op., mese rif., gettone…): vedi provvigioni-column-filters */
   [param: string]: string | string[] | undefined;
 };
@@ -139,6 +142,7 @@ export default async function ProvvigioniPage({
     focus: focusRaw,
     storno: stornoRaw,
     competence: competenceRaw,
+    archiviate: archiviateRaw,
   } = rawSearchParams;
   const canViewAll = hasPermission(session.role, "commissions.view_all");
   const canConfirm = canConfirmCommission(session.role);
@@ -197,6 +201,13 @@ export default async function ProvvigioniPage({
   const showToLiquidatePanel =
     isIncassatoDaLiquidareFocus(focus) ||
     statoEffective === "Incassato";
+  const includeArchivedAnnual = parseIncludeArchivedAnnual(
+    typeof archiviateRaw === "string"
+      ? archiviateRaw
+      : Array.isArray(archiviateRaw)
+        ? archiviateRaw[0]
+        : undefined,
+  );
 
   const settledPeriod =
     settledRaw && /^\d{4}-\d{2}$/.test(settledRaw) ? settledRaw : toPeriod(new Date());
@@ -387,6 +398,7 @@ export default async function ProvvigioniPage({
         expandMode,
         statoEffective,
         rowFilterScope,
+        includeArchivedAnnual,
       )
     : await prisma.contract.count({ where: contractWhere });
   const pages = pageCount(total);
@@ -415,6 +427,7 @@ export default async function ProvvigioniPage({
     activeListTotal: total,
     allowExpand: Boolean(expandMode),
     rowScope: rowFilterScope,
+    includeArchivedAnnual,
   };
 
   // Commissoni mancanti: in background (non blocca il caricamento)
@@ -620,6 +633,7 @@ export default async function ProvvigioniPage({
     earlyMap: new Map<string, boolean>(),
     now: new Date(),
     statoFilter: statoEffective,
+    includeArchivedAnnual,
   };
   let prebuiltExpandedRows: ProvvigioneRow[] | null = null;
 
@@ -898,6 +912,7 @@ export default async function ProvvigioniPage({
     competence: competenceQueryValue,
     sort: sortByClient ? "client" : undefined,
     dir: sortByClient ? sortDir : undefined,
+    ...(includeArchivedAnnual ? { archiviate: "1" } : {}),
   };
   const anomalieHref = `/provvigioni?${new URLSearchParams({
     settled: settledPeriod,
@@ -966,6 +981,7 @@ export default async function ProvvigioniPage({
       ...(focus ? { focus } : {}),
       ...(stornoParam ? { storno: stornoParam } : {}),
       ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
+      ...(includeArchivedAnnual ? { archiviate: "1" } : {}),
       ...(nextVista !== "tutti" ? { vista: nextVista } : {}),
     }).toString()}`;
   }
@@ -985,6 +1001,7 @@ export default async function ProvvigioniPage({
     stato,
     ...(vistaTab !== "tutti" ? { vista: vistaTab } : {}),
     ...(competenceQueryValue ? { competence: competenceQueryValue } : {}),
+    ...(includeArchivedAnnual ? { archiviate: "1" } : {}),
   };
 
   const sortHint = sortByClient
@@ -1110,6 +1127,8 @@ export default async function ProvvigioniPage({
         }))}
         selectedCollabIds={selectedCollabIds}
         totalCollabCount={collabCounts.reduce((s, c) => s + c.n, 0)}
+        showAnnualArchiveHint={vistaTab === "annuale" || vistaTab === "tutti"}
+        includeArchivedAnnual={includeArchivedAnnual}
       />
 
       <ProvvigioniSummaryCards
