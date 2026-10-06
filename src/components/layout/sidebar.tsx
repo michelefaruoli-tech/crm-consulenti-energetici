@@ -26,7 +26,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { logoutAction } from "@/lib/logout-action";
-import { ROLE_LABELS, type AppRole } from "@/lib/constants";
+import { roleDisplayLabel, type AppRole } from "@/lib/constants";
+import { TopBar } from "@/components/layout/top-bar";
 
 type NavRoles = "all" | AppRole[];
 
@@ -111,6 +112,7 @@ export function Sidebar({
 
   // Chiudi menu al cambio pagina (navigazione telefono)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset drawer al cambio route
     setOpen(false);
   }, [pathname]);
 
@@ -195,7 +197,7 @@ export function Sidebar({
       <div className="border-t border-slate-800 p-4">
         <p className="truncate text-sm font-medium">{user.name}</p>
         <p className="text-xs text-slate-400">
-          {ROLE_LABELS[user.role] ?? user.role}
+          {roleDisplayLabel(user.role, user.email)}
         </p>
         <p className="mt-0.5 truncate text-xs text-slate-500">{user.email}</p>
       </div>
@@ -205,7 +207,7 @@ export function Sidebar({
   return (
     <>
       {/* Barra telefono */}
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
+      <header className="sticky top-0 z-40 flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2.5 md:hidden">
         <button
           type="button"
           className="rounded-lg border border-slate-200 p-2 text-slate-800"
@@ -216,8 +218,12 @@ export function Sidebar({
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900">CRM Energia</p>
-          <p className="truncate text-[11px] text-slate-500">{user.name}</p>
+          <p className="truncate text-[11px] text-slate-500">
+            {user.name}
+            <span className="text-slate-400"> · {roleDisplayLabel(user.role, user.email)}</span>
+          </p>
         </div>
+        <TopBar user={user} variant="mobile" />
         {canCreateContract ? (
           <Link
             href="/contratti/nuovo"

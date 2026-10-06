@@ -5,6 +5,10 @@ import { sendMail, textToHtmlParagraphs } from "@/lib/mail";
 import { clientDisplayName } from "@/lib/utils";
 import { resolveContractStakeholderEmails } from "@/lib/backoffice-destination";
 import { formatEmailList } from "@/lib/user-scope";
+import {
+  createAppNotificationsForUsers,
+  resolveActiveUserIdsByEmails,
+} from "@/lib/app-notifications";
 
 /** Stati Master per cui avvisare Master + inseritore/collaboratore. */
 const NOTIFY_TO: ContractStatus[] = [
@@ -27,9 +31,39 @@ export function shouldNotifyAgentStatusChange(
   return NOTIFY_TO.includes(to as ContractStatus);
 }
 
+async function createInAppOutcomeNotifications(opts: {
+  contractId: string;
+  contractNumber: string;
+  cliente: string;
+  fornitore: string;
+  outcomeLabel: string;
+  agentNotes: string;
+  recipientEmails: string[];
+}): Promise<void> {
+  try {
+    const userIds = await resolveActiveUserIdsByEmails(opts.recipientEmails);
+    if (userIds.length === 0) return;
+    const title = `${opts.outcomeLabel} — ${opts.cliente}`;
+    const bodyParts = [
+      opts.fornitore ? `Fornitore: ${opts.fornitore}` : null,
+      `Contratto: ${opts.contractNumber}`,
+      opts.agentNotes ? opts.agentNotes.slice(0, 400) : null,
+    ].filter(Boolean);
+    await createAppNotificationsForUsers(userIds, {
+      type: "CONTRACT_OUTCOME",
+      title,
+      body: bodyParts.join(" · "),
+      link: `/contratti/${opts.contractId}`,
+    });
+  } catch (e) {
+    console.warn("[notifyCollaboratorStatusChange] in-app", e);
+  }
+}
+
 /**
  * Email a Master + inseritore/collaboratore quando Back Office completa / risponde.
  * Destinatari: sempre MASTER_EMAIL e email di chi ha inserito (+ collaboratore se diverso).
+ * In parallelo crea notifiche in-app (campana) per gli stessi destinatari.
  * Non blocca il flusso se SMTP fallisce.
  */
 export async function notifyCollaboratorStatusChange(opts: {
@@ -117,6 +151,17 @@ export async function notifyCollaboratorStatusChange(opts: {
     ]
       .filter((line): line is string => line != null)
       .join("\n");
+
+    // Notifica in-app (aggiuntiva alle email BO #66)
+    await createInAppOutcomeNotifications({
+      contractId: contract.id,
+      contractNumber: contract.contractNumber,
+      cliente,
+      fornitore,
+      outcomeLabel,
+      agentNotes,
+      recipientEmails: recipients,
+    });
 
     const toEmail = formatEmailList(recipients);
     const result = await sendMail({

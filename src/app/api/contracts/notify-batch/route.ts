@@ -20,6 +20,11 @@ import {
 } from "@/lib/attachment-config";
 import { writeAuditLog } from "@/lib/audit";
 import { enqueueContractsForBackoffice } from "@/lib/enqueue-backoffice";
+import {
+  createAppNotificationsForUsers,
+  resolveActiveUserIdsByEmails,
+} from "@/lib/app-notifications";
+import { clientDisplayName } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -98,6 +103,34 @@ export async function POST(request: Request) {
       userId: session.id,
     });
     const queuedCount = enqueueResults.filter((r) => r.queued).length;
+
+    // Notifiche in-app (campana): Master + stakeholder + BO per ogni pratica
+    try {
+      for (const c of contracts) {
+        const merged = await mergeBackofficeAndStakeholderRecipients({
+          supplierId: c.supplierId,
+          collaboratorId: c.collaboratorId,
+          createdById: c.createdById,
+        });
+        const userIds = await resolveActiveUserIdsByEmails(merged.recipients);
+        if (userIds.length === 0) continue;
+        const cliente = clientDisplayName(c.client);
+        await createAppNotificationsForUsers(userIds, {
+          type: "CONTRACT_SENT_BO",
+          title: `Contratto inviato al BO — ${cliente}`,
+          body: [
+            c.supplier?.name ? `Fornitore: ${c.supplier.name}` : null,
+            `N. ${c.contractNumber}`,
+            `Inserito da: ${session.name}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          link: `/lavorazione/${c.id}`,
+        });
+      }
+    } catch (e) {
+      console.warn("[notify-batch] in-app notifications", e);
+    }
 
     // Destinazione BO + Master + inseritore/collaboratore per ogni pratica
     const destBySupplier = new Map<

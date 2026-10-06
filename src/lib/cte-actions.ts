@@ -19,8 +19,33 @@ import { SEV_IREN_OBSOLETE_OFFER_NAMES } from "@/lib/cte-sev-iren-listino";
 import { userCanManageCteOffer } from "@/lib/cte-scope";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import {
+  createAppNotificationsForUsers,
+  resolveCteBroadcastUserIds,
+} from "@/lib/app-notifications";
 
 export type CteActionResult = { ok: true; id?: string } | { ok: false; error: string };
+
+async function notifyCteStaff(opts: {
+  title: string;
+  body: string;
+  excludeUserId?: string;
+}): Promise<void> {
+  try {
+    const ids = (await resolveCteBroadcastUserIds()).filter(
+      (id) => id !== opts.excludeUserId,
+    );
+    if (ids.length === 0) return;
+    await createAppNotificationsForUsers(ids, {
+      type: "CTE_UPDATE",
+      title: opts.title,
+      body: opts.body,
+      link: "/catalogo-cte",
+    });
+  } catch (e) {
+    console.warn("[cte-actions] in-app notification", e);
+  }
+}
 
 function assertManagePermission(role: Parameters<typeof hasPermission>[0]): void {
   if (!hasPermission(role, "cte.catalog.manage")) {
@@ -174,6 +199,12 @@ export async function createCteOfferAction(formData: FormData): Promise<CteActio
     details: { offerName: offer.offerName, supplierId: offer.supplierId },
   });
 
+  await notifyCteStaff({
+    title: `Nuova offerta CTE — ${offer.offerName}`,
+    body: `Creata da ${session.name}`,
+    excludeUserId: session.id,
+  });
+
   revalidatePath("/catalogo-cte");
   return { ok: true, id: offer.id };
 }
@@ -244,6 +275,12 @@ export async function updateCteOfferAction(formData: FormData): Promise<CteActio
     details: { offerName: parsed.offerName },
   });
 
+  await notifyCteStaff({
+    title: `Offerta CTE aggiornata — ${parsed.offerName}`,
+    body: `Modificata da ${session.name}`,
+    excludeUserId: session.id,
+  });
+
   revalidatePath("/catalogo-cte");
   revalidatePath(`/catalogo-cte/${id}`);
   return { ok: true, id };
@@ -273,6 +310,12 @@ export async function deactivateCteOfferAction(formData: FormData): Promise<CteA
     entity: "CteOffer",
     entityId: id,
     details: { offerName: existing.offerName },
+  });
+
+  await notifyCteStaff({
+    title: `Offerta CTE disattivata — ${existing.offerName}`,
+    body: `Disattivata da ${session.name}`,
+    excludeUserId: session.id,
   });
 
   revalidatePath("/catalogo-cte");
@@ -306,6 +349,12 @@ export async function importDolomitiListinoAction(): Promise<
     action: "IMPORT_CTE_LISTINO",
     entity: "CteOffer",
     details: { supplier: dolomiti.name, ...result, source: "dolomiti-screenshot-set-2026" },
+  });
+
+  await notifyCteStaff({
+    title: `Import listino CTE — ${dolomiti.name}`,
+    body: `+${result.created} create, ${result.updated} aggiornate (da ${session.name})`,
+    excludeUserId: session.id,
   });
 
   revalidatePath("/catalogo-cte");
@@ -373,6 +422,12 @@ export async function importCteListinoAction(
     action: "IMPORT_CTE_LISTINO",
     entity: "CteOffer",
     details: { source: pack.kind, ...result, deactivated },
+  });
+
+  await notifyCteStaff({
+    title: `Import listino CTE — ${LISTINO_KIND_LABEL[kind]}`,
+    body: `+${result.created} create, ${result.updated} aggiornate${deactivated ? `, ${deactivated} disattivate` : ""} (da ${session.name})`,
+    excludeUserId: session.id,
   });
 
   revalidatePath("/catalogo-cte");
