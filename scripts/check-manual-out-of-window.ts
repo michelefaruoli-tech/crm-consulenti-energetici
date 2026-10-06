@@ -13,6 +13,8 @@ const base: Omit<Contract, "recurringMonths" | "supplyStartDate"> = {
   insertionDate: new Date(2026, 3, 1),
   supplyStartDate: null,
   operationType: "CAMBIO",
+  collectionDate: null,
+  recurrence: "M",
   status: "ATTIVATO",
   expiryDate: null,
   supplier: { name: "Helios" },
@@ -101,6 +103,35 @@ console.log("\n• Rata in intervallo → nessuna anomalia");
     ],
   };
   check("nessun finding", findOutOfWindowMonths(contract, now), null);
+}
+
+console.log(
+  "\n• Annuale +12 oltre expiry formale → NON fuori intervallo (preserve)",
+);
+{
+  const contract: Contract = {
+    ...base,
+    recurrence: "R",
+    collectionDate: new Date(2025, 5, 15),
+    supplyStartDate: new Date(2025, 5, 1),
+    expiryDate: new Date(2026, 5, 1),
+    recurringMonths: [
+      {
+        id: "m-2026-06",
+        period: "2026-06",
+        status: "PENDING",
+        amount: 70,
+        paidAt: null,
+        settledPeriod: null,
+        note: null,
+      },
+    ],
+  };
+  check(
+    "rata annuale +12 non segnalata come fuori intervallo",
+    findOutOfWindowMonths(contract, now),
+    null,
+  );
 }
 
 console.log("");

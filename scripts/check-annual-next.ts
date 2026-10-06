@@ -11,6 +11,7 @@ import {
   ANNUAL_NEXT_HIDDEN_NOTE,
   annualNextRowDue,
   isAnnualNextHidden,
+  listAnnualDuePeriodsThrough,
   nextAnnualDuePeriod,
 } from "../src/lib/recurring";
 import { isDisposableRecurringMonth } from "../src/lib/recurring-window";
@@ -77,6 +78,22 @@ check(
   "dopo un incasso: la prossima dovuta è +12 da quella, non subito",
   annualNextRowDue("2026-05", ["2027-05"], new Date(2027, 5, 1)).due, // giugno 2027
   false,
+);
+
+check(
+  "listAnnualDuePeriodsThrough: ingresso 2025-06 → 2026-06 dovuta a ott 2026",
+  listAnnualDuePeriodsThrough("2025-06", [], "2026-10").join(","),
+  "2026-06",
+);
+check(
+  "listAnnualDuePeriodsThrough: dopo LIQUIDATED 2026-06 → 2027-06 se maturata",
+  listAnnualDuePeriodsThrough("2025-06", ["2026-06"], "2027-07").join(","),
+  "2027-06",
+);
+check(
+  "listAnnualDuePeriodsThrough: non ancora al 13° mese → vuoto",
+  listAnnualDuePeriodsThrough("2025-06", [], "2026-05").join(","),
+  "",
 );
 
 check(

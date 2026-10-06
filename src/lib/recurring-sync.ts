@@ -6,6 +6,7 @@ import {
   isRecurring,
   isRecurringAnnual,
   isRecurringMonthly,
+  listAnnualDuePeriodsThrough,
   nextAnnualDuePeriod,
   normalizeRecurrence,
   recurrenceWriteData,
@@ -74,15 +75,20 @@ function isAutoClosedOutOfWindow(row: OutOfWindowMonthRow): boolean {
 /**
  * Segnala le rate fuori intervallo senza valore economico chiudendole con nota
  * automatica. La rimozione fisica resta solo al pulsante di bonifica (Backup).
+ *
+ * `preservePeriods`: competenze da non chiudere anche se oltre `window.end`
+ * (rate annuali +12 dovute dopo expiry formale).
  */
 async function closeDisposableOutOfWindowMonths(
   rows: OutOfWindowMonthRow[],
   window: RecurringWindow,
+  preservePeriods?: ReadonlySet<string>,
 ): Promise<{ closed: number; manualReview: number }> {
   const toClose: Array<{ id: string; note: string }> = [];
   let manualReview = 0;
 
   for (const row of rows) {
+    if (preservePeriods?.has(row.period)) continue;
     if (isPeriodInRecurringWindow(window, row.period)) continue;
     if (isAnnualNextHidden(row.note)) continue;
     if (!isDisposableRecurringMonth(row)) {
@@ -116,6 +122,7 @@ async function closeDisposableOutOfWindowMonths(
  * Il mese di competenza è ammesso per questo contratto?
  * Guardia da usare prima di creare una rata da azioni manuali o import.
  * Helios: blocca anche competenze oltre lastPayable (lag M+2).
+ * Annuali (R): ammette la catena +12 anche oltre expiry formale.
  */
 export async function isPeriodAllowedForContract(
   contractId: string,
@@ -129,6 +136,8 @@ export async function isPeriodAllowedForContract(
       operationType: true,
       status: true,
       expiryDate: true,
+      recurrence: true,
+      collectionDate: true,
       supplier: { select: { name: true } },
       statusHistory: {
         where: { toStatus: "CHIUSO" },
@@ -136,14 +145,30 @@ export async function isPeriodAllowedForContract(
         orderBy: { changedAt: "desc" },
         take: 1,
       },
+      recurringMonths: {
+        where: { status: { in: ["PAID", "LIQUIDATED"] } },
+        select: { period: true },
+      },
     },
   });
   if (!contract) return false;
-  if (!isPeriodInRecurringWindow(recurringWindow(contract), period)) {
+  const window = recurringWindow(contract);
+  if (isPeriodInRecurringWindow(window, period)) {
+    // ok in finestra formale
+  } else if (isRecurringAnnual(contract.recurrence)) {
+    const paid = contract.recurringMonths.map((m) => m.period);
+    const firstYearCollected =
+      Boolean(contract.collectionDate) || paid.length > 0;
+    if (!firstYearCollected) return false;
+    const nowPeriod = toPeriod(new Date());
+    const due = listAnnualDuePeriodsThrough(window.start, paid, nowPeriod);
+    // Anche la prossima non ancora scaduta: creazione manuale / import al 13° mese.
+    const next = nextAnnualDuePeriod(window.start, paid);
+    if (!due.includes(period) && period !== next) return false;
+  } else {
     return false;
   }
   if (isHeliosSupplier(contract.supplier?.name)) {
-    const window = recurringWindow(contract);
     if (
       isHeliosCompetenceHiddenByLag({
         period,
@@ -161,10 +186,13 @@ export async function isPeriodAllowedForContract(
  * Chiude le rate del contratto fuori dall'intervallo di competenza.
  * Le rate incassate / pagate / segnalate a mano non vengono toccate:
  * finiscono nel conteggio `manualReview` e restano visibili.
+ *
+ * `preservePeriods`: es. competenze annuali +12 dovute oltre expiry formale.
  */
 async function purgeOutOfWindowMonths(
   contractId: string,
   window: RecurringWindow,
+  preservePeriods?: ReadonlySet<string>,
 ): Promise<{ closed: number; manualReview: number }> {
   const rows = await prisma.recurringMonth.findMany({
     where: {
@@ -184,7 +212,7 @@ async function purgeOutOfWindowMonths(
     },
   });
 
-  return closeDisposableOutOfWindowMonths(rows, window);
+  return closeDisposableOutOfWindowMonths(rows, window, preservePeriods);
 }
 
 /**
@@ -211,6 +239,8 @@ export async function reconcileAllRecurringBounds(): Promise<{
       insertionDate: true,
       supplyStartDate: true,
       operationType: true,
+      collectionDate: true,
+      recurrence: true,
       status: true,
       expiryDate: true,
       statusHistory: {
@@ -232,13 +262,28 @@ export async function reconcileAllRecurringBounds(): Promise<{
     },
   });
 
+  const nowPeriod = toPeriod(new Date());
   let excluded = 0;
   let manualReview = 0;
   for (const contract of contracts) {
     const window = recurringWindow(contract);
+    let preservePeriods: ReadonlySet<string> | undefined;
+    if (isRecurringAnnual(contract.recurrence)) {
+      const paidPeriods = contract.recurringMonths
+        .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
+        .map((r) => r.period);
+      const firstYearCollected =
+        Boolean(contract.collectionDate) || paidPeriods.length > 0;
+      if (firstYearCollected) {
+        preservePeriods = new Set(
+          listAnnualDuePeriodsThrough(window.start, paidPeriods, nowPeriod),
+        );
+      }
+    }
     const result = await closeDisposableOutOfWindowMonths(
       contract.recurringMonths,
       window,
+      preservePeriods,
     );
     excluded += result.closed;
     manualReview += result.manualReview;
@@ -301,8 +346,26 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   const window = recurringWindow(contract, nowDate);
 
   // Rate fuori intervallo (prima dell'ingresso o dopo la chiusura): via.
-  // Restano solo quelle con valore economico, da decidere a mano.
-  await purgeOutOfWindowMonths(contractId, window);
+  // Annuali: preserva le competenze +12 dovute (cadono dopo expiry formale).
+  let preservePeriods: ReadonlySet<string> | undefined;
+  if (isRecurringAnnual(contract.recurrence)) {
+    const paidRows = await prisma.recurringMonth.findMany({
+      where: {
+        contractId,
+        status: { in: ["PAID", "LIQUIDATED"] },
+      },
+      select: { period: true },
+    });
+    const paidPeriods = paidRows.map((r) => r.period);
+    const firstYearCollected =
+      Boolean(contract.collectionDate) || paidPeriods.length > 0;
+    if (firstYearCollected) {
+      preservePeriods = new Set(
+        listAnnualDuePeriodsThrough(window.start, paidPeriods, now),
+      );
+    }
+  }
+  await purgeOutOfWindowMonths(contractId, window, preservePeriods);
 
   // Pratica fallita: chiudi mesi aperti e non generarne di nuovi.
   if (contract.status === "ANNULLATO" || contract.status === "KO") {
@@ -774,6 +837,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       insertionDate: true,
       supplyStartDate: true,
       operationType: true,
+      collectionDate: true,
       status: true,
       expiryDate: true,
       commission: { select: { expected: true } },
@@ -818,8 +882,23 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
 
   for (const contract of contracts) {
     // Le rate fuori intervallo vanno chiuse anche per annuali / pratiche KO.
+    // Annuali: non chiudere le competenze +12 dovute oltre expiry formale.
     const window = recurringWindow(contract, nowDate);
+    let preserveAnnual: ReadonlySet<string> | undefined;
+    if (isRecurringAnnual(contract.recurrence)) {
+      const paidPeriods = contract.recurringMonths
+        .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
+        .map((r) => r.period);
+      const firstYearCollected =
+        Boolean(contract.collectionDate) || paidPeriods.length > 0;
+      if (firstYearCollected) {
+        preserveAnnual = new Set(
+          listAnnualDuePeriodsThrough(window.start, paidPeriods, now),
+        );
+      }
+    }
     for (const row of contract.recurringMonths) {
+      if (preserveAnnual?.has(row.period)) continue;
       if (isPeriodInRecurringWindow(window, row.period)) continue;
       if (isAnnualNextHidden(row.note)) continue;
       if (!isDisposableRecurringMonth(row)) {

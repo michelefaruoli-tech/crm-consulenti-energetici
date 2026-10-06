@@ -224,3 +224,36 @@ export function annualNextRowDue(
   const period = nextAnnualDuePeriod(supplyStartPeriod, paidPeriods);
   return { due: period <= toPeriod(now), period };
 }
+
+/**
+ * Competenze annuali già dovute fino a `nowPeriod` (catena +12).
+ *
+ * Importante: queste date cadono spesso **dopo** l'`expiryDate` formale
+ * (ingresso + 12 mesi → finestra mensile chiude un mese prima dell'anniversario).
+ * Sync, purge e backfill devono trattarle come legittime, non come rate
+ * fuori intervallo da chiudere/saltare.
+ */
+export function listAnnualDuePeriodsThrough(
+  supplyStartPeriod: string,
+  paidPeriods: readonly string[],
+  nowPeriod: string,
+  alreadyPaidOrLiquidated: ReadonlySet<string> = new Set(
+    paidPeriods.filter((p) => /^\d{4}-\d{2}$/.test(p)),
+  ),
+): string[] {
+  if (!/^\d{4}-\d{2}$/.test(supplyStartPeriod) || !/^\d{4}-\d{2}$/.test(nowPeriod)) {
+    return [];
+  }
+  const due: string[] = [];
+  let nextDue = nextAnnualDuePeriod(supplyStartPeriod, paidPeriods);
+  for (let i = 0; i < 10; i++) {
+    if (nextDue > nowPeriod) break;
+    if (alreadyPaidOrLiquidated.has(nextDue)) {
+      nextDue = addMonths(nextDue, 12);
+      continue;
+    }
+    due.push(nextDue);
+    nextDue = addMonths(nextDue, 12);
+  }
+  return due;
+}
