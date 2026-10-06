@@ -291,8 +291,10 @@ export function ContractsFilterTable({
   if (canDelete) {
     columns.push({
       key: "_del",
-      label: "",
+      label: "Azioni",
       getValue: () => "",
+      stickyRight: true,
+      colClassName: "min-w-[5.5rem] text-right",
       render: (r) => <DeleteRowButton kind="contract" id={String(r.id)} />,
     });
   }

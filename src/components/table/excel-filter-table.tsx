@@ -39,6 +39,11 @@ export type FilterColumn = {
   colClassName?: string;
   /** Testo secondario sotto la cella editabile (es. competenza mensile) */
   cellExtra?: (row: Record<string, unknown>) => React.ReactNode;
+  /**
+   * Colonna fissa a destra durante lo scroll orizzontale
+   * (es. AZIONI su Contratti, come demo evo-flow).
+   */
+  stickyRight?: boolean;
 };
 
 type Props = {
@@ -552,6 +557,25 @@ export function ExcelFilterTable({
     updateFixedBarGeometry();
   }, [needsHScroll]);
 
+  /**
+   * Rotella mouse → scroll orizzontale (come demo evo-flow/contracts.html):
+   * deltaY positivo scorre a destra. Solo se la tabella overflow-x.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 2) return;
+      // Gesture già orizzontale (trackpad): lascia al browser
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [columns, rows, fitWidth]);
+
   function syncFromMain() {
     const main = scrollRef.current;
     const sticky = stickyScrollRef.current;
@@ -974,9 +998,12 @@ export function ExcelFilterTable({
                 <th
                   key={col.key}
                   className={cn(
-                    "relative align-bottom overflow-visible whitespace-nowrap",
+                    "relative align-bottom whitespace-nowrap",
+                    col.stickyRight ? "overflow-hidden" : "overflow-visible",
                     dense ? "px-1.5 py-1.5" : "px-3 py-2",
                     col.colClassName,
+                    col.stickyRight &&
+                      "sticky right-0 z-30 bg-slate-100 shadow-[-2px_0_5px_rgba(15,23,42,0.06)]",
                   )}
                 >
                   <div className="flex min-w-0 items-center gap-0.5">
@@ -1045,7 +1072,7 @@ export function ExcelFilterTable({
               <tr
                 key={key}
                 className={cn(
-                  "transition-colors",
+                  "group/row transition-colors",
                   onRowClick &&
                     (getRowClassName
                       ? "cursor-pointer hover:brightness-[0.97]"
@@ -1094,7 +1121,16 @@ export function ExcelFilterTable({
                       rowBox,
                       isFirstData && "border-l border-slate-300",
                       isLast && "border-r border-slate-300",
-                      rowSurface,
+                      // Sticky a destra: sfondo opaco obbligatorio (altrimenti le colonne sotto traspaiono)
+                      col.stickyRight
+                        ? cn(
+                            "sticky right-0 z-10 shadow-[-2px_0_5px_rgba(15,23,42,0.06)]",
+                            rowSurface || "bg-white",
+                            !getRowClassName &&
+                              onRowClick &&
+                              "group-hover/row:bg-slate-50",
+                          )
+                        : rowSurface,
                       isFirstData && rowAccent,
                       dirty && "bg-amber-50",
                       selected && "!bg-emerald-200",
