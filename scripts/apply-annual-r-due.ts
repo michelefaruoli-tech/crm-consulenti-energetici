@@ -112,16 +112,45 @@ async function upsertDuePeriod(args: {
 
   if (!existing) {
     if (DRY) return "created";
-    await prisma.recurringMonth.create({
-      data: {
-        contractId,
-        period,
-        status,
-        amount,
-        paidAt: null,
-      },
-    });
-    return "created";
+    try {
+      await prisma.recurringMonth.create({
+        data: {
+          contractId,
+          period,
+          status,
+          amount,
+          paidAt: null,
+        },
+      });
+      return "created";
+    } catch (e) {
+      // Race / riga già presente: verifica e eventuale riapertura.
+      const again = await prisma.recurringMonth.findFirst({
+        where: { contractId, period },
+        select: {
+          id: true,
+          period: true,
+          status: true,
+          note: true,
+          amount: true,
+        },
+      });
+      if (!again) throw e;
+      if (OPEN_STATUSES.has(again.status) || PRESERVED.has(again.status)) {
+        return "already_ok";
+      }
+      await prisma.recurringMonth.update({
+        where: { id: again.id },
+        data: {
+          status,
+          amount: amount ?? (again.amount == null ? null : Number(again.amount)),
+          paidAt: null,
+          settledPeriod: null,
+          note: isAnnualNextHidden(again.note) ? null : again.note,
+        },
+      });
+      return "reopened";
+    }
   }
 
   if (PRESERVED.has(existing.status)) return "already_ok";
@@ -347,11 +376,23 @@ async function main() {
   );
 
   await prisma.$disconnect();
-  if (errors > 0) process.exit(1);
+  // In production build non far fallire il deploy (come annual-past-years).
+  if (errors > 0 && !APPLY_IF_PROD) process.exit(1);
+  if (errors > 0 && APPLY_IF_PROD) {
+    console.error(
+      `[annual-r-due] ${errors} errori durante apply — continuo il build; sync/cron o rilancio possono completare`,
+    );
+  }
 }
 
 main().catch(async (e) => {
-  console.error(e);
-  await prisma.$disconnect();
+  console.error("[annual-r-due]", e);
+  await prisma.$disconnect().catch(() => undefined);
+  if (APPLY_IF_PROD) {
+    console.error(
+      "[annual-r-due] apply fallito in build — continuo; sync/cron o rilancio possono riparare",
+    );
+    process.exit(0);
+  }
   process.exit(1);
 });
