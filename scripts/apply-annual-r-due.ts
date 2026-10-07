@@ -19,10 +19,15 @@ import {
   isAnnualFirstYearCollected,
   isAnnualNextHidden,
   listAnnualDuePeriodsThrough,
+  recurrenceWriteData,
   toPeriod,
 } from "../src/lib/recurring";
 import { computeSupplyStartDate } from "../src/lib/supply-dates";
 import { clientDisplayName } from "../src/lib/utils";
+
+/** Fornitori annuali (R) anche se ancora marcati UT per drift recurrenceKind. */
+const ANNUAL_SUPPLIER_HINT =
+  /sinergy|etruria|dolomiti|duferco/i;
 
 const CLIENT_NAME_SELECT = {
   type: true,
@@ -436,21 +441,38 @@ async function main() {
       );
     }
 
-    // Preferisci R non storico; altrimenti R storico; altrimenti il primo match.
-    const row =
+    // Preferisci R non storico; altrimenti il primo non storico (spesso UT da correggere).
+    let row =
       matches.find((m) => m.recurrenceKind === "R" && !m.isHistorical) ??
       matches.find((m) => m.recurrenceKind === "R") ??
+      matches.find((m) => !m.isHistorical) ??
       matches[0]!;
 
+    const clientLabel = clientDisplayName(row.client);
+    const annualSupplier = ANNUAL_SUPPLIER_HINT.test(row.supplier.name);
+
+    // Vitucci/Quadrifoglio: Sinergy/Etruria restati UT perché set-annual scriveva
+    // solo `recurrence` e non `recurrenceKind` (e Etruria non era in lista).
     if (row.recurrenceKind !== "R") {
-      const line = `[focus] ${clientDisplayName(row.client)} | ${pod} | ${row.supplier.name} | kind=${row.recurrenceKind} (atteso R) | MANCANTE`;
-      console.warn(line);
-      focusLines.push(line);
-      focusMissing++;
-      continue;
+      if (!annualSupplier) {
+        const line = `[focus] ${clientLabel} | ${pod} | ${row.supplier.name} | kind=${row.recurrenceKind} (atteso R) | MANCANTE`;
+        console.warn(line);
+        focusLines.push(line);
+        focusMissing++;
+        continue;
+      }
+      if (!DRY) {
+        await prisma.contract.update({
+          where: { id: row.id },
+          data: recurrenceWriteData("R"),
+        });
+      }
+      console.log(
+        `[focus] FIX kind ${row.recurrenceKind}→R ${clientLabel} | ${pod} | ${row.supplier.name}${DRY ? " (dry)" : ""}`,
+      );
+      row = { ...row, recurrenceKind: "R" };
     }
 
-    const clientLabel = clientDisplayName(row.client);
     const paidPeriods = row.recurringMonths
       .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
       .map((r) => r.period);

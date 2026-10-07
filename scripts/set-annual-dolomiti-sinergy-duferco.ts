@@ -1,5 +1,7 @@
 /**
- * Imposta ricorrenza annuale (R) per Dolomiti, Sinergy, Duferco.
+ * Imposta ricorrenza annuale (R) per Dolomiti, Sinergy, Duferco, Etruria.
+ * Scrive SEMPRE `recurrence` + `recurrenceKind` (via recurrenceWriteData).
+ *
  * Uso:
  *   npx tsx scripts/set-annual-dolomiti-sinergy-duferco.ts --dry
  *   npx tsx scripts/set-annual-dolomiti-sinergy-duferco.ts
@@ -10,10 +12,11 @@ dotenv.config();
 
 import { PrismaNeonHttp } from "@prisma/adapter-neon";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { recurrenceWriteData } from "../src/lib/recurring";
 
 const DRY = process.argv.includes("--dry");
 
-const SUPPLIERS_ANNUAL = ["Dolomiti", "Sinergy", "Duferco"];
+const SUPPLIERS_ANNUAL = ["Dolomiti", "Sinergy", "Duferco", "Etruria"];
 
 const prisma = new PrismaClient({
   adapter: new PrismaNeonHttp(process.env.DATABASE_URL!, {
@@ -34,11 +37,12 @@ async function main() {
       OR: SUPPLIERS_ANNUAL.map((name) => ({
         supplier: { name: { equals: name, mode: "insensitive" as const } },
       })),
-      NOT: { recurrence: { equals: "R", mode: "insensitive" } },
+      NOT: { recurrenceKind: "R" },
     },
     select: {
       id: true,
       recurrence: true,
+      recurrenceKind: true,
       supplier: { select: { name: true } },
     },
   });
@@ -60,15 +64,15 @@ async function main() {
     return;
   }
 
-  const ids = contracts.map((c) => c.id);
-  for (const id of ids) {
+  const write = recurrenceWriteData("R");
+  for (const c of contracts) {
     await prisma.contract.update({
-      where: { id },
-      data: { recurrence: "R" },
+      where: { id: c.id },
+      data: write,
     });
   }
 
-  console.log(`Aggiornati ${ids.length} contratti → R (annuale)`);
+  console.log(`Aggiornati ${contracts.length} contratti → R (annuale)`);
   await prisma.$disconnect();
 }
 
