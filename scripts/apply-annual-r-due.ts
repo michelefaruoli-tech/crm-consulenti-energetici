@@ -347,11 +347,23 @@ async function main() {
   );
 
   await prisma.$disconnect();
-  if (errors > 0) process.exit(1);
+  // In production build non far fallire il deploy (come annual-past-years).
+  if (errors > 0 && !APPLY_IF_PROD) process.exit(1);
+  if (errors > 0 && APPLY_IF_PROD) {
+    console.error(
+      `[annual-r-due] ${errors} errori durante apply — continuo il build; sync/cron o rilancio possono completare`,
+    );
+  }
 }
 
 main().catch(async (e) => {
-  console.error(e);
-  await prisma.$disconnect();
+  console.error("[annual-r-due]", e);
+  await prisma.$disconnect().catch(() => undefined);
+  if (APPLY_IF_PROD) {
+    console.error(
+      "[annual-r-due] apply fallito in build — continuo; sync/cron o rilancio possono riparare",
+    );
+    process.exit(0);
+  }
   process.exit(1);
 });
