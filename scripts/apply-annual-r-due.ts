@@ -96,7 +96,69 @@ type MonthRow = {
 };
 
 function normalizePod(value: string | null | undefined): string {
-  return (value ?? "").trim().toUpperCase();
+  return (value ?? "").trim().toUpperCase().replace(/[\s\-]/g, "");
+}
+
+function podMatchesFocus(
+  focusPod: string,
+  pod: string | null | undefined,
+  podPdr: string | null | undefined,
+): boolean {
+  const target = normalizePod(focusPod);
+  const a = normalizePod(pod);
+  const b = normalizePod(podPdr);
+  if (!target) return false;
+  return (
+    a === target ||
+    b === target ||
+    (a.length >= 8 && (a.endsWith(target) || target.endsWith(a))) ||
+    (b.length >= 8 && (b.endsWith(target) || target.endsWith(b)))
+  );
+}
+
+const FOCUS_CONTRACT_SELECT = {
+  id: true,
+  insertionDate: true,
+  supplyStartDate: true,
+  operationType: true,
+  collectionDate: true,
+  status: true,
+  paymentStatus: true,
+  recurrenceKind: true,
+  isHistorical: true,
+  pod: true,
+  podPdr: true,
+  client: { select: CLIENT_NAME_SELECT },
+  supplier: { select: { name: true } },
+  commission: { select: { expected: true } },
+  recurringMonths: {
+    select: {
+      id: true,
+      period: true,
+      status: true,
+      note: true,
+      amount: true,
+    },
+  },
+} as const;
+
+/** Lookup flessibile: equals Prisma a volte non matcha POD con spazi/casing. */
+async function findFocusContractRows(focusPod: string) {
+  const tail = focusPod.slice(-10);
+  const rows = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      OR: [
+        { pod: { equals: focusPod, mode: "insensitive" } },
+        { podPdr: { equals: focusPod, mode: "insensitive" } },
+        { pod: { contains: tail, mode: "insensitive" } },
+        { podPdr: { contains: tail, mode: "insensitive" } },
+      ],
+    },
+    select: FOCUS_CONTRACT_SELECT,
+    take: 30,
+  });
+  return rows.filter((r) => podMatchesFocus(focusPod, r.pod, r.podPdr));
 }
 
 function supplyStartPeriod(contract: {
@@ -353,60 +415,130 @@ async function main() {
     }
   }
 
-  // Verifica finale focus POD da DB (anche dry: solo lettura stato attuale).
-  console.log("[focus] verifica POD segnalati");
+  // Pass focus: lookup flessibile POD (spazi/casing) + apply anche se esclusi dal filtro R stretto.
+  console.log("[focus] apply/verifica POD segnalati (lookup flessibile)");
   const focusLines: string[] = [];
   let focusOk = 0;
   let focusMissing = 0;
   for (const pod of FOCUS_PODS) {
-    const row = await prisma.contract.findFirst({
-      where: {
-        deletedAt: null,
-        isHistorical: false,
-        recurrenceKind: "R",
-        OR: [
-          { pod: { equals: pod, mode: "insensitive" } },
-          { podPdr: { equals: pod, mode: "insensitive" } },
-        ],
-      },
-      select: {
-        id: true,
-        insertionDate: true,
-        supplyStartDate: true,
-        operationType: true,
-        collectionDate: true,
-        client: { select: CLIENT_NAME_SELECT },
-        supplier: { select: { name: true } },
-        recurringMonths: {
-          select: { period: true, status: true },
-          orderBy: { period: "asc" },
-        },
-      },
-    });
-    if (!row) {
-      const line = `[focus] POD ${pod}: contratto R non trovato | MANCANTE`;
+    const matches = await findFocusContractRows(pod);
+    if (matches.length === 0) {
+      const line = `[focus] POD ${pod}: nessun contratto (qualsiasi kind) | MANCANTE`;
       console.warn(line);
       focusLines.push(line);
       focusMissing++;
       continue;
     }
+
+    for (const m of matches) {
+      console.log(
+        `[focus] DIAG ${pod} id=${m.id} kind=${m.recurrenceKind} status=${m.status} hist=${m.isHistorical} pod=${m.pod ?? "-"} podPdr=${m.podPdr ?? "-"} client=${clientDisplayName(m.client)} supplier=${m.supplier.name}`,
+      );
+    }
+
+    // Preferisci R non storico; altrimenti R storico; altrimenti il primo match.
+    const row =
+      matches.find((m) => m.recurrenceKind === "R" && !m.isHistorical) ??
+      matches.find((m) => m.recurrenceKind === "R") ??
+      matches[0]!;
+
+    if (row.recurrenceKind !== "R") {
+      const line = `[focus] ${clientDisplayName(row.client)} | ${pod} | ${row.supplier.name} | kind=${row.recurrenceKind} (atteso R) | MANCANTE`;
+      console.warn(line);
+      focusLines.push(line);
+      focusMissing++;
+      continue;
+    }
+
+    const clientLabel = clientDisplayName(row.client);
     const paidPeriods = row.recurringMonths
       .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
       .map((r) => r.period);
+    const firstYearCollected = isAnnualFirstYearCollected({
+      collectionDate: row.collectionDate,
+      status: row.status,
+      paymentStatus: row.paymentStatus,
+      paidOrLiquidatedPeriods: paidPeriods,
+    });
+    if (!firstYearCollected) {
+      const line = `[focus] ${clientLabel} | ${pod} | ${row.supplier.name} | primo anno non incassato | MANCANTE`;
+      console.warn(line);
+      focusLines.push(line);
+      focusMissing++;
+      continue;
+    }
+
     const start = supplyStartPeriod(row);
-    const due = listAnnualDuePeriodsThrough(start, paidPeriods, nowPeriod);
-    const target = due[0] ?? null;
+    const duePeriods = listAnnualDuePeriodsThrough(start, paidPeriods, nowPeriod);
+    const amount = Number(row.commission?.expected ?? 0) || null;
+    const byPeriod = new Map(
+      row.recurringMonths.map((r) => [r.period, r] as const),
+    );
+
+    for (const period of duePeriods) {
+      const existing = byPeriod.get(period) ?? null;
+      // Se già processato nel loop principale (already_ok), upsert è idempotente.
+      try {
+        const action = await upsertDuePeriod({
+          contractId: row.id,
+          period,
+          amount,
+          nowPeriod,
+          existing,
+        });
+        if (action === "created") created++;
+        else if (action === "reopened") reopened++;
+        console.log(
+          `[focus] ${action.toUpperCase()} ${clientLabel} ${pod} ${period}`,
+        );
+        focusResults.push({
+          pod,
+          client: clientLabel,
+          supplier: row.supplier.name,
+          period,
+          status:
+            action === "created" || action === "reopened"
+              ? period < nowPeriod
+                ? "MISSING"
+                : "PENDING"
+              : existing?.status ?? null,
+          action,
+        });
+      } catch (e) {
+        errors++;
+        console.error(
+          `[focus] err ${row.id} ${pod} ${period}`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
+    // Rileggi mesi dopo apply per status reale.
+    const months = await prisma.recurringMonth.findMany({
+      where: { contractId: row.id },
+      select: { period: true, status: true },
+      orderBy: { period: "asc" },
+    });
+    const paidAfter = months
+      .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
+      .map((r) => r.period);
+    const dueAfter = listAnnualDuePeriodsThrough(
+      supplyStartPeriod(row),
+      paidAfter,
+      nowPeriod,
+    );
+    const target = dueAfter[0] ?? duePeriods[0] ?? null;
     const month = target
-      ? row.recurringMonths.find((r) => r.period === target) ?? null
+      ? months.find((r) => r.period === target) ?? null
       : null;
     const operational =
-      month &&
+      !!month &&
       (OPEN_STATUSES.has(month.status) ||
         month.status === "PAID" ||
         month.status === "LIQUIDATED");
     if (operational) focusOk++;
     else focusMissing++;
-    const line = `[focus] ${clientDisplayName(row.client)} | ${pod} | ${row.supplier.name} | due=${target ?? "-"} | status=${month?.status ?? "ASSENTE"} | ${operational ? "OK" : "MANCANTE"}`;
+    const line = `[focus] ${clientLabel} | ${pod} | ${row.supplier.name} | due=${target ?? "-"} | status=${month?.status ?? "ASSENTE"} | ${operational ? "OK" : "MANCANTE"}`;
     console.log(line);
     focusLines.push(line);
   }
