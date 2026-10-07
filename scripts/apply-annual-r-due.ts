@@ -307,6 +307,9 @@ async function main() {
 
   // Verifica finale focus POD da DB (anche dry: solo lettura stato attuale).
   console.log("[focus] verifica POD segnalati");
+  const focusLines: string[] = [];
+  let focusOk = 0;
+  let focusMissing = 0;
   for (const pod of FOCUS_PODS) {
     const row = await prisma.contract.findFirst({
       where: {
@@ -333,7 +336,10 @@ async function main() {
       },
     });
     if (!row) {
-      console.warn(`[focus] POD ${pod}: contratto R non trovato`);
+      const line = `[focus] POD ${pod}: contratto R non trovato | MANCANTE`;
+      console.warn(line);
+      focusLines.push(line);
+      focusMissing++;
       continue;
     }
     const paidPeriods = row.recurringMonths
@@ -350,30 +356,35 @@ async function main() {
       (OPEN_STATUSES.has(month.status) ||
         month.status === "PAID" ||
         month.status === "LIQUIDATED");
-    console.log(
-      `[focus] ${row.client.name} | ${pod} | ${row.supplier.name} | due=${target ?? "-"} | status=${month?.status ?? "ASSENTE"} | ${operational ? "OK" : "MANCANTE"}`,
-    );
+    if (operational) focusOk++;
+    else focusMissing++;
+    const line = `[focus] ${row.client.name} | ${pod} | ${row.supplier.name} | due=${target ?? "-"} | status=${month?.status ?? "ASSENTE"} | ${operational ? "OK" : "MANCANTE"}`;
+    console.log(line);
+    focusLines.push(line);
   }
 
-  console.log(
-    JSON.stringify(
-      {
-        mode: DRY ? "dry" : "apply",
-        nowPeriod,
-        contracts: contracts.length,
-        candidates,
-        created,
-        reopened,
-        alreadyOk,
-        skippedNotDue,
-        skippedOther,
-        errors,
-        focusActions: focusResults,
-      },
-      null,
-      2,
-    ),
-  );
+  const summary = {
+    mode: DRY ? "dry" : "apply",
+    nowPeriod,
+    contracts: contracts.length,
+    candidates,
+    created,
+    reopened,
+    alreadyOk,
+    skippedNotDue,
+    skippedOther,
+    errors,
+    focusOk,
+    focusMissing,
+    focusActions: focusResults,
+  };
+  console.log(JSON.stringify(summary, null, 2));
+
+  if (APPLY && APPLY_IF_PROD && !DRY) {
+    await emailApplyReport({ summary, focusLines }).catch((e) => {
+      console.error("[annual-r-due] email report fallita", e);
+    });
+  }
 
   await prisma.$disconnect();
   // In production build non far fallire il deploy (come annual-past-years).
@@ -383,6 +394,62 @@ async function main() {
       `[annual-r-due] ${errors} errori durante apply — continuo il build; sync/cron o rilancio possono completare`,
     );
   }
+}
+
+async function emailApplyReport(args: {
+  summary: {
+    created: number;
+    reopened: number;
+    alreadyOk: number;
+    candidates: number;
+    errors: number;
+    focusOk: number;
+    focusMissing: number;
+    nowPeriod: string;
+  };
+  focusLines: string[];
+}): Promise<void> {
+  const host = process.env.SMTP_HOST?.trim();
+  const user = process.env.SMTP_USER?.trim();
+  const pass = process.env.SMTP_PASS?.trim() || process.env.SMTP_PASSWORD?.trim();
+  const to =
+    process.env.MASTER_EMAIL?.trim() || "michele.faruoli@gmail.com";
+  if (!host || !user || !pass) {
+    console.warn("[annual-r-due] SMTP non configurato — skip email report");
+    return;
+  }
+  const nodemailer = await import("nodemailer");
+  const fromEmail =
+    process.env.SMTP_FROM_EMAIL?.trim() ||
+    process.env.SMTP_FROM?.trim() ||
+    user;
+  const fromName = process.env.SMTP_FROM_NAME?.trim() || "CRM FM Consulenza";
+  const { summary, focusLines } = args;
+  const ok = summary.focusMissing === 0 && summary.focusOk >= 6;
+  const subject = ok
+    ? `CRM — apply rate 2026 OK (created ${summary.created}, reopened ${summary.reopened})`
+    : `CRM — apply rate 2026 da verificare (focus missing ${summary.focusMissing})`;
+  const text = [
+    `Apply annuali R dovute — produzione`,
+    `periodo corrente: ${summary.nowPeriod}`,
+    `created=${summary.created} reopened=${summary.reopened} alreadyOk=${summary.alreadyOk}`,
+    `candidates=${summary.candidates} errors=${summary.errors}`,
+    `focusOk=${summary.focusOk} focusMissing=${summary.focusMissing}`,
+    "",
+    ...focusLines,
+  ].join("\n");
+  const transporter = nodemailer.createTransport({
+    host,
+    port: Number(process.env.SMTP_PORT ?? 587),
+    auth: { user, pass },
+  });
+  await transporter.sendMail({
+    from: `"${fromName}" <${fromEmail}>`,
+    to,
+    subject,
+    text,
+  });
+  console.log(`[annual-r-due] email report inviata a ${to}`);
 }
 
 main().catch(async (e) => {
