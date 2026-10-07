@@ -53,6 +53,7 @@ const INTEGRITY_CONTRACT_SELECT = {
   supplyStartDate: true,
   operationType: true,
   status: true,
+  paymentStatus: true,
   expiryDate: true,
   supplier: { select: { name: true } },
   collaborator: { select: { name: true } },
@@ -92,6 +93,7 @@ type IntegrityContract = {
   supplyStartDate: Date | null;
   operationType: string | null;
   status: string | null;
+  paymentStatus: string | null;
   expiryDate: Date | null;
   supplier: { name: string } | null;
   collaborator: { name: string } | null;

@@ -192,6 +192,30 @@ export const notAnnualNextHiddenWhere: {
 };
 
 /**
+ * Prima annualità già incassata/liquidata (gettone sulla riga contratto
+ * oppure rate PAID/LIQUIDATED).
+ *
+ * Importante: la prima annualità R spesso NON ha `RecurringMonth` — resta
+ * su `collectionDate` / stato unità. Contratti legacy possono essere
+ * `PROVVIGIONE_LIQUIDATA` o `paymentStatus` Incassato/Pagato senza
+ * `collectionDate`: senza questo segnale sync/apply/backfill saltano il +12
+ * (caso Vitucci / Quadrifoglio dopo deploy #77/#78).
+ */
+export function isAnnualFirstYearCollected(input: {
+  collectionDate?: Date | string | null;
+  status?: string | null;
+  paymentStatus?: string | null;
+  paidOrLiquidatedPeriods?: readonly string[];
+}): boolean {
+  if (input.collectionDate) return true;
+  if ((input.paidOrLiquidatedPeriods?.length ?? 0) > 0) return true;
+  const status = (input.status ?? "").trim().toUpperCase();
+  if (status === "PROVVIGIONE_LIQUIDATA") return true;
+  const pay = (input.paymentStatus ?? "").trim();
+  return pay === "Incassato" || pay === "Pagato";
+}
+
+/**
  * Prossima competenza annuale: ultimo incasso + 12 mesi, oppure
  * primo anniversario (ingresso fornitura + 12) se non ci sono ancora rate pagate.
  */

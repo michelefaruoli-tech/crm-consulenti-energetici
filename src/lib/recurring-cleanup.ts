@@ -12,6 +12,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import {
+  isAnnualFirstYearCollected,
   isAnnualNextHidden,
   isRecurringAnnual,
   listAnnualDuePeriodsThrough,
@@ -74,6 +75,7 @@ const CONTRACT_SELECT = {
   collectionDate: true,
   recurrence: true,
   status: true,
+  paymentStatus: true,
   expiryDate: true,
   supplier: { select: { name: true } },
   collaborator: { select: { name: true } },
@@ -114,6 +116,7 @@ type ContractWithMonths = {
   collectionDate: Date | null;
   recurrence: string | null;
   status: string | null;
+  paymentStatus: string | null;
   expiryDate: Date | null;
   supplier: { name: string } | null;
   collaborator: { name: string } | null;
@@ -158,9 +161,14 @@ export function findOutOfWindowMonths(
     const paidPeriods = contract.recurringMonths
       .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
       .map((m) => m.period);
-    const firstYearCollected =
-      Boolean(contract.collectionDate) || paidPeriods.length > 0;
-    if (firstYearCollected) {
+    if (
+      isAnnualFirstYearCollected({
+        collectionDate: contract.collectionDate,
+        status: contract.status,
+        paymentStatus: contract.paymentStatus,
+        paidOrLiquidatedPeriods: paidPeriods,
+      })
+    ) {
       preserveAnnual = new Set(
         listAnnualDuePeriodsThrough(window.start, paidPeriods, toPeriod(now)),
       );

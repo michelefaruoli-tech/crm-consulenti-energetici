@@ -34,6 +34,7 @@ const base: Omit<Contract, "recurrence" | "supplier" | "recurringMonths"> = {
   supplyStartDate: new Date(2026, 0, 1),
   operationType: "CAMBIO",
   status: "ATTIVATO",
+  paymentStatus: null,
   expiryDate: null,
   collaborator: { name: "Michele Faruoli" },
   client,
@@ -200,6 +201,51 @@ console.log(
   );
   check(
     "piano backfill include 2026-06",
+    planBackfillForContract(contract, now).map((p) => p.period),
+    ["2026-06"],
+  );
+}
+
+console.log(
+  "\n• Annuale CHIUSO dopo expiry: backfill crea comunque il +12 (Vitucci/Quadrifoglio)",
+);
+{
+  const contract: Contract = {
+    ...base,
+    recurrence: "R",
+    recurrenceKind: "R",
+    status: "CHIUSO",
+    supplier: { name: "Sinergy" },
+    supplyStartDate: new Date(2025, 5, 1),
+    collectionDate: new Date(2025, 5, 20),
+    expiryDate: new Date(2026, 5, 1),
+    recurringMonths: [],
+  };
+  check(
+    "CHIUSO non esclude 2026-06",
+    planBackfillForContract(contract, now).map((p) => p.period),
+    ["2026-06"],
+  );
+}
+
+console.log(
+  "\n• Annuale liquidato legacy senza collectionDate: primo anno comunque riconosciuto",
+);
+{
+  const contract: Contract = {
+    ...base,
+    recurrence: "R",
+    recurrenceKind: "R",
+    status: "PROVVIGIONE_LIQUIDATA",
+    paymentStatus: "Pagato",
+    collectionDate: null,
+    supplier: { name: "Sinergy" },
+    supplyStartDate: new Date(2025, 5, 1),
+    expiryDate: new Date(2026, 5, 1),
+    recurringMonths: [],
+  };
+  check(
+    "PROVVIGIONE_LIQUIDATA senza collectionDate → 2026-06",
     planBackfillForContract(contract, now).map((p) => p.period),
     ["2026-06"],
   );

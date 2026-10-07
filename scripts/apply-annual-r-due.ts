@@ -16,6 +16,7 @@ dotenv.config();
 import { PrismaNeonHttp } from "@prisma/adapter-neon";
 import { PrismaClient } from "../src/generated/prisma/client";
 import {
+  isAnnualFirstYearCollected,
   isAnnualNextHidden,
   listAnnualDuePeriodsThrough,
   toPeriod,
@@ -28,6 +29,12 @@ const AUTO_CLOSED_NOTES = new Set([
   "Esclusa: successiva alla chiusura del contratto",
   "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)",
 ]);
+
+function clearClosureNote(note: string | null | undefined): string | null {
+  if (!note) return null;
+  if (AUTO_CLOSED_NOTES.has(note) || isAnnualNextHidden(note)) return null;
+  return note;
+}
 
 const APPLY_FLAG = process.argv.includes("--apply");
 const APPLY_IF_PROD = process.argv.includes("--apply-if-production");
@@ -146,7 +153,7 @@ async function upsertDuePeriod(args: {
           amount: amount ?? (again.amount == null ? null : Number(again.amount)),
           paidAt: null,
           settledPeriod: null,
-          note: isAnnualNextHidden(again.note) ? null : again.note,
+          note: clearClosureNote(again.note),
         },
       });
       return "reopened";
@@ -168,7 +175,7 @@ async function upsertDuePeriod(args: {
       amount: amount ?? (existing.amount == null ? null : Number(existing.amount)),
       paidAt: null,
       settledPeriod: null,
-      note: isAnnualNextHidden(existing.note) ? null : existing.note,
+      note: clearClosureNote(existing.note),
     },
   });
   return "reopened";
@@ -191,6 +198,8 @@ async function main() {
       supplyStartDate: true,
       operationType: true,
       collectionDate: true,
+      status: true,
+      paymentStatus: true,
       pod: true,
       podPdr: true,
       client: { select: { name: true } },
@@ -233,10 +242,28 @@ async function main() {
     const paidPeriods = contract.recurringMonths
       .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
       .map((r) => r.period);
-    const firstYearCollected =
-      Boolean(contract.collectionDate) || paidPeriods.length > 0;
+    const pod = normalizePod(contract.pod || contract.podPdr);
+    const firstYearCollected = isAnnualFirstYearCollected({
+      collectionDate: contract.collectionDate,
+      status: contract.status,
+      paymentStatus: contract.paymentStatus,
+      paidOrLiquidatedPeriods: paidPeriods,
+    });
     if (!firstYearCollected) {
       skippedNotDue++;
+      if (FOCUS_PODS.has(pod)) {
+        console.warn(
+          `[focus] SKIP ${contract.client.name} | ${pod} | primo anno non incassato (collectionDate=${contract.collectionDate ? "si" : "no"} status=${contract.status} payment=${contract.paymentStatus ?? "-"} paidMonths=${paidPeriods.length})`,
+        );
+        focusResults.push({
+          pod,
+          client: contract.client.name,
+          supplier: contract.supplier.name,
+          period: null,
+          status: null,
+          action: "skipped_first_year",
+        });
+      }
       continue;
     }
 
@@ -244,6 +271,19 @@ async function main() {
     const duePeriods = listAnnualDuePeriodsThrough(start, paidPeriods, nowPeriod);
     if (duePeriods.length === 0) {
       skippedNotDue++;
+      if (FOCUS_PODS.has(pod)) {
+        console.warn(
+          `[focus] SKIP ${contract.client.name} | ${pod} | nessuna competenza dovuta (start=${start} paid=${paidPeriods.join(",") || "-"})`,
+        );
+        focusResults.push({
+          pod,
+          client: contract.client.name,
+          supplier: contract.supplier.name,
+          period: null,
+          status: null,
+          action: "skipped_not_due",
+        });
+      }
       continue;
     }
 
@@ -252,7 +292,6 @@ async function main() {
     const byPeriod = new Map(
       contract.recurringMonths.map((r) => [r.period, r] as const),
     );
-    const pod = normalizePod(contract.pod || contract.podPdr);
 
     for (const period of duePeriods) {
       const existing = byPeriod.get(period) ?? null;

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   addMonths,
   ANNUAL_NEXT_HIDDEN_NOTE,
+  isAnnualFirstYearCollected,
   isAnnualNextHidden,
   isRecurring,
   isRecurringAnnual,
@@ -135,6 +136,7 @@ export async function isPeriodAllowedForContract(
       supplyStartDate: true,
       operationType: true,
       status: true,
+      paymentStatus: true,
       expiryDate: true,
       recurrence: true,
       collectionDate: true,
@@ -157,8 +159,12 @@ export async function isPeriodAllowedForContract(
     // ok in finestra formale
   } else if (isRecurringAnnual(contract.recurrence)) {
     const paid = contract.recurringMonths.map((m) => m.period);
-    const firstYearCollected =
-      Boolean(contract.collectionDate) || paid.length > 0;
+    const firstYearCollected = isAnnualFirstYearCollected({
+      collectionDate: contract.collectionDate,
+      status: contract.status,
+      paymentStatus: contract.paymentStatus,
+      paidOrLiquidatedPeriods: paid,
+    });
     if (!firstYearCollected) return false;
     const nowPeriod = toPeriod(new Date());
     const due = listAnnualDuePeriodsThrough(window.start, paid, nowPeriod);
@@ -242,6 +248,7 @@ export async function reconcileAllRecurringBounds(): Promise<{
       collectionDate: true,
       recurrence: true,
       status: true,
+      paymentStatus: true,
       expiryDate: true,
       statusHistory: {
         where: { toStatus: "CHIUSO" },
@@ -272,9 +279,14 @@ export async function reconcileAllRecurringBounds(): Promise<{
       const paidPeriods = contract.recurringMonths
         .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
         .map((r) => r.period);
-      const firstYearCollected =
-        Boolean(contract.collectionDate) || paidPeriods.length > 0;
-      if (firstYearCollected) {
+      if (
+        isAnnualFirstYearCollected({
+          collectionDate: contract.collectionDate,
+          status: contract.status,
+          paymentStatus: contract.paymentStatus,
+          paidOrLiquidatedPeriods: paidPeriods,
+        })
+      ) {
         preservePeriods = new Set(
           listAnnualDuePeriodsThrough(window.start, paidPeriods, nowPeriod),
         );
@@ -317,6 +329,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       collectionDate: true,
       stornoEndDate: true,
       status: true,
+      paymentStatus: true,
       expiryDate: true,
       statusHistory: {
         where: { toStatus: "CHIUSO" },
@@ -357,9 +370,14 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       select: { period: true },
     });
     const paidPeriods = paidRows.map((r) => r.period);
-    const firstYearCollected =
-      Boolean(contract.collectionDate) || paidPeriods.length > 0;
-    if (firstYearCollected) {
+    if (
+      isAnnualFirstYearCollected({
+        collectionDate: contract.collectionDate,
+        status: contract.status,
+        paymentStatus: contract.paymentStatus,
+        paidOrLiquidatedPeriods: paidPeriods,
+      })
+    ) {
       preservePeriods = new Set(
         listAnnualDuePeriodsThrough(window.start, paidPeriods, now),
       );
@@ -385,9 +403,8 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   const amount = Number(contract.commission?.expected ?? 0) || null;
 
   if (isRecurringAnnual(contract.recurrence)) {
-    if (contract.status !== "CHIUSO") {
-      await syncAnnualPeriods(contractId, contract, amount, nowDate);
-    }
+    // Anche CHIUSO (expiry formale 12 mesi): il +12 resta dovuto.
+    await syncAnnualPeriods(contractId, contract, amount, nowDate);
     return;
   }
 
@@ -477,6 +494,8 @@ type AnnualSyncContract = {
   supplyStartDate: Date | null;
   operationType: string | null;
   collectionDate: Date | null;
+  status: string | null;
+  paymentStatus: string | null;
   stornoEndDate: Date | null;
   supplier: { stornoMonths: number | null } | null;
 };
@@ -520,7 +539,12 @@ async function syncAnnualPeriods(
   const paid = months.filter(
     (row) => row.status === "PAID" || row.status === "LIQUIDATED",
   );
-  const firstYearCollected = Boolean(contract.collectionDate) || paid.length > 0;
+  const firstYearCollected = isAnnualFirstYearCollected({
+    collectionDate: contract.collectionDate,
+    status: contract.status,
+    paymentStatus: contract.paymentStatus,
+    paidOrLiquidatedPeriods: paid.map((row) => row.period),
+  });
 
   if (!firstYearCollected) {
     for (const row of months) {
@@ -672,6 +696,8 @@ export async function upsertAnnualBackfillPeriod(
       supplyStartDate: true,
       operationType: true,
       collectionDate: true,
+      status: true,
+      paymentStatus: true,
       stornoEndDate: true,
       supplier: { select: { stornoMonths: true } },
     },
@@ -689,7 +715,12 @@ export async function upsertAnnualBackfillPeriod(
     select: { id: true, period: true, status: true, amount: true, note: true },
   });
   const paid = months.filter((r) => r.status === "PAID" || r.status === "LIQUIDATED");
-  const firstYearCollected = Boolean(contract.collectionDate) || paid.length > 0;
+  const firstYearCollected = isAnnualFirstYearCollected({
+    collectionDate: contract.collectionDate,
+    status: contract.status,
+    paymentStatus: contract.paymentStatus,
+    paidOrLiquidatedPeriods: paid.map((r) => r.period),
+  });
   if (!firstYearCollected) {
     return {
       outcome: "saltata",
@@ -839,6 +870,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       operationType: true,
       collectionDate: true,
       status: true,
+      paymentStatus: true,
       expiryDate: true,
       commission: { select: { expected: true } },
       supplier: { select: { name: true } },
@@ -889,9 +921,14 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       const paidPeriods = contract.recurringMonths
         .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
         .map((r) => r.period);
-      const firstYearCollected =
-        Boolean(contract.collectionDate) || paidPeriods.length > 0;
-      if (firstYearCollected) {
+      if (
+        isAnnualFirstYearCollected({
+          collectionDate: contract.collectionDate,
+          status: contract.status,
+          paymentStatus: contract.paymentStatus,
+          paidOrLiquidatedPeriods: paidPeriods,
+        })
+      ) {
         preserveAnnual = new Set(
           listAnnualDuePeriodsThrough(window.start, paidPeriods, now),
         );
@@ -1053,7 +1090,11 @@ export async function getMissingRecurringAlerts(
           {
             isHistorical: false,
             deletedAt: null,
-            status: { notIn: ["KO", "ANNULLATO", "CHIUSO"] },
+            // CHIUSO escluso solo per mensili: sulle R il +12 resta dovuto oltre expiry.
+            status:
+              kind === "monthly"
+                ? { notIn: ["KO", "ANNULLATO", "CHIUSO"] }
+                : { notIn: ["KO", "ANNULLATO"] },
             ...recurrenceFilter,
           },
           ...(scopeWhere ? [scopeWhere] : []),
