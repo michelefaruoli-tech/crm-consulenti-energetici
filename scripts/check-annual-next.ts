@@ -10,6 +10,7 @@
 import {
   ANNUAL_NEXT_HIDDEN_NOTE,
   annualNextRowDue,
+  isAnnualFirstYearCollected,
   isAnnualNextHidden,
   listAnnualDuePeriodsThrough,
   nextAnnualDuePeriod,
@@ -31,6 +32,37 @@ function check(name: string, got: unknown, expected: unknown) {
   }
   console.log(`✅ ${name}`);
 }
+
+check(
+  "primo anno: collectionDate basta",
+  isAnnualFirstYearCollected({ collectionDate: new Date("2025-06-01") }),
+  true,
+);
+check(
+  "primo anno: PROVVIGIONE_LIQUIDATA senza collectionDate",
+  isAnnualFirstYearCollected({
+    collectionDate: null,
+    status: "PROVVIGIONE_LIQUIDATA",
+  }),
+  true,
+);
+check(
+  "primo anno: paymentStatus Incassato senza collectionDate",
+  isAnnualFirstYearCollected({
+    collectionDate: null,
+    paymentStatus: "Incassato",
+  }),
+  true,
+);
+check(
+  "primo anno: niente segnali → false",
+  isAnnualFirstYearCollected({
+    collectionDate: null,
+    status: "ATTIVATO",
+    paymentStatus: "Da incassare",
+  }),
+  false,
+);
 
 check(
   "primo incasso (niente rate pagate) → ingresso + 12 mesi",

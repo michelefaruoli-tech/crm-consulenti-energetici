@@ -6,6 +6,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import {
+  isAnnualFirstYearCollected,
   isContractRecurringAnnual,
   isContractRecurringMonthly,
   listAnnualDuePeriodsThrough,
@@ -84,6 +85,7 @@ const CANDIDATE_SELECT = {
   supplyStartDate: true,
   operationType: true,
   status: true,
+  paymentStatus: true,
   expiryDate: true,
   supplier: { select: { name: true } },
   collaborator: { select: { name: true } },
@@ -119,6 +121,7 @@ export type CandidateContract = {
   supplyStartDate: Date | null;
   operationType: string | null;
   status: string | null;
+  paymentStatus: string | null;
   expiryDate: Date | null;
   supplier: { name: string } | null;
   collaborator: { name: string } | null;
@@ -144,14 +147,20 @@ function contractLabel(contract: CandidateContract): string {
 }
 
 function annualFirstYearCollected(contract: CandidateContract): boolean {
-  if (contract.collectionDate) return true;
-  return contract.recurringMonths.some(
-    (m) => m.status === "PAID" || m.status === "LIQUIDATED",
-  );
+  const paidOrLiquidatedPeriods = contract.recurringMonths
+    .filter((m) => m.status === "PAID" || m.status === "LIQUIDATED")
+    .map((m) => m.period);
+  return isAnnualFirstYearCollected({
+    collectionDate: contract.collectionDate,
+    status: contract.status,
+    paymentStatus: contract.paymentStatus,
+    paidOrLiquidatedPeriods,
+  });
 }
 
 function expectedAnnualPeriods(contract: CandidateContract, now: Date): string[] {
-  if (contract.status === "CHIUSO") return [];
+  // CHIUSO dopo expiry formale (12 mesi) NON esclude il +12 dovuto:
+  // Vitucci/Quadrifoglio restano CHIUSO ma la rata anniversario è da incassare.
   if (!annualFirstYearCollected(contract)) return [];
 
   const window = recurringWindow(contract, now);
