@@ -341,6 +341,25 @@ check(
   true,
 );
 
+// Guardrail: Client non ha campo `name` (companyName/firstName/lastName).
+// #79 falliva in prod con PrismaClientValidationError su client.select.name.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+const applySrc = readFileSync(
+  join(process.cwd(), "scripts/apply-annual-r-due.ts"),
+  "utf8",
+);
+check(
+  "apply-annual-r-due non seleziona client.name (campo inesistente)",
+  /client:\s*\{\s*select:\s*\{\s*name:\s*true/.test(applySrc),
+  false,
+);
+check(
+  "apply-annual-r-due usa clientDisplayName",
+  applySrc.includes("clientDisplayName"),
+  true,
+);
+
 if (failures > 0) {
   console.error(`\n❌ ${failures} verifiche fallite (copia annuale +12).`);
   process.exit(1);

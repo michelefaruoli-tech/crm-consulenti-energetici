@@ -22,6 +22,14 @@ import {
   toPeriod,
 } from "../src/lib/recurring";
 import { computeSupplyStartDate } from "../src/lib/supply-dates";
+import { clientDisplayName } from "../src/lib/utils";
+
+const CLIENT_NAME_SELECT = {
+  type: true,
+  companyName: true,
+  firstName: true,
+  lastName: true,
+} as const;
 
 /** Allineato a `RECURRING_AUTO_CLOSED_NOTE` in recurring-window.ts (evita import @/). */
 const AUTO_CLOSED_NOTES = new Set([
@@ -202,7 +210,7 @@ async function main() {
       paymentStatus: true,
       pod: true,
       podPdr: true,
-      client: { select: { name: true } },
+      client: { select: CLIENT_NAME_SELECT },
       supplier: { select: { name: true } },
       commission: { select: { expected: true } },
       recurringMonths: {
@@ -239,6 +247,7 @@ async function main() {
   }> = [];
 
   for (const contract of contracts) {
+    const clientLabel = clientDisplayName(contract.client);
     const paidPeriods = contract.recurringMonths
       .filter((r) => r.status === "PAID" || r.status === "LIQUIDATED")
       .map((r) => r.period);
@@ -253,11 +262,11 @@ async function main() {
       skippedNotDue++;
       if (FOCUS_PODS.has(pod)) {
         console.warn(
-          `[focus] SKIP ${contract.client.name} | ${pod} | primo anno non incassato (collectionDate=${contract.collectionDate ? "si" : "no"} status=${contract.status} payment=${contract.paymentStatus ?? "-"} paidMonths=${paidPeriods.length})`,
+          `[focus] SKIP ${clientLabel} | ${pod} | primo anno non incassato (collectionDate=${contract.collectionDate ? "si" : "no"} status=${contract.status} payment=${contract.paymentStatus ?? "-"} paidMonths=${paidPeriods.length})`,
         );
         focusResults.push({
           pod,
-          client: contract.client.name,
+          client: clientLabel,
           supplier: contract.supplier.name,
           period: null,
           status: null,
@@ -273,11 +282,11 @@ async function main() {
       skippedNotDue++;
       if (FOCUS_PODS.has(pod)) {
         console.warn(
-          `[focus] SKIP ${contract.client.name} | ${pod} | nessuna competenza dovuta (start=${start} paid=${paidPeriods.join(",") || "-"})`,
+          `[focus] SKIP ${clientLabel} | ${pod} | nessuna competenza dovuta (start=${start} paid=${paidPeriods.join(",") || "-"})`,
         );
         focusResults.push({
           pod,
-          client: contract.client.name,
+          client: clientLabel,
           supplier: contract.supplier.name,
           period: null,
           status: null,
@@ -306,12 +315,12 @@ async function main() {
         if (action === "created") {
           created++;
           console.log(
-            `[ok] CREATA ${contract.client.name} ${pod} ${period} (${contract.supplier.name})`,
+            `[ok] CREATA ${clientLabel} ${pod} ${period} (${contract.supplier.name})`,
           );
         } else if (action === "reopened") {
           reopened++;
           console.log(
-            `[ok] RIAPERTA ${contract.client.name} ${pod} ${period} (${contract.supplier.name})`,
+            `[ok] RIAPERTA ${clientLabel} ${pod} ${period} (${contract.supplier.name})`,
           );
         } else if (action === "already_ok") {
           alreadyOk++;
@@ -322,7 +331,7 @@ async function main() {
         if (FOCUS_PODS.has(pod)) {
           focusResults.push({
             pod,
-            client: contract.client.name,
+            client: clientLabel,
             supplier: contract.supplier.name,
             period,
             status:
@@ -366,7 +375,7 @@ async function main() {
         supplyStartDate: true,
         operationType: true,
         collectionDate: true,
-        client: { select: { name: true } },
+        client: { select: CLIENT_NAME_SELECT },
         supplier: { select: { name: true } },
         recurringMonths: {
           select: { period: true, status: true },
@@ -397,7 +406,7 @@ async function main() {
         month.status === "LIQUIDATED");
     if (operational) focusOk++;
     else focusMissing++;
-    const line = `[focus] ${row.client.name} | ${pod} | ${row.supplier.name} | due=${target ?? "-"} | status=${month?.status ?? "ASSENTE"} | ${operational ? "OK" : "MANCANTE"}`;
+    const line = `[focus] ${clientDisplayName(row.client)} | ${pod} | ${row.supplier.name} | due=${target ?? "-"} | status=${month?.status ?? "ASSENTE"} | ${operational ? "OK" : "MANCANTE"}`;
     console.log(line);
     focusLines.push(line);
   }
