@@ -112,16 +112,45 @@ async function upsertDuePeriod(args: {
 
   if (!existing) {
     if (DRY) return "created";
-    await prisma.recurringMonth.create({
-      data: {
-        contractId,
-        period,
-        status,
-        amount,
-        paidAt: null,
-      },
-    });
-    return "created";
+    try {
+      await prisma.recurringMonth.create({
+        data: {
+          contractId,
+          period,
+          status,
+          amount,
+          paidAt: null,
+        },
+      });
+      return "created";
+    } catch (e) {
+      // Race / riga già presente: verifica e eventuale riapertura.
+      const again = await prisma.recurringMonth.findFirst({
+        where: { contractId, period },
+        select: {
+          id: true,
+          period: true,
+          status: true,
+          note: true,
+          amount: true,
+        },
+      });
+      if (!again) throw e;
+      if (OPEN_STATUSES.has(again.status) || PRESERVED.has(again.status)) {
+        return "already_ok";
+      }
+      await prisma.recurringMonth.update({
+        where: { id: again.id },
+        data: {
+          status,
+          amount: amount ?? (again.amount == null ? null : Number(again.amount)),
+          paidAt: null,
+          settledPeriod: null,
+          note: isAnnualNextHidden(again.note) ? null : again.note,
+        },
+      });
+      return "reopened";
+    }
   }
 
   if (PRESERVED.has(existing.status)) return "already_ok";
