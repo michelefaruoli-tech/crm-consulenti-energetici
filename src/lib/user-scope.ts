@@ -118,6 +118,24 @@ export async function loadVisibleCollaboratorOptions(
   });
 }
 
+/**
+ * Conta i collaboratori attivi nella rete dell’utente
+ * (`UserCollaboratorScope` dove `userId` = utente corrente).
+ * Usato dalla card Dashboard «Collaboratori più produttivi» per agenti/AM:
+ * serve ≥1 sottoposto attivo per mostrare la card (scoped alla propria rete).
+ */
+export async function countActiveNetworkCollaborators(
+  userId: string,
+): Promise<number> {
+  if (!userId.trim()) return 0;
+  return prisma.userCollaboratorScope.count({
+    where: {
+      userId,
+      collaborator: { active: true },
+    },
+  });
+}
+
 export async function contractVisibilityWhere(session: {
   id: string;
   role: Role;

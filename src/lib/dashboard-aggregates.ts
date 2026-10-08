@@ -135,3 +135,38 @@ export function aggregateCollaboratorRanking(
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "it"))
     .slice(0, limit);
 }
+
+/**
+ * Audience della card Dashboard «Collaboratori più produttivi»:
+ * - admin_global: Admin (`stats.full`) → ranking su tutta la rete
+ * - network: agente/AM (o altro ruolo) con ≥1 collaboratore attivo in
+ *   `UserCollaboratorScope` → ranking solo del proprio perimetro
+ * - hidden: collaboratore senza sottoposti → card non mostrata
+ */
+export type ProductiveCollaboratorsAudience =
+  | "admin_global"
+  | "network"
+  | "hidden";
+
+export function resolveProductiveCollaboratorsAudience(input: {
+  isAdminStats: boolean;
+  activeNetworkCollaboratorCount: number;
+}): ProductiveCollaboratorsAudience {
+  if (input.isAdminStats) return "admin_global";
+  if (input.activeNetworkCollaboratorCount >= 1) return "network";
+  return "hidden";
+}
+
+export function shouldShowProductiveCollaboratorsCard(
+  audience: ProductiveCollaboratorsAudience,
+): boolean {
+  return audience !== "hidden";
+}
+
+export function productiveCollaboratorsSubtitle(
+  audience: ProductiveCollaboratorsAudience,
+): string {
+  if (audience === "admin_global") return "Vista globale · nomi unificati";
+  if (audience === "network") return "La tua rete · nomi unificati";
+  return "";
+}
