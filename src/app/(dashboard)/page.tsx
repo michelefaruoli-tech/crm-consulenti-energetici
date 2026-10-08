@@ -16,6 +16,9 @@ import {
   aggregateSupplierRanking,
   aggregateUtilityRanking,
   parseDashboardYear,
+  productiveCollaboratorsSubtitle,
+  resolveProductiveCollaboratorsAudience,
+  shouldShowProductiveCollaboratorsCard,
   startOfMonth,
   startOfWeekMonday,
 } from "@/lib/dashboard-aggregates";
@@ -84,9 +87,22 @@ export default async function DashboardPage({
   const showCollabFilter = canViewAll || isScoped;
   const {
     contractVisibilityWhere,
+    countActiveNetworkCollaborators,
     loadVisibleCollaboratorOptions,
   } = await import("@/lib/user-scope");
   const visibility = await contractVisibilityWhere(session);
+  const activeNetworkCollaboratorCount = isAdminStats
+    ? 0
+    : await countActiveNetworkCollaborators(session.id);
+  const productiveAudience = resolveProductiveCollaboratorsAudience({
+    isAdminStats,
+    activeNetworkCollaboratorCount,
+  });
+  const showProductiveCard =
+    shouldShowProductiveCollaboratorsCard(productiveAudience);
+  const productiveRankingWhere = isAdminStats
+    ? { deletedAt: null as null }
+    : { deletedAt: null as null, ...visibility };
   const stornoCollab = showCollabFilter
     ? parseDashboardCollabParam(collabRaw)
     : undefined;
@@ -174,19 +190,22 @@ export default async function DashboardPage({
         },
         orderBy: [{ sentToMasterAt: "desc" }, { createdAt: "desc" }],
       }),
-      isAdminStats
+      showProductiveCard
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
-            where: { deletedAt: null },
+            where: productiveRankingWhere,
             _count: { id: true },
             orderBy: { _count: { id: "desc" } },
             take: 30,
           })
         : Promise.resolve([]),
-      isAdminStats
+      showProductiveCard
         ? prisma.contract.groupBy({
             by: ["collaboratorId"],
-            where: { deletedAt: null, insertionDate: { gte: monthStart } },
+            where: {
+              ...productiveRankingWhere,
+              insertionDate: { gte: monthStart },
+            },
             _count: { id: true },
             orderBy: { _count: { id: "desc" } },
             take: 30,
@@ -494,12 +513,14 @@ export default async function DashboardPage({
             )}
           </section>
 
-          {isAdminStats ? (
+          {showProductiveCard ? (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-1 text-lg font-semibold text-slate-900">
                 Collaboratori più produttivi
               </h2>
-              <p className="mb-4 text-sm text-slate-500">Solo admin · nomi unificati</p>
+              <p className="mb-4 text-sm text-slate-500">
+                {productiveCollaboratorsSubtitle(productiveAudience)}
+              </p>
 
               <div className="grid gap-6 sm:grid-cols-2">
                 <div>
