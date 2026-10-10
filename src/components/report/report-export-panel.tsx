@@ -148,8 +148,9 @@ export function ReportExportPanel({
         </Link>
       </div>
       <p className="mt-4 text-sm text-slate-600">
-        L’export apre con il foglio/sezione <strong>Rendiconto</strong>: Incassato +
-        Storni + ricorrenti + eventuali voci sopra, con subtotali.
+        L’export apre con il foglio/sezione <strong>Rendiconto</strong>: una scheda
+        colorata per fornitore (i mesi stanno dentro, i contratti in ordine
+        alfabetico), più storni, ricorrenti e le voci sopra.
       </p>
     </section>
   );
