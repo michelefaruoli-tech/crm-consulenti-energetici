@@ -49,6 +49,7 @@ const ACTION_STYLE: Record<ComparaAgostoAction, string> = {
   confirm: "bg-amber-50 text-amber-800",
   unmatched: "bg-red-50 text-red-700",
   skip_liquidated: "bg-slate-100 text-slate-600",
+  already_ok: "bg-slate-100 text-slate-700",
 };
 
 function isSelectable(row: ComparaAgostoPreviewRow): boolean {
@@ -390,10 +391,10 @@ export function ComparaAgostoImportPanel() {
       <p className="text-xs text-slate-500">
         Regole importo (partenza anteprima, poi editabili): Michele Faruoli /
         Lucio·Lucius Eni 80 / Iren 80 · Fagiano Eni 70 / Iren 65 · Laforgia e
-        altri Eni 70 / Iren 60. Match sul collaboratore CRM (Shop se serve). Su
-        ogni riga puoi modificare importo, collaboratore, etichetta e POD fill
-        prima di applicare. Create, «da confermare» e «senza match» vanno
-        selezionate a mano; senza match crea stub Client+Contratto.
+        altri Eni 70 / Iren 60. Se la rata è già Incassato da liquidare e il POD
+        coincide → «Già in liquidazione» (checkbox spenta, nessuno overwrite).
+        Una differenza regola vs gettone file non basta a proporre aggiornamento.
+        Create, «da confermare» e «senza match» vanno selezionate a mano.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -423,7 +424,7 @@ export function ComparaAgostoImportPanel() {
 
       {preview ? (
         <div className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
             <Stat label="Righe OK" value={String(preview.summary.total)} />
             <Stat
               label="Da aggiornare"
@@ -444,6 +445,10 @@ export function ComparaAgostoImportPanel() {
               label="Senza match"
               value={String(preview.summary.unmatched)}
               tone="red"
+            />
+            <Stat
+              label="Già in liquidazione"
+              value={String(preview.summary.alreadyOk)}
             />
             <Stat
               label="Già liquidate"
@@ -514,6 +519,7 @@ export function ComparaAgostoImportPanel() {
               <option value="create">Solo da creare</option>
               <option value="confirm">Solo da confermare</option>
               <option value="unmatched">Solo senza match</option>
+              <option value="already_ok">Solo già in liquidazione</option>
               <option value="skip_liquidated">Solo già liquidate</option>
             </Select>
           </div>

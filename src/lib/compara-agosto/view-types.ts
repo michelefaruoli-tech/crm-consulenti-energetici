@@ -8,7 +8,9 @@ export type ComparaAgostoAction =
   | "create"
   | "confirm"
   | "unmatched"
-  | "skip_liquidated";
+  | "skip_liquidated"
+  /** Già Incassato da liquidare + POD ok: non toccare. */
+  | "already_ok";
 
 export type ComparaPodFillMode =
   | "none"
@@ -17,11 +19,12 @@ export type ComparaPodFillMode =
   | "display_from_crm";
 
 export const COMPARA_AGOSTO_ACTION_LABEL: Record<ComparaAgostoAction, string> = {
-  update: "Da aggiornare (Incassato da liquidare)",
+  update: "Da aggiornare → Incassato da liquidare",
   create: "Da creare (manca in Provvigioni)",
   confirm: "Da confermare (Michele)",
   unmatched: "Senza corrispondenza",
   skip_liquidated: "Già liquidata — non sovrascrivere",
+  already_ok: "Già in liquidazione — non toccare",
 };
 
 export function comparaAgostoRowKey(row: {
@@ -98,6 +101,7 @@ export type ComparaAgostoPreviewResult = {
     confirm: number;
     unmatched: number;
     skipLiquidated: number;
+    alreadyOk: number;
     fagianoRows: number;
     fagianoMissingPod: number;
     fagianoProbableMatch: number;

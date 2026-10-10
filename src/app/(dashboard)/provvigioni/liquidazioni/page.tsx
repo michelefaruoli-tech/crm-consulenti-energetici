@@ -104,10 +104,10 @@ export default async function LiquidazioniPage() {
         <CardTitle>Compara Agosto — inviti pagati</CardTitle>
         <p className="mt-1 mb-4 text-sm text-slate-600">
           Flusso dedicato: match per Nominativo, importi per regola (Faruoli /
-          Lucio 80·80, Fagiano 70·65, altri 70·60) editabili in anteprima, stato{" "}
-          <strong>Incassato da liquidare</strong>. Checkbox su aggiorna / crea /
-          conferma / senza match (stub); create e casi POD ambigui restano in
-          conferma per Michele.
+          Lucio 80·80, Fagiano 70·65, altri 70·60) editabili in anteprima.
+          Rate già <strong>Incassato da liquidare</strong> con POD ok → «Già in
+          liquidazione» (non toccare). Checkbox solo su aggiorna / crea /
+          conferma / senza match (stub).
         </p>
         <ComparaAgostoImportPanel />
       </Card>

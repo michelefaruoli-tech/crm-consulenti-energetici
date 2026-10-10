@@ -19,7 +19,7 @@ import {
   friendlyNeonHttpError,
   logPrismaError,
 } from "@/lib/neon-http-errors";
-import { isRecurringMonthly, periodLabel } from "@/lib/recurring";
+import { periodLabel } from "@/lib/recurring";
 import { normalizePodKey } from "@/lib/storno-status";
 import { applyPayoutRowMark } from "@/lib/payout/apply";
 import {
@@ -35,6 +35,7 @@ import {
   comparaRuleAmount,
   isFagianoCollaborator,
 } from "@/lib/compara-agosto/amounts";
+import { classifyComparaAgostoAction } from "@/lib/compara-agosto/classify";
 import { createComparaStubContract } from "@/lib/compara-agosto/create-stub";
 import { decidePodFill } from "@/lib/compara-agosto/pod-fill";
 import { deduceComparaPeriods } from "@/lib/compara-agosto/periods";
@@ -46,7 +47,6 @@ import {
 import { readComparaUnits } from "@/lib/compara-agosto/units";
 import {
   comparaAgostoRowKey,
-  type ComparaAgostoAction,
   type ComparaAgostoActionError,
   type ComparaAgostoPreviewResult,
   type ComparaAgostoPreviewRow,
@@ -263,120 +263,6 @@ async function loadContractFinance(contractIds: string[]): Promise<
   return map;
 }
 
-function classifyAction(params: {
-  contract: PayoutCandidate | null;
-  finance:
-    | {
-        recurrence: string | null;
-        status: string;
-        paymentStatus: string | null;
-        commissionPaid: number;
-        recurringByPeriod: Map<
-          string,
-          { id: string; status: string; amount: number | null }
-        >;
-      }
-    | undefined;
-  competencePeriod: string;
-  ambiguous: boolean;
-  podNeedsConfirm: boolean;
-  amount: number | null;
-}): {
-  action: ComparaAgostoAction;
-  skipReason: string | null;
-  existingLiquidatedAmount: number | null;
-} {
-  if (!params.contract) {
-    return {
-      action: "unmatched",
-      skipReason: "Nessun contratto per nominativo/POD",
-      existingLiquidatedAmount: null,
-    };
-  }
-  if (params.amount == null) {
-    return {
-      action: "confirm",
-      skipReason: "Importo non determinabile",
-      existingLiquidatedAmount: null,
-    };
-  }
-  if (params.ambiguous || params.podNeedsConfirm) {
-    return {
-      action: "confirm",
-      skipReason: params.podNeedsConfirm
-        ? "POD/nominativo da confermare (Michele)"
-        : "Match da confermare (Michele)",
-      existingLiquidatedAmount: null,
-    };
-  }
-
-  const fin = params.finance;
-  if (!fin) {
-    return {
-      action: "create",
-      skipReason: null,
-      existingLiquidatedAmount: null,
-    };
-  }
-
-  if (isRecurringMonthly(fin.recurrence)) {
-    const month = fin.recurringByPeriod.get(params.competencePeriod);
-    if (month?.status === "LIQUIDATED") {
-      return {
-        action: "skip_liquidated",
-        skipReason: "Rata già liquidata: importo non sovrascritto",
-        existingLiquidatedAmount: month.amount,
-      };
-    }
-    if (!month) {
-      return {
-        action: "create",
-        skipReason: null,
-        existingLiquidatedAmount: null,
-      };
-    }
-    if (month.status === "PAID") {
-      return {
-        action: "update",
-        skipReason: "Rata già Incassato da liquidare: aggiorna importo/note",
-        existingLiquidatedAmount: null,
-      };
-    }
-    return {
-      action: "update",
-      skipReason: null,
-      existingLiquidatedAmount: null,
-    };
-  }
-
-  // Una tantum
-  if (
-    fin.status === "PROVVIGIONE_LIQUIDATA" ||
-    (fin.commissionPaid > 0 && fin.paymentStatus === "Pagato")
-  ) {
-    return {
-      action: "skip_liquidated",
-      skipReason: "Provvigione già liquidata: non sovrascrivere",
-      existingLiquidatedAmount: fin.commissionPaid,
-    };
-  }
-  if (
-    fin.paymentStatus === "Incassato" ||
-    fin.status === "PAGATO_DAL_FORNITORE"
-  ) {
-    return {
-      action: "update",
-      skipReason: null,
-      existingLiquidatedAmount: null,
-    };
-  }
-  return {
-    action: "create",
-    skipReason: null,
-    existingLiquidatedAmount: null,
-  };
-}
-
 async function planRows(
   buffer: Buffer,
   fallbackCompetence: string,
@@ -478,6 +364,9 @@ async function planRows(
       fileAmount: d.parsed.amount,
     });
     const fin = d.contract ? finance.get(d.contract.id) : undefined;
+    const crmPod = d.contract
+      ? (fin?.podPdr || fin?.pod || fin?.pdr || d.contract.podPdr || "").trim()
+      : "";
     const podDecision = decidePodFill({
       filePodRaw: d.parsed.podRaw,
       contract: d.contract
@@ -490,18 +379,24 @@ async function planRows(
       isFagiano: fagiano,
       ambiguousMatch: d.ambiguous,
     });
-    const classified = classifyAction({
-      contract: d.contract,
+    const filePodKey = d.parsed.podRaw.trim()
+      ? normalizePodKey(d.parsed.podRaw)
+      : "";
+    const crmPodKey = crmPod ? normalizePodKey(crmPod) : "";
+    const podNeedsFill = Boolean(filePodKey && !crmPodKey);
+    const podAlreadyOk =
+      Boolean(filePodKey && crmPodKey && filePodKey === crmPodKey) ||
+      (!filePodKey && Boolean(crmPodKey));
+    const classified = classifyComparaAgostoAction({
+      hasContract: Boolean(d.contract),
       finance: fin,
       competencePeriod: periods.competencePeriod,
       ambiguous: d.ambiguous,
       podNeedsConfirm: podDecision.mode === "needs_confirm",
+      podNeedsFill,
+      podAlreadyOk,
       amount: rule.amount,
     });
-
-    const crmPod = d.contract
-      ? (fin?.podPdr || fin?.pod || fin?.pdr || d.contract.podPdr || "").trim()
-      : "";
 
     const preview: PlannedRow = {
       sheetName: d.parsed.sheetName,
@@ -547,7 +442,8 @@ async function planRows(
           ? "UNMATCHED"
           : classified.action === "confirm"
             ? "AMBIGUOUS"
-            : classified.action === "skip_liquidated"
+            : classified.action === "skip_liquidated" ||
+                classified.action === "already_ok"
               ? "IGNORED"
               : d.contract
                 ? "MATCHED"
@@ -617,6 +513,7 @@ export async function previewComparaAgostoAction(
       confirm: 0,
       unmatched: 0,
       skipLiquidated: 0,
+      alreadyOk: 0,
       fagianoRows: 0,
       fagianoMissingPod: 0,
       fagianoProbableMatch: 0,
@@ -631,6 +528,7 @@ export async function previewComparaAgostoAction(
       else if (row.action === "confirm") summary.confirm++;
       else if (row.action === "unmatched") summary.unmatched++;
       else if (row.action === "skip_liquidated") summary.skipLiquidated++;
+      else if (row.action === "already_ok") summary.alreadyOk++;
 
       if (row.isFagiano) {
         fagianoRows++;
@@ -774,7 +672,9 @@ export async function importAndApplyComparaAgostoAction(
     for (const row of plan.planned) {
       const key = comparaAgostoRowKey(row);
       if (!selectedKeys.has(key)) continue;
-      if (row.action === "skip_liquidated") continue;
+      if (row.action === "skip_liquidated" || row.action === "already_ok") {
+        continue;
+      }
 
       const edit = rowEdits.get(key);
       const amount = edit?.amount ?? row.ruleAmount;
