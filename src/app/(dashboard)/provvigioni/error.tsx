@@ -25,6 +25,11 @@ export default function ProvvigioniError({
         lista senza filtri pesanti (es. «Incassato» su tutti i mesi con molte
         righe).
       </p>
+      <p className="text-sm text-rose-900/80">
+        Se l&apos;errore compare subito dopo «Salva tutte le modifiche», i dati
+        sono spesso già stati scritti: usa «Provvigioni (reset filtri)» o
+        restringi mese competenza, poi verifica le celle salvate.
+      </p>
       {error.digest ? (
         <p className="text-xs text-rose-800/70">Riferimento: {error.digest}</p>
       ) : null}

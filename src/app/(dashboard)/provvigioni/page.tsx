@@ -417,6 +417,9 @@ export default async function ProvvigioniPage({
     listUsesExpandedRows && sortByClient && total <= 400 && !rateScopeActive;
   const expandUsePaginatedFetch = listUsesExpandedRows && !expandFetchAllForSort;
 
+  const heavyExpandedList =
+    Boolean(expandMode) && viewingAllPeriods && total >= 1200;
+
   const summaryContext = {
     focus,
     effectiveCompetence,
@@ -428,6 +431,7 @@ export default async function ProvvigioniPage({
     allowExpand: Boolean(expandMode),
     rowScope: rowFilterScope,
     includeArchivedAnnual,
+    heavyExpandedList,
   };
 
   // Commissoni mancanti: in background (non blocca il caricamento)
@@ -614,7 +618,35 @@ export default async function ProvvigioniPage({
   ]);
 
   // Summary finanziario eseguito dopo il batch principale (query in serie internamente).
-  const financialSummary = await loadProvvigioniFinancialSummary(statsBaseFilters, vistaTab, summaryContext);
+  let financialSummary: Awaited<
+    ReturnType<typeof loadProvvigioniFinancialSummary>
+  >;
+  try {
+    financialSummary = await loadProvvigioniFinancialSummary(
+      statsBaseFilters,
+      vistaTab,
+      summaryContext,
+    );
+  } catch (e) {
+    console.error("[Provvigioni] loadProvvigioniFinancialSummary", e);
+    financialSummary = {
+      incassatoCount:
+        statoEffective === "Incassato" || isIncassatoDaLiquidareFocus(focus)
+          ? total
+          : 0,
+      incassatoAmount: 0,
+      daIncassareUtCount: 0,
+      daIncassareUtAmount: 0,
+      daIncassareMCount: 0,
+      daIncassareMAmount: 0,
+      daIncassareRCount: 0,
+      daIncassareRAmount: 0,
+      daIncassareCount: 0,
+      daIncassareAmount: 0,
+      pagatoCount: statoEffective === "Pagato" ? total : 0,
+      pagatoAmount: 0,
+    };
+  }
 
   const { tutti: countTutti, mensile: countMensili, annuale: countAnnuali } =
     tabCounts;
