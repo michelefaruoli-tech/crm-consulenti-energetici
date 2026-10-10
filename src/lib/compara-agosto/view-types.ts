@@ -8,6 +8,17 @@ export type ComparaAgostoAction =
   | "create"
   | "confirm"
   | "unmatched"
+  | "skip_liquidated"
+  /** Già Incassato da liquidare + POD ok: non toccare. */
+  | "already_ok";
+
+/** Suggerimento mostrato in colonna Azione (stile Provvigioni). */
+export type ComparaSuggestion =
+  | "already_ok"
+  | "update_status"
+  | "insert_pod"
+  | "create_row"
+  | "confirm_match"
   | "skip_liquidated";
 
 export type ComparaPodFillMode =
@@ -16,12 +27,23 @@ export type ComparaPodFillMode =
   | "needs_confirm"
   | "display_from_crm";
 
+export const COMPARA_SUGGESTION_LABEL: Record<ComparaSuggestion, string> = {
+  already_ok: "Già in liquidazione",
+  update_status: "Da aggiornare",
+  insert_pod: "Inserisci POD dal file",
+  create_row: "Crea riga",
+  confirm_match: "Da confermare",
+  skip_liquidated: "Già liquidata",
+};
+
+/** @deprecated prefer COMPARA_SUGGESTION_LABEL */
 export const COMPARA_AGOSTO_ACTION_LABEL: Record<ComparaAgostoAction, string> = {
-  update: "Da aggiornare (Incassato da liquidare)",
-  create: "Da creare (manca in Provvigioni)",
-  confirm: "Da confermare (Michele)",
-  unmatched: "Senza corrispondenza",
-  skip_liquidated: "Già liquidata — non sovrascrivere",
+  update: "Da aggiornare",
+  create: "Crea riga",
+  confirm: "Da confermare",
+  unmatched: "Crea riga",
+  skip_liquidated: "Già liquidata",
+  already_ok: "Già in liquidazione",
 };
 
 export function comparaAgostoRowKey(row: {
@@ -31,15 +53,31 @@ export function comparaAgostoRowKey(row: {
   return `${row.sheetName}:${row.rowIndex}`;
 }
 
+export function comparaSuggestionForRow(row: {
+  action: ComparaAgostoAction;
+  podNeedsFill?: boolean;
+}): ComparaSuggestion {
+  if (row.action === "already_ok") return "already_ok";
+  if (row.action === "skip_liquidated") return "skip_liquidated";
+  if (row.action === "unmatched" || row.action === "create") return "create_row";
+  if (row.action === "confirm") return "confirm_match";
+  if (row.action === "update" && row.podNeedsFill) return "insert_pod";
+  return "update_status";
+}
+
 /** Override editabili in UI prima dell'apply (chiave = sheet:rowIndex). */
 export type ComparaAgostoRowEdit = {
+  nominativo: string;
+  supplier: string;
   amount: number | null;
+  /** POD/PDR mostrato/editato in colonna. */
+  pod: string;
+  /** Etichetta stato Provvigioni (es. Incassato da liquidare). */
+  stato: string;
   collaboratorId: string;
   collaboratorName: string;
-  /** Etichetta liquidazione (run) per questa riga. */
+  /** Etichetta liquidazione (run). */
   rowLabel: string;
-  /** POD proposto in scrittura (editabile). */
-  proposedPodFill: string;
 };
 
 export type ComparaAgostoCollaboratorOption = {
@@ -60,6 +98,7 @@ export type ComparaAgostoPreviewRow = {
   units: number;
   period: string | null;
   action: ComparaAgostoAction;
+  suggestion: ComparaSuggestion;
   matchReason?: string;
   matchScore?: number;
   contractId?: string;
@@ -68,17 +107,19 @@ export type ComparaAgostoPreviewRow = {
   crmPod?: string;
   supplierName?: string;
   collaboratorName?: string;
-  /** Id collaboratore CRM se matchato (per prefill tendina). */
   collaboratorId?: string;
+  /** Stato CRM attuale (etichetta Provvigioni). */
+  crmStato?: string;
+  /** Stato proposto in anteprima. */
+  proposedStato: string;
   isFagiano: boolean;
   fagianoMissingPodInFile: boolean;
+  /** File ha POD e CRM no → fill utile. */
+  podNeedsFill: boolean;
   podFillMode: ComparaPodFillMode;
-  /** POD proposto in scrittura sul contratto (se approvato). */
   proposedPodFill?: string;
   skipReason?: string;
-  /** Importo già liquidato presente in CRM (avviso). */
   existingLiquidatedAmount?: number | null;
-  /** Etichetta liquidazione di default per la riga. */
   defaultRowLabel?: string;
 };
 
@@ -98,6 +139,7 @@ export type ComparaAgostoPreviewResult = {
     confirm: number;
     unmatched: number;
     skipLiquidated: number;
+    alreadyOk: number;
     fagianoRows: number;
     fagianoMissingPod: number;
     fagianoProbableMatch: number;

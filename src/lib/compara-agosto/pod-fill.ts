@@ -86,10 +86,10 @@ export function decidePodFill(params: {
     };
   }
 
-  // Stesso POD
+  // Stesso POD: niente da scrivere
   if (fileKey === crmKey) {
     return {
-      mode: "safe_prefill",
+      mode: "none",
       proposedPodFill: null,
       reason: "POD file = CRM",
     };

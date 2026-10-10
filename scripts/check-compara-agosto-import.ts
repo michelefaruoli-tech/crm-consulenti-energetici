@@ -18,7 +18,9 @@ import {
   COMPARA_AMOUNT_OTHER_ENI,
   COMPARA_AMOUNT_OTHER_IREN,
 } from "../src/lib/compara-agosto/amounts";
+import { classifyComparaAgostoAction } from "../src/lib/compara-agosto/classify";
 import { decidePodFill } from "../src/lib/compara-agosto/pod-fill";
+import { comparaSuggestionForRow } from "../src/lib/compara-agosto/view-types";
 import { deduceComparaPeriods } from "../src/lib/compara-agosto/periods";
 import { comparaAgostoTemplateConfig } from "../src/lib/compara-agosto/template";
 import { readComparaUnits } from "../src/lib/compara-agosto/units";
@@ -146,6 +148,20 @@ check(
   "safe_prefill",
 );
 check(
+  "POD uguale → none (niente scrittura)",
+  decidePodFill({
+    filePodRaw: "IT001E80700344",
+    contract: {
+      podPdr: "IT001E80700344",
+      pod: "IT001E80700344",
+      pdr: null,
+    },
+    isFagiano: false,
+    ambiguousMatch: false,
+  }).mode,
+  "none",
+);
+check(
   "POD diverso → needs_confirm",
   decidePodFill({
     filePodRaw: "IT001E111",
@@ -164,6 +180,99 @@ check(
     ambiguousMatch: true,
   }).mode,
   "needs_confirm",
+);
+
+console.log("\n• Classificazione già in liquidazione (caso Delli Gatti)");
+const paidMonth = new Map([
+  ["2026-08", { id: "m1", status: "PAID", amount: 75 }],
+]);
+const paidFinance = {
+  recurrence: "MENSILE",
+  status: "ATTIVATO",
+  paymentStatus: "Incassato",
+  commissionPaid: 0,
+  recurringByPeriod: paidMonth,
+};
+check(
+  "PAID + POD uguale + regola≠file → already_ok",
+  classifyComparaAgostoAction({
+    hasContract: true,
+    finance: paidFinance,
+    competencePeriod: "2026-08",
+    ambiguous: false,
+    podNeedsConfirm: false,
+    podNeedsFill: false,
+    podAlreadyOk: true,
+    amount: 60, // regola Laforgia Iren; file 75
+  }).action,
+  "already_ok",
+);
+check(
+  "PAID + POD da riempire → update (fill)",
+  classifyComparaAgostoAction({
+    hasContract: true,
+    finance: paidFinance,
+    competencePeriod: "2026-08",
+    ambiguous: false,
+    podNeedsConfirm: false,
+    podNeedsFill: true,
+    podAlreadyOk: false,
+    amount: 60,
+  }).action,
+  "update",
+);
+check(
+  "EXPECTED → update (portare a Incassato)",
+  classifyComparaAgostoAction({
+    hasContract: true,
+    finance: {
+      ...paidFinance,
+      recurringByPeriod: new Map([
+        ["2026-08", { id: "m1", status: "EXPECTED", amount: null }],
+      ]),
+    },
+    competencePeriod: "2026-08",
+    ambiguous: false,
+    podNeedsConfirm: false,
+    podNeedsFill: false,
+    podAlreadyOk: true,
+    amount: 60,
+  }).action,
+  "update",
+);
+check(
+  "LIQUIDATED → skip_liquidated",
+  classifyComparaAgostoAction({
+    hasContract: true,
+    finance: {
+      ...paidFinance,
+      recurringByPeriod: new Map([
+        ["2026-08", { id: "m1", status: "LIQUIDATED", amount: 60 }],
+      ]),
+    },
+    competencePeriod: "2026-08",
+    ambiguous: false,
+    podNeedsConfirm: false,
+    podNeedsFill: false,
+    podAlreadyOk: true,
+    amount: 60,
+  }).action,
+  "skip_liquidated",
+);
+check(
+  "suggestion already_ok",
+  comparaSuggestionForRow({ action: "already_ok" }),
+  "already_ok",
+);
+check(
+  "suggestion insert_pod",
+  comparaSuggestionForRow({ action: "update", podNeedsFill: true }),
+  "insert_pod",
+);
+check(
+  "suggestion create_row",
+  comparaSuggestionForRow({ action: "unmatched" }),
+  "create_row",
 );
 
 console.log("\n• Units / periodi");
