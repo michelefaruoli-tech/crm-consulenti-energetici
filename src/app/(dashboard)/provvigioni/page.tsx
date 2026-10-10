@@ -48,7 +48,6 @@ import {
   loadDoppiaPosizioneContractIds,
   mergeLegacyFuoriStornoFocus,
   parseStornoStatusFilters,
-  stornoFilterAllowsHistorical,
   stornoFilterHintLabels,
   stornoFilterNeedsDoppiaIds,
 } from "@/lib/storno-filters";
@@ -265,7 +264,8 @@ export default async function ProvvigioniPage({
     recurrenceMode,
     visibility,
     columnWhere: columnWhereParts.contract,
-    includeHistorical: stornoFilterAllowsHistorical(stornoIds),
+    /** Sempre true: i salvati (anche storico POD) restano in elenco. */
+    includeHistorical: true,
   };
 
   const listFilters = {
@@ -318,7 +318,7 @@ export default async function ProvvigioniPage({
         visibility,
         columnWhere: columnWhereParts.contract,
         competencePeriod: effectiveCompetence,
-        includeHistorical: stornoFilterAllowsHistorical(stornoIds),
+        includeHistorical: true,
       },
       focus,
       effectiveCompetence,
@@ -348,7 +348,7 @@ export default async function ProvvigioniPage({
     q,
     visibility,
     columnWhere: columnWhereParts.contract,
-    includeHistorical: stornoFilterAllowsHistorical(stornoIds),
+    includeHistorical: true,
   };
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
