@@ -1,8 +1,12 @@
 /**
  * Import Compara Agosto — regole importo, periodi, POD fill Fagiano, parse file.
  * Uso: npx tsx scripts/check-compara-agosto-import.ts
+ *
+ * Il fixture in `scripts/fixtures/` è la fonte obbligatoria per CI/Vercel.
+ * Se è presente anche COMPARA_AGOSTO.xlsx nello store, si fanno controlli extra.
  */
 import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   comparaRuleAmount,
   isFagianoCollaborator,
@@ -135,56 +139,86 @@ check("settled da Mese Invito", periods.settledPeriod, "2026-09");
 check("competence moda Data", periods.competencePeriod, "2026-08");
 
 async function main() {
-  console.log("\n• Parse COMPARA_AGOSTO.xlsx");
-  const candidates = [
-    "/cursor/stores/self/media/COMPARA_AGOSTO.xlsx",
-    "/cursor/stores/bc-13eb74be-095d-494b-8617-c7fbc59dbb56/docs/COMPARA_AGOSTO.xlsx",
-  ];
-  const filePath = candidates.find((p) => existsSync(p));
-  if (!filePath) {
+  console.log("\n• Parse fixture CI (scripts/fixtures/compara-agosto-sample.xlsx)");
+  const fixturePath = join(
+    process.cwd(),
+    "scripts/fixtures/compara-agosto-sample.xlsx",
+  );
+  if (!existsSync(fixturePath)) {
     failures++;
-    console.log("   KO  file COMPARA_AGOSTO.xlsx non trovato");
+    console.log("   KO  fixture Compara non trovato in repo");
   } else {
-    const buffer = readFileSync(filePath);
     const parsed = await parsePayoutWorkbook(
-      buffer,
+      readFileSync(fixturePath),
       comparaAgostoTemplateConfig(),
     );
     check("parse ok", parsed.ok, true);
     if (parsed.ok) {
-      check("141 righe OK", parsed.rows.length, 141);
-      const eni = parsed.rows.filter((r) =>
-        /eni/i.test(r.supplierHint),
+      // 4 OK + 1 KO saltata dal template
+      check("4 righe OK (KO esclusa)", parsed.rows.length, 4);
+      const noPod = parsed.rows.filter((r) => !r.podRaw.trim()).length;
+      check("1 riga senza POD (Fagiano)", noPod, 1);
+      const fagiano = parsed.rows.filter((r) =>
+        /fagiano/i.test(r.collaboratorHint),
       ).length;
+      check("1 shop Fagiano", fagiano, 1);
+      const dual = parsed.rows.filter((r) => readComparaUnits(r.raw) === 2);
+      check("1 Dual", dual.length, 1);
+      check(
+        "Dual Iren → 120",
+        comparaRuleAmount({
+          supplierHint: dual[0]!.supplierHint,
+          collaboratorName: dual[0]!.collaboratorHint,
+          units: 2,
+          fileAmount: dual[0]!.amount,
+        }).amount,
+        120,
+      );
+      const fagianoRow = parsed.rows.find((r) =>
+        /fagiano/i.test(r.collaboratorHint),
+      );
+      check(
+        "Fagiano Iren senza POD → 65",
+        comparaRuleAmount({
+          supplierHint: fagianoRow?.supplierHint,
+          collaboratorName: fagianoRow?.collaboratorHint,
+          units: 1,
+          fileAmount: fagianoRow?.amount,
+        }).amount,
+        65,
+      );
+      const Augustish = parsed.rows.filter((r) => r.period === "2026-08").length;
+      check("competenza agosto da Data", Augustish, 4);
+    }
+  }
+
+  // Controlli extra sul file reale (opzionali: assenti su Vercel)
+  const realCandidates = [
+    join(process.cwd(), "scripts/fixtures/COMPARA_AGOSTO.xlsx"),
+    "/cursor/stores/self/media/COMPARA_AGOSTO.xlsx",
+    "/cursor/stores/bc-13eb74be-095d-494b-8617-c7fbc59dbb56/docs/COMPARA_AGOSTO.xlsx",
+  ];
+  const realPath = realCandidates.find((p) => existsSync(p));
+  if (realPath) {
+    console.log("\n• Parse COMPARA_AGOSTO.xlsx (opzionale, store locale)");
+    const parsed = await parsePayoutWorkbook(
+      readFileSync(realPath),
+      comparaAgostoTemplateConfig(),
+    );
+    check("parse reale ok", parsed.ok, true);
+    if (parsed.ok) {
+      check("141 righe OK", parsed.rows.length, 141);
+      const eni = parsed.rows.filter((r) => /eni/i.test(r.supplierHint)).length;
       const iren = parsed.rows.filter((r) =>
         /iren/i.test(r.supplierHint),
       ).length;
       check("Eni 64", eni, 64);
       check("Iren 77", iren, 77);
-      const noPod = parsed.rows.filter((r) => !r.podRaw.trim()).length;
-      check("POD assenti in questo file", noPod, 0);
-      const amountsOk = parsed.rows.every(
-        (r) => r.amount != null && r.amount > 0,
-      );
-      check("gettoni leggibili (€)", amountsOk, true);
-      const Augustish = parsed.rows.filter((r) => r.period === "2026-08").length;
-      check("maggioranza competenza agosto da Data", Augustish >= 100, true);
-
-      let ruleTotal = 0;
-      for (const row of parsed.rows) {
-        const units = readComparaUnits(row.raw);
-        const { amount } = comparaRuleAmount({
-          supplierHint: row.supplierHint,
-          collaboratorName: row.collaboratorHint,
-          units,
-          fileAmount: row.amount,
-        });
-        ruleTotal += amount ?? 0;
-      }
-      // Shop file = MICHELE FARUOLI → regole «altri»: Eni70 / Iren60 (× Valore)
-      console.log(`   .. totale regole (shop Faruoli): ${ruleTotal.toFixed(2)}`);
-      check("totale regole > 0", ruleTotal > 0, true);
     }
+  } else {
+    console.log(
+      "\n• COMPARA_AGOSTO.xlsx assente (normale in CI): skip controlli volume reale",
+    );
   }
 
   console.log(
