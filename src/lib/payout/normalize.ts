@@ -299,7 +299,15 @@ export function personKeyVariants(parts: {
     const k = fuzzyPersonKey(v);
     if (k) out.push(k);
   };
-  if (parts.full) push(parts.full);
+  if (parts.full) {
+    push(parts.full);
+    // File «Alberto Maruccia» ↔ CRM «MARUCCIA ALBERTO» (cognome nome)
+    const words = parts.full.trim().split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      push(`${words[words.length - 1]} ${words.slice(0, -1).join(" ")}`);
+      push(`${words.slice(1).join(" ")} ${words[0]}`);
+    }
+  }
   if (parts.first && parts.last) {
     push(`${parts.first} ${parts.last}`);
     push(`${parts.last} ${parts.first}`);
