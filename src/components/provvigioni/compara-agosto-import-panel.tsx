@@ -282,13 +282,18 @@ export function ComparaAgostoImportPanel() {
       (r) =>
         keys.includes(comparaAgostoRowKey(r)) && r.presence === "needs_create",
     ).length;
+    const updateCount = keys.length - createCount;
+    const rigaLabel = keys.length === 1 ? "riga" : "righe";
     const ok = window.confirm(
       [
-        `Salvare ${keys.length} riga/e?`,
+        `Salvare ${keys.length} ${rigaLabel}?`,
+        updateCount > 0
+          ? `${updateCount} aggiornano contratti già in Provvigioni.`
+          : null,
         createCount > 0
-          ? `${createCount} verranno create come Incassato da liquidare (confermate).`
-          : "Aggiornamento delle schede già in Provvigioni.",
-        "Write a lotti (niente blocco database su Neon).",
+          ? `${createCount} ${createCount === 1 ? "è nuova e diventa" : "sono nuove e diventano"} Incassato da liquidare.`
+          : null,
+        "Ok salva, Annulla non cambia nulla.",
       ]
         .filter(Boolean)
         .join("\n"),
