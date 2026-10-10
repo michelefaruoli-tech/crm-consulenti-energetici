@@ -1,7 +1,7 @@
 import { AgendaApp } from "@/components/agenda/agenda-app";
 import { requireSession } from "@/lib/auth";
 import {
-  getAgendaGenericNoteAction,
+  listAgendaGenericNotesAction,
   listAgendaItemsAction,
 } from "@/lib/agenda-actions";
 import { romeDateString } from "@/lib/timezone";
@@ -16,18 +16,18 @@ export default async function AgendaPage() {
   const from = format(startOfWeek(monthStart, { weekStartsOn: 1 }), "yyyy-MM-dd");
   const to = format(endOfWeek(endOfMonth(monthStart), { weekStartsOn: 1 }), "yyyy-MM-dd");
 
-  const [monthRes, noteRes] = await Promise.all([
+  const [monthRes, notesRes] = await Promise.all([
     listAgendaItemsAction({ from, to }),
-    getAgendaGenericNoteAction(),
+    listAgendaGenericNotesAction("aperte"),
   ]);
 
   const initialItems = monthRes.ok ? monthRes.items : [];
-  const initialNoteText = noteRes.ok ? noteRes.note.text : "";
+  const initialNotes = notesRes.ok ? notesRes.notes : [];
 
   return (
     <AgendaApp
       initialItems={initialItems}
-      initialNoteText={initialNoteText}
+      initialNotes={initialNotes}
       userName={session.name}
     />
   );
