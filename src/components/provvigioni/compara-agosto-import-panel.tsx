@@ -6,12 +6,14 @@ import {
   importAndApplyComparaAgostoAction,
   previewComparaAgostoAction,
 } from "@/lib/compara-agosto-actions";
+import { comparaRuleAmount } from "@/lib/compara-agosto/amounts";
 import {
   COMPARA_AGOSTO_ACTION_LABEL,
   comparaAgostoRowKey,
   type ComparaAgostoAction,
   type ComparaAgostoPreviewResult,
   type ComparaAgostoPreviewRow,
+  type ComparaAgostoRowEdit,
 } from "@/lib/compara-agosto/view-types";
 import { periodLabel, toPeriod } from "@/lib/recurring";
 import { formatCurrency } from "@/lib/commission";
@@ -53,8 +55,35 @@ function isSelectable(row: ComparaAgostoPreviewRow): boolean {
   return (
     row.action === "update" ||
     row.action === "create" ||
-    row.action === "confirm"
+    row.action === "confirm" ||
+    row.action === "unmatched"
   );
+}
+
+function defaultEditForRow(
+  row: ComparaAgostoPreviewRow,
+  defaultRunLabel: string,
+): ComparaAgostoRowEdit {
+  return {
+    amount: row.ruleAmount,
+    collaboratorId: row.collaboratorId ?? "",
+    collaboratorName: row.collaboratorName ?? row.shopHint ?? "",
+    rowLabel: row.defaultRowLabel ?? defaultRunLabel,
+    proposedPodFill: row.proposedPodFill ?? "",
+  };
+}
+
+function buildDefaultEdits(
+  preview: ComparaAgostoPreviewResult,
+): Record<string, ComparaAgostoRowEdit> {
+  const out: Record<string, ComparaAgostoRowEdit> = {};
+  for (const row of preview.rows) {
+    out[comparaAgostoRowKey(row)] = defaultEditForRow(
+      row,
+      preview.defaultRunLabel,
+    );
+  }
+  return out;
 }
 
 export function ComparaAgostoImportPanel() {
@@ -76,14 +105,19 @@ export function ComparaAgostoImportPanel() {
     null,
   );
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [rowEdits, setRowEdits] = useState<
+    Record<string, ComparaAgostoRowEdit>
+  >({});
   const [filter, setFilter] = useState<"all" | ComparaAgostoAction>("all");
 
   useEffect(() => {
     if (!preview) {
       setSelectedKeys(new Set());
+      setRowEdits({});
       return;
     }
-    // Default: solo «da aggiornare». Create e confirm richiedono scelta esplicita.
+    setRowEdits(buildDefaultEdits(preview));
+    // Default: solo «da aggiornare». Create / confirm / unmatched a mano.
     setSelectedKeys(
       new Set(
         preview.rows
@@ -104,17 +138,21 @@ export function ComparaAgostoImportPanel() {
     let count = 0;
     let total = 0;
     for (const row of preview.rows) {
-      if (!selectedKeys.has(comparaAgostoRowKey(row))) continue;
+      const key = comparaAgostoRowKey(row);
+      if (!selectedKeys.has(key)) continue;
       if (!isSelectable(row)) continue;
+      const edit = rowEdits[key];
+      const amount = edit?.amount ?? row.ruleAmount;
       count++;
-      total += row.ruleAmount ?? 0;
+      total += amount ?? 0;
     }
     return { count, total };
-  }, [preview, selectedKeys]);
+  }, [preview, selectedKeys, rowEdits]);
 
   function reset() {
     setPreview(null);
     setSelectedKeys(new Set());
+    setRowEdits({});
     setError(null);
     setMessage(null);
   }
@@ -140,6 +178,9 @@ export function ComparaAgostoImportPanel() {
     if (selectedKeys.size > 0) {
       fd.set("selectedRowKeys", JSON.stringify([...selectedKeys]));
     }
+    if (Object.keys(rowEdits).length > 0) {
+      fd.set("rowEdits", JSON.stringify(rowEdits));
+    }
     return fd;
   }
 
@@ -158,6 +199,7 @@ export function ComparaAgostoImportPanel() {
       setPreview(res);
       setCompetencePeriod(res.competencePeriod);
       setSettledPeriod(res.settledPeriod);
+      if (res.defaultRunLabel) setRunLabel(res.defaultRunLabel);
     });
   }
 
@@ -185,34 +227,86 @@ export function ComparaAgostoImportPanel() {
     });
   }
 
+  function patchEdit(key: string, patch: Partial<ComparaAgostoRowEdit>) {
+    setRowEdits((prev) => {
+      const existing = prev[key];
+      if (existing) return { ...prev, [key]: { ...existing, ...patch } };
+      const row = preview?.rows.find((r) => comparaAgostoRowKey(r) === key);
+      const base = row
+        ? defaultEditForRow(row, preview!.defaultRunLabel)
+        : {
+            amount: null,
+            collaboratorId: "",
+            collaboratorName: "",
+            rowLabel: runLabel,
+            proposedPodFill: "",
+          };
+      return { ...prev, [key]: { ...base, ...patch } };
+    });
+  }
+
+  function onCollaboratorChange(
+    key: string,
+    row: ComparaAgostoPreviewRow,
+    collaboratorId: string,
+  ) {
+    const opt = preview?.collaborators.find((c) => c.id === collaboratorId);
+    const name = opt?.name ?? "";
+    const rule = comparaRuleAmount({
+      supplierHint: row.supplierName || row.supplierHint,
+      collaboratorName: name || row.shopHint,
+      units: row.units,
+      fileAmount: row.fileAmount,
+    });
+    patchEdit(key, {
+      collaboratorId,
+      collaboratorName: name,
+      amount: rule.amount,
+    });
+  }
+
   function runApply() {
     if (!preview) return;
     if (selectedApplicable.count === 0) {
       setError(
-        "Seleziona almeno una riga da aggiornare / creare / confermare (checkbox).",
+        "Seleziona almeno una riga da aggiornare / creare / confermare / senza match (checkbox).",
       );
       return;
     }
-    const creates = preview.rows.filter(
-      (r) =>
-        r.action === "create" && selectedKeys.has(comparaAgostoRowKey(r)),
-    ).length;
-    const confirms = preview.rows.filter(
-      (r) =>
-        r.action === "confirm" && selectedKeys.has(comparaAgostoRowKey(r)),
-    ).length;
+
+    const selectedRows = preview.rows.filter((r) =>
+      selectedKeys.has(comparaAgostoRowKey(r)),
+    );
+    const creates = selectedRows.filter((r) => r.action === "create").length;
+    const confirms = selectedRows.filter((r) => r.action === "confirm").length;
+    const unmatched = selectedRows.filter((r) => r.action === "unmatched");
+    const unmatchedMissingCollab = unmatched.filter((r) => {
+      const edit = rowEdits[comparaAgostoRowKey(r)];
+      return !(edit?.collaboratorId || r.collaboratorId);
+    });
+    if (unmatchedMissingCollab.length > 0) {
+      setError(
+        `Senza corrispondenza: scegli il collaboratore su ${unmatchedMissingCollab.length} riga/e prima di applicare.`,
+      );
+      return;
+    }
+
     const ok = window.confirm(
       [
         `Applicare ${selectedApplicable.count} righe selezionate (${formatCurrency(selectedApplicable.total)})?`,
+        "Vengono usati importo / collaboratore / etichetta / POD modificati in tabella.",
         creates > 0
           ? `${creates} CREATE: mancavano in Provvigioni — confermi i dati?`
           : null,
         confirms > 0
-          ? `${confirms} DA CONFERMARE: match/POD ambigui — Michele approva la sostituzione?`
+          ? `${confirms} DA CONFERMARE: match/POD ambigui — Michele approva?`
+          : null,
+        unmatched.length > 0
+          ? `${unmatched.length} SENZA MATCH: crea Client+Contratto+Provvigione stub, poi Incassato da liquidare.`
           : null,
         "",
         "Stato destinazione: Incassato da liquidare (PAID).",
-        "Le già liquidate e le senza match NON vengono applicate.",
+        "Le già liquidate NON vengono applicate.",
         "Operazione tracciata nella liquidazione (annullabile).",
       ]
         .filter(Boolean)
@@ -223,12 +317,17 @@ export function ComparaAgostoImportPanel() {
     start(async () => {
       const res = await importAndApplyComparaAgostoAction(buildFd());
       if (!res.ok) {
-        setError(res.error);
+        setError(
+          res.details?.length
+            ? `${res.error}: ${res.details.join(", ")}`
+            : res.error,
+        );
         return;
       }
       setMessage(
         [
           `Compara applicato: ${res.applied} righe`,
+          res.stubsCreated > 0 ? `${res.stubsCreated} stub creati` : null,
           res.skipped > 0 ? `${res.skipped} saltate` : null,
           res.errors > 0 ? `${res.errors} errori` : null,
           res.podFilled > 0 ? `${res.podFilled} POD compilati` : null,
@@ -280,7 +379,7 @@ export function ComparaAgostoImportPanel() {
             ))}
           </Select>
         </Field>
-        <Field label="Etichetta liquidazione">
+        <Field label="Etichetta liquidazione (default)">
           <Input
             value={runLabel}
             onChange={(e) => setRunLabel(e.target.value)}
@@ -289,10 +388,12 @@ export function ComparaAgostoImportPanel() {
       </div>
 
       <p className="text-xs text-slate-500">
-        Regole importo: Fagiano Eni 70 / Iren 65 · altri (es. Laforgia) Eni 70 /
-        Iren 60. Match per Nominativo (+ POD se presente). Fagiano senza POD:
-        proposta fill, niente overwrite se dati diversi. Create e «da
-        confermare» vanno selezionate a mano.
+        Regole importo (partenza anteprima, poi editabili): Michele Faruoli /
+        Lucio·Lucius Eni 80 / Iren 80 · Fagiano Eni 70 / Iren 65 · Laforgia e
+        altri Eni 70 / Iren 60. Match sul collaboratore CRM (Shop se serve). Su
+        ogni riga puoi modificare importo, collaboratore, etichetta e POD fill
+        prima di applicare. Create, «da confermare» e «senza match» vanno
+        selezionate a mano; senza match crea stub Client+Contratto.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -359,7 +460,7 @@ export function ComparaAgostoImportPanel() {
               <strong>
                 {formatCurrency(preview.summary.ruleAmountTotal)}
               </strong>
-              {" · "}selezionato{" "}
+              {" · "}selezionato (valori UI){" "}
               <strong>{formatCurrency(selectedApplicable.total)}</strong>
             </p>
             <p className="mt-1 text-xs text-slate-600">
@@ -392,6 +493,12 @@ export function ComparaAgostoImportPanel() {
             </Button>
             <Button
               variant="secondary"
+              onClick={() => selectAction("unmatched", true)}
+            >
+              Seleziona senza match
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => setSelectedKeys(new Set())}
             >
               Deseleziona tutto
@@ -411,7 +518,7 @@ export function ComparaAgostoImportPanel() {
             </Select>
           </div>
 
-          <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-200">
+          <div className="max-h-[32rem] overflow-auto rounded-lg border border-slate-200">
             <table className="min-w-full text-left text-xs">
               <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase text-slate-500">
                 <tr>
@@ -419,10 +526,11 @@ export function ComparaAgostoImportPanel() {
                   <th className="px-2 py-2">Azione</th>
                   <th className="px-2 py-2">Nominativo</th>
                   <th className="px-2 py-2">Forn.</th>
-                  <th className="px-2 py-2">Collab.</th>
+                  <th className="px-2 py-2">Collaboratore</th>
+                  <th className="px-2 py-2">Importo €</th>
+                  <th className="px-2 py-2">Etichetta</th>
                   <th className="px-2 py-2">POD file</th>
-                  <th className="px-2 py-2">POD CRM / fill</th>
-                  <th className="px-2 py-2">Importo</th>
+                  <th className="px-2 py-2">POD fill</th>
                   <th className="px-2 py-2">Note</th>
                 </tr>
               </thead>
@@ -430,8 +538,11 @@ export function ComparaAgostoImportPanel() {
                 {visibleRows.map((row) => {
                   const key = comparaAgostoRowKey(row);
                   const selectable = isSelectable(row);
+                  const edit =
+                    rowEdits[key] ??
+                    defaultEditForRow(row, preview.defaultRunLabel);
                   return (
-                    <tr key={key} className="border-t border-slate-100">
+                    <tr key={key} className="border-t border-slate-100 align-top">
                       <td className="px-2 py-1.5">
                         <input
                           type="checkbox"
@@ -466,49 +577,123 @@ export function ComparaAgostoImportPanel() {
                       <td className="px-2 py-1.5">
                         {row.supplierName || row.supplierHint}
                       </td>
-                      <td className="px-2 py-1.5">
-                        {row.collaboratorName || row.shopHint || "—"}
+                      <td className="px-2 py-1.5 min-w-[9rem]">
+                        {selectable ? (
+                          <Select
+                            value={edit.collaboratorId}
+                            onChange={(e) =>
+                              onCollaboratorChange(key, row, e.target.value)
+                            }
+                          >
+                            <option value="">— scegli —</option>
+                            {preview.collaborators.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <span>
+                            {row.collaboratorName || row.shopHint || "—"}
+                          </span>
+                        )}
                         {row.isFagiano ? (
-                          <span className="ml-1 text-amber-700">Fagiano</span>
+                          <div className="mt-0.5 text-amber-700">Fagiano</div>
                         ) : null}
+                        {row.shopHint &&
+                        row.shopHint !== edit.collaboratorName ? (
+                          <div className="text-[10px] text-slate-400">
+                            shop {row.shopHint}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-1.5 min-w-[5.5rem]">
+                        {selectable ? (
+                          <>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="w-24"
+                              value={edit.amount ?? ""}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                patchEdit(key, {
+                                  amount:
+                                    v === ""
+                                      ? null
+                                      : Number.isFinite(Number(v))
+                                        ? Number(v)
+                                        : null,
+                                });
+                              }}
+                            />
+                            {row.ruleApplied ? (
+                              <div className="text-[10px] text-slate-500">
+                                regola
+                                {row.units > 1 ? ` ×${row.units}` : ""}
+                              </div>
+                            ) : null}
+                            {row.fileAmount != null &&
+                            row.fileAmount !== edit.amount ? (
+                              <div className="text-[10px] text-slate-400">
+                                file {formatCurrency(row.fileAmount)}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span>
+                            {row.ruleAmount != null
+                              ? formatCurrency(row.ruleAmount)
+                              : "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 min-w-[8rem]">
+                        {selectable ? (
+                          <Input
+                            value={edit.rowLabel}
+                            onChange={(e) =>
+                              patchEdit(key, { rowLabel: e.target.value })
+                            }
+                          />
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 font-mono">
                         {row.podRaw || (
                           <span className="text-amber-700">assente</span>
                         )}
-                      </td>
-                      <td className="px-2 py-1.5 font-mono">
-                        {row.crmPod || "—"}
-                        {row.proposedPodFill ? (
-                          <div className="text-sky-700">
-                            → {row.proposedPodFill}
-                            {row.podFillMode === "needs_confirm"
-                              ? " (conferma)"
-                              : ""}
-                          </div>
-                        ) : null}
-                        {row.podFillMode === "display_from_crm" ? (
-                          <div className="text-slate-500">da CRM</div>
+                        {row.crmPod ? (
+                          <div className="text-slate-400">CRM {row.crmPod}</div>
                         ) : null}
                       </td>
-                      <td className="px-2 py-1.5">
-                        {row.ruleAmount != null
-                          ? formatCurrency(row.ruleAmount)
-                          : "—"}
-                        {row.ruleApplied ? (
-                          <div className="text-[10px] text-slate-500">
-                            regola
-                            {row.units > 1 ? ` ×${row.units}` : ""}
-                          </div>
-                        ) : null}
-                        {row.fileAmount != null &&
-                        row.fileAmount !== row.ruleAmount ? (
-                          <div className="text-[10px] text-slate-400">
-                            file {formatCurrency(row.fileAmount)}
-                          </div>
+                      <td className="px-2 py-1.5 min-w-[7rem]">
+                        {selectable &&
+                        (row.podFillMode === "safe_prefill" ||
+                          row.podFillMode === "needs_confirm" ||
+                          row.action === "unmatched" ||
+                          Boolean(row.proposedPodFill)) ? (
+                          <Input
+                            className="font-mono"
+                            value={edit.proposedPodFill}
+                            onChange={(e) =>
+                              patchEdit(key, {
+                                proposedPodFill: e.target.value,
+                              })
+                            }
+                            placeholder="POD/PDR"
+                          />
+                        ) : row.podFillMode === "display_from_crm" ? (
+                          <span className="text-slate-500">da CRM</span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                        {row.podFillMode === "needs_confirm" ? (
+                          <div className="text-amber-700">conferma</div>
                         ) : null}
                       </td>
-                      <td className="max-w-[14rem] px-2 py-1.5 text-slate-600">
+                      <td className="max-w-[12rem] px-2 py-1.5 text-slate-600">
                         {row.matchReason}
                         {row.skipReason ? ` · ${row.skipReason}` : ""}
                       </td>

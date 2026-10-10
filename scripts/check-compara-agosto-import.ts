@@ -10,6 +10,9 @@ import { join } from "node:path";
 import {
   comparaRuleAmount,
   isFagianoCollaborator,
+  isMasterRateCollaborator,
+  COMPARA_AMOUNT_MASTER_ENI,
+  COMPARA_AMOUNT_MASTER_IREN,
   COMPARA_AMOUNT_FAGIANO_ENI,
   COMPARA_AMOUNT_FAGIANO_IREN,
   COMPARA_AMOUNT_OTHER_ENI,
@@ -33,6 +36,43 @@ function check(label: string, actual: unknown, expected: unknown) {
 console.log("\n• Regole importo");
 check("fagiano?", isFagianoCollaborator("Fagiano Marco"), true);
 check("non fagiano", isFagianoCollaborator("Laforgia Vito"), false);
+check("master Faruoli?", isMasterRateCollaborator("Michele Faruoli"), true);
+check("master Lucio?", isMasterRateCollaborator("Lucio Rossi"), true);
+check("master Lucius?", isMasterRateCollaborator("Lucius"), true);
+check("non master Laforgia", isMasterRateCollaborator("Laforgia Vito"), false);
+check(
+  "Faruoli Eni 80",
+  comparaRuleAmount({
+    supplierHint: "Eni",
+    collaboratorName: "Michele Faruoli",
+  }).amount,
+  COMPARA_AMOUNT_MASTER_ENI,
+);
+check(
+  "Faruoli Iren 80",
+  comparaRuleAmount({
+    supplierHint: "Iren",
+    collaboratorName: "Michele Faruoli",
+  }).amount,
+  COMPARA_AMOUNT_MASTER_IREN,
+);
+check(
+  "Lucio Eni 80",
+  comparaRuleAmount({
+    supplierHint: "Eni plenitude",
+    collaboratorName: "Lucio",
+  }).amount,
+  COMPARA_AMOUNT_MASTER_ENI,
+);
+check(
+  "Lucius Iren Dual 160",
+  comparaRuleAmount({
+    supplierHint: "Iren",
+    collaboratorName: "Lucius Bianchi",
+    units: 2,
+  }).amount,
+  COMPARA_AMOUNT_MASTER_IREN * 2,
+);
 check(
   "Fagiano Eni",
   comparaRuleAmount({
@@ -50,7 +90,7 @@ check(
   COMPARA_AMOUNT_FAGIANO_IREN,
 );
 check(
-  "Altri Eni",
+  "Altri Eni (Laforgia)",
   comparaRuleAmount({
     supplierHint: "Eni",
     collaboratorName: "Laforgia Vito",
@@ -58,10 +98,10 @@ check(
   COMPARA_AMOUNT_OTHER_ENI,
 );
 check(
-  "Altri Iren",
+  "Altri Iren (Laforgia)",
   comparaRuleAmount({
     supplierHint: "Iren",
-    collaboratorName: "Michele Faruoli",
+    collaboratorName: "Laforgia Vito",
   }).amount,
   COMPARA_AMOUNT_OTHER_IREN,
 );
@@ -164,15 +204,16 @@ async function main() {
       check("1 shop Fagiano", fagiano, 1);
       const dual = parsed.rows.filter((r) => readComparaUnits(r.raw) === 2);
       check("1 Dual", dual.length, 1);
+      // Dual nel fixture ha Shop Faruoli → quota master 80 × 2
       check(
-        "Dual Iren → 120",
+        "Dual Iren Faruoli → 160",
         comparaRuleAmount({
           supplierHint: dual[0]!.supplierHint,
           collaboratorName: dual[0]!.collaboratorHint,
           units: 2,
           fileAmount: dual[0]!.amount,
         }).amount,
-        120,
+        160,
       );
       const fagianoRow = parsed.rows.find((r) =>
         /fagiano/i.test(r.collaboratorHint),

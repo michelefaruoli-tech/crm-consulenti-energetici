@@ -31,6 +31,22 @@ export function comparaAgostoRowKey(row: {
   return `${row.sheetName}:${row.rowIndex}`;
 }
 
+/** Override editabili in UI prima dell'apply (chiave = sheet:rowIndex). */
+export type ComparaAgostoRowEdit = {
+  amount: number | null;
+  collaboratorId: string;
+  collaboratorName: string;
+  /** Etichetta liquidazione (run) per questa riga. */
+  rowLabel: string;
+  /** POD proposto in scrittura (editabile). */
+  proposedPodFill: string;
+};
+
+export type ComparaAgostoCollaboratorOption = {
+  id: string;
+  name: string;
+};
+
 export type ComparaAgostoPreviewRow = {
   sheetName: string;
   rowIndex: number;
@@ -52,6 +68,8 @@ export type ComparaAgostoPreviewRow = {
   crmPod?: string;
   supplierName?: string;
   collaboratorName?: string;
+  /** Id collaboratore CRM se matchato (per prefill tendina). */
+  collaboratorId?: string;
   isFagiano: boolean;
   fagianoMissingPodInFile: boolean;
   podFillMode: ComparaPodFillMode;
@@ -60,6 +78,8 @@ export type ComparaAgostoPreviewRow = {
   skipReason?: string;
   /** Importo già liquidato presente in CRM (avviso). */
   existingLiquidatedAmount?: number | null;
+  /** Etichetta liquidazione di default per la riga. */
+  defaultRowLabel?: string;
 };
 
 export type ComparaAgostoPreviewResult = {
@@ -67,8 +87,10 @@ export type ComparaAgostoPreviewResult = {
   fileName: string;
   competencePeriod: string;
   settledPeriod: string;
+  defaultRunLabel: string;
   sheetsRead: string[];
   rows: ComparaAgostoPreviewRow[];
+  collaborators: ComparaAgostoCollaboratorOption[];
   summary: {
     total: number;
     update: number;
