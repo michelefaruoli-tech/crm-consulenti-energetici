@@ -59,6 +59,7 @@ import { readComparaUnits } from "@/lib/compara-agosto/units";
 import {
   comparaAgostoRowKey,
   comparaSuggestionForRow,
+  parseComparaRowEditsJson,
   type ComparaAgostoActionError,
   type ComparaAgostoPreviewResult,
   type ComparaAgostoPreviewRow,
@@ -182,41 +183,7 @@ function collaboratorForAmount(
 function readRowEdits(
   formData: FormData,
 ): Map<string, ComparaAgostoRowEdit> {
-  const raw = String(formData.get("rowEdits") ?? "").trim();
-  const out = new Map<string, ComparaAgostoRowEdit>();
-  if (!raw) return out;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return out;
-    for (const [key, value] of Object.entries(
-      parsed as Record<string, unknown>,
-    )) {
-      if (!value || typeof value !== "object") continue;
-      const v = value as Record<string, unknown>;
-      const amountRaw = v.amount;
-      const amount =
-        typeof amountRaw === "number" && Number.isFinite(amountRaw)
-          ? amountRaw
-          : amountRaw == null || amountRaw === ""
-            ? null
-            : Number(amountRaw);
-      // Compat: UI nuova usa `pod`; vecchia `proposedPodFill`
-      const pod = String(v.pod ?? v.proposedPodFill ?? "").trim();
-      out.set(key, {
-        nominativo: String(v.nominativo ?? "").trim(),
-        supplier: String(v.supplier ?? "").trim(),
-        amount: amount != null && Number.isFinite(amount) ? amount : null,
-        pod,
-        stato: String(v.stato ?? STATO_INCASSATO).trim() || STATO_INCASSATO,
-        collaboratorId: String(v.collaboratorId ?? "").trim(),
-        collaboratorName: String(v.collaboratorName ?? "").trim(),
-        rowLabel: String(v.rowLabel ?? "").trim(),
-      });
-    }
-  } catch {
-    return out;
-  }
-  return out;
+  return parseComparaRowEditsJson(String(formData.get("rowEdits") ?? ""));
 }
 
 function crmStatoFromFinance(

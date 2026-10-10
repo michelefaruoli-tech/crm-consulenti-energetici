@@ -93,6 +93,58 @@ export type ComparaAgostoRowEdit = {
   createConfirmed?: boolean;
 };
 
+const STATO_INCASSATO_DEFAULT = "Incassato da liquidare";
+
+function truthyFlag(v: unknown): boolean {
+  return v === true || v === "true" || v === 1 || v === "1";
+}
+
+/**
+ * Parse del JSON `rowEdits` inviato dal pannello.
+ * Deve preservare `createConfirmed` e `collaboratorId` (bug Maruccia PR #87).
+ */
+export function parseComparaRowEditsJson(
+  raw: string,
+): Map<string, ComparaAgostoRowEdit> {
+  const out = new Map<string, ComparaAgostoRowEdit>();
+  const text = raw.trim();
+  if (!text) return out;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return out;
+    for (const [key, value] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object") continue;
+      const v = value as Record<string, unknown>;
+      const amountRaw = v.amount;
+      const amount =
+        typeof amountRaw === "number" && Number.isFinite(amountRaw)
+          ? amountRaw
+          : amountRaw == null || amountRaw === ""
+            ? null
+            : Number(amountRaw);
+      const pod = String(v.pod ?? v.proposedPodFill ?? "").trim();
+      out.set(key, {
+        nominativo: String(v.nominativo ?? "").trim(),
+        supplier: String(v.supplier ?? "").trim(),
+        amount: amount != null && Number.isFinite(amount) ? amount : null,
+        pod,
+        stato:
+          String(v.stato ?? STATO_INCASSATO_DEFAULT).trim() ||
+          STATO_INCASSATO_DEFAULT,
+        collaboratorId: String(v.collaboratorId ?? "").trim(),
+        collaboratorName: String(v.collaboratorName ?? "").trim(),
+        rowLabel: String(v.rowLabel ?? "").trim(),
+        createConfirmed: truthyFlag(v.createConfirmed),
+      });
+    }
+  } catch {
+    return out;
+  }
+  return out;
+}
+
 export type ComparaAgostoCollaboratorOption = {
   id: string;
   name: string;
