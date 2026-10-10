@@ -146,6 +146,32 @@ export function isMaskedPod(raw: string): boolean {
   return /[*x]{3,}/i.test(raw);
 }
 
+/**
+ * Segnaposto / maschera senza codice reale (vuoto, `XXXX`, `ZXXXX`, `***`…).
+ * In CRM non conta come POD valorizzato: l’apply può sostituirlo col file.
+ */
+export function isPlaceholderPod(raw: string | null | undefined): boolean {
+  const s = String(raw ?? "").trim();
+  if (!s) return true;
+  const compact = s.replace(/[\s_\-]/g, "");
+  if (!compact) return true;
+  // XXXX, ZXXXX, xx, XXX…
+  if (/^z?x{2,}$/i.test(compact)) return true;
+  // Solo asterischi / punti / x
+  if (/^[*x.]+$/i.test(compact)) return true;
+  if (/^(n\/?a|nd|nil|null|none)$/i.test(compact)) return true;
+  // Maschera senza abbastanza cifre utili
+  if (isMaskedPod(s) && s.replace(/[^0-9]/g, "").length < 4) return true;
+  return false;
+}
+
+/** POD/PDR CRM effettivo: stringa vuota se assente o segnaposto. */
+export function effectiveCrmPod(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s || isPlaceholderPod(s)) return "";
+  return s;
+}
+
 /** Ultime cifre di un POD mascherato, usate come match debole. */
 export function maskedPodSuffix(raw: string): string {
   const digits = raw.replace(/[^0-9]/g, "");
@@ -153,7 +179,45 @@ export function maskedPodSuffix(raw: string): string {
 }
 
 /** Lunghezza canonica di un PDR italiano. */
-const PDR_LENGTH = 14;
+export const PDR_LENGTH = 14;
+
+/**
+ * Ripristina gli zeri iniziali persi quando Excel salva il PDR come numero.
+ * - Solo cifre 11–13 → pad a 14 (prefisso `0` / `00` tipico gas).
+ * - Già 14 cifre, POD `IT…`, mascherati: invariati.
+ */
+export function restorePdrLeadingZeros(raw: string): string {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return "";
+  if (isMaskedPod(trimmed)) return trimmed;
+  const base = normalizePodKey(trimmed);
+  if (!base) return "";
+  if (/^IT/i.test(base)) return base;
+  if (/^\d{11,13}$/.test(base)) {
+    return base.padStart(PDR_LENGTH, "0");
+  }
+  return base;
+}
+
+/**
+ * Testo POD/PDR da cella Excel: preferisce il risultato numerico ripristinato
+ * (zeri a 14 cifre) rispetto a `String(number)` che perde `0`/`00`.
+ */
+export function cellPodText(value: RawCell): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // Evita notazione scientifica; poi ripristina zeri PDR
+    const digits = Number.isInteger(value)
+      ? Math.trunc(value).toString()
+      : String(value);
+    return restorePdrLeadingZeros(digits);
+  }
+  if (value != null && typeof value === "object") {
+    const o = value as { result?: unknown; text?: unknown };
+    if (o.result != null) return cellPodText(o.result);
+    if (o.text != null) return cellPodText(o.text);
+  }
+  return restorePdrLeadingZeros(cellText(value));
+}
 
 /**
  * Chiavi candidate per POD/PDR.
@@ -163,7 +227,8 @@ const PDR_LENGTH = 14;
  * fornitura gas trova corrispondenza.
  */
 export function podCandidateKeys(raw: string): string[] {
-  const base = normalizePodKey(raw);
+  const restored = restorePdrLeadingZeros(raw);
+  const base = normalizePodKey(restored || raw);
   if (!base) return [];
   const out = [base];
   if (/^\d{11,13}$/.test(base)) {
@@ -172,7 +237,42 @@ export function podCandidateKeys(raw: string): string[] {
   if (/^0+\d+$/.test(base)) {
     out.push(base.replace(/^0+/, ""));
   }
+  // Varianti senza zeri iniziali ↔ con pad 14 (stesso PDR)
+  if (/^\d{14}$/.test(base) && base.startsWith("0")) {
+    out.push(base.replace(/^0+/, ""));
+  }
   return [...new Set(out)];
+}
+
+/**
+ * True se file e CRM sono lo stesso POD/PDR, anche quando manca solo lo `00`
+ * (o `0`) iniziale perso da Excel. Segnaposto (`XXXX`…) non sono equivalenti.
+ */
+export function podsEquivalent(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (isPlaceholderPod(a) || isPlaceholderPod(b)) return false;
+  const ka = podCandidateKeys(a ?? "");
+  const kb = podCandidateKeys(b ?? "");
+  if (ka.length === 0 || kb.length === 0) return false;
+  return ka.some((k) => kb.includes(k));
+}
+
+/**
+ * True se l’apply deve scrivere il POD/PDR del file sul contratto:
+ * file reale e (CRM vuoto/segnaposto oppure diverso). Non tocca PDR già
+ * corretti e coincidente (inclusa regola zeri `00`).
+ */
+export function shouldWritePodFromFile(
+  filePod: string | null | undefined,
+  crmPod: string | null | undefined,
+): boolean {
+  const file = String(filePod ?? "").trim();
+  if (!file || isPlaceholderPod(file)) return false;
+  const crm = effectiveCrmPod(crmPod);
+  if (!crm) return true;
+  return !podsEquivalent(file, crm);
 }
 
 /**
