@@ -20,7 +20,14 @@ import {
 } from "../src/lib/compara-agosto/amounts";
 import { classifyComparaAgostoAction } from "../src/lib/compara-agosto/classify";
 import { decidePodFill } from "../src/lib/compara-agosto/pod-fill";
+import {
+  comparaSupplierDisplayLabel,
+  comparaSuppliersCompatible,
+  resolveComparaSupplierMatch,
+} from "../src/lib/compara-agosto/supplier-match";
 import { comparaSuggestionForRow } from "../src/lib/compara-agosto/view-types";
+import type { PayoutCandidate, PayoutContractIndex } from "../src/lib/payout/match";
+import type { ParsedPayoutRow } from "../src/lib/payout/types";
 import { deduceComparaPeriods } from "../src/lib/compara-agosto/periods";
 import { comparaAgostoTemplateConfig } from "../src/lib/compara-agosto/template";
 import { readComparaUnits } from "../src/lib/compara-agosto/units";
@@ -375,6 +382,96 @@ check(
   "suggestion create_row",
   comparaSuggestionForRow({ action: "unmatched" }),
   "create_row",
+);
+
+console.log("\n• Fornitore file ≠ Liquidata (Lepore)");
+check("Eni≡Plenitude", comparaSuppliersCompatible("Iren", "Plenitude"), false);
+check("Iren≡Iren", comparaSuppliersCompatible("IREN", "Iren Energia"), true);
+check("Eni≡Plenitude ok", comparaSuppliersCompatible("Eni", "Plenitude"), true);
+check(
+  "label Nuova Iren",
+  comparaSupplierDisplayLabel("IREN LUCE"),
+  "Iren",
+);
+const emptyIndex: PayoutContractIndex = {
+  byPod: new Map(),
+  byPodSuffix: new Map(),
+  byFiscal: new Map(),
+  byName: new Map(),
+  size: 0,
+};
+const plenitude: PayoutCandidate = {
+  id: "c-plen",
+  contractNumber: "X1",
+  podPdr: "00882602701365",
+  pod: null,
+  pdr: "00882602701365",
+  supplierId: "s1",
+  collaboratorId: "u1",
+  recurrence: "UT",
+  status: "PROVVIGIONE_LIQUIDATA",
+  supplyStartDate: null,
+  insertionDate: new Date("2025-01-01"),
+  operationType: null,
+  expiryDate: null,
+  supplierName: "Plenitude",
+  collaboratorName: "Michele Faruoli",
+  clientName: "ANTONIO LEPORE",
+};
+emptyIndex.byPod.set("00882602701365", [plenitude]);
+const leporeRow: ParsedPayoutRow = {
+  sheetName: "Sheet",
+  rowIndex: 2,
+  raw: {},
+  clientNameRaw: "ANTONIO LEPORE",
+  supplierHint: "Iren",
+  collaboratorHint: "Michele",
+  podRaw: "00882602701365",
+  podKeys: ["00882602701365"],
+  fiscalKey: "",
+  amount: 60,
+  period: "2026-08",
+};
+const leporeResolved = resolveComparaSupplierMatch({
+  index: emptyIndex,
+  row: leporeRow,
+  matched: plenitude,
+  ambiguous: false,
+  matchReason: "pod_exact",
+  matchScore: 100,
+  candidateIds: [plenitude.id],
+});
+check(
+  "Lepore Iren vs Plenitude → needs create (no contract)",
+  leporeResolved.contract == null && leporeResolved.supplierMismatchCreate,
+  true,
+);
+check(
+  "Lepore mismatched supplier name",
+  leporeResolved.mismatchedSupplierName,
+  "Plenitude",
+);
+const irenAlt: PayoutCandidate = {
+  ...plenitude,
+  id: "c-iren",
+  contractNumber: "X2",
+  supplierName: "Iren",
+  status: "ATTIVATO",
+};
+emptyIndex.byPod.set("00882602701365", [plenitude, irenAlt]);
+const leporeAlt = resolveComparaSupplierMatch({
+  index: emptyIndex,
+  row: leporeRow,
+  matched: plenitude,
+  ambiguous: false,
+  matchReason: "pod_exact",
+  matchScore: 100,
+  candidateIds: [plenitude.id],
+});
+check(
+  "Lepore con Iren già presente → usa Iren",
+  leporeAlt.contract?.id,
+  "c-iren",
 );
 
 console.log("\n• Units / periodi");

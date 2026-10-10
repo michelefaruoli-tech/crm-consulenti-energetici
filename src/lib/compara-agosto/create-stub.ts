@@ -86,6 +86,7 @@ export async function createComparaStubContract(params: {
   const [y, m] = params.competencePeriod.split("-").map(Number);
   const insertionDate = new Date(y ?? 2026, (m ?? 1) - 1, 1);
 
+  // Neon HTTP: niente nested create (Prisma apre $transaction).
   const contract = await prisma.contract.create({
     data: {
       contractNumber,
@@ -101,16 +102,18 @@ export async function createComparaStubContract(params: {
       podPdr: podRaw || null,
       productName: `Compara ${params.supplierHint}`.slice(0, 120),
       ...recurrenceWriteData("UT"),
-      commission: {
-        create: {
-          expected: params.amount,
-          accrued: 0,
-          received: 0,
-          paid: 0,
-        },
-      },
     },
     select: { id: true, contractNumber: true },
+  });
+
+  await prisma.commission.create({
+    data: {
+      contractId: contract.id,
+      expected: params.amount,
+      accrued: 0,
+      received: 0,
+      paid: 0,
+    },
   });
 
   void podKey;

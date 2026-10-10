@@ -47,6 +47,10 @@ import { createComparaStubContract } from "@/lib/compara-agosto/create-stub";
 import { decidePodFill } from "@/lib/compara-agosto/pod-fill";
 import { deduceComparaPeriods } from "@/lib/compara-agosto/periods";
 import {
+  comparaSupplierDisplayLabel,
+  resolveComparaSupplierMatch,
+} from "@/lib/compara-agosto/supplier-match";
+import {
   COMPARA_AGOSTO_TEMPLATE_KEY,
   COMPARA_AGOSTO_TEMPLATE_LABEL,
   comparaAgostoTemplateConfig,
@@ -66,9 +70,11 @@ const STATO_INCASSATO = "Incassato da liquidare";
 const STATO_LIQUIDATO = "Liquidato";
 const STATO_DA_INCASSARE = "Da incassare";
 
-const PREVIEW_ROW_LIMIT = 400;
-const APPLY_BATCH_SIZE = 40;
-const INSERT_CONCURRENCY = 20;
+/** Mostra tutti i nominativi del foglio (niente filtri che ne nascondono). */
+const PREVIEW_ROW_LIMIT = 2500;
+const APPLY_BATCH_SIZE = 8;
+/** Neon HTTP: pochi write paralleli evitano statement/timeout. */
+const INSERT_CONCURRENCY = 2;
 const PERIOD_RE = /^\d{4}-\d{2}$/;
 
 function fail(error: string, details?: string[]): ComparaAgostoActionError {
@@ -359,6 +365,7 @@ async function planRows(
     matchReason: string | null;
     matchScore: number | null;
     candidateIds: string[];
+    mismatchedSupplierName: string | null;
   }> = [];
 
   for (const row of parsed.rows) {
@@ -367,35 +374,47 @@ async function planRows(
       period: row.period ?? periods.competencePeriod,
     };
     const outcome = matchPayoutRow(withPeriod, index);
+    let matched: PayoutCandidate | null = null;
+    let ambiguous = false;
+    let matchReason: string | null = null;
+    let matchScore: number | null = null;
+    let candidateIds: string[] = [];
+
     if (outcome.status === "unmatched") {
-      draft.push({
-        parsed: withPeriod,
-        contract: null,
-        ambiguous: false,
-        matchReason: null,
-        matchScore: null,
-        candidateIds: [],
-      });
-      continue;
+      // resta unmatched
+    } else if (outcome.status === "ambiguous") {
+      matched = outcome.candidates[0] ?? null;
+      ambiguous = true;
+      matchReason = outcome.reason;
+      matchScore = outcome.score;
+      candidateIds = outcome.candidates.map((c) => c.id);
+    } else {
+      matched = outcome.contract;
+      matchReason = outcome.reason;
+      matchScore = outcome.score;
+      candidateIds = [outcome.contract.id];
     }
-    if (outcome.status === "ambiguous") {
-      draft.push({
-        parsed: withPeriod,
-        contract: outcome.candidates[0] ?? null,
-        ambiguous: true,
-        matchReason: outcome.reason,
-        matchScore: outcome.score,
-        candidateIds: outcome.candidates.map((c) => c.id),
-      });
-      continue;
-    }
+
+    // Fornitore file ≠ contratto matchato (es. Iren vs Plenitude Liquidata):
+    // alternativa compatibile, altrimenti da caricare (conferma + collab).
+    const resolved = resolveComparaSupplierMatch({
+      index,
+      row: withPeriod,
+      matched,
+      ambiguous,
+      matchReason,
+      matchScore,
+      candidateIds,
+    });
+
     draft.push({
       parsed: withPeriod,
-      contract: outcome.contract,
-      ambiguous: false,
-      matchReason: outcome.reason,
-      matchScore: outcome.score,
-      candidateIds: [outcome.contract.id],
+      contract: resolved.contract,
+      ambiguous: resolved.ambiguous,
+      matchReason: resolved.matchReason,
+      matchScore: resolved.matchScore,
+      candidateIds: resolved.candidateIds,
+      mismatchedSupplierName: resolved.mismatchedSupplierName,
     });
   }
 
@@ -461,9 +480,22 @@ async function planRows(
       action: classified.action,
       podNeedsFill,
     });
+    // Assente, o Liquidata di altro fornitore senza Incassato compatibile → da caricare
+    const presence =
+      d.contract == null
+        ? ("needs_create" as const)
+        : ("present" as const);
+    const fileSupplierLabel = comparaSupplierDisplayLabel(
+      d.parsed.supplierHint || d.contract?.supplierName,
+    );
+    const presenceNote =
+      presence === "needs_create"
+        ? d.mismatchedSupplierName
+          ? `In CRM c’è ${d.mismatchedSupplierName} (altro fornitore): conferma per caricare ${fileSupplierLabel}`
+          : "Non in Provvigioni: conferma caricamento e scegli il collaboratore"
+        : undefined;
     const proposedStato =
-      classified.action === "already_ok" ||
-      classified.action === "skip_liquidated"
+      presence === "present" && crmStato
         ? crmStato
         : STATO_INCASSATO;
     const displayPod =
@@ -471,6 +503,17 @@ async function planRows(
       d.parsed.podRaw.trim() ||
       crmPod ||
       "";
+
+    const matchReasonLabel =
+      d.matchReason === "supplier_mismatch_create"
+        ? "Fornitore diverso → da caricare"
+        : d.matchReason === "supplier_compatible"
+          ? "Match fornitore file"
+          : d.matchReason
+            ? (PAYOUT_MATCH_REASON_LABEL[
+                d.matchReason as keyof typeof PAYOUT_MATCH_REASON_LABEL
+              ] ?? d.matchReason)
+            : undefined;
 
     const preview: PlannedRow = {
       sheetName: d.parsed.sheetName,
@@ -484,13 +527,18 @@ async function planRows(
       ruleApplied: rule.ruleApplied,
       units,
       period: periods.competencePeriod,
-      action: classified.action,
+      action:
+        presence === "needs_create"
+          ? "unmatched"
+          : classified.action,
+      presence,
+      presenceNote,
       suggestion,
-      matchReason: d.matchReason
-        ? (PAYOUT_MATCH_REASON_LABEL[
-            d.matchReason as keyof typeof PAYOUT_MATCH_REASON_LABEL
-          ] ?? d.matchReason)
-        : undefined,
+      suggestionLabel:
+        presence === "needs_create"
+          ? `Da caricare (${fileSupplierLabel})`
+          : undefined,
+      matchReason: matchReasonLabel,
       matchScore: d.matchScore ?? undefined,
       contractId: d.contract?.id,
       contractNumber: d.contract?.contractNumber,
@@ -586,6 +634,8 @@ export async function previewComparaAgostoAction(
     let ruleAmountTotal = 0;
     const summary = {
       total: plan.planned.length,
+      present: 0,
+      needsCreate: 0,
       update: 0,
       create: 0,
       confirm: 0,
@@ -601,6 +651,8 @@ export async function previewComparaAgostoAction(
     };
 
     for (const row of plan.planned) {
+      if (row.presence === "present") summary.present++;
+      else summary.needsCreate++;
       if (row.action === "update") summary.update++;
       else if (row.action === "create") summary.create++;
       else if (row.action === "confirm") summary.confirm++;
@@ -753,12 +805,10 @@ export async function importAndApplyComparaAgostoAction(
 
     const applicable: ApplicableRow[] = [];
     const missingCollab: string[] = [];
+    const missingCreateConfirm: string[] = [];
     for (const row of plan.planned) {
       const key = comparaAgostoRowKey(row);
       if (!selectedKeys.has(key)) continue;
-      if (row.action === "skip_liquidated" || row.action === "already_ok") {
-        continue;
-      }
 
       const edit = rowEdits.get(key);
       const amount = edit?.amount ?? row.ruleAmount;
@@ -792,10 +842,11 @@ export async function importAndApplyComparaAgostoAction(
         row.nominativo ||
         ""
       ).trim();
+      // Preferisci fornitore del file (edit/hint), non quello della Liquidata altrui
       const supplier = (
         edit?.supplier ||
-        row.supplierName ||
         row.supplierHint ||
+        row.supplierName ||
         ""
       ).trim();
       const stato = (edit?.stato || row.proposedStato || STATO_INCASSATO).trim();
@@ -805,11 +856,19 @@ export async function importAndApplyComparaAgostoAction(
       const alreadyTarget =
         (markMode === "INCASSATO" && row.crmStato === STATO_INCASSATO) ||
         (markMode === "LIQUIDATO" && row.crmStato === STATO_LIQUIDATO);
-      // Solo fill POD (stato già ok): include sostituzione XXXX/ZXXXX
       const podOnly =
         alreadyTarget && shouldWritePodFromFile(podFill, row.crmPod || "");
 
-      if (row.action === "unmatched") {
+      // Non presente / fornitore diverso → stub solo con conferma esplicita
+      const needsStub =
+        row.presence === "needs_create" ||
+        row.action === "unmatched" ||
+        (row.action === "create" && !row.contractId);
+      if (needsStub) {
+        if (!edit?.createConfirmed) {
+          missingCreateConfirm.push(nominativo || key);
+          continue;
+        }
         if (!collaboratorId) {
           missingCollab.push(nominativo || key);
           continue;
@@ -822,7 +881,7 @@ export async function importAndApplyComparaAgostoAction(
           effectiveRowLabel: rowLabel || defaultRunLabel,
           effectivePodFill: podFill || row.podRaw.trim(),
           effectiveNominativo: nominativo,
-          effectiveSupplier: supplier,
+          effectiveSupplier: supplier || row.supplierHint || "Compara",
           effectiveStato: stato,
           markMode,
           isStubCreate: true,
@@ -831,13 +890,7 @@ export async function importAndApplyComparaAgostoAction(
         continue;
       }
 
-      if (
-        row.action !== "update" &&
-        row.action !== "create" &&
-        row.action !== "confirm"
-      ) {
-        continue;
-      }
+      // Presente: salva aggiorna la scheda (anche se era already_ok / liquidata stesso fornitore)
       if (!row.contractId) continue;
 
       applicable.push({
@@ -856,6 +909,13 @@ export async function importAndApplyComparaAgostoAction(
       });
     }
 
+    if (missingCreateConfirm.length > 0) {
+      return fail(
+        "Per i nominativi non in Provvigioni conferma il caricamento e scegli a nome di chi",
+        missingCreateConfirm.slice(0, 8),
+      );
+    }
+
     if (missingCollab.length > 0) {
       return fail(
         "Senza corrispondenza: scegli un collaboratore sulle righe selezionate",
@@ -868,42 +928,65 @@ export async function importAndApplyComparaAgostoAction(
       );
     }
 
-    // Stub Client+Contract+Commission per unmatched selezionate
+    // Stub Client+Contract+Commission uno-a-uno (Neon HTTP: no nested/tx)
     let stubsCreated = 0;
+    const stubFailures: string[] = [];
     for (const row of applicable) {
       if (!row.isStubCreate) continue;
-      const stub = await createComparaStubContract({
-        nominativo: row.effectiveNominativo || row.nominativo,
-        supplierHint: row.effectiveSupplier || row.supplierHint || "Compara",
-        collaboratorId: row.effectiveCollaboratorId,
-        createdById: session.id,
-        podRaw: row.effectivePodFill || row.podRaw,
-        amount: row.effectiveAmount,
-        competencePeriod: plan.competencePeriod,
-        note: `${row.sheetName}:${row.rowIndex}`,
-      });
-      row.contractId = stub.contractId;
-      row.contractNumber = stub.contractNumber;
-      row.crmCollaboratorId = row.effectiveCollaboratorId;
-      row.action = "create";
-      stubsCreated++;
+      try {
+        const stub = await createComparaStubContract({
+          nominativo: row.effectiveNominativo || row.nominativo,
+          supplierHint: row.effectiveSupplier || row.supplierHint || "Compara",
+          collaboratorId: row.effectiveCollaboratorId,
+          createdById: session.id,
+          podRaw: row.effectivePodFill || row.podRaw,
+          amount: row.effectiveAmount,
+          competencePeriod: plan.competencePeriod,
+          note: `${row.sheetName}:${row.rowIndex}`,
+        });
+        row.contractId = stub.contractId;
+        row.contractNumber = stub.contractNumber;
+        row.crmCollaboratorId = row.effectiveCollaboratorId;
+        row.action = "create";
+        stubsCreated++;
+      } catch (e) {
+        logPrismaError("createComparaStubContract", e);
+        stubFailures.push(
+          `${row.effectiveNominativo || row.nominativo}: ${errorMessage(e, "stub")}`,
+        );
+        row.contractId = undefined;
+      }
+    }
+    // Escludi stub falliti dal resto dell'apply (le altre righe proseguono)
+    const applicableOk = applicable.filter(
+      (r) => !r.isStubCreate || Boolean(r.contractId),
+    );
+    if (applicableOk.length === 0 && stubFailures.length > 0) {
+      return fail(
+        "Creazione righe non riuscita (limite database o dati). Riprova.",
+        stubFailures.slice(0, 8),
+      );
     }
 
     // Patch collaboratore CRM se modificato in UI (contratti già esistenti)
-    for (const row of applicable) {
+    for (const row of applicableOk) {
       if (row.isStubCreate) continue;
       if (!row.contractId || !row.effectiveCollaboratorId) continue;
       if (row.effectiveCollaboratorId === row.crmCollaboratorId) continue;
-      await prisma.contract.update({
-        where: { id: row.contractId },
-        data: { collaboratorId: row.effectiveCollaboratorId },
-      });
-      row.crmCollaboratorId = row.effectiveCollaboratorId;
+      try {
+        await prisma.contract.update({
+          where: { id: row.contractId },
+          data: { collaboratorId: row.effectiveCollaboratorId },
+        });
+        row.crmCollaboratorId = row.effectiveCollaboratorId;
+      } catch (e) {
+        logPrismaError("comparaCollabPatch", e);
+      }
     }
 
     // Raggruppa per etichetta liquidazione (run)
     const byLabel = new Map<string, ApplicableRow[]>();
-    for (const row of applicable) {
+    for (const row of applicableOk) {
       const label = row.effectiveRowLabel || defaultRunLabel;
       const list = byLabel.get(label) ?? [];
       list.push(row);
@@ -920,20 +1003,22 @@ export async function importAndApplyComparaAgostoAction(
     let primaryBatchId = "";
 
     for (const [runLabel, group] of byLabel) {
+      // Hash unico per ogni salvataggio (stesso file può salvare a lotti/ripetuti)
+      const rowFingerprint = group
+        .map((r) => `${r.sheetName}:${r.rowIndex}`)
+        .sort()
+        .join(",");
       const sha256 = createHash("sha256")
         .update(upload.buffer)
         .update("\0")
         .update(runLabel)
+        .update("\0")
+        .update(rowFingerprint)
+        .update("\0")
+        .update(String(Date.now()))
+        .update("\0")
+        .update(String(Math.random()))
         .digest("hex");
-      const duplicate = await prisma.payoutBatch.findUnique({
-        where: { sha256 },
-        select: { id: true, runId: true, filename: true },
-      });
-      if (duplicate) {
-        return fail(
-          `Questo file+etichetta è già stato importato (${duplicate.filename} · ${runLabel}): apri la liquidazione collegata`,
-        );
-      }
 
       let run = await prisma.payoutRun.findUnique({
         where: {
@@ -982,55 +1067,61 @@ export async function importAndApplyComparaAgostoAction(
         primaryBatchId = batch.id;
       }
 
+      // Insert sequenziali a bassa concorrenza; un fallimento non abortisce il lotto
       await mapWithConcurrency(group, INSERT_CONCURRENCY, async (row) => {
-        await prisma.payoutRow.create({
-          data: {
-            batchId: batch.id,
-            sheetName: row.sheetName,
-            rowIndex: row.rowIndex,
-            rawJson: JSON.stringify({
-              ...row.parsed.raw,
-              _comparaAction: row.action,
-              _proposedPodFill: row.effectivePodFill || null,
-              _podFillMode: row.podFillMode,
-              _uiAmount: row.effectiveAmount,
-              _uiCollaboratorId: row.effectiveCollaboratorId,
-              _stubCreate: row.isStubCreate,
-              _markMode: row.markMode,
-              _podOnly: row.podOnly,
-              _uiStato: row.effectiveStato,
-            }),
-            podRaw: row.effectivePodFill || row.podRaw || null,
-            podKey: row.parsed.podKeys[0] ?? null,
-            clientNameRaw: row.effectiveNominativo || row.nominativo || null,
-            supplierHint: row.effectiveSupplier || row.supplierHint || null,
-            collaboratorHint:
-              row.effectiveCollaboratorName || row.collaboratorName || null,
-            amount: row.effectiveAmount,
-            period: plan.competencePeriod,
-            matchStatus: "MATCHED",
-            matchScore: row.matchScore ?? null,
-            matchReason: row.matchReason ?? row.action,
-            contractId: row.contractId!,
-            collaboratorId:
-              row.effectiveCollaboratorId || row.crmCollaboratorId,
-            candidateIdsJson:
-              row.candidateIds.length > 0
-                ? JSON.stringify(row.candidateIds)
-                : null,
-            note: [
-              `Compara ${row.action}`,
-              row.isStubCreate ? "stub creato" : null,
-              row.skipReason,
-              row.effectivePodFill
-                ? `POD fill=${row.effectivePodFill}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")
-              .slice(0, 200),
-          },
-        });
+        try {
+          await prisma.payoutRow.create({
+            data: {
+              batchId: batch.id,
+              sheetName: row.sheetName,
+              rowIndex: row.rowIndex,
+              rawJson: JSON.stringify({
+                ...row.parsed.raw,
+                _comparaAction: row.action,
+                _proposedPodFill: row.effectivePodFill || null,
+                _podFillMode: row.podFillMode,
+                _uiAmount: row.effectiveAmount,
+                _uiCollaboratorId: row.effectiveCollaboratorId,
+                _stubCreate: row.isStubCreate,
+                _markMode: row.markMode,
+                _podOnly: row.podOnly,
+                _uiStato: row.effectiveStato,
+              }),
+              podRaw: row.effectivePodFill || row.podRaw || null,
+              podKey: row.parsed.podKeys[0] ?? null,
+              clientNameRaw: row.effectiveNominativo || row.nominativo || null,
+              supplierHint: row.effectiveSupplier || row.supplierHint || null,
+              collaboratorHint:
+                row.effectiveCollaboratorName || row.collaboratorName || null,
+              amount: row.effectiveAmount,
+              period: plan.competencePeriod,
+              matchStatus: "MATCHED",
+              matchScore: row.matchScore ?? null,
+              matchReason: row.matchReason ?? row.action,
+              contractId: row.contractId!,
+              collaboratorId:
+                row.effectiveCollaboratorId || row.crmCollaboratorId,
+              candidateIdsJson:
+                row.candidateIds.length > 0
+                  ? JSON.stringify(row.candidateIds)
+                  : null,
+              note: [
+                `Compara ${row.action}`,
+                row.isStubCreate ? "stub creato" : null,
+                row.skipReason,
+                row.effectivePodFill
+                  ? `POD fill=${row.effectivePodFill}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+                .slice(0, 200),
+            },
+          });
+        } catch (e) {
+          logPrismaError("comparaPayoutRowCreate", e);
+          totalErrors += 1;
+        }
       });
 
       let applied = 0;

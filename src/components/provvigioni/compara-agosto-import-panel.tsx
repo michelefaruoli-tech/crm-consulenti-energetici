@@ -8,12 +8,11 @@ import {
 } from "@/lib/compara-agosto-actions";
 import { comparaRuleAmount } from "@/lib/compara-agosto/amounts";
 import {
-  COMPARA_SUGGESTION_LABEL,
+  COMPARA_PRESENCE_LABEL,
   comparaAgostoRowKey,
   type ComparaAgostoPreviewResult,
   type ComparaAgostoPreviewRow,
   type ComparaAgostoRowEdit,
-  type ComparaSuggestion,
 } from "@/lib/compara-agosto/view-types";
 import { periodLabel, toPeriod } from "@/lib/recurring";
 import { formatCurrency } from "@/lib/commission";
@@ -44,37 +43,20 @@ function monthOptions(): string[] {
   return out;
 }
 
-const SUGGESTION_STYLE: Record<ComparaSuggestion, string> = {
-  already_ok: "text-slate-600",
-  update_status: "text-emerald-700",
-  insert_pod: "text-sky-700",
-  create_row: "text-sky-800",
-  confirm_match: "text-amber-800",
-  skip_liquidated: "text-slate-500",
-};
-
-function canConfirm(row: ComparaAgostoPreviewRow): boolean {
-  return (
-    row.action === "update" ||
-    row.action === "create" ||
-    row.action === "confirm" ||
-    row.action === "unmatched"
-  );
-}
-
 function defaultEditForRow(
   row: ComparaAgostoPreviewRow,
   defaultRunLabel: string,
 ): ComparaAgostoRowEdit {
   return {
     nominativo: row.nominativo,
-    supplier: row.supplierName || row.supplierHint || "",
+    supplier: row.supplierHint || row.supplierName || "",
     amount: row.ruleAmount,
     pod: row.proposedPodFill || row.podRaw || row.crmPod || "",
     stato: row.proposedStato,
     collaboratorId: row.collaboratorId ?? "",
     collaboratorName: row.collaboratorName ?? row.shopHint ?? "",
     rowLabel: row.defaultRowLabel ?? defaultRunLabel,
+    createConfirmed: false,
   };
 }
 
@@ -115,50 +97,40 @@ export function ComparaAgostoImportPanel() {
   const [preview, setPreview] = useState<ComparaAgostoPreviewResult | null>(
     null,
   );
-  /** Righe confermate (sì) — solo queste vanno in apply. */
-  const [confirmedKeys, setConfirmedKeys] = useState<Set<string>>(
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(
     () => new Set(),
   );
   const [rowEdits, setRowEdits] = useState<
     Record<string, ComparaAgostoRowEdit>
   >({});
-  const [filter, setFilter] = useState<"all" | ComparaSuggestion>("all");
 
   useEffect(() => {
     if (!preview) {
-      setConfirmedKeys(new Set());
+      setSelectedKeys(new Set());
       setRowEdits({});
       return;
     }
     setRowEdits(buildDefaultEdits(preview));
-    // Nessuna conferma automatica: Michele sceglie riga per riga
-    setConfirmedKeys(new Set());
+    setSelectedKeys(new Set());
   }, [preview]);
 
-  const visibleRows = useMemo(() => {
-    if (!preview) return [];
-    if (filter === "all") return preview.rows;
-    return preview.rows.filter((r) => r.suggestion === filter);
-  }, [preview, filter]);
-
-  const confirmedStats = useMemo(() => {
+  const selectedStats = useMemo(() => {
     if (!preview) return { count: 0, total: 0 };
     let count = 0;
     let total = 0;
     for (const row of preview.rows) {
       const key = comparaAgostoRowKey(row);
-      if (!confirmedKeys.has(key)) continue;
-      if (!canConfirm(row)) continue;
+      if (!selectedKeys.has(key)) continue;
       const edit = rowEdits[key];
       count++;
       total += edit?.amount ?? row.ruleAmount ?? 0;
     }
     return { count, total };
-  }, [preview, confirmedKeys, rowEdits]);
+  }, [preview, selectedKeys, rowEdits]);
 
   function reset() {
     setPreview(null);
-    setConfirmedKeys(new Set());
+    setSelectedKeys(new Set());
     setRowEdits({});
     setError(null);
     setMessage(null);
@@ -175,18 +147,19 @@ export function ComparaAgostoImportPanel() {
     setFileB64(await fileToBase64(file));
   }
 
-  function buildFd(): FormData {
+  function buildFd(
+    keys: string[],
+    edits: Record<string, ComparaAgostoRowEdit> = rowEdits,
+  ): FormData {
     const fd = new FormData();
     if (fileB64) fd.set("fileBase64", fileB64);
     fd.set("fileName", fileName);
     fd.set("competencePeriod", competencePeriod);
     fd.set("settledPeriod", settledPeriod);
     if (runLabel.trim()) fd.set("runLabel", runLabel.trim());
-    if (confirmedKeys.size > 0) {
-      fd.set("selectedRowKeys", JSON.stringify([...confirmedKeys]));
-    }
-    if (Object.keys(rowEdits).length > 0) {
-      fd.set("rowEdits", JSON.stringify(rowEdits));
+    fd.set("selectedRowKeys", JSON.stringify(keys));
+    if (Object.keys(edits).length > 0) {
+      fd.set("rowEdits", JSON.stringify(edits));
     }
     return fd;
   }
@@ -198,7 +171,7 @@ export function ComparaAgostoImportPanel() {
     }
     reset();
     start(async () => {
-      const res = await previewComparaAgostoAction(buildFd());
+      const res = await previewComparaAgostoAction(buildFd([]));
       if (!res.ok) {
         setError(res.error);
         return;
@@ -210,9 +183,8 @@ export function ComparaAgostoImportPanel() {
     });
   }
 
-  function setConfirmed(key: string, row: ComparaAgostoPreviewRow, on: boolean) {
-    if (!canConfirm(row)) return;
-    setConfirmedKeys((prev) => {
+  function toggleSelected(key: string, on: boolean) {
+    setSelectedKeys((prev) => {
       const next = new Set(prev);
       if (on) next.add(key);
       else next.delete(key);
@@ -220,18 +192,11 @@ export function ComparaAgostoImportPanel() {
     });
   }
 
-  function confirmSuggestion(suggestion: ComparaSuggestion, on: boolean) {
+  function selectAll(on: boolean) {
     if (!preview) return;
-    setConfirmedKeys((prev) => {
-      const next = new Set(prev);
-      for (const row of preview.rows) {
-        if (row.suggestion !== suggestion || !canConfirm(row)) continue;
-        const key = comparaAgostoRowKey(row);
-        if (on) next.add(key);
-        else next.delete(key);
-      }
-      return next;
-    });
+    setSelectedKeys(
+      on ? new Set(preview.rows.map((r) => comparaAgostoRowKey(r))) : new Set(),
+    );
   }
 
   function patchEdit(key: string, patch: Partial<ComparaAgostoRowEdit>) {
@@ -250,6 +215,7 @@ export function ComparaAgostoImportPanel() {
             collaboratorId: "",
             collaboratorName: "",
             rowLabel: runLabel,
+            createConfirmed: false,
           };
       return { ...prev, [key]: { ...base, ...patch } };
     });
@@ -263,7 +229,7 @@ export function ComparaAgostoImportPanel() {
     const opt = preview?.collaborators.find((c) => c.id === collaboratorId);
     const name = opt?.name ?? "";
     const edit = rowEdits[key];
-    const supplier = edit?.supplier || row.supplierName || row.supplierHint;
+    const supplier = edit?.supplier || row.supplierHint || row.supplierName;
     const rule = comparaRuleAmount({
       supplierHint: supplier,
       collaboratorName: name || row.shopHint,
@@ -277,51 +243,61 @@ export function ComparaAgostoImportPanel() {
     });
   }
 
-  function runApply() {
-    if (!preview) return;
-    if (confirmedStats.count === 0) {
-      setError("Conferma almeno una riga (Sì in colonna Azione) prima di applicare.");
-      return;
+  function validateKeys(
+    keys: string[],
+    edits: Record<string, ComparaAgostoRowEdit>,
+  ): string | null {
+    if (!preview || keys.length === 0) {
+      return "Seleziona almeno una riga da salvare.";
     }
-
-    const confirmedRows = preview.rows.filter((r) =>
-      confirmedKeys.has(comparaAgostoRowKey(r)),
-    );
-    const creates = confirmedRows.filter(
-      (r) => r.suggestion === "create_row",
-    ).length;
-    const pods = confirmedRows.filter(
-      (r) => r.suggestion === "insert_pod",
-    ).length;
-    const missingCollab = confirmedRows.filter((r) => {
-      if (r.action !== "unmatched") return false;
-      const edit = rowEdits[comparaAgostoRowKey(r)];
-      return !(edit?.collaboratorId || r.collaboratorId);
+    const creates = preview.rows.filter((r) => {
+      const key = comparaAgostoRowKey(r);
+      return keys.includes(key) && r.presence === "needs_create";
     });
-    if (missingCollab.length > 0) {
-      setError(
-        `Senza corrispondenza: scegli il collaboratore su ${missingCollab.length} riga/e (tendina in Azione).`,
-      );
+    for (const row of creates) {
+      const key = comparaAgostoRowKey(row);
+      const edit = edits[key];
+      if (!edit?.createConfirmed) {
+        return `«${row.nominativo}» non è in Provvigioni: spunta «Confermo caricamento» e scegli a nome di chi.`;
+      }
+      if (!edit.collaboratorId) {
+        return `«${row.nominativo}»: scegli il collaboratore a nome di cui caricare.`;
+      }
+    }
+    return null;
+  }
+
+  function runSave(
+    keys: string[],
+    edits: Record<string, ComparaAgostoRowEdit> = rowEdits,
+  ) {
+    if (!preview) return;
+    const validation = validateKeys(keys, edits);
+    if (validation) {
+      setError(validation);
       return;
     }
 
+    const createCount = preview.rows.filter(
+      (r) =>
+        keys.includes(comparaAgostoRowKey(r)) && r.presence === "needs_create",
+    ).length;
     const ok = window.confirm(
       [
-        `Applicare ${confirmedStats.count} righe confermate (${formatCurrency(confirmedStats.total)})?`,
-        "Vengono usati Nominativo / Fornitore / Importo / POD / Stato modificati in tabella.",
-        creates > 0 ? `${creates} CREATE riga stub.` : null,
-        pods > 0 ? `${pods} INSERT POD dal file.` : null,
-        "",
-        "Le righe «Già in liquidazione» non vengono toccate.",
-        "Operazione tracciata nella liquidazione (annullabile).",
+        `Salvare ${keys.length} riga/e?`,
+        createCount > 0
+          ? `${createCount} verranno create come Incassato da liquidare (confermate).`
+          : "Aggiornamento delle schede già in Provvigioni.",
+        "Write a lotti (niente blocco database su Neon).",
       ]
         .filter(Boolean)
         .join("\n"),
     );
     if (!ok) return;
 
+    setError(null);
     start(async () => {
-      const res = await importAndApplyComparaAgostoAction(buildFd());
+      const res = await importAndApplyComparaAgostoAction(buildFd(keys, edits));
       if (!res.ok) {
         setError(
           res.details?.length
@@ -332,22 +308,50 @@ export function ComparaAgostoImportPanel() {
       }
       setMessage(
         [
-          `Compara applicato: ${res.applied} righe`,
-          res.stubsCreated > 0 ? `${res.stubsCreated} stub creati` : null,
+          `Salvato: ${res.applied} righe`,
+          res.stubsCreated > 0 ? `${res.stubsCreated} caricate` : null,
           res.skipped > 0 ? `${res.skipped} saltate` : null,
           res.errors > 0 ? `${res.errors} errori` : null,
-          res.podFilled > 0 ? `${res.podFilled} POD compilati` : null,
+          res.podFilled > 0 ? `${res.podFilled} POD` : null,
         ]
           .filter(Boolean)
           .join(" · "),
       );
-      setPreview(null);
-      setFileB64(null);
-      setFileName("");
-      setFileKey((k) => k + 1);
-      router.push(`/provvigioni/liquidazioni/${res.runId}`);
       router.refresh();
+      const again = await previewComparaAgostoAction(buildFd([], edits));
+      if (again.ok) {
+        setPreview(again);
+      }
+      if (res.runId) {
+        router.push(`/provvigioni/liquidazioni/${res.runId}`);
+      }
     });
+  }
+
+  function saveOne(row: ComparaAgostoPreviewRow) {
+    const key = comparaAgostoRowKey(row);
+    let edits = rowEdits;
+    if (row.presence === "needs_create") {
+      const edit =
+        edits[key] ?? defaultEditForRow(row, preview!.defaultRunLabel);
+      if (!edit.collaboratorId) {
+        setError(
+          `Scegli a nome di chi caricare «${row.nominativo}», poi conferma e Salva.`,
+        );
+        toggleSelected(key, true);
+        return;
+      }
+      if (!edit.createConfirmed) {
+        const c = window.confirm(
+          `«${row.nominativo}» non è in Provvigioni (o c’è solo altro fornitore).\n\nConfermi di caricarlo a nome di ${edit.collaboratorName}?`,
+        );
+        if (!c) return;
+        const next = { ...edit, createConfirmed: true };
+        edits = { ...edits, [key]: next };
+        setRowEdits(edits);
+      }
+    }
+    runSave([key], edits);
   }
 
   return (
@@ -394,23 +398,24 @@ export function ComparaAgostoImportPanel() {
       </div>
 
       <p className="text-xs text-slate-500">
-        Tabella come Provvigioni: modifica celle, poi conferma Sì/No in Azione.
-        Già Incassato da liquidare + POD uguale → «Già in liquidazione» (nessun
-        overwrite). POD nel file ma assente in CRM → «Inserisci POD dal file».
-        Quote: Faruoli/Lucio 80·80 · Fagiano 70·65 · altri 70·60.
+        Elenco completo dei nominativi del foglio. Modifica le celle e Salva:
+        se già in Provvigioni aggiorna la scheda; se manca (o c’è solo una
+        Liquidata di altro fornitore) conferma il caricamento e scegli a nome di
+        chi. PDR con 0/00 iniziali riconosciuti. Quote: Faruoli/Lucio 80·80 ·
+        Fagiano 70·65 · altri 70·60.
       </p>
 
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" onClick={runPreview} disabled={pending}>
-          {pending && !preview ? "Lettura…" : "1. Anteprima"}
+          {pending && !preview ? "Lettura…" : "1. Carica elenco"}
         </Button>
         <Button
-          onClick={runApply}
-          disabled={pending || !preview || confirmedStats.count === 0}
+          onClick={() => runSave([...selectedKeys])}
+          disabled={pending || !preview || selectedStats.count === 0}
         >
           {pending && preview
-            ? "Applicazione…"
-            : `2. Applica confermate (${confirmedStats.count})`}
+            ? "Salvataggio…"
+            : `2. Salva selezionate (${selectedStats.count})`}
         </Button>
       </div>
 
@@ -432,102 +437,86 @@ export function ComparaAgostoImportPanel() {
               Competenza <strong>{periodLabel(preview.competencePeriod)}</strong>
               {" · "}settled{" "}
               <strong>{periodLabel(preview.settledPeriod)}</strong>
-              {" · "}già ok{" "}
-              <strong>{preview.summary.alreadyOk}</strong>
-              {" · "}confermate{" "}
+              {" · "}
+              <strong>{preview.summary.total}</strong> nominativi
+              {" · "}in Provvigioni{" "}
+              <strong>{preview.summary.present}</strong>
+              {" · "}da caricare{" "}
+              <strong>{preview.summary.needsCreate}</strong>
+              {" · "}selezionate{" "}
               <strong>
-                {confirmedStats.count} ({formatCurrency(confirmedStats.total)})
+                {selectedStats.count} ({formatCurrency(selectedStats.total)})
               </strong>
             </p>
             <div className="flex flex-wrap gap-1.5 text-xs">
-              <Button
-                variant="secondary"
-                onClick={() => confirmSuggestion("update_status", true)}
-              >
-                Conferma aggiornamenti
+              <Button variant="secondary" onClick={() => selectAll(true)}>
+                Seleziona tutte
               </Button>
-              <Button
-                variant="secondary"
-                onClick={() => confirmSuggestion("insert_pod", true)}
-              >
-                Conferma insert POD
+              <Button variant="secondary" onClick={() => selectAll(false)}>
+                Azzera selezione
               </Button>
-              <Button
-                variant="secondary"
-                onClick={() => confirmSuggestion("create_row", true)}
-              >
-                Conferma create
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setConfirmedKeys(new Set())}
-              >
-                Azzera conferme
-              </Button>
-              <Select
-                value={filter}
-                onChange={(e) =>
-                  setFilter(e.target.value as "all" | ComparaSuggestion)
-                }
-              >
-                <option value="all">Filtro: tutte</option>
-                <option value="update_status">Solo da aggiornare</option>
-                <option value="insert_pod">Solo insert POD</option>
-                <option value="create_row">Solo crea riga</option>
-                <option value="confirm_match">Solo da confermare</option>
-                <option value="already_ok">Solo già in liquidazione</option>
-                <option value="skip_liquidated">Solo già liquidate</option>
-              </Select>
             </div>
           </div>
 
-          <div className="max-h-[36rem] overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="max-h-[40rem] overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="min-w-full border-collapse text-left text-xs">
               <thead className="sticky top-0 z-20 bg-slate-100 text-[11px] uppercase tracking-wide text-slate-600">
                 <tr>
+                  <th className="px-2 py-2 font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={
+                        preview.rows.length > 0 &&
+                        selectedKeys.size === preview.rows.length
+                      }
+                      onChange={(e) => selectAll(e.target.checked)}
+                      aria-label="Seleziona tutte"
+                    />
+                  </th>
                   <th className="px-2 py-2 font-semibold">Nominativo</th>
                   <th className="px-2 py-2 font-semibold">Fornitore</th>
-                  <th className="hidden px-2 py-2 font-semibold lg:table-cell">
-                    Collab.
-                  </th>
+                  <th className="px-2 py-2 font-semibold">Collab.</th>
                   <th className="px-2 py-2 font-semibold">Importo</th>
                   <th className="px-2 py-2 font-semibold">POD / PDR</th>
                   <th className="px-2 py-2 font-semibold">Stato</th>
                   <th className="sticky right-0 z-30 bg-slate-100 px-2 py-2 font-semibold shadow-[-2px_0_5px_rgba(15,23,42,0.06)]">
-                    Azione
+                    Situazione / Salva
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((row) => {
+                {preview.rows.map((row) => {
                   const key = comparaAgostoRowKey(row);
-                  const editable = canConfirm(row);
                   const edit =
                     rowEdits[key] ??
                     defaultEditForRow(row, preview.defaultRunLabel);
-                  const confirmed = confirmedKeys.has(key);
-                  const hasCrmCollab = Boolean(row.collaboratorId);
+                  const selected = selectedKeys.has(key);
+                  const needsCreate = row.presence === "needs_create";
                   return (
                     <tr
                       key={key}
                       className={`border-t border-slate-100 align-top ${
-                        confirmed ? "bg-emerald-50/40" : "bg-white"
+                        selected ? "bg-emerald-50/40" : "bg-white"
                       }`}
                     >
                       <td className="px-2 py-1.5">
-                        {editable ? (
-                          <input
-                            className="min-w-[10rem] rounded border border-slate-200 bg-transparent px-1 py-1 text-[13px] font-semibold text-slate-900"
-                            value={edit.nominativo}
-                            onChange={(e) =>
-                              patchEdit(key, { nominativo: e.target.value })
-                            }
-                          />
-                        ) : (
-                          <span className="font-semibold text-slate-900">
-                            {row.nominativo}
-                          </span>
-                        )}
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(e) =>
+                            toggleSelected(key, e.target.checked)
+                          }
+                          aria-label={`Seleziona ${row.nominativo}`}
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input
+                          className="min-w-[10rem] rounded border border-slate-200 bg-transparent px-1 py-1 text-[13px] font-semibold text-slate-900"
+                          value={edit.nominativo}
+                          onChange={(e) =>
+                            patchEdit(key, { nominativo: e.target.value })
+                          }
+                        />
                         {row.contractNumber ? (
                           <div className="text-[10px] text-slate-400">
                             {row.contractNumber}
@@ -535,180 +524,133 @@ export function ComparaAgostoImportPanel() {
                         ) : null}
                       </td>
                       <td className="px-2 py-1.5">
-                        {editable ? (
-                          <input
-                            className="max-w-[8rem] rounded border border-slate-200 bg-transparent px-1 py-1"
-                            value={edit.supplier}
-                            onChange={(e) =>
-                              patchEdit(key, { supplier: e.target.value })
-                            }
-                          />
-                        ) : (
-                          <span>{row.supplierName || row.supplierHint}</span>
-                        )}
-                      </td>
-                      <td className="hidden px-2 py-1.5 lg:table-cell">
-                        {hasCrmCollab && editable ? (
-                          <select
-                            className="max-w-[7rem] rounded border border-slate-200 bg-transparent px-1 py-1"
-                            value={edit.collaboratorId}
-                            title={edit.collaboratorName}
-                            onChange={(e) =>
-                              onCollaboratorChange(key, row, e.target.value)
-                            }
-                          >
-                            <option value="">—</option>
-                            {preview.collaborators.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {shortCollab(c.name)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : hasCrmCollab ? (
-                          <span title={row.collaboratorName}>
-                            {shortCollab(row.collaboratorName || "")}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
+                        <input
+                          className="max-w-[8rem] rounded border border-slate-200 bg-transparent px-1 py-1"
+                          value={edit.supplier}
+                          onChange={(e) =>
+                            patchEdit(key, { supplier: e.target.value })
+                          }
+                        />
                       </td>
                       <td className="px-2 py-1.5">
-                        {editable ? (
-                          <>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className="w-[5.5rem] rounded border border-slate-200 bg-transparent px-1 py-1 tabular-nums"
-                              value={edit.amount ?? ""}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                patchEdit(key, {
-                                  amount:
-                                    v === ""
-                                      ? null
-                                      : Number.isFinite(Number(v))
-                                        ? Number(v)
-                                        : null,
-                                });
-                              }}
-                            />
-                            {row.fileAmount != null &&
-                            row.fileAmount !== edit.amount ? (
-                              <div className="text-[10px] text-slate-400">
-                                file {formatCurrency(row.fileAmount)}
-                              </div>
-                            ) : null}
-                          </>
-                        ) : (
-                          <span className="tabular-nums">
-                            {row.ruleAmount != null
-                              ? formatCurrency(row.ruleAmount)
-                              : "—"}
-                          </span>
-                        )}
+                        <select
+                          className={`max-w-[8rem] rounded border px-1 py-1 ${
+                            needsCreate && !edit.collaboratorId
+                              ? "border-amber-400 bg-amber-50"
+                              : "border-slate-200 bg-transparent"
+                          }`}
+                          value={edit.collaboratorId}
+                          title={edit.collaboratorName}
+                          onChange={(e) =>
+                            onCollaboratorChange(key, row, e.target.value)
+                          }
+                        >
+                          <option value="">
+                            {needsCreate ? "A nome di…" : "—"}
+                          </option>
+                          {preview.collaborators.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {shortCollab(c.name)}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-2 py-1.5">
-                        {editable ? (
-                          <input
-                            className={`max-w-[11rem] rounded border px-1 py-1 font-mono text-xs ${
-                              row.podNeedsFill
-                                ? "border-sky-300 bg-sky-50"
-                                : "border-slate-200 bg-transparent"
-                            }`}
-                            value={edit.pod}
-                            placeholder="POD / PDR…"
-                            onChange={(e) =>
-                              patchEdit(key, { pod: e.target.value })
-                            }
-                          />
-                        ) : (
-                          <span className="font-mono text-xs">
-                            {row.crmPod || row.podRaw || "—"}
-                          </span>
-                        )}
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="w-[5.5rem] rounded border border-slate-200 bg-transparent px-1 py-1 tabular-nums"
+                          value={edit.amount ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            patchEdit(key, {
+                              amount:
+                                v === ""
+                                  ? null
+                                  : Number.isFinite(Number(v))
+                                    ? Number(v)
+                                    : null,
+                            });
+                          }}
+                        />
+                        {row.fileAmount != null &&
+                        row.fileAmount !== edit.amount ? (
+                          <div className="text-[10px] text-slate-400">
+                            file {formatCurrency(row.fileAmount)}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-2 py-1.5">
-                        {editable ? (
-                          <select
-                            className="max-w-[9.5rem] rounded border border-slate-200 bg-transparent px-1 py-1"
-                            value={
-                              PROVVIGIONE_STATO_OPTIONS.includes(
-                                edit.stato as (typeof PROVVIGIONE_STATO_OPTIONS)[number],
-                              )
-                                ? edit.stato
-                                : "Incassato da liquidare"
-                            }
-                            onChange={(e) =>
-                              patchEdit(key, { stato: e.target.value })
-                            }
-                          >
-                            {PROVVIGIONE_STATO_OPTIONS.map((o) => (
-                              <option key={o} value={o}>
-                                {o}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span>{row.crmStato || row.proposedStato}</span>
-                        )}
+                        <input
+                          className="max-w-[11rem] rounded border border-slate-200 bg-transparent px-1 py-1 font-mono text-xs"
+                          value={edit.pod}
+                          placeholder="POD / PDR…"
+                          onChange={(e) =>
+                            patchEdit(key, { pod: e.target.value })
+                          }
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <select
+                          className="max-w-[9.5rem] rounded border border-slate-200 bg-transparent px-1 py-1"
+                          value={
+                            PROVVIGIONE_STATO_OPTIONS.includes(
+                              edit.stato as (typeof PROVVIGIONE_STATO_OPTIONS)[number],
+                            )
+                              ? edit.stato
+                              : "Incassato da liquidare"
+                          }
+                          onChange={(e) =>
+                            patchEdit(key, { stato: e.target.value })
+                          }
+                        >
+                          {PROVVIGIONE_STATO_OPTIONS.map((o) => (
+                            <option key={o} value={o}>
+                              {o}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td
                         className={`sticky right-0 z-10 px-2 py-1.5 shadow-[-2px_0_5px_rgba(15,23,42,0.06)] ${
-                          confirmed ? "bg-emerald-50" : "bg-white"
+                          selected ? "bg-emerald-50" : "bg-white"
                         }`}
                       >
                         <div
-                          className={`font-medium ${SUGGESTION_STYLE[row.suggestion]}`}
+                          className={`font-medium ${
+                            needsCreate ? "text-amber-800" : "text-slate-700"
+                          }`}
                         >
-                          {COMPARA_SUGGESTION_LABEL[row.suggestion]}
+                          {COMPARA_PRESENCE_LABEL[row.presence]}
                         </div>
-                        {!hasCrmCollab && editable ? (
-                          <select
-                            className="mt-1 max-w-[8rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-[11px]"
-                            value={edit.collaboratorId}
-                            onChange={(e) =>
-                              onCollaboratorChange(key, row, e.target.value)
-                            }
-                          >
-                            <option value="">Collab…</option>
-                            {preview.collaborators.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {shortCollab(c.name)}
-                              </option>
-                            ))}
-                          </select>
+                        {needsCreate ? (
+                          <label className="mt-1 flex cursor-pointer items-start gap-1 text-[11px] text-amber-900">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={Boolean(edit.createConfirmed)}
+                              onChange={(e) =>
+                                patchEdit(key, {
+                                  createConfirmed: e.target.checked,
+                                })
+                              }
+                            />
+                            <span>Confermo caricamento</span>
+                          </label>
                         ) : null}
-                        {editable ? (
-                          <div className="mt-1.5 flex items-center gap-2">
-                            <label className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-slate-700">
-                              <input
-                                type="radio"
-                                name={`confirm-${key}`}
-                                checked={confirmed}
-                                onChange={() => setConfirmed(key, row, true)}
-                              />
-                              Sì
-                            </label>
-                            <label className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-slate-700">
-                              <input
-                                type="radio"
-                                name={`confirm-${key}`}
-                                checked={!confirmed}
-                                onChange={() => setConfirmed(key, row, false)}
-                              />
-                              No
-                            </label>
-                          </div>
-                        ) : (
-                          <div className="mt-1 text-[11px] text-slate-500">
-                            — non toccare
-                          </div>
-                        )}
-                        {row.skipReason && row.suggestion === "confirm_match" ? (
-                          <div className="mt-0.5 max-w-[10rem] text-[10px] text-amber-700">
-                            {row.skipReason}
+                        {row.presenceNote ? (
+                          <div className="mt-0.5 max-w-[11rem] text-[10px] text-slate-500">
+                            {row.presenceNote}
                           </div>
                         ) : null}
+                        <Button
+                          className="mt-1.5"
+                          variant="secondary"
+                          disabled={pending}
+                          onClick={() => saveOne(row)}
+                        >
+                          Salva
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -718,7 +660,7 @@ export function ComparaAgostoImportPanel() {
           </div>
           {preview.truncated ? (
             <p className="text-xs text-amber-700">
-              Anteprima troncata alle prime {preview.rows.length} righe.
+              Elenco troncato alle prime {preview.rows.length} righe.
             </p>
           ) : null}
         </div>
