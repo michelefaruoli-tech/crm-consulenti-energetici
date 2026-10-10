@@ -7,6 +7,7 @@ import { periodLabel } from "@/lib/recurring";
 import { formatRomeDateTime } from "@/lib/timezone";
 import { listBuiltinTemplates } from "@/lib/payout/templates";
 import { PayoutImportPanel } from "@/components/provvigioni/payout-import-panel";
+import { ComparaAgostoImportPanel } from "@/components/provvigioni/compara-agosto-import-panel";
 import { PayoutBulkHistoricalPanel } from "@/components/provvigioni/payout-bulk-historical-panel";
 import { HeliosAnticipatoryCleanupPanel } from "@/components/provvigioni/helios-anticipatory-cleanup-panel";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -98,6 +99,18 @@ export default async function LiquidazioniPage() {
           <HeliosAnticipatoryCleanupPanel />
         </Card>
       ) : null}
+
+      <Card>
+        <CardTitle>Compara Agosto — inviti pagati</CardTitle>
+        <p className="mt-1 mb-4 text-sm text-slate-600">
+          Flusso dedicato: match per Nominativo, importi per regola
+          (Fagiano / altri), stato{" "}
+          <strong>Incassato da liquidare</strong>. Anteprima a tre liste
+          (aggiorna / crea / senza match) con checkbox: le create e i casi
+          Fagiano senza POD o POD diverso restano in conferma per Michele.
+        </p>
+        <ComparaAgostoImportPanel />
+      </Card>
 
       <Card>
         <CardTitle>Nuovo import</CardTitle>

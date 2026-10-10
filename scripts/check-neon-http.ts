@@ -30,6 +30,7 @@ const PAYOUT_CRITICAL_PATHS = [
   "src/lib/payout/report-doc.ts",
   "src/lib/payout/totals.ts",
   "src/lib/helios-provvigioni-import.ts",
+  "src/lib/compara-agosto-actions.ts",
 ];
 
 const FORBIDDEN = [
