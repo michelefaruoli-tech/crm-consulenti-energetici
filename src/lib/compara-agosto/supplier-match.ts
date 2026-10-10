@@ -2,7 +2,8 @@
  * Compatibilità fornitore file Compara ↔ contratto CRM.
  * Eni e Plenitude sono lo stesso gruppo; Iren è distinto.
  * Se il match POD punta a una Liquidata di altro fornitore,
- * non è il pagamento di agosto → nuova riga per il fornitore del file.
+ * cerca un contratto dello stesso nominativo + fornitore file
+ * (anche con POD CRM XXXX) prima di chiedere «Da caricare».
  */
 
 import { classifyComparaSupplier } from "@/lib/compara-agosto/amounts";
@@ -10,6 +11,7 @@ import type {
   PayoutCandidate,
   PayoutContractIndex,
 } from "@/lib/payout/match";
+import { isPlaceholderPod } from "@/lib/payout/normalize";
 import type { ParsedPayoutRow } from "@/lib/payout/types";
 
 /** True se file e CRM indicano lo stesso fornitore Compara (Eni≡Plenitude). */
@@ -55,9 +57,31 @@ function pushUnique(list: PayoutCandidate[], c: PayoutCandidate): void {
   if (!list.some((x) => x.id === c.id)) list.push(c);
 }
 
+function rankCandidate(c: PayoutCandidate): number {
+  // Preferisci già Incassato / liquidabile rispetto a bozze
+  const st = `${c.status}`.toUpperCase();
+  if (st === "PAGATO_DAL_FORNITORE") return 100;
+  if (st === "PROVVIGIONE_LIQUIDATA") return 40;
+  if (st === "ATTIVATO" || st === "INSERITO") return 60;
+  return 20;
+}
+
+function pickBest(pool: PayoutCandidate[]): PayoutCandidate | null {
+  if (pool.length === 0) return null;
+  if (pool.length === 1) return pool[0]!;
+  return pool.slice().sort((a, b) => {
+    const ra = rankCandidate(a);
+    const rb = rankCandidate(b);
+    if (rb !== ra) return rb - ra;
+    const ta = a.insertionDate?.getTime?.() ?? 0;
+    const tb = b.insertionDate?.getTime?.() ?? 0;
+    return tb - ta;
+  })[0]!;
+}
+
 /**
- * Cerca un contratto con lo stesso POD/PDR e fornitore compatibile col file.
- * Usato quando il match primario punta a un altro fornitore.
+ * Cerca contratto fornitore-compatibile: prima per POD/PDR, poi per nominativo
+ * (copre POD CRM segnaposto XXXX / ZXXXX sullo stesso cliente+fornitore).
  */
 export function findComparaSupplierCompatible(
   index: PayoutContractIndex,
@@ -65,28 +89,45 @@ export function findComparaSupplierCompatible(
   supplierHint: string,
 ): PayoutCandidate | null {
   const hint = supplierHint.trim();
-  if (!hint || row.podKeys.length === 0) return null;
+  if (!hint) return null;
 
-  const pool: PayoutCandidate[] = [];
+  const byPod: PayoutCandidate[] = [];
   for (const key of row.podKeys) {
     const found = index.byPod.get(key);
     if (!found) continue;
     for (const c of found) {
       if (comparaSuppliersCompatible(hint, c.supplierName)) {
-        pushUnique(pool, c);
+        pushUnique(byPod, c);
       }
     }
   }
+  const podPick = pickBest(byPod);
+  if (podPick) return podPick;
 
-  if (pool.length === 0) return null;
-  if (pool.length === 1) return pool[0]!;
-
-  // Preferisci il più recente
-  return pool.slice().sort((a, b) => {
-    const ta = a.insertionDate?.getTime?.() ?? 0;
-    const tb = b.insertionDate?.getTime?.() ?? 0;
-    return tb - ta;
-  })[0]!;
+  // Nome (+ ordine invertito già in personKeys) + stesso fornitore
+  const byName: PayoutCandidate[] = [];
+  for (const key of row.personKeys ?? []) {
+    const found = index.byName.get(key);
+    if (!found) continue;
+    for (const c of found) {
+      if (comparaSuppliersCompatible(hint, c.supplierName)) {
+        pushUnique(byName, c);
+      }
+    }
+  }
+  // Tra i match per nome, preferisci quelli con POD reale o già Incassato
+  const ranked = byName.slice().sort((a, b) => {
+    const aPod = a.podPdr || a.pod || a.pdr || "";
+    const bPod = b.podPdr || b.pod || b.pdr || "";
+    const aReal = aPod && !isPlaceholderPod(aPod) ? 1 : 0;
+    const bReal = bPod && !isPlaceholderPod(bPod) ? 1 : 0;
+    if (bReal !== aReal) return bReal - aReal;
+    const ra = rankCandidate(a);
+    const rb = rankCandidate(b);
+    if (rb !== ra) return rb - ra;
+    return (b.insertionDate?.getTime?.() ?? 0) - (a.insertionDate?.getTime?.() ?? 0);
+  });
+  return ranked[0] ?? null;
 }
 
 export type ComparaResolvedMatch = {
@@ -101,8 +142,9 @@ export type ComparaResolvedMatch = {
 };
 
 /**
- * Dopo matchPayoutRow: se il fornitore non combacia, prova un'alternativa
- * o forza create (contract null) senza toccare la Liquidata altrui.
+ * Dopo matchPayoutRow: se il fornitore non combacia (o non c’è match POD),
+ * prova nominativo+fornitore file; altrimenti «Da caricare» senza toccare
+ * la Liquidata altrui.
  */
 export function resolveComparaSupplierMatch(params: {
   index: PayoutContractIndex;
@@ -124,7 +166,7 @@ export function resolveComparaSupplierMatch(params: {
   } = params;
   const hint = row.supplierHint.trim();
 
-  if (!matched || !hint) {
+  if (!hint) {
     return {
       contract: matched,
       ambiguous,
@@ -136,7 +178,7 @@ export function resolveComparaSupplierMatch(params: {
     };
   }
 
-  if (comparaSuppliersCompatible(hint, matched.supplierName)) {
+  if (matched && comparaSuppliersCompatible(hint, matched.supplierName)) {
     return {
       contract: matched,
       ambiguous,
@@ -153,15 +195,29 @@ export function resolveComparaSupplierMatch(params: {
     return {
       contract: alt,
       ambiguous: false,
-      matchReason: "supplier_compatible",
-      matchScore,
+      matchReason: matched
+        ? "supplier_compatible"
+        : "name_supplier_compatible",
+      matchScore: matchScore ?? 50,
       candidateIds: [alt.id],
       supplierMismatchCreate: false,
       mismatchedSupplierName: null,
     };
   }
 
-  // Es. Lepore: PDR matcha Plenitude Liquidata 2025, file è Iren → nuova riga
+  if (!matched) {
+    return {
+      contract: null,
+      ambiguous: false,
+      matchReason: matchReason,
+      matchScore: null,
+      candidateIds: [],
+      supplierMismatchCreate: false,
+      mismatchedSupplierName: null,
+    };
+  }
+
+  // Es. POD matcha Plenitude Liquidata, nessun Iren per quel nominativo
   return {
     contract: null,
     ambiguous: false,

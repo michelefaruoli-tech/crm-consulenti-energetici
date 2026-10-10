@@ -37,6 +37,7 @@ import { readComparaUnits } from "../src/lib/compara-agosto/units";
 import {
   cellPodText,
   isPlaceholderPod,
+  personKeyVariants,
   podsEquivalent,
   restorePdrLeadingZeros,
   shouldWritePodFromFile,
@@ -387,6 +388,19 @@ check(
   "create_row",
 );
 
+console.log("\n• Nome ordine invertito (Maruccia)");
+const marucciaKeys = personKeyVariants({ full: "Alberto Maruccia" });
+check(
+  "include ordine CRM cognome-nome",
+  marucciaKeys.includes("MARUCCIA ALBERTO"),
+  true,
+);
+check(
+  "include ordine file nome-cognome",
+  marucciaKeys.includes("ALBERTO MARUCCIA"),
+  true,
+);
+
 console.log("\n• Fornitore file ≠ Liquidata (Lepore)");
 check("Eni≡Plenitude", comparaSuppliersCompatible("Iren", "Plenitude"), false);
 check("Iren≡Iren", comparaSuppliersCompatible("IREN", "Iren Energia"), true);
@@ -431,9 +445,12 @@ const leporeRow: ParsedPayoutRow = {
   collaboratorHint: "Michele",
   podRaw: "00882602701365",
   podKeys: ["00882602701365"],
+  podMaskedSuffix: "",
+  personKeys: personKeyVariants({ full: "ANTONIO LEPORE" }),
   fiscalKey: "",
   amount: 60,
   period: "2026-08",
+  note: "",
 };
 const leporeResolved = resolveComparaSupplierMatch({
   index: emptyIndex,
@@ -445,7 +462,7 @@ const leporeResolved = resolveComparaSupplierMatch({
   candidateIds: [plenitude.id],
 });
 check(
-  "Lepore Iren vs Plenitude → needs create (no contract)",
+  "Lepore Iren vs Plenitude senza Iren → needs create",
   leporeResolved.contract == null && leporeResolved.supplierMismatchCreate,
   true,
 );
@@ -459,12 +476,20 @@ const irenAlt: PayoutCandidate = {
   id: "c-iren",
   contractNumber: "X2",
   supplierName: "Iren",
-  status: "ATTIVATO",
+  status: "PAGATO_DAL_FORNITORE",
+  podPdr: "XXXX",
+  pdr: "XXXX",
 };
-emptyIndex.byPod.set("00882602701365", [plenitude, irenAlt]);
+// Iren già Incassato ma POD segnaposto: recuperabile per nome+fornitore
+emptyIndex.byName.set("ANTONIO LEPORE", [plenitude, irenAlt]);
+emptyIndex.byName.set("LEPORE ANTONIO", [plenitude, irenAlt]);
+const leporeName = {
+  ...leporeRow,
+  personKeys: personKeyVariants({ full: "ANTONIO LEPORE" }),
+};
 const leporeAlt = resolveComparaSupplierMatch({
   index: emptyIndex,
-  row: leporeRow,
+  row: leporeName,
   matched: plenitude,
   ambiguous: false,
   matchReason: "pod_exact",
@@ -472,9 +497,59 @@ const leporeAlt = resolveComparaSupplierMatch({
   candidateIds: [plenitude.id],
 });
 check(
-  "Lepore con Iren già presente → usa Iren",
+  "Lepore: Iren Incassato per nome (POD XXXX) → usa Iren",
   leporeAlt.contract?.id,
   "c-iren",
+);
+const marucciaIren: PayoutCandidate = {
+  ...irenAlt,
+  id: "c-maruccia-iren",
+  clientName: "MARUCCIA ALBERTO",
+  supplierName: "Iren",
+  status: "PAGATO_DAL_FORNITORE",
+  podPdr: "ZXXXX",
+  pod: "ZXXXX",
+  pdr: null,
+};
+const marucciaIndex: PayoutContractIndex = {
+  byPod: new Map([["ZXXXX", [marucciaIren]]]),
+  byPodSuffix: new Map(),
+  byFiscal: new Map(),
+  byName: new Map([
+    ["MARUCCIA ALBERTO", [marucciaIren]],
+    ["ALBERTO MARUCCIA", [marucciaIren]],
+  ]),
+  size: 1,
+};
+const marucciaFile: ParsedPayoutRow = {
+  sheetName: "Sheet",
+  rowIndex: 3,
+  raw: {},
+  clientNameRaw: "Alberto Maruccia",
+  supplierHint: "Iren",
+  collaboratorHint: "Fagiano",
+  podRaw: "01613893005447",
+  podKeys: ["01613893005447", "1613893005447"],
+  podMaskedSuffix: "",
+  personKeys: personKeyVariants({ full: "Alberto Maruccia" }),
+  fiscalKey: "",
+  amount: 65,
+  period: "2026-08",
+  note: "",
+};
+const marucciaResolved = resolveComparaSupplierMatch({
+  index: marucciaIndex,
+  row: marucciaFile,
+  matched: null,
+  ambiguous: false,
+  matchReason: null,
+  matchScore: null,
+  candidateIds: [],
+});
+check(
+  "Maruccia unmatched POD + Iren per nome → present",
+  marucciaResolved.contract?.id,
+  "c-maruccia-iren",
 );
 
 console.log("\n• rowEdits payload (Maruccia: conferma + Fagiano)");
