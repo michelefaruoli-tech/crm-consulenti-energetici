@@ -296,26 +296,58 @@ export async function deleteAgendaItemAction(
   }
 }
 
+export type AgendaGenericNoteStatusDto = "DA_CONTROLLARE" | "RISOLTA";
+
 export type AgendaGenericNoteDto = {
+  id: string;
   text: string;
-  updatedAt: string | null;
+  status: AgendaGenericNoteStatusDto;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export async function getAgendaGenericNoteAction(): Promise<
-  { ok: true; note: AgendaGenericNoteDto } | { ok: false; error: string }
+export type AgendaGenericNoteFilter = "aperte" | "risolte" | "tutte";
+
+function toNoteDto(note: {
+  id: string;
+  text: string;
+  status: AgendaGenericNoteStatusDto;
+  createdAt: Date;
+  updatedAt: Date;
+}): AgendaGenericNoteDto {
+  return {
+    id: note.id,
+    text: note.text,
+    status: note.status,
+    createdAt: note.createdAt.toISOString(),
+    updatedAt: note.updatedAt.toISOString(),
+  };
+}
+
+function normalizeNoteText(text: string): string {
+  return text.replace(/\r\n/g, "\n").trim();
+}
+
+export async function listAgendaGenericNotesAction(
+  filter: AgendaGenericNoteFilter = "aperte",
+): Promise<
+  { ok: true; notes: AgendaGenericNoteDto[] } | { ok: false; error: string }
 > {
   try {
     const session = await requireSession();
-    const note = await prisma.agendaGenericNote.findUnique({
-      where: { userId: session.id },
+    const statusFilter =
+      filter === "aperte"
+        ? ({ status: "DA_CONTROLLARE" as const })
+        : filter === "risolte"
+          ? ({ status: "RISOLTA" as const })
+          : {};
+
+    const notes = await prisma.agendaGenericNote.findMany({
+      where: { userId: session.id, ...statusFilter },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
     });
-    return {
-      ok: true,
-      note: {
-        text: note?.text ?? "",
-        updatedAt: note?.updatedAt.toISOString() ?? null,
-      },
-    };
+
+    return { ok: true, notes: notes.map(toNoteDto) };
   } catch (e) {
     return {
       ok: false,
@@ -324,36 +356,124 @@ export async function getAgendaGenericNoteAction(): Promise<
   }
 }
 
-export async function saveAgendaGenericNoteAction(
+export async function createAgendaGenericNoteAction(
   text: string,
-): Promise<{ ok: true; updatedAt: string } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; note: AgendaGenericNoteDto } | { ok: false; error: string }
+> {
   try {
     const session = await requireSession();
-    const trimmed = text.trimEnd();
+    const trimmed = normalizeNoteText(text);
+    if (!trimmed) {
+      return { ok: false, error: "Inserisci il testo della nota" };
+    }
     if (trimmed.length > 50_000) {
       return { ok: false, error: "Nota troppo lunga (max 50.000 caratteri)" };
     }
 
-    // Neon HTTP: niente upsert/createMany/updateMany/$transaction — find + create/update.
-    const existing = await prisma.agendaGenericNote.findUnique({
-      where: { userId: session.id },
+    const saved = await prisma.agendaGenericNote.create({
+      data: {
+        userId: session.id,
+        text: trimmed,
+        status: "DA_CONTROLLARE",
+      },
     });
 
-    const saved = existing
-      ? await prisma.agendaGenericNote.update({
-          where: { id: existing.id },
-          data: { text: trimmed },
-        })
-      : await prisma.agendaGenericNote.create({
-          data: { userId: session.id, text: trimmed },
-        });
-
     revalidatePath("/agenda");
-    return { ok: true, updatedAt: saved.updatedAt.toISOString() };
+    return { ok: true, note: toNoteDto(saved) };
   } catch (e) {
     return {
       ok: false,
-      error: e instanceof Error ? e.message : "Salvataggio nota non riuscito",
+      error: e instanceof Error ? e.message : "Creazione nota non riuscita",
+    };
+  }
+}
+
+export async function updateAgendaGenericNoteAction(
+  id: string,
+  text: string,
+): Promise<
+  { ok: true; note: AgendaGenericNoteDto } | { ok: false; error: string }
+> {
+  try {
+    const session = await requireSession();
+    const existing = await prisma.agendaGenericNote.findUnique({ where: { id } });
+    if (!existing || existing.userId !== session.id) {
+      return { ok: false, error: "Nota non trovata" };
+    }
+
+    const trimmed = normalizeNoteText(text);
+    if (!trimmed) {
+      return { ok: false, error: "Inserisci il testo della nota" };
+    }
+    if (trimmed.length > 50_000) {
+      return { ok: false, error: "Nota troppo lunga (max 50.000 caratteri)" };
+    }
+
+    const saved = await prisma.agendaGenericNote.update({
+      where: { id },
+      data: { text: trimmed },
+    });
+
+    revalidatePath("/agenda");
+    return { ok: true, note: toNoteDto(saved) };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Modifica nota non riuscita",
+    };
+  }
+}
+
+export async function setAgendaGenericNoteStatusAction(
+  id: string,
+  status: AgendaGenericNoteStatusDto,
+): Promise<
+  { ok: true; note: AgendaGenericNoteDto } | { ok: false; error: string }
+> {
+  try {
+    const session = await requireSession();
+    if (status !== "DA_CONTROLLARE" && status !== "RISOLTA") {
+      return { ok: false, error: "Stato non valido" };
+    }
+
+    const existing = await prisma.agendaGenericNote.findUnique({ where: { id } });
+    if (!existing || existing.userId !== session.id) {
+      return { ok: false, error: "Nota non trovata" };
+    }
+
+    const saved = await prisma.agendaGenericNote.update({
+      where: { id },
+      data: { status },
+    });
+
+    revalidatePath("/agenda");
+    return { ok: true, note: toNoteDto(saved) };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Aggiornamento stato non riuscito",
+    };
+  }
+}
+
+export async function deleteAgendaGenericNoteAction(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const session = await requireSession();
+    const existing = await prisma.agendaGenericNote.findUnique({ where: { id } });
+    if (!existing || existing.userId !== session.id) {
+      return { ok: false, error: "Nota non trovata" };
+    }
+
+    await prisma.agendaGenericNote.delete({ where: { id } });
+    revalidatePath("/agenda");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Eliminazione nota non riuscita",
     };
   }
 }

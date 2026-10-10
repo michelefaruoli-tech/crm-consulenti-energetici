@@ -32,13 +32,18 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { cn } from "@/lib/cn";
 import {
+  createAgendaGenericNoteAction,
   createAgendaItemAction,
+  deleteAgendaGenericNoteAction,
   deleteAgendaItemAction,
-  getAgendaGenericNoteAction,
+  listAgendaGenericNotesAction,
   listAgendaItemsAction,
-  saveAgendaGenericNoteAction,
+  setAgendaGenericNoteStatusAction,
   toggleAgendaCompleteAction,
+  updateAgendaGenericNoteAction,
   updateAgendaItemAction,
+  type AgendaGenericNoteDto,
+  type AgendaGenericNoteFilter,
   type AgendaItemDto,
 } from "@/lib/agenda-actions";
 import { APP_TZ, romeDateString } from "@/lib/timezone";
@@ -182,13 +187,23 @@ function EventChip({
   );
 }
 
+const NOTE_FILTERS: { key: AgendaGenericNoteFilter; label: string }[] = [
+  { key: "aperte", label: "Da controllare" },
+  { key: "risolte", label: "Risolte" },
+  { key: "tutte", label: "Tutte" },
+];
+
+function noteStatusLabel(status: AgendaGenericNoteDto["status"]): string {
+  return status === "RISOLTA" ? "Risolta" : "Da controllare";
+}
+
 export function AgendaApp({
   initialItems,
-  initialNoteText,
+  initialNotes,
   userName,
 }: {
   initialItems: AgendaItemDto[];
-  initialNoteText: string;
+  initialNotes: AgendaGenericNoteDto[];
   userName: string;
 }) {
   const todayYmd = romeDateString();
@@ -199,9 +214,11 @@ export function AgendaApp({
   const [form, setForm] = useState<FormState>(() => emptyForm(todayYmd));
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [noteText, setNoteText] = useState(initialNoteText);
-  const [noteSavedAt, setNoteSavedAt] = useState<string | null>(null);
-  const [noteDirty, setNoteDirty] = useState(false);
+  const [notes, setNotes] = useState(initialNotes);
+  const [noteFilter, setNoteFilter] = useState<AgendaGenericNoteFilter>("aperte");
+  const [newNoteText, setNewNoteText] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
   const [noteMsg, setNoteMsg] = useState<string | null>(null);
   const notifiedRef = useRef<Set<string>>(new Set());
 
@@ -260,17 +277,22 @@ export function AgendaApp({
     reloadRange(rangeFromTo.from, rangeFromTo.to);
   }, [view, rangeFromTo, reloadRange]);
 
-  useEffect(() => {
-    if (view !== "notes") return;
+  const reloadNotes = useCallback((filter: AgendaGenericNoteFilter) => {
     startTransition(async () => {
-      const res = await getAgendaGenericNoteAction();
+      const res = await listAgendaGenericNotesAction(filter);
       if (res.ok) {
-        setNoteText(res.note.text);
-        setNoteSavedAt(res.note.updatedAt);
-        setNoteDirty(false);
+        setNotes(res.notes);
+        setNoteMsg(null);
+      } else {
+        setNoteMsg(res.error);
       }
     });
-  }, [view]);
+  }, []);
+
+  useEffect(() => {
+    if (view !== "notes") return;
+    reloadNotes(noteFilter);
+  }, [view, noteFilter, reloadNotes]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
@@ -363,17 +385,80 @@ export function AgendaApp({
     });
   };
 
-  const saveNote = () => {
+  const createNote = () => {
     setNoteMsg(null);
     startTransition(async () => {
-      const res = await saveAgendaGenericNoteAction(noteText);
+      const res = await createAgendaGenericNoteAction(newNoteText);
       if (!res.ok) {
         setNoteMsg(res.error);
         return;
       }
-      setNoteSavedAt(res.updatedAt);
-      setNoteDirty(false);
-      setNoteMsg("Nota salvata");
+      setNewNoteText("");
+      setNoteMsg("Nota creata");
+      if (noteFilter === "risolte") {
+        setNoteFilter("aperte");
+      } else {
+        reloadNotes(noteFilter);
+      }
+    });
+  };
+
+  const saveEditedNote = (id: string) => {
+    setNoteMsg(null);
+    startTransition(async () => {
+      const res = await updateAgendaGenericNoteAction(id, editingNoteText);
+      if (!res.ok) {
+        setNoteMsg(res.error);
+        return;
+      }
+      setEditingNoteId(null);
+      setEditingNoteText("");
+      setNoteMsg("Nota aggiornata");
+      reloadNotes(noteFilter);
+    });
+  };
+
+  const markNoteResolved = (id: string) => {
+    setNoteMsg(null);
+    startTransition(async () => {
+      const res = await setAgendaGenericNoteStatusAction(id, "RISOLTA");
+      if (!res.ok) {
+        setNoteMsg(res.error);
+        return;
+      }
+      setNoteMsg("Nota segnata come risolta");
+      reloadNotes(noteFilter);
+    });
+  };
+
+  const reopenNote = (id: string) => {
+    setNoteMsg(null);
+    startTransition(async () => {
+      const res = await setAgendaGenericNoteStatusAction(id, "DA_CONTROLLARE");
+      if (!res.ok) {
+        setNoteMsg(res.error);
+        return;
+      }
+      setNoteMsg("Nota riaperta");
+      reloadNotes(noteFilter);
+    });
+  };
+
+  const removeNote = (id: string) => {
+    if (!window.confirm("Eliminare questa nota?")) return;
+    setNoteMsg(null);
+    startTransition(async () => {
+      const res = await deleteAgendaGenericNoteAction(id);
+      if (!res.ok) {
+        setNoteMsg(res.error);
+        return;
+      }
+      if (editingNoteId === id) {
+        setEditingNoteId(null);
+        setEditingNoteText("");
+      }
+      setNoteMsg("Nota eliminata");
+      reloadNotes(noteFilter);
     });
   };
 
@@ -767,38 +852,196 @@ export function AgendaApp({
 
       {view === "notes" ? (
         <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-slate-900">Note generiche</h2>
               <p className="text-sm text-slate-500">
-                Appunti personali, indipendenti dagli appuntamenti
+                Lista di appunti da lavorare, indipendenti dagli appuntamenti
               </p>
             </div>
-            <Button type="button" size="sm" onClick={saveNote} disabled={pending || !noteDirty}>
-              {pending ? "Salvataggio..." : "Salva nota"}
-            </Button>
+            <div
+              className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+              role="tablist"
+              aria-label="Filtro note"
+            >
+              {NOTE_FILTERS.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={noteFilter === f.key}
+                  onClick={() => setNoteFilter(f.key)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                    noteFilter === f.key
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800",
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <Textarea
-            rows={14}
-            value={noteText}
-            onChange={(e) => {
-              setNoteText(e.target.value);
-              setNoteDirty(true);
-              setNoteMsg(null);
-            }}
-            placeholder="Scrivi qui note libere, promemoria, contatti utili..."
-            className="min-h-[16rem] font-normal"
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-            {noteDirty ? <span className="text-amber-700">Modifiche non salvate</span> : null}
-            {noteMsg ? <span className="text-emerald-700">{noteMsg}</span> : null}
-            {noteSavedAt && !noteDirty ? (
-              <span>
-                Ultimo salvataggio{" "}
-                {formatInTimeZone(noteSavedAt, APP_TZ, "dd/MM/yyyy HH:mm")}
-              </span>
-            ) : null}
+
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+            <Field label="Nuova nota">
+              <Textarea
+                rows={3}
+                value={newNoteText}
+                onChange={(e) => {
+                  setNewNoteText(e.target.value);
+                  setNoteMsg(null);
+                }}
+                placeholder="Es. Ricontrollare contratti attivi…"
+                className="font-normal"
+              />
+            </Field>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={createNote}
+                disabled={pending || !newNoteText.trim()}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                {pending ? "Salvataggio..." : "Aggiungi nota"}
+              </Button>
+              {noteMsg ? <span className="text-xs text-emerald-700">{noteMsg}</span> : null}
+            </div>
           </div>
+
+          {notes.length === 0 ? (
+            <div className="px-2 py-12 text-center">
+              <StickyNote className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+              <p className="text-sm text-slate-500">
+                {noteFilter === "risolte"
+                  ? "Nessuna nota risolta"
+                  : noteFilter === "tutte"
+                    ? "Nessuna nota ancora"
+                    : "Nessuna nota da controllare"}
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {notes.map((note) => {
+                const isEditing = editingNoteId === note.id;
+                const isResolved = note.status === "RISOLTA";
+                return (
+                  <li key={note.id} className="px-3 py-3 sm:px-4">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold",
+                          isResolved
+                            ? "bg-emerald-50 text-emerald-800"
+                            : "bg-amber-50 text-amber-800",
+                        )}
+                      >
+                        {noteStatusLabel(note.status)}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Aggiornata{" "}
+                        {formatInTimeZone(note.updatedAt, APP_TZ, "dd/MM/yyyy HH:mm")}
+                      </span>
+                    </div>
+
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <Textarea
+                          rows={4}
+                          value={editingNoteText}
+                          onChange={(e) => setEditingNoteText(e.target.value)}
+                          className="font-normal"
+                          autoFocus
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => saveEditedNote(note.id)}
+                            disabled={pending || !editingNoteText.trim()}
+                          >
+                            Salva
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setEditingNoteId(null);
+                              setEditingNoteText("");
+                            }}
+                            disabled={pending}
+                          >
+                            Annulla
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p
+                          className={cn(
+                            "whitespace-pre-wrap text-sm text-slate-800",
+                            isResolved && "text-slate-500 line-through",
+                          )}
+                        >
+                          {note.text}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setEditingNoteId(note.id);
+                              setEditingNoteText(note.text);
+                              setNoteMsg(null);
+                            }}
+                            disabled={pending}
+                          >
+                            Modifica
+                          </Button>
+                          {isResolved ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => reopenNote(note.id)}
+                              disabled={pending}
+                            >
+                              Riapri
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => markNoteResolved(note.id)}
+                              disabled={pending}
+                            >
+                              <Check className="mr-1.5 h-4 w-4" />
+                              Segna risolta
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => removeNote(note.id)}
+                            disabled={pending}
+                            className="text-rose-700 hover:bg-rose-50"
+                          >
+                            <Trash2 className="mr-1.5 h-4 w-4" />
+                            Elimina
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       ) : null}
 

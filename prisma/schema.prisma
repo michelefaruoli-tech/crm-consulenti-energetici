@@ -122,7 +122,7 @@ model User {
   /// Dove questo utente compare nello scope di un backoffice / area manager
   scopedByBackoffices UserCollaboratorScope[] @relation("ScopedCollaborator")
   agendaItems          AgendaItem[]
-  agendaGenericNote    AgendaGenericNote?
+  agendaGenericNotes   AgendaGenericNote[]
   /// Import provvigioni e ciclo di liquidazione
   importTemplatesCreated ImportTemplate[]   @relation("ImportTemplateCreatedBy")
   payoutRunsCreated      PayoutRun[]        @relation("PayoutRunCreatedBy")
@@ -695,14 +695,25 @@ model AgendaItem {
   @@index([alertAt])
 }
 
-/// Blocco note libere per utente (tab «Note generiche» in Agenda).
+/// Stato lavorativo di una nota generica in Agenda.
+enum AgendaGenericNoteStatus {
+  DA_CONTROLLARE
+  RISOLTA
+}
+
+/// Nota libera lavorabile per utente (tab «Note generiche» in Agenda).
+/// Una riga = una voce in lista (non più un unico blocco testo per utente).
 model AgendaGenericNote {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  text      String   @default("")
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+  id        String                   @id @default(cuid())
+  userId    String
+  user      User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String                   @default("")
+  status    AgendaGenericNoteStatus  @default(DA_CONTROLLARE)
+  updatedAt DateTime                 @updatedAt
+  createdAt DateTime                 @default(now())
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
