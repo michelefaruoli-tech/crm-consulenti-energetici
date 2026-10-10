@@ -51,6 +51,11 @@ export type ProvvigioniFilters = {
    * P1.2 B4: con filtro storno «Storico» non forzare `isHistorical: false`
    * (altrimenti l’OR con storico sarebbe sempre vuoto).
    */
+  /**
+   * Se `false`, nasconde i contratti `isHistorical` (POD ricontrattualizzato).
+   * Default / `true`: restano in elenco (regola Michele: ogni contratto salvato
+   * compare in Provvigioni; il badge Storico li distingue).
+   */
   includeHistorical?: boolean;
 };
 
@@ -374,7 +379,9 @@ export function buildProvvigioniContractWhere(
       OR: [
         {
           AND: [
-            ...(f.includeHistorical ? [] : [{ isHistorical: false as const }]),
+            ...(f.includeHistorical === false
+              ? [{ isHistorical: false as const }]
+              : []),
             { status: { notIn: [...KO_STATUSES] } },
           ],
         },
@@ -382,7 +389,7 @@ export function buildProvvigioniContractWhere(
       ],
     });
   } else {
-    if (!f.includeHistorical) {
+    if (f.includeHistorical === false) {
       and.push({ isHistorical: false });
     }
     and.push({ status: { notIn: [...KO_STATUSES] } });

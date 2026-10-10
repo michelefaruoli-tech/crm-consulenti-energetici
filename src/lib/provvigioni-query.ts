@@ -22,7 +22,6 @@ import {
   loadDoppiaPosizioneContractIds,
   mergeLegacyFuoriStornoFocus,
   parseStornoStatusFilters,
-  stornoFilterAllowsHistorical,
   stornoFilterNeedsDoppiaIds,
 } from "@/lib/storno-filters";
 import {
@@ -222,7 +221,7 @@ export async function resolveProvvigioniQuery(
         visibility,
         columnWhere: columnWhereParts.contract,
         competencePeriod: effectiveCompetence,
-        includeHistorical: stornoFilterAllowsHistorical(stornoIds),
+        includeHistorical: true,
       },
       focus,
       effectiveCompetence,
