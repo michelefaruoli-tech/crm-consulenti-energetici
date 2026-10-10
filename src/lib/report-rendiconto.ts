@@ -4,6 +4,8 @@
  */
 import { formatCurrency } from "@/lib/commission";
 import { effectiveGettone } from "@/lib/provvigioni-stato";
+import { reportHasStato } from "@/lib/report-filters";
+import type { ReportExtraLine } from "@/lib/report-extras";
 import { formatMonthLabel } from "@/lib/report-month";
 import {
   groupReportRecurringByContract,
@@ -99,7 +101,31 @@ export type RendicontoSupplierBlock = {
   count: number;
 };
 
-/** Raggruppa le righe per fornitore (A→Z) con subtotale. */
+/**
+ * Ordine alfabetico del nominativo, senza distinguere maiuscole.
+ * A parità di nome: POD/PDR, poi numero contratto.
+ */
+export function compareRendicontoLines(a: RendicontoLine, b: RendicontoLine): number {
+  const byName = a.clientName.localeCompare(b.clientName, "it", {
+    sensitivity: "base",
+  });
+  if (byName !== 0) return byName;
+  const byPod = (a.podPdr || "").localeCompare(b.podPdr || "", "it", {
+    sensitivity: "base",
+  });
+  if (byPod !== 0) return byPod;
+  const byContract = a.contractNumber.localeCompare(b.contractNumber, "it", {
+    sensitivity: "base",
+  });
+  if (byContract !== 0) return byContract;
+  return a.dateLabel.localeCompare(b.dateLabel, "it", { sensitivity: "base" });
+}
+
+export function sortRendicontoLines(lines: RendicontoLine[]): RendicontoLine[] {
+  return [...lines].sort(compareRendicontoLines);
+}
+
+/** Raggruppa le righe per fornitore (A→Z) con subtotale. Le righe sono A→Z per cliente. */
 export function groupLinesBySupplier(
   lines: RendicontoLine[],
 ): RendicontoSupplierBlock[] {
@@ -111,13 +137,150 @@ export function groupLinesBySupplier(
     map.set(key, arr);
   }
   return [...map.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0], "it"))
+    .sort((a, b) => a[0].localeCompare(b[0], "it", { sensitivity: "base" }))
     .map(([supplierName, group]) => ({
       supplierName,
-      lines: group,
+      lines: sortRendicontoLines(group),
       subtotal: group.reduce((s, row) => s + row.amount, 0),
       count: group.length,
     }));
+}
+
+/** Mese dentro la scheda di un fornitore. I totali sono quelli del blocco già calcolato. */
+export type RendicontoMonthSlice = {
+  month: string;
+  label: string;
+  lines: RendicontoLine[];
+  subtotal: number;
+  count: number;
+};
+
+/**
+ * Una scheda = un fornitore. I mesi stanno dentro, non il contrario.
+ * Incassato, storni e ricorrenti dello stesso fornitore condividono la scheda.
+ */
+export type RendicontoSupplierCardModel = {
+  supplierName: string;
+  months: RendicontoMonthSlice[];
+  storniMonths: RendicontoMonthSlice[];
+  ricorrenti: RendicontoLine[];
+  incassatoSubtotal: number;
+  incassatoCount: number;
+  storniSubtotal: number;
+  storniCount: number;
+  ricorrentiSubtotal: number;
+  ricorrentiCount: number;
+};
+
+/** Raggruppa il rendiconto per fornitore, con i mesi in ordine cronologico dentro. */
+export function buildRendicontoSupplierCards(
+  rendiconto: RendicontoSummary,
+  options?: { includeStornos?: boolean; includeRecurring?: boolean },
+): RendicontoSupplierCardModel[] {
+  const includeStornos = options?.includeStornos !== false;
+  const includeRecurring = options?.includeRecurring !== false;
+  const cards = new Map<string, RendicontoSupplierCardModel>();
+
+  function ensure(name: string): RendicontoSupplierCardModel {
+    const existing = cards.get(name);
+    if (existing) return existing;
+    const created: RendicontoSupplierCardModel = {
+      supplierName: name,
+      months: [],
+      storniMonths: [],
+      ricorrenti: [],
+      incassatoSubtotal: 0,
+      incassatoCount: 0,
+      storniSubtotal: 0,
+      storniCount: 0,
+      ricorrentiSubtotal: 0,
+      ricorrentiCount: 0,
+    };
+    cards.set(name, created);
+    return created;
+  }
+
+  for (const block of rendiconto.months) {
+    for (const supplier of block.incassatoBySupplier) {
+      const card = ensure(supplier.supplierName);
+      card.months.push({
+        month: block.month,
+        label: block.label,
+        lines: sortRendicontoLines(supplier.lines),
+        subtotal: supplier.subtotal,
+        count: supplier.count,
+      });
+    }
+    if (includeStornos && block.storni.length > 0) {
+      for (const supplier of groupLinesBySupplier(block.storni)) {
+        const card = ensure(supplier.supplierName);
+        card.storniMonths.push({
+          month: block.month,
+          label: block.label,
+          lines: supplier.lines,
+          subtotal: supplier.subtotal,
+          count: supplier.count,
+        });
+        card.storniSubtotal += supplier.subtotal;
+        card.storniCount += supplier.count;
+      }
+    }
+  }
+
+  if (includeRecurring) {
+    for (const supplier of groupLinesBySupplier(rendiconto.ricorrentiGrouped)) {
+      const card = ensure(supplier.supplierName);
+      card.ricorrenti = supplier.lines;
+      card.ricorrentiSubtotal = supplier.subtotal;
+      card.ricorrentiCount = supplier.count;
+    }
+  }
+
+  for (const official of rendiconto.incassatoBySupplier) {
+    const card = ensure(official.supplierName);
+    card.incassatoSubtotal = official.subtotal;
+    card.incassatoCount = official.count;
+  }
+
+  return [...cards.values()]
+    .filter(
+      (card) =>
+        card.months.length > 0 ||
+        card.storniMonths.length > 0 ||
+        card.ricorrenti.length > 0,
+    )
+    .sort((a, b) =>
+      a.supplierName.localeCompare(b.supplierName, "it", { sensitivity: "base" }),
+    );
+}
+
+/** Testo della barra: stesso importo già presente nel riepilogo del fornitore. */
+export function rendicontoSupplierCardHeading(card: RendicontoSupplierCardModel): {
+  title: string;
+  foot: string;
+  amount: number;
+} {
+  if (card.incassatoCount > 0 || card.months.length > 0) {
+    return {
+      title: `${card.supplierName}  ·  ${rendicontoCountLabel(card.incassatoCount)}  ·  ${formatEuro(card.incassatoSubtotal)}`,
+      foot: `Subtotale ${card.supplierName}`,
+      amount: card.incassatoSubtotal,
+    };
+  }
+  if (card.storniCount > 0) {
+    const countLabel =
+      card.storniCount === 1 ? "1 storno" : `${card.storniCount} storni`;
+    return {
+      title: `${card.supplierName}  ·  ${countLabel}  ·  ${formatEuro(card.storniSubtotal)}`,
+      foot: `Subtotale storni ${card.supplierName}`,
+      amount: card.storniSubtotal,
+    };
+  }
+  return {
+    title: `${card.supplierName}  ·  ${rendicontoCountLabel(card.ricorrentiCount)}  ·  ${formatEuro(card.ricorrentiSubtotal)}`,
+    foot: `Subtotale ${card.supplierName}`,
+    amount: card.ricorrentiSubtotal,
+  };
 }
 
 export type RendicontoSummary = {
@@ -307,4 +470,94 @@ export function buildRendiconto(params: {
 
 export function formatEuro(n: number): string {
   return formatCurrency(n);
+}
+
+/** Intestazione del blocco incassi: stessa regola di PDF, Excel e anteprima. */
+export function rendicontoCollectedHeading(stati: readonly string[]): string {
+  const list = [...stati];
+  const onlyDaIncassare =
+    reportHasStato(list, "Da incassare") &&
+    !reportHasStato(list, "Incassato") &&
+    !reportHasStato(list, "Pagato") &&
+    !reportHasStato(list, "Tutti");
+  return onlyDaIncassare
+    ? "Da incassare per fornitore"
+    : "Incassato per fornitore";
+}
+
+export function rendicontoCountLabel(count: number): string {
+  return count === 1 ? "1 contratto" : `${count} contratti`;
+}
+
+export type RendicontoSummaryRowKind =
+  | "supplier"
+  | "storni"
+  | "ricorrenti"
+  | "extra"
+  | "netto";
+
+/** Riga del riepilogo in cima al rendiconto. Gli importi sono quelli già calcolati. */
+export type RendicontoSummaryRow = {
+  kind: RendicontoSummaryRowKind;
+  label: string;
+  note: string;
+  amount: number;
+};
+
+/**
+ * Riepilogo visuale (fornitori, storni, ricorrenti, voci, netto).
+ * Non ricalcola i totali: ripete i valori del rendiconto e delle voci extra.
+ */
+export function buildRendicontoSummaryRows(input: {
+  rendiconto: RendicontoSummary;
+  extras?: ReportExtraLine[];
+  includeRecurring: boolean;
+  grandNetto: number;
+}): RendicontoSummaryRow[] {
+  const extras = input.extras ?? [];
+  const rows: RendicontoSummaryRow[] = [];
+  for (const supplier of input.rendiconto.incassatoBySupplier) {
+    rows.push({
+      kind: "supplier",
+      label: supplier.supplierName,
+      note: String(supplier.count),
+      amount: supplier.subtotal,
+    });
+  }
+  if (input.rendiconto.countStorni > 0 || input.rendiconto.totStorni !== 0) {
+    rows.push({
+      kind: "storni",
+      label: "Storni",
+      note: String(input.rendiconto.countStorni),
+      amount: input.rendiconto.totStorni,
+    });
+  }
+  if (input.includeRecurring && input.rendiconto.countRicorrenti > 0) {
+    rows.push({
+      kind: "ricorrenti",
+      label: "Rate ricorrenti (somma)",
+      note: String(input.rendiconto.countRicorrenti),
+      amount: input.rendiconto.totRicorrenti,
+    });
+  }
+  for (const extra of extras) {
+    rows.push({
+      kind: "extra",
+      label: extra.tipologia,
+      note: extra.note || "-",
+      amount: extra.amount,
+    });
+  }
+  const count =
+    input.rendiconto.countIncassato +
+    input.rendiconto.countStorni +
+    input.rendiconto.countRicorrenti +
+    extras.length;
+  rows.push({
+    kind: "netto",
+    label: "TOTALE NETTO",
+    note: String(count),
+    amount: input.grandNetto,
+  });
+  return rows;
 }

@@ -8,6 +8,7 @@ import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 import { sendReportEmailAction } from "@/lib/actions";
 import { ReportPeriodFields } from "@/components/report/report-period-fields";
 import { ReportExportPanel } from "@/components/report/report-export-panel";
+import { RendicontoSchede } from "@/components/report/rendiconto-schede";
 import { BackupButton } from "@/components/report/backup-button";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency } from "@/lib/commission";
@@ -22,7 +23,11 @@ import {
   loadReportStornos,
   sumReportStornos,
 } from "@/lib/report-stornos";
-import { reportIncassatoAmount } from "@/lib/report-rendiconto";
+import {
+  buildRendiconto,
+  rendicontoCollectedHeading,
+  reportIncassatoAmount,
+} from "@/lib/report-rendiconto";
 import {
   REPORT_MONTH_LABELS,
   REPORT_STATO_OPTIONS,
@@ -194,6 +199,15 @@ export default async function ReportPage({
     return true;
   });
   const includeRecurring = reportIncludesRecurring(stati);
+  const rendiconto = buildRendiconto({
+    contracts: onlyStornato ? [] : contracts,
+    stornoRows,
+    recurringRows: includeRecurring && !onlyStornato ? recurringRows : [],
+    skipRecurring: !includeRecurring || onlyStornato,
+    onlyStornato,
+    inlineRecurring: reportHasStato(stati, "Da incassare"),
+    incassatoMonths: resolveIncassatoMonths(period),
+  });
   const totalContracts = onlyStornato
     ? stornoTotals.count
     : oneShot.length +
@@ -511,6 +525,24 @@ export default async function ReportPage({
           </p>
         </div>
       </div>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-semibold text-slate-900">
+            {rendicontoCollectedHeading(stati)}
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Una scheda per fornitore, con la sua barra colore. I mesi di quel
+            fornitore stanno dentro la scheda. I contratti sono in ordine
+            alfabetico per nominativo.
+          </p>
+        </div>
+        <RendicontoSchede
+          rendiconto={rendiconto}
+          includeStornos={includeStornos}
+          includeRecurring={includeRecurring}
+        />
+      </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="mb-1 font-semibold text-slate-900">

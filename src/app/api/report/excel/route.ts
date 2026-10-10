@@ -15,7 +15,21 @@ import {
   loadReportStornos,
   sumReportStornos,
 } from "@/lib/report-stornos";
-import { buildRendiconto, reportClienteLabel } from "@/lib/report-rendiconto";
+import {
+  buildRendiconto,
+  buildRendicontoSupplierCards,
+  rendicontoCollectedHeading,
+} from "@/lib/report-rendiconto";
+import {
+  paintAmountOnBar,
+  paintBarRow,
+  writeRendicontoSupplierCards,
+} from "@/lib/rendiconto-excel";
+import {
+  RENDICONTO_SECTION_THEME,
+  rendicontoNettoSwatch,
+  rendicontoSupplierTheme,
+} from "@/lib/rendiconto-supplier-theme";
 import {
   parseReportExtras,
   sumReportExtras,
@@ -35,8 +49,6 @@ import {
   resolveReportStato,
 } from "@/lib/report-filters";
 import { isInFornitura } from "@/lib/supply-dates";
-
-type ExcelRow = (string | number | null)[];
 
 function styleHeader(row: ExcelJS.Row, fill: string) {
   row.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -78,16 +90,6 @@ function styleSubtotal(
     pattern: "solid",
     fgColor: { argb: fill },
   };
-}
-
-/** Importo: positivo = verde scuro, negativo = rosso. */
-function styleAmountCell(cell: ExcelJS.Cell, amount: number) {
-  cell.font = {
-    ...(typeof cell.font === "object" && cell.font ? cell.font : {}),
-    bold: true,
-    color: { argb: amount < 0 ? "FFB91C1C" : "FF047857" },
-  };
-  cell.numFmt = "#,##0.00";
 }
 
 export async function GET(req: NextRequest) {
@@ -183,13 +185,12 @@ export async function GET(req: NextRequest) {
     views: [{ state: "frozen", ySplit: 6 }],
   });
   rend.columns = [
-    { width: 14 },
-    { width: 16 },
     { width: 28 },
+    { width: 46 },
+    { width: 22 },
+    { width: 22 },
     { width: 18 },
-    { width: 20 },
-    { width: 14 },
-    { width: 14 },
+    { width: 16 },
   ];
 
   const titleRow = rend.addRow([
@@ -199,10 +200,9 @@ export async function GET(req: NextRequest) {
     "",
     "",
     "",
-    "",
   ]);
   titleRow.font = { bold: true, size: 16, color: { argb: "FF0F172A" } };
-  rend.mergeCells(1, 1, 1, 8);
+  rend.mergeCells(1, 1, 1, 6);
 
   rend.addRow([`Periodo: ${periodLabelText}`]);
   rend.addRow([`Stato filtro: ${stato}`]);
@@ -221,47 +221,61 @@ export async function GET(req: NextRequest) {
   styleHeader(summaryHeader, "FF0F766E");
   // Solo parziali per fornitore (niente totale "Incassato una tantum")
   for (const s of rendiconto.incassatoBySupplier) {
-    const r = rend.addRow([s.supplierName, s.count, s.subtotal]);
-    styleAmountCell(r.getCell(3), s.subtotal);
+    const r = rend.addRow([s.supplierName, s.count, s.subtotal, "", "", ""]);
+    const theme = rendicontoSupplierTheme(s.supplierName);
+    paintBarRow(r, theme, 11);
+    paintAmountOnBar(r.getCell(3), theme, 11);
   }
   if (rendiconto.countStorni > 0 || rendiconto.totStorni !== 0) {
-    const r = rend.addRow(["Storni", rendiconto.countStorni, rendiconto.totStorni]);
-    r.getCell(3).font = { color: { argb: "FFB91C1C" }, bold: true };
+    const r = rend.addRow([
+      "Storni",
+      rendiconto.countStorni,
+      rendiconto.totStorni,
+      "",
+      "",
+      "",
+    ]);
+    paintBarRow(r, RENDICONTO_SECTION_THEME.storni, 11);
+    paintAmountOnBar(r.getCell(3), RENDICONTO_SECTION_THEME.storni, 11);
   }
   if (includeRecurring && rendiconto.countRicorrenti > 0) {
     const r = rend.addRow([
       "Rate ricorrenti (somma)",
       rendiconto.countRicorrenti,
       rendiconto.totRicorrenti,
+      "",
+      "",
+      "",
     ]);
-    styleAmountCell(r.getCell(3), rendiconto.totRicorrenti);
+    paintBarRow(r, RENDICONTO_SECTION_THEME.ricorrenti, 11);
+    paintAmountOnBar(r.getCell(3), RENDICONTO_SECTION_THEME.ricorrenti, 11);
   }
   for (const e of extras) {
-    const r = rend.addRow([e.tipologia, e.note || "-", e.amount]);
-    styleAmountCell(r.getCell(3), e.amount);
+    const r = rend.addRow([e.tipologia, e.note || "-", e.amount, "", "", ""]);
+    paintBarRow(r, RENDICONTO_SECTION_THEME.extra, 11);
+    paintAmountOnBar(r.getCell(3), RENDICONTO_SECTION_THEME.extra, 11);
   }
+  const nettoCount =
+    rendiconto.countIncassato +
+    rendiconto.countStorni +
+    rendiconto.countRicorrenti;
   const nettoRow = rend.addRow([
     "TOTALE NETTO",
     extras.length > 0
-      ? `${rendiconto.countIncassato + rendiconto.countStorni + rendiconto.countRicorrenti} + ${extras.length} voci`
-      : String(
-          rendiconto.countIncassato +
-            rendiconto.countStorni +
-            rendiconto.countRicorrenti,
-        ),
+      ? `${nettoCount} + ${extras.length} voci`
+      : String(nettoCount),
     grandNetto,
+    "",
+    "",
+    "",
   ]);
-  styleSubtotal(nettoRow, "FF065F46");
-  styleAmountCell(nettoRow.getCell(3), grandNetto);
-  nettoRow.getCell(3).font = {
-    bold: true,
-    size: 12,
-    color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
-  };
+  const nettoTone = rendicontoNettoSwatch(grandNetto);
+  paintBarRow(nettoRow, nettoTone, 12);
+  paintAmountOnBar(nettoRow.getCell(3), nettoTone, 12);
   rend.addRow([]);
 
   const detailTitle = rend.addRow([
-    "DETTAGLIO",
+    rendicontoCollectedHeading(stati).toUpperCase(),
     "",
     "",
     "",
@@ -278,181 +292,24 @@ export async function GET(req: NextRequest) {
     "Collaboratore",
     "Data",
     "Importo €",
-  ] as ExcelRow);
+  ]);
   styleHeader(detailHeader, "FF334155");
 
-  for (const block of rendiconto.months) {
-    if (rendiconto.months.length > 1) {
-      const monthTitle = rend.addRow([
-        block.label.toUpperCase(),
-        "",
-        "",
-        "",
-        "",
-        "",
-      ]);
-      styleSection(monthTitle, "FFE0E7FF", "FF312E81");
-      rend.mergeCells(monthTitle.number, 1, monthTitle.number, 6);
-    }
+  const supplierCards = buildRendicontoSupplierCards(rendiconto, {
+    includeStornos,
+    includeRecurring,
+  });
+  writeRendicontoSupplierCards(rend, supplierCards, rendiconto.months);
 
-    // Incassato — un blocco per fornitore (saltato se solo Stornato)
-    if (!onlyStornato) {
-    if (block.incassatoBySupplier.length === 0) {
-      rend.addRow([
-        reportHasStato(stati, "Da incassare") &&
-        !reportHasStato(stati, "Incassato") &&
-        !reportHasStato(stati, "Tutti")
-          ? "Da incassare"
-          : "Incassato",
-        "(nessuna riga)",
-        "",
-        "",
-        "",
-        "",
-      ]);
-    } else {
-      for (const supplier of block.incassatoBySupplier) {
-        const supTitle = rend.addRow([
-          `Fornitore: ${supplier.supplierName}`,
-          `${supplier.count} contratti`,
-          "",
-          "",
-          "",
-          supplier.subtotal,
-        ]);
-        styleSection(supTitle, "FF0F766E", "FFFFFFFF");
-        for (const line of supplier.lines) {
-          const r = rend.addRow([
-            "Incassato",
-            reportClienteLabel(line.clientName, line.podPdr),
-            line.supplierName,
-            line.collaboratorName,
-            line.dateLabel,
-            line.amount,
-          ]);
-          styleAmountCell(r.getCell(6), line.amount);
-        }
-        const subSup = rend.addRow([
-          `Subtotale ${supplier.supplierName}`,
-          `${supplier.count} righe`,
-          "",
-          "",
-          "",
-          supplier.subtotal,
-        ]);
-        styleSubtotal(subSup);
-        subSup.getCell(6).font = {
-          bold: true,
-          color: {
-            argb: supplier.subtotal < 0 ? "FFFECACA" : "FFA7F3D0",
-          },
-        };
-      }
-    }
-    }
-
-    if (includeStornos) {
-    const stoTitle = rend.addRow(["STORNI (solo importi negativi)", "", "", "", "", ""]);
-    styleSection(stoTitle, "FFFFE4E6", "FF9F1239");
-    if (block.storni.length === 0) {
-      rend.addRow(["", "(nessuno storno nel periodo)", "", "", "", ""]);
-    } else {
-      for (const line of block.storni) {
-        const r = rend.addRow([
-          "Storno",
-          reportClienteLabel(line.clientName, line.podPdr),
-          line.supplierName,
-          line.collaboratorName,
-          line.dateLabel,
-          line.amount,
-        ]);
-        r.getCell(6).font = { color: { argb: "FFB91C1C" }, bold: true };
-      }
-    }
-    const subSto = rend.addRow([
-      "Subtotale Storni",
-      `${block.countStorni} righe`,
-      "",
-      "",
-      "",
-      block.subStorni,
-    ]);
-    styleSubtotal(subSto, "FF9F1239");
-    subSto.getCell(6).font = { bold: true, color: { argb: "FFFECACA" } };
-    }
-
-    if (rendiconto.months.length > 1) {
-      const subNet = rend.addRow([
-        `Subtotale netto ${block.label}`,
-        "",
-        "",
-        "",
-        "",
-        block.subNetto,
-      ]);
-      styleSubtotal(subNet, "FFB45309");
-      subNet.getCell(6).font = {
-        bold: true,
-        color: { argb: block.subNetto < 0 ? "FFFECACA" : "FFFEF3C7" },
-      };
-    }
-
-    rend.addRow([]);
-  }
-
-  if (includeRecurring && rendiconto.ricorrentiGrouped.length > 0) {
-    const ricTitle = rend.addRow([
-      `RATE RICORRENTI - ${rendiconto.countRicorrenti} contratti`,
-      rendiconto.totRicorrenti,
-      "",
-      "",
-      "",
-      rendiconto.totRicorrenti,
-    ]);
-    styleSection(ricTitle, "FF6B21A8", "FFFFFFFF");
-    for (const line of rendiconto.ricorrentiGrouped) {
-      const r = rend.addRow([
-        "Ricorrente",
-        reportClienteLabel(line.clientName, line.podPdr),
-        line.supplierName,
-        line.collaboratorName,
-        line.dateLabel,
-        line.amount,
-      ]);
-      styleAmountCell(r.getCell(6), line.amount);
-    }
-    const subRic = rend.addRow([
-      "Somma ricorrenti",
-      `${rendiconto.countRicorrenti} contratti`,
-      "",
-      "",
-      "",
-      rendiconto.totRicorrenti,
-    ]);
-    styleSubtotal(subRic, "FF6B21A8");
-    subRic.getCell(6).font = {
-      bold: true,
-      color: { argb: "FFE9D5FF" },
-    };
-    rend.addRow([]);
-  }
-
-  const finalTot = rend.addRow([
+  const finalLabel =
     extras.length > 0
       ? "TOTALE NETTO (fornitori + storni + ricorrenti + voci aggiuntive)"
-      : "TOTALE NETTO (fornitori + storni + ricorrenti)",
-    "",
-    "",
-    "",
-    "",
-    grandNetto,
-  ]);
-  styleSubtotal(finalTot, "FF065F46");
-  finalTot.getCell(6).font = {
-    bold: true,
-    size: 13,
-    color: { argb: grandNetto < 0 ? "FFFECACA" : "FFA7F3D0" },
-  };
+      : "TOTALE NETTO (fornitori + storni + ricorrenti)";
+  const finalTot = rend.addRow([finalLabel, "", "", "", "", grandNetto]);
+  rend.mergeCells(finalTot.number, 1, finalTot.number, 5);
+  const finalTone = rendicontoNettoSwatch(grandNetto);
+  paintBarRow(finalTot, finalTone, 13);
+  paintAmountOnBar(finalTot.getCell(6), finalTone, 13);
 
   // Formato numeri colonna importo
   rend.getColumn(6).numFmt = '#,##0.00';
