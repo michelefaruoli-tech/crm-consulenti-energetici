@@ -2,7 +2,8 @@
 
 /**
  * Import Compara Agosto: anteprima obbligatoria con checkbox, regole importo
- * Fagiano/altri, create mancanti, fill POD Fagiano senza overwrite automatico.
+ * (Faruoli/Lucio 80/80, Fagiano 70/65, altri 70/60), celle editabili in UI,
+ * create da unmatched (stub), fill POD senza overwrite automatico.
  *
  * Neon HTTP: nessun $transaction / updateMany / createMany.
  */
@@ -34,6 +35,7 @@ import {
   comparaRuleAmount,
   isFagianoCollaborator,
 } from "@/lib/compara-agosto/amounts";
+import { createComparaStubContract } from "@/lib/compara-agosto/create-stub";
 import { decidePodFill } from "@/lib/compara-agosto/pod-fill";
 import { deduceComparaPeriods } from "@/lib/compara-agosto/periods";
 import {
@@ -48,7 +50,9 @@ import {
   type ComparaAgostoActionError,
   type ComparaAgostoPreviewResult,
   type ComparaAgostoPreviewRow,
+  type ComparaAgostoRowEdit,
 } from "@/lib/compara-agosto/view-types";
+import { loadVisibleCollaboratorOptions } from "@/lib/user-scope";
 
 const PREVIEW_ROW_LIMIT = 400;
 const APPLY_BATCH_SIZE = 40;
@@ -152,10 +156,44 @@ function collaboratorForAmount(
   contractName: string | null,
   shopHint: string,
 ): string {
-  // Shop file è spesso il master (Faruoli): la regola Fagiano usa il collaboratore CRM
-  if (contractName && isFagianoCollaborator(contractName)) return contractName;
-  if (isFagianoCollaborator(shopHint)) return shopHint;
-  return contractName || shopHint;
+  // Preferisci il collaboratore CRM (Fagiano/Laforgia/…); Shop file spesso è Faruoli master
+  if (contractName?.trim()) return contractName.trim();
+  return shopHint.trim();
+}
+
+function readRowEdits(
+  formData: FormData,
+): Map<string, ComparaAgostoRowEdit> {
+  const raw = String(formData.get("rowEdits") ?? "").trim();
+  const out = new Map<string, ComparaAgostoRowEdit>();
+  if (!raw) return out;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return out;
+    for (const [key, value] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object") continue;
+      const v = value as Record<string, unknown>;
+      const amountRaw = v.amount;
+      const amount =
+        typeof amountRaw === "number" && Number.isFinite(amountRaw)
+          ? amountRaw
+          : amountRaw == null || amountRaw === ""
+            ? null
+            : Number(amountRaw);
+      out.set(key, {
+        amount: amount != null && Number.isFinite(amount) ? amount : null,
+        collaboratorId: String(v.collaboratorId ?? "").trim(),
+        collaboratorName: String(v.collaboratorName ?? "").trim(),
+        rowLabel: String(v.rowLabel ?? "").trim(),
+        proposedPodFill: String(v.proposedPodFill ?? "").trim(),
+      });
+    }
+  } catch {
+    return out;
+  }
+  return out;
 }
 
 async function loadContractFinance(contractIds: string[]): Promise<
@@ -490,12 +528,14 @@ async function planRows(
       crmPod: crmPod || undefined,
       supplierName: d.contract?.supplierName,
       collaboratorName: collabName || undefined,
+      collaboratorId: d.contract?.collaboratorId,
       isFagiano: fagiano,
       fagianoMissingPodInFile: fagiano && !d.parsed.podRaw.trim(),
       podFillMode: podDecision.mode,
       proposedPodFill: podDecision.proposedPodFill ?? undefined,
       skipReason: classified.skipReason ?? podDecision.reason ?? undefined,
       existingLiquidatedAmount: classified.existingLiquidatedAmount,
+      defaultRowLabel: `Compara ${periodLabel(periods.competencePeriod)}`,
       parsed: {
         ...d.parsed,
         amount: rule.amount,
@@ -534,10 +574,13 @@ function toPreviewRow(row: PlannedRow): ComparaAgostoPreviewRow {
     parsed: _p,
     matchStatus: _m,
     candidateIds: _c,
-    crmCollaboratorId: _id,
+    crmCollaboratorId,
     ...rest
   } = row;
-  return rest;
+  return {
+    ...rest,
+    collaboratorId: rest.collaboratorId ?? crmCollaboratorId ?? undefined,
+  };
 }
 
 /** Anteprima obbligatoria: non scrive nulla. */
@@ -598,7 +641,7 @@ export async function previewComparaAgostoAction(
         }
         if (row.podFillMode === "needs_confirm") fagianoPodConfirm++;
       }
-      if (row.ruleAmount != null && row.action !== "unmatched") {
+      if (row.ruleAmount != null) {
         ruleAmountTotal += row.ruleAmount;
       }
     }
@@ -609,13 +652,18 @@ export async function previewComparaAgostoAction(
     summary.fagianoPodConfirm = fagianoPodConfirm;
     summary.ruleAmountTotal = round2(ruleAmountTotal);
 
+    const collaborators = await loadVisibleCollaboratorOptions(session);
+    const defaultRunLabel = `Compara ${periodLabel(plan.competencePeriod)}`;
+
     return {
       ok: true,
       fileName: upload.fileName,
       competencePeriod: plan.competencePeriod,
       settledPeriod: plan.settledPeriod,
+      defaultRunLabel,
       sheetsRead: plan.sheetsRead,
       rows: plan.planned.slice(0, PREVIEW_ROW_LIMIT).map(toPreviewRow),
+      collaborators: collaborators.map((c) => ({ id: c.id, name: c.name })),
       summary,
       truncated: plan.planned.length > PREVIEW_ROW_LIMIT,
     };
@@ -665,10 +713,18 @@ async function ensureSource(userId: string): Promise<{
   return { sourceId: source.id, templateId: template.id };
 }
 
+type ApplicableRow = PlannedRow & {
+  effectiveAmount: number;
+  effectiveCollaboratorId: string;
+  effectiveCollaboratorName: string;
+  effectiveRowLabel: string;
+  effectivePodFill: string;
+  isStubCreate: boolean;
+};
+
 /**
- * Importa le righe selezionate (update/create/confirm approvate) in un ciclo
- * liquidazione e le applica a lotti come Incassato da liquidare.
- * Le create e le confirm richiedono selezione esplicita in UI.
+ * Importa le righe selezionate (anche «senza match» con stub) usando i valori
+ * editati in UI (importo, collaboratore, etichetta, POD). Solo checkbox spuntate.
  */
 export async function importAndApplyComparaAgostoAction(
   formData: FormData,
@@ -681,6 +737,7 @@ export async function importAndApplyComparaAgostoAction(
       skipped: number;
       errors: number;
       podFilled: number;
+      stubsCreated: number;
       remaining: number;
     }
   | ComparaAgostoActionError
@@ -698,6 +755,7 @@ export async function importAndApplyComparaAgostoAction(
       return fail("Seleziona almeno una riga da applicare");
     }
 
+    const rowEdits = readRowEdits(formData);
     const fallbackCompetence = readPeriod(formData, "competencePeriod");
     const fallbackSettled = readPeriod(formData, "settledPeriod");
     const plan = await planRows(
@@ -707,301 +765,451 @@ export async function importAndApplyComparaAgostoAction(
     );
     if (!plan.ok) return plan;
 
-    const applicable = plan.planned.filter((row) => {
-      if (!selectedKeys.has(comparaAgostoRowKey(row))) return false;
-      if (row.action === "unmatched") return false;
-      if (row.action === "skip_liquidated") return false;
-      if (!row.contractId || row.ruleAmount == null) return false;
-      // create e confirm: solo se selezionate (già filtrato)
-      return (
-        row.action === "update" ||
-        row.action === "create" ||
-        row.action === "confirm"
-      );
-    });
-
-    if (applicable.length === 0) {
-      return fail(
-        "Nessuna riga applicabile tra le selezionate (unmatched / già liquidate escluse)",
-      );
-    }
-
-    const sha256 = createHash("sha256").update(upload.buffer).digest("hex");
-    const duplicate = await prisma.payoutBatch.findUnique({
-      where: { sha256 },
-      select: { id: true, runId: true, filename: true },
-    });
-    if (duplicate) {
-      return fail(
-        `Questo file è già stato importato (${duplicate.filename}): apri la liquidazione collegata`,
-      );
-    }
-
-    const runLabel =
+    const defaultRunLabel =
       String(formData.get("runLabel") ?? "").trim() ||
       `Compara ${periodLabel(plan.competencePeriod)}`;
 
-    let run = await prisma.payoutRun.findUnique({
-      where: {
-        period_label: { period: plan.settledPeriod, label: runLabel },
-      },
-      select: { id: true, status: true },
-    });
-    if (!run) {
-      run = await prisma.payoutRun.create({
-        data: {
-          period: plan.settledPeriod,
-          label: runLabel,
-          createdById: session.id,
-          markMode: "INCASSATO",
-        },
-        select: { id: true, status: true },
+    const applicable: ApplicableRow[] = [];
+    const missingCollab: string[] = [];
+    for (const row of plan.planned) {
+      const key = comparaAgostoRowKey(row);
+      if (!selectedKeys.has(key)) continue;
+      if (row.action === "skip_liquidated") continue;
+
+      const edit = rowEdits.get(key);
+      const amount = edit?.amount ?? row.ruleAmount;
+      if (amount == null || !Number.isFinite(amount)) continue;
+
+      const collaboratorId = (
+        edit?.collaboratorId ||
+        row.collaboratorId ||
+        row.crmCollaboratorId ||
+        ""
+      ).trim();
+      const collaboratorName = (
+        edit?.collaboratorName ||
+        row.collaboratorName ||
+        row.shopHint ||
+        ""
+      ).trim();
+      const rowLabel = (
+        edit?.rowLabel ||
+        row.defaultRowLabel ||
+        defaultRunLabel
+      ).trim();
+      const proposedPodFill = (
+        edit?.proposedPodFill ??
+        row.proposedPodFill ??
+        ""
+      ).trim();
+
+      if (row.action === "unmatched") {
+        if (!collaboratorId) {
+          missingCollab.push(row.nominativo || key);
+          continue;
+        }
+        applicable.push({
+          ...row,
+          effectiveAmount: amount,
+          effectiveCollaboratorId: collaboratorId,
+          effectiveCollaboratorName: collaboratorName,
+          effectiveRowLabel: rowLabel || defaultRunLabel,
+          effectivePodFill: proposedPodFill || row.podRaw.trim(),
+          isStubCreate: true,
+        });
+        continue;
+      }
+
+      if (
+        row.action !== "update" &&
+        row.action !== "create" &&
+        row.action !== "confirm"
+      ) {
+        continue;
+      }
+      if (!row.contractId) continue;
+
+      applicable.push({
+        ...row,
+        effectiveAmount: amount,
+        effectiveCollaboratorId: collaboratorId,
+        effectiveCollaboratorName: collaboratorName,
+        effectiveRowLabel: rowLabel || defaultRunLabel,
+        effectivePodFill: proposedPodFill,
+        isStubCreate: false,
       });
     }
-    if (run.status === "CLOSED") {
-      return fail("La liquidazione è chiusa");
+
+    if (missingCollab.length > 0) {
+      return fail(
+        "Senza corrispondenza: scegli un collaboratore sulle righe selezionate",
+        missingCollab.slice(0, 8),
+      );
+    }
+    if (applicable.length === 0) {
+      return fail(
+        "Nessuna riga applicabile tra le selezionate (già liquidate escluse; importo richiesto)",
+      );
+    }
+
+    // Stub Client+Contract+Commission per unmatched selezionate
+    let stubsCreated = 0;
+    for (const row of applicable) {
+      if (!row.isStubCreate) continue;
+      const stub = await createComparaStubContract({
+        nominativo: row.nominativo,
+        supplierHint: row.supplierHint || "Compara",
+        collaboratorId: row.effectiveCollaboratorId,
+        createdById: session.id,
+        podRaw: row.effectivePodFill || row.podRaw,
+        amount: row.effectiveAmount,
+        competencePeriod: plan.competencePeriod,
+        note: `${row.sheetName}:${row.rowIndex}`,
+      });
+      row.contractId = stub.contractId;
+      row.contractNumber = stub.contractNumber;
+      row.crmCollaboratorId = row.effectiveCollaboratorId;
+      row.action = "create";
+      stubsCreated++;
+    }
+
+    // Patch collaboratore CRM se modificato in UI (contratti già esistenti)
+    for (const row of applicable) {
+      if (row.isStubCreate) continue;
+      if (!row.contractId || !row.effectiveCollaboratorId) continue;
+      if (row.effectiveCollaboratorId === row.crmCollaboratorId) continue;
+      await prisma.contract.update({
+        where: { id: row.contractId },
+        data: { collaboratorId: row.effectiveCollaboratorId },
+      });
+      row.crmCollaboratorId = row.effectiveCollaboratorId;
+    }
+
+    // Raggruppa per etichetta liquidazione (run)
+    const byLabel = new Map<string, ApplicableRow[]>();
+    for (const row of applicable) {
+      const label = row.effectiveRowLabel || defaultRunLabel;
+      const list = byLabel.get(label) ?? [];
+      list.push(row);
+      byLabel.set(label, list);
     }
 
     const { sourceId, templateId } = await ensureSource(session.id);
-    const batch = await prisma.payoutBatch.create({
-      data: {
-        runId: run.id,
-        sourceId,
-        templateId,
-        filename: upload.fileName.slice(0, 200),
-        sha256,
-        fileSize: upload.buffer.length,
-        status: "PARSED",
-        totalRows: applicable.length,
-        matchedRows: applicable.filter((r) => r.action !== "confirm").length,
-        ambiguousRows: applicable.filter((r) => r.action === "confirm").length,
-        unmatchedRows: 0,
-        computedTotal: round2(
-          applicable.reduce((s, r) => s + (r.ruleAmount ?? 0), 0),
-        ),
-        uploadedById: session.id,
-      },
-      select: { id: true },
-    });
+    let totalApplied = 0;
+    let totalSkipped = 0;
+    let totalErrors = 0;
+    let totalPodFilled = 0;
+    let totalRemaining = 0;
+    let primaryRunId = "";
+    let primaryBatchId = "";
 
-    await mapWithConcurrency(applicable, INSERT_CONCURRENCY, async (row) => {
-      await prisma.payoutRow.create({
-        data: {
-          batchId: batch.id,
-          sheetName: row.sheetName,
-          rowIndex: row.rowIndex,
-          rawJson: JSON.stringify({
-            ...row.parsed.raw,
-            _comparaAction: row.action,
-            _proposedPodFill: row.proposedPodFill ?? null,
-            _podFillMode: row.podFillMode,
-          }),
-          podRaw: row.podRaw || null,
-          podKey: row.parsed.podKeys[0] ?? null,
-          clientNameRaw: row.nominativo || null,
-          supplierHint: row.supplierHint || null,
-          collaboratorHint: row.collaboratorName || null,
-          amount: row.ruleAmount,
-          period: plan.competencePeriod,
-          // confirm selezionate da Michele → MATCHED per l'apply
-          matchStatus: "MATCHED",
-          matchScore: row.matchScore ?? null,
-          matchReason: row.matchReason ?? row.action,
-          contractId: row.contractId!,
-          collaboratorId: row.crmCollaboratorId,
-          candidateIdsJson:
-            row.candidateIds.length > 0
-              ? JSON.stringify(row.candidateIds)
-              : null,
-          note: [
-            `Compara ${row.action}`,
-            row.skipReason,
-            row.proposedPodFill ? `POD fill=${row.proposedPodFill}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")
-            .slice(0, 200),
-        },
+    for (const [runLabel, group] of byLabel) {
+      const sha256 = createHash("sha256")
+        .update(upload.buffer)
+        .update("\0")
+        .update(runLabel)
+        .digest("hex");
+      const duplicate = await prisma.payoutBatch.findUnique({
+        where: { sha256 },
+        select: { id: true, runId: true, filename: true },
       });
-    });
+      if (duplicate) {
+        return fail(
+          `Questo file+etichetta è già stato importato (${duplicate.filename} · ${runLabel}): apri la liquidazione collegata`,
+        );
+      }
 
-    // Apply lotto (stesso pattern liquidazioni)
-    let applied = 0;
-    let skipped = 0;
-    let errors = 0;
-    let podFilled = 0;
-    let guard = 0;
-    for (;;) {
-      const pending = await prisma.payoutRow.findMany({
-        where: { batchId: batch.id, matchStatus: "MATCHED", appliedAt: null },
-        select: {
-          id: true,
-          contractId: true,
-          period: true,
-          amount: true,
-          rawJson: true,
-          note: true,
+      let run = await prisma.payoutRun.findUnique({
+        where: {
+          period_label: { period: plan.settledPeriod, label: runLabel },
         },
-        take: APPLY_BATCH_SIZE,
-        orderBy: { id: "asc" },
+        select: { id: true, status: true },
       });
-      if (pending.length === 0) break;
-
-      for (const row of pending) {
-        if (!row.contractId) {
-          skipped++;
-          continue;
-        }
-        try {
-          let proposedPod: string | null = null;
-          try {
-            const raw = JSON.parse(row.rawJson) as {
-              _proposedPodFill?: string | null;
-              _podFillMode?: string;
-            };
-            if (
-              raw._proposedPodFill &&
-              (raw._podFillMode === "safe_prefill" ||
-                raw._podFillMode === "needs_confirm")
-            ) {
-              proposedPod = String(raw._proposedPodFill).trim();
-            }
-          } catch {
-            proposedPod = null;
-          }
-
-          if (proposedPod) {
-            const contract = await prisma.contract.findUnique({
-              where: { id: row.contractId },
-              select: { podPdr: true, pod: true, pdr: true },
-            });
-            const crmKey = normalizePodKey(
-              contract?.podPdr || contract?.pod || contract?.pdr || "",
-            );
-            const fileKey = normalizePodKey(proposedPod);
-            // Scrive solo se CRM vuoto; se diverso e needs_confirm, Michele ha
-            // selezionato la riga → consente la sostituzione esplicita
-            const canWrite = !crmKey || crmKey === fileKey || Boolean(proposedPod);
-            if (canWrite && fileKey && crmKey !== fileKey) {
-              const looksLikePod = /^IT/i.test(proposedPod);
-              await prisma.contract.update({
-                where: { id: row.contractId },
-                data: looksLikePod
-                  ? { pod: proposedPod, podPdr: proposedPod }
-                  : { pdr: proposedPod, podPdr: proposedPod },
-              });
-              podFilled++;
-            } else if (canWrite && fileKey && !crmKey) {
-              const looksLikePod = /^IT/i.test(proposedPod);
-              await prisma.contract.update({
-                where: { id: row.contractId },
-                data: looksLikePod
-                  ? { pod: proposedPod, podPdr: proposedPod }
-                  : { pdr: proposedPod, podPdr: proposedPod },
-              });
-              podFilled++;
-            }
-          }
-
-          const outcome = await applyPayoutRowMark({
-            contractId: row.contractId,
-            period: row.period ?? plan.competencePeriod,
-            settledPeriod: plan.settledPeriod,
-            amount: row.amount == null ? null : decimalToNumber(row.amount),
+      if (!run) {
+        run = await prisma.payoutRun.create({
+          data: {
+            period: plan.settledPeriod,
+            label: runLabel,
+            createdById: session.id,
             markMode: "INCASSATO",
-            note: `Import Compara Agosto · competenza ${plan.competencePeriod}`,
-          });
+          },
+          select: { id: true, status: true },
+        });
+      }
+      if (run.status === "CLOSED") {
+        return fail(`La liquidazione «${runLabel}» è chiusa`);
+      }
 
-          if (!outcome.ok) {
-            await prisma.payoutRow.update({
-              where: { id: row.id },
-              data: {
-                matchStatus: "IGNORED",
-                note: outcome.reason.slice(0, 200),
-                appliedAt: new Date(),
-              },
-            });
+      const batch = await prisma.payoutBatch.create({
+        data: {
+          runId: run.id,
+          sourceId,
+          templateId,
+          filename: upload.fileName.slice(0, 200),
+          sha256,
+          fileSize: upload.buffer.length,
+          status: "PARSED",
+          totalRows: group.length,
+          matchedRows: group.filter((r) => r.action !== "confirm").length,
+          ambiguousRows: group.filter((r) => r.action === "confirm").length,
+          unmatchedRows: 0,
+          computedTotal: round2(
+            group.reduce((s, r) => s + r.effectiveAmount, 0),
+          ),
+          uploadedById: session.id,
+        },
+        select: { id: true },
+      });
+
+      if (!primaryRunId) {
+        primaryRunId = run.id;
+        primaryBatchId = batch.id;
+      }
+
+      await mapWithConcurrency(group, INSERT_CONCURRENCY, async (row) => {
+        await prisma.payoutRow.create({
+          data: {
+            batchId: batch.id,
+            sheetName: row.sheetName,
+            rowIndex: row.rowIndex,
+            rawJson: JSON.stringify({
+              ...row.parsed.raw,
+              _comparaAction: row.action,
+              _proposedPodFill: row.effectivePodFill || null,
+              _podFillMode: row.podFillMode,
+              _uiAmount: row.effectiveAmount,
+              _uiCollaboratorId: row.effectiveCollaboratorId,
+              _stubCreate: row.isStubCreate,
+            }),
+            podRaw: row.podRaw || null,
+            podKey: row.parsed.podKeys[0] ?? null,
+            clientNameRaw: row.nominativo || null,
+            supplierHint: row.supplierHint || null,
+            collaboratorHint:
+              row.effectiveCollaboratorName || row.collaboratorName || null,
+            amount: row.effectiveAmount,
+            period: plan.competencePeriod,
+            matchStatus: "MATCHED",
+            matchScore: row.matchScore ?? null,
+            matchReason: row.matchReason ?? row.action,
+            contractId: row.contractId!,
+            collaboratorId:
+              row.effectiveCollaboratorId || row.crmCollaboratorId,
+            candidateIdsJson:
+              row.candidateIds.length > 0
+                ? JSON.stringify(row.candidateIds)
+                : null,
+            note: [
+              `Compara ${row.action}`,
+              row.isStubCreate ? "stub creato" : null,
+              row.skipReason,
+              row.effectivePodFill
+                ? `POD fill=${row.effectivePodFill}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+              .slice(0, 200),
+          },
+        });
+      });
+
+      let applied = 0;
+      let skipped = 0;
+      let errors = 0;
+      let podFilled = 0;
+      let guard = 0;
+      for (;;) {
+        const pending = await prisma.payoutRow.findMany({
+          where: {
+            batchId: batch.id,
+            matchStatus: "MATCHED",
+            appliedAt: null,
+          },
+          select: {
+            id: true,
+            contractId: true,
+            period: true,
+            amount: true,
+            rawJson: true,
+            note: true,
+          },
+          take: APPLY_BATCH_SIZE,
+          orderBy: { id: "asc" },
+        });
+        if (pending.length === 0) break;
+
+        for (const prow of pending) {
+          if (!prow.contractId) {
             skipped++;
             continue;
           }
+          try {
+            let proposedPod: string | null = null;
+            let podMode = "";
+            try {
+              const raw = JSON.parse(prow.rawJson) as {
+                _proposedPodFill?: string | null;
+                _podFillMode?: string;
+              };
+              proposedPod = raw._proposedPodFill
+                ? String(raw._proposedPodFill).trim()
+                : null;
+              podMode = String(raw._podFillMode ?? "");
+            } catch {
+              proposedPod = null;
+            }
 
-          await prisma.payoutRow.update({
-            where: { id: row.id },
-            data: {
-              matchStatus: "APPLIED",
-              appliedAt: new Date(),
-              recurringMonthId: outcome.recurringMonthId,
-              previousStateJson: JSON.stringify(outcome.previousState),
-            },
-          });
-          applied++;
-        } catch (e) {
-          console.error("[importAndApplyComparaAgostoAction]", row.id, e);
-          await prisma.payoutRow
-            .update({
-              where: { id: row.id },
+            if (
+              proposedPod &&
+              (podMode === "safe_prefill" ||
+                podMode === "needs_confirm" ||
+                podMode === "none" ||
+                !podMode)
+            ) {
+              const contract = await prisma.contract.findUnique({
+                where: { id: prow.contractId },
+                select: { podPdr: true, pod: true, pdr: true },
+              });
+              const crmKey = normalizePodKey(
+                contract?.podPdr || contract?.pod || contract?.pdr || "",
+              );
+              const fileKey = normalizePodKey(proposedPod);
+              if (fileKey && crmKey !== fileKey) {
+                const looksLikePod = /^IT/i.test(proposedPod);
+                await prisma.contract.update({
+                  where: { id: prow.contractId },
+                  data: looksLikePod
+                    ? { pod: proposedPod, podPdr: proposedPod }
+                    : { pdr: proposedPod, podPdr: proposedPod },
+                });
+                podFilled++;
+              } else if (fileKey && !crmKey) {
+                const looksLikePod = /^IT/i.test(proposedPod);
+                await prisma.contract.update({
+                  where: { id: prow.contractId },
+                  data: looksLikePod
+                    ? { pod: proposedPod, podPdr: proposedPod }
+                    : { pdr: proposedPod, podPdr: proposedPod },
+                });
+                podFilled++;
+              }
+            }
+
+            const outcome = await applyPayoutRowMark({
+              contractId: prow.contractId,
+              period: prow.period ?? plan.competencePeriod,
+              settledPeriod: plan.settledPeriod,
+              amount:
+                prow.amount == null ? null : decimalToNumber(prow.amount),
+              markMode: "INCASSATO",
+              note: `Import Compara Agosto · competenza ${plan.competencePeriod}`,
+            });
+
+            if (!outcome.ok) {
+              await prisma.payoutRow.update({
+                where: { id: prow.id },
+                data: {
+                  matchStatus: "IGNORED",
+                  note: outcome.reason.slice(0, 200),
+                  appliedAt: new Date(),
+                },
+              });
+              skipped++;
+              continue;
+            }
+
+            await prisma.payoutRow.update({
+              where: { id: prow.id },
               data: {
-                matchStatus: "ERROR",
-                note: errorMessage(e, "Errore").slice(0, 200),
+                matchStatus: "APPLIED",
+                appliedAt: new Date(),
+                recurringMonthId: outcome.recurringMonthId,
+                previousStateJson: JSON.stringify(outcome.previousState),
               },
-            })
-            .catch(() => undefined);
-          errors++;
+            });
+            applied++;
+          } catch (e) {
+            console.error("[importAndApplyComparaAgostoAction]", prow.id, e);
+            await prisma.payoutRow
+              .update({
+                where: { id: prow.id },
+                data: {
+                  matchStatus: "ERROR",
+                  note: errorMessage(e, "Errore").slice(0, 200),
+                },
+              })
+              .catch(() => undefined);
+            errors++;
+          }
         }
+
+        guard += 1;
+        if (guard > 500) break;
       }
 
-      guard += 1;
-      if (guard > 500) break;
-    }
-
-    const remaining = await prisma.payoutRow.count({
-      where: { batchId: batch.id, matchStatus: "MATCHED", appliedAt: null },
-    });
-
-    await prisma.payoutBatch.update({
-      where: { id: batch.id },
-      data: {
-        status: remaining > 0 ? "PARTIALLY_APPLIED" : "APPLIED",
-        appliedAt: remaining > 0 ? undefined : new Date(),
-      },
-    });
-    if (remaining === 0) {
-      await prisma.payoutRun.update({
-        where: { id: run.id },
-        data: { status: "APPLIED", appliedAt: new Date() },
+      const remaining = await prisma.payoutRow.count({
+        where: {
+          batchId: batch.id,
+          matchStatus: "MATCHED",
+          appliedAt: null,
+        },
       });
-    }
 
-    await writeAuditLog({
-      userId: session.id,
-      action: "IMPORT",
-      entity: "PayoutBatch",
-      entityId: batch.id,
-      details: {
-        template: COMPARA_AGOSTO_TEMPLATE_KEY,
-        competencePeriod: plan.competencePeriod,
-        settledPeriod: plan.settledPeriod,
-        applied,
-        skipped,
-        errors,
-        podFilled,
-        selected: selectedKeys.size,
-      },
-    });
+      await prisma.payoutBatch.update({
+        where: { id: batch.id },
+        data: {
+          status: remaining > 0 ? "PARTIALLY_APPLIED" : "APPLIED",
+          appliedAt: remaining > 0 ? undefined : new Date(),
+        },
+      });
+      if (remaining === 0) {
+        await prisma.payoutRun.update({
+          where: { id: run.id },
+          data: { status: "APPLIED", appliedAt: new Date() },
+        });
+      }
+
+      await writeAuditLog({
+        userId: session.id,
+        action: "IMPORT",
+        entity: "PayoutBatch",
+        entityId: batch.id,
+        details: {
+          template: COMPARA_AGOSTO_TEMPLATE_KEY,
+          competencePeriod: plan.competencePeriod,
+          settledPeriod: plan.settledPeriod,
+          runLabel,
+          applied,
+          skipped,
+          errors,
+          podFilled,
+          stubsCreated,
+          selected: selectedKeys.size,
+        },
+      });
+
+      totalApplied += applied;
+      totalSkipped += skipped;
+      totalErrors += errors;
+      totalPodFilled += podFilled;
+      totalRemaining += remaining;
+      revalidatePath(`/provvigioni/liquidazioni/${run.id}`);
+    }
 
     revalidatePath("/provvigioni");
     revalidatePath("/provvigioni/liquidazioni");
-    revalidatePath(`/provvigioni/liquidazioni/${run.id}`);
 
     return {
       ok: true,
-      runId: run.id,
-      batchId: batch.id,
-      applied,
-      skipped,
-      errors,
-      podFilled,
-      remaining,
+      runId: primaryRunId,
+      batchId: primaryBatchId,
+      applied: totalApplied,
+      skipped: totalSkipped,
+      errors: totalErrors,
+      podFilled: totalPodFilled,
+      stubsCreated,
+      remaining: totalRemaining,
     };
   } catch (e) {
     logPrismaError("importAndApplyComparaAgostoAction", e);

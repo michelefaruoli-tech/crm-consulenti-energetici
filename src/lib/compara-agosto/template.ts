@@ -9,10 +9,10 @@ import type { PayoutTemplateConfig } from "@/lib/payout/types";
 export const COMPARA_AGOSTO_TEMPLATE_KEY = "compara_agosto";
 
 export const COMPARA_AGOSTO_TEMPLATE_LABEL =
-  "Compara — Inviti pagati (regole Fagiano/altri)";
+  "Compara — Inviti pagati (regole Faruoli/Fagiano/altri)";
 
 export const COMPARA_AGOSTO_TEMPLATE_HINT =
-  "Stato OK · Nominativo · Shop · Prodotto Pivot · Codice Pod/Pdr (opzionale) · importi da regola CRM";
+  "Stato OK · Nominativo · Shop · Prodotto Pivot · Codice Pod/Pdr (opzionale) · importi da regola (Faruoli/Lucio 80, Fagiano 70/65, altri 70/60)";
 
 export function comparaAgostoTemplateConfig(): PayoutTemplateConfig {
   return {
