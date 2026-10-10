@@ -59,6 +59,11 @@ export type ProvvigioniSummaryContext = {
   rowScope?: ProvvigioniRowFilterScope;
   /** `?archiviate=1`: include liquidate annuali precedenti nei totali espansi. */
   includeArchivedAnnual?: boolean;
+  /**
+   * Lista espansa su tutti i mesi con molte righe: le card non attive usano
+   * conteggi per contratto (no expand rate) per evitare timeout Vercel.
+   */
+  heavyExpandedList?: boolean;
 };
 
 function isActiveDaIncassareCard(
@@ -77,15 +82,6 @@ async function summaryForStato(
   ctx: ProvvigioniSummaryContext,
   opts?: { daIncassareKind?: DaIncassareKind },
 ): Promise<{ count: number; amount: number }> {
-  const competenceForAmount = ctx.applyCompetenceToList
-    ? ctx.effectiveCompetence ?? null
-    : null;
-  const viewingAllPeriods = ctx.viewingAllPeriods ?? !ctx.applyCompetenceToList;
-  const expandMode =
-    ctx.allowExpand === false
-      ? null
-      : getRecurringExpandMode(stato, viewingAllPeriods, ctx.effectiveCompetence);
-
   const kind = opts?.daIncassareKind ?? "all";
   const activeCanon = canonicalizeProvvigioneStato(ctx.activeStato?.trim() ?? "");
   const isActiveIncassato =
@@ -95,23 +91,47 @@ async function summaryForStato(
   const isActiveDaIncassare =
     stato === "Da incassare" && isActiveDaIncassareCard(kind, ctx);
 
+  const cardIsActive =
+    isActiveIncassato || isActivePagato || isActiveDaIncassare;
+  /** Lista pesante: le card non attive non espandono le rate (evita timeout). */
+  const ctxForCard: ProvvigioniSummaryContext =
+    ctx.heavyExpandedList && !cardIsActive
+      ? { ...ctx, allowExpand: false }
+      : ctx;
+  const competenceForAmount = ctxForCard.applyCompetenceToList
+    ? ctxForCard.effectiveCompetence ?? null
+    : null;
+
+  const viewingAllPeriods =
+    ctxForCard.viewingAllPeriods ?? !ctxForCard.applyCompetenceToList;
+  const expandMode =
+    ctxForCard.allowExpand === false
+      ? null
+      : getRecurringExpandMode(
+          stato,
+          viewingAllPeriods,
+          ctxForCard.effectiveCompetence,
+        );
+
   // Card attiva: usa dati già calcolati per il conteggio; espansi solo se necessario.
   // Solo per bucket «all» / focus UT (stesso where della lista).
   if (
-    (isActiveIncassato || isActivePagato || isActiveDaIncassare) &&
+    cardIsActive &&
     (kind === "all" || (kind === "UT" && isUtDaIncassareFocus(ctx.focus))) &&
-    ctx.activeListWhere &&
-    ctx.activeListTotal !== undefined
+    ctxForCard.activeListWhere &&
+    ctxForCard.activeListTotal !== undefined
   ) {
+    const activeExpand =
+      ctxForCard.allowExpand === false ? null : expandMode;
     return {
-      count: ctx.activeListTotal,
+      count: ctxForCard.activeListTotal,
       amount: await sumExpandedAmountForStato(
-        ctx.activeListWhere,
-        expandMode,
+        ctxForCard.activeListWhere,
+        activeExpand,
         competenceForAmount,
         stato,
-        ctx.rowScope,
-        ctx.includeArchivedAnnual,
+        ctxForCard.rowScope,
+        ctxForCard.includeArchivedAnnual,
       ),
     };
   }
@@ -120,9 +140,9 @@ async function summaryForStato(
    * Focus B2/B3 bucket-specific: non AND-are sulle altre card
    * (altrimenti totali incompatibili diventano 0).
    */
-  const summaryFocus = isBucketSpecificFocus(ctx.focus)
+  const summaryFocus = isBucketSpecificFocus(ctxForCard.focus)
     ? undefined
-    : ctx.focus;
+    : ctxForCard.focus;
 
   /**
    * Split UT/M/R: sempre recurrenceMode=all + AND su recurrenceKind.
@@ -134,11 +154,11 @@ async function summaryForStato(
       ...base,
       stato,
       recurrenceMode: "all",
-      competencePeriod: ctx.effectiveCompetence,
+      competencePeriod: ctxForCard.effectiveCompetence,
     },
     focus: summaryFocus,
-    effectiveCompetence: ctx.effectiveCompetence,
-    applyCompetenceToList: ctx.applyCompetenceToList,
+    effectiveCompetence: ctxForCard.effectiveCompetence,
+    applyCompetenceToList: ctxForCard.applyCompetenceToList,
   });
   const kindClause: Prisma.ContractWhereInput | null =
     kind === "UT"
@@ -158,8 +178,8 @@ async function summaryForStato(
           where,
           expandMode,
           stato,
-          ctx.rowScope,
-          ctx.includeArchivedAnnual,
+          ctxForCard.rowScope,
+          ctxForCard.includeArchivedAnnual,
         )
       : prisma.contract.count({ where }),
     sumExpandedAmountForStato(
@@ -167,8 +187,8 @@ async function summaryForStato(
       expandMode,
       competenceForAmount,
       stato,
-      ctx.rowScope,
-      ctx.includeArchivedAnnual,
+      ctxForCard.rowScope,
+      ctxForCard.includeArchivedAnnual,
     ),
   ]);
   return { count, amount };

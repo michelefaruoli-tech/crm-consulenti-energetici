@@ -550,7 +550,9 @@ export function ProvvigioniFilterTable({
   }, [drafts]);
 
   function reloadList() {
-    router.push(buildPageHref("/provvigioni", baseQuery()));
+    start(() => {
+      router.refresh();
+    });
   }
 
   function baseQuery(extra: Record<string, string | undefined | null> = {}) {
