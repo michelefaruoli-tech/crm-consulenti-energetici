@@ -25,7 +25,10 @@ import {
   comparaSuppliersCompatible,
   resolveComparaSupplierMatch,
 } from "../src/lib/compara-agosto/supplier-match";
-import { comparaSuggestionForRow } from "../src/lib/compara-agosto/view-types";
+import {
+  comparaSuggestionForRow,
+  parseComparaRowEditsJson,
+} from "../src/lib/compara-agosto/view-types";
 import type { PayoutCandidate, PayoutContractIndex } from "../src/lib/payout/match";
 import type { ParsedPayoutRow } from "../src/lib/payout/types";
 import { deduceComparaPeriods } from "../src/lib/compara-agosto/periods";
@@ -472,6 +475,57 @@ check(
   "Lepore con Iren già presente → usa Iren",
   leporeAlt.contract?.id,
   "c-iren",
+);
+
+console.log("\n• rowEdits payload (Maruccia: conferma + Fagiano)");
+const marucciaKey = "Compara:12";
+const marucciaPayload = JSON.stringify({
+  [marucciaKey]: {
+    nominativo: "Alberto Maruccia",
+    supplier: "Iren",
+    amount: 65,
+    pod: "01613893005447",
+    stato: "Incassato da liquidare",
+    collaboratorId: "user-fagiano-id",
+    collaboratorName: "Fagiano Marco",
+    rowLabel: "Compara Agosto 2026",
+    createConfirmed: true,
+  },
+});
+const marucciaEdits = parseComparaRowEditsJson(marucciaPayload);
+const marucciaEdit = marucciaEdits.get(marucciaKey);
+check(
+  "createConfirmed preservato dal JSON",
+  marucciaEdit?.createConfirmed === true,
+  true,
+);
+check(
+  "collaboratorId Fagiano preservato",
+  marucciaEdit?.collaboratorId,
+  "user-fagiano-id",
+);
+check(
+  "POD Maruccia preservato",
+  marucciaEdit?.pod,
+  "01613893005447",
+);
+check(
+  "senza createConfirmed → false",
+  parseComparaRowEditsJson(
+    JSON.stringify({
+      [marucciaKey]: {
+        nominativo: "X",
+        supplier: "Iren",
+        amount: 65,
+        pod: "",
+        stato: "Incassato da liquidare",
+        collaboratorId: "u1",
+        collaboratorName: "Fagiano",
+        rowLabel: "",
+      },
+    }),
+  ).get(marucciaKey)?.createConfirmed,
+  false,
 );
 
 console.log("\n• Units / periodi");
