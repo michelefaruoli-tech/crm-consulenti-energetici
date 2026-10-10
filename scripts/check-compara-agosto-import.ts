@@ -20,6 +20,7 @@ import {
 } from "../src/lib/compara-agosto/amounts";
 import { classifyComparaAgostoAction } from "../src/lib/compara-agosto/classify";
 import { decidePodFill } from "../src/lib/compara-agosto/pod-fill";
+import { comparaSuggestionForRow } from "../src/lib/compara-agosto/view-types";
 import { deduceComparaPeriods } from "../src/lib/compara-agosto/periods";
 import { comparaAgostoTemplateConfig } from "../src/lib/compara-agosto/template";
 import { readComparaUnits } from "../src/lib/compara-agosto/units";
@@ -257,6 +258,21 @@ check(
     amount: 60,
   }).action,
   "skip_liquidated",
+);
+check(
+  "suggestion already_ok",
+  comparaSuggestionForRow({ action: "already_ok" }),
+  "already_ok",
+);
+check(
+  "suggestion insert_pod",
+  comparaSuggestionForRow({ action: "update", podNeedsFill: true }),
+  "insert_pod",
+);
+check(
+  "suggestion create_row",
+  comparaSuggestionForRow({ action: "unmatched" }),
+  "create_row",
 );
 
 console.log("\n• Units / periodi");

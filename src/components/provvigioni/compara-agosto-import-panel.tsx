@@ -8,15 +8,16 @@ import {
 } from "@/lib/compara-agosto-actions";
 import { comparaRuleAmount } from "@/lib/compara-agosto/amounts";
 import {
-  COMPARA_AGOSTO_ACTION_LABEL,
+  COMPARA_SUGGESTION_LABEL,
   comparaAgostoRowKey,
-  type ComparaAgostoAction,
   type ComparaAgostoPreviewResult,
   type ComparaAgostoPreviewRow,
   type ComparaAgostoRowEdit,
+  type ComparaSuggestion,
 } from "@/lib/compara-agosto/view-types";
 import { periodLabel, toPeriod } from "@/lib/recurring";
 import { formatCurrency } from "@/lib/commission";
+import { PROVVIGIONE_STATO_OPTIONS } from "@/lib/provvigioni-stato";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/form";
 
@@ -43,16 +44,16 @@ function monthOptions(): string[] {
   return out;
 }
 
-const ACTION_STYLE: Record<ComparaAgostoAction, string> = {
-  update: "bg-emerald-50 text-emerald-700",
-  create: "bg-sky-50 text-sky-800",
-  confirm: "bg-amber-50 text-amber-800",
-  unmatched: "bg-red-50 text-red-700",
-  skip_liquidated: "bg-slate-100 text-slate-600",
-  already_ok: "bg-slate-100 text-slate-700",
+const SUGGESTION_STYLE: Record<ComparaSuggestion, string> = {
+  already_ok: "text-slate-600",
+  update_status: "text-emerald-700",
+  insert_pod: "text-sky-700",
+  create_row: "text-sky-800",
+  confirm_match: "text-amber-800",
+  skip_liquidated: "text-slate-500",
 };
 
-function isSelectable(row: ComparaAgostoPreviewRow): boolean {
+function canConfirm(row: ComparaAgostoPreviewRow): boolean {
   return (
     row.action === "update" ||
     row.action === "create" ||
@@ -66,11 +67,14 @@ function defaultEditForRow(
   defaultRunLabel: string,
 ): ComparaAgostoRowEdit {
   return {
+    nominativo: row.nominativo,
+    supplier: row.supplierName || row.supplierHint || "",
     amount: row.ruleAmount,
+    pod: row.proposedPodFill || row.podRaw || row.crmPod || "",
+    stato: row.proposedStato,
     collaboratorId: row.collaboratorId ?? "",
     collaboratorName: row.collaboratorName ?? row.shopHint ?? "",
     rowLabel: row.defaultRowLabel ?? defaultRunLabel,
-    proposedPodFill: row.proposedPodFill ?? "",
   };
 }
 
@@ -85,6 +89,12 @@ function buildDefaultEdits(
     );
   }
   return out;
+}
+
+function shortCollab(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return name;
+  return `${parts[0]} ${parts[parts.length - 1]?.[0] ?? ""}.`;
 }
 
 export function ComparaAgostoImportPanel() {
@@ -105,54 +115,50 @@ export function ComparaAgostoImportPanel() {
   const [preview, setPreview] = useState<ComparaAgostoPreviewResult | null>(
     null,
   );
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  /** Righe confermate (sì) — solo queste vanno in apply. */
+  const [confirmedKeys, setConfirmedKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [rowEdits, setRowEdits] = useState<
     Record<string, ComparaAgostoRowEdit>
   >({});
-  const [filter, setFilter] = useState<"all" | ComparaAgostoAction>("all");
+  const [filter, setFilter] = useState<"all" | ComparaSuggestion>("all");
 
   useEffect(() => {
     if (!preview) {
-      setSelectedKeys(new Set());
+      setConfirmedKeys(new Set());
       setRowEdits({});
       return;
     }
     setRowEdits(buildDefaultEdits(preview));
-    // Default: solo «da aggiornare». Create / confirm / unmatched a mano.
-    setSelectedKeys(
-      new Set(
-        preview.rows
-          .filter((r) => r.action === "update")
-          .map((r) => comparaAgostoRowKey(r)),
-      ),
-    );
+    // Nessuna conferma automatica: Michele sceglie riga per riga
+    setConfirmedKeys(new Set());
   }, [preview]);
 
   const visibleRows = useMemo(() => {
     if (!preview) return [];
     if (filter === "all") return preview.rows;
-    return preview.rows.filter((r) => r.action === filter);
+    return preview.rows.filter((r) => r.suggestion === filter);
   }, [preview, filter]);
 
-  const selectedApplicable = useMemo(() => {
+  const confirmedStats = useMemo(() => {
     if (!preview) return { count: 0, total: 0 };
     let count = 0;
     let total = 0;
     for (const row of preview.rows) {
       const key = comparaAgostoRowKey(row);
-      if (!selectedKeys.has(key)) continue;
-      if (!isSelectable(row)) continue;
+      if (!confirmedKeys.has(key)) continue;
+      if (!canConfirm(row)) continue;
       const edit = rowEdits[key];
-      const amount = edit?.amount ?? row.ruleAmount;
       count++;
-      total += amount ?? 0;
+      total += edit?.amount ?? row.ruleAmount ?? 0;
     }
     return { count, total };
-  }, [preview, selectedKeys, rowEdits]);
+  }, [preview, confirmedKeys, rowEdits]);
 
   function reset() {
     setPreview(null);
-    setSelectedKeys(new Set());
+    setConfirmedKeys(new Set());
     setRowEdits({});
     setError(null);
     setMessage(null);
@@ -176,8 +182,8 @@ export function ComparaAgostoImportPanel() {
     fd.set("competencePeriod", competencePeriod);
     fd.set("settledPeriod", settledPeriod);
     if (runLabel.trim()) fd.set("runLabel", runLabel.trim());
-    if (selectedKeys.size > 0) {
-      fd.set("selectedRowKeys", JSON.stringify([...selectedKeys]));
+    if (confirmedKeys.size > 0) {
+      fd.set("selectedRowKeys", JSON.stringify([...confirmedKeys]));
     }
     if (Object.keys(rowEdits).length > 0) {
       fd.set("rowEdits", JSON.stringify(rowEdits));
@@ -204,22 +210,22 @@ export function ComparaAgostoImportPanel() {
     });
   }
 
-  function toggleKey(key: string, row: ComparaAgostoPreviewRow) {
-    if (!isSelectable(row)) return;
-    setSelectedKeys((prev) => {
+  function setConfirmed(key: string, row: ComparaAgostoPreviewRow, on: boolean) {
+    if (!canConfirm(row)) return;
+    setConfirmedKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (on) next.add(key);
+      else next.delete(key);
       return next;
     });
   }
 
-  function selectAction(action: ComparaAgostoAction, on: boolean) {
+  function confirmSuggestion(suggestion: ComparaSuggestion, on: boolean) {
     if (!preview) return;
-    setSelectedKeys((prev) => {
+    setConfirmedKeys((prev) => {
       const next = new Set(prev);
       for (const row of preview.rows) {
-        if (row.action !== action || !isSelectable(row)) continue;
+        if (row.suggestion !== suggestion || !canConfirm(row)) continue;
         const key = comparaAgostoRowKey(row);
         if (on) next.add(key);
         else next.delete(key);
@@ -236,11 +242,14 @@ export function ComparaAgostoImportPanel() {
       const base = row
         ? defaultEditForRow(row, preview!.defaultRunLabel)
         : {
+            nominativo: "",
+            supplier: "",
             amount: null,
+            pod: "",
+            stato: "Incassato da liquidare",
             collaboratorId: "",
             collaboratorName: "",
             rowLabel: runLabel,
-            proposedPodFill: "",
           };
       return { ...prev, [key]: { ...base, ...patch } };
     });
@@ -253,8 +262,10 @@ export function ComparaAgostoImportPanel() {
   ) {
     const opt = preview?.collaborators.find((c) => c.id === collaboratorId);
     const name = opt?.name ?? "";
+    const edit = rowEdits[key];
+    const supplier = edit?.supplier || row.supplierName || row.supplierHint;
     const rule = comparaRuleAmount({
-      supplierHint: row.supplierName || row.supplierHint,
+      supplierHint: supplier,
       collaboratorName: name || row.shopHint,
       units: row.units,
       fileAmount: row.fileAmount,
@@ -268,46 +279,40 @@ export function ComparaAgostoImportPanel() {
 
   function runApply() {
     if (!preview) return;
-    if (selectedApplicable.count === 0) {
-      setError(
-        "Seleziona almeno una riga da aggiornare / creare / confermare / senza match (checkbox).",
-      );
+    if (confirmedStats.count === 0) {
+      setError("Conferma almeno una riga (Sì in colonna Azione) prima di applicare.");
       return;
     }
 
-    const selectedRows = preview.rows.filter((r) =>
-      selectedKeys.has(comparaAgostoRowKey(r)),
+    const confirmedRows = preview.rows.filter((r) =>
+      confirmedKeys.has(comparaAgostoRowKey(r)),
     );
-    const creates = selectedRows.filter((r) => r.action === "create").length;
-    const confirms = selectedRows.filter((r) => r.action === "confirm").length;
-    const unmatched = selectedRows.filter((r) => r.action === "unmatched");
-    const unmatchedMissingCollab = unmatched.filter((r) => {
+    const creates = confirmedRows.filter(
+      (r) => r.suggestion === "create_row",
+    ).length;
+    const pods = confirmedRows.filter(
+      (r) => r.suggestion === "insert_pod",
+    ).length;
+    const missingCollab = confirmedRows.filter((r) => {
+      if (r.action !== "unmatched") return false;
       const edit = rowEdits[comparaAgostoRowKey(r)];
       return !(edit?.collaboratorId || r.collaboratorId);
     });
-    if (unmatchedMissingCollab.length > 0) {
+    if (missingCollab.length > 0) {
       setError(
-        `Senza corrispondenza: scegli il collaboratore su ${unmatchedMissingCollab.length} riga/e prima di applicare.`,
+        `Senza corrispondenza: scegli il collaboratore su ${missingCollab.length} riga/e (tendina in Azione).`,
       );
       return;
     }
 
     const ok = window.confirm(
       [
-        `Applicare ${selectedApplicable.count} righe selezionate (${formatCurrency(selectedApplicable.total)})?`,
-        "Vengono usati importo / collaboratore / etichetta / POD modificati in tabella.",
-        creates > 0
-          ? `${creates} CREATE: mancavano in Provvigioni — confermi i dati?`
-          : null,
-        confirms > 0
-          ? `${confirms} DA CONFERMARE: match/POD ambigui — Michele approva?`
-          : null,
-        unmatched.length > 0
-          ? `${unmatched.length} SENZA MATCH: crea Client+Contratto+Provvigione stub, poi Incassato da liquidare.`
-          : null,
+        `Applicare ${confirmedStats.count} righe confermate (${formatCurrency(confirmedStats.total)})?`,
+        "Vengono usati Nominativo / Fornitore / Importo / POD / Stato modificati in tabella.",
+        creates > 0 ? `${creates} CREATE riga stub.` : null,
+        pods > 0 ? `${pods} INSERT POD dal file.` : null,
         "",
-        "Stato destinazione: Incassato da liquidare (PAID).",
-        "Le già liquidate NON vengono applicate.",
+        "Le righe «Già in liquidazione» non vengono toccate.",
         "Operazione tracciata nella liquidazione (annullabile).",
       ]
         .filter(Boolean)
@@ -356,7 +361,7 @@ export function ComparaAgostoImportPanel() {
             onChange={(e) => void onFileChange(e.target.files?.[0] ?? null)}
           />
         </Field>
-        <Field label="Competenza (riferimento)">
+        <Field label="Competenza">
           <Select
             value={competencePeriod}
             onChange={(e) => setCompetencePeriod(e.target.value)}
@@ -380,7 +385,7 @@ export function ComparaAgostoImportPanel() {
             ))}
           </Select>
         </Field>
-        <Field label="Etichetta liquidazione (default)">
+        <Field label="Etichetta liquidazione">
           <Input
             value={runLabel}
             onChange={(e) => setRunLabel(e.target.value)}
@@ -389,12 +394,10 @@ export function ComparaAgostoImportPanel() {
       </div>
 
       <p className="text-xs text-slate-500">
-        Regole importo (partenza anteprima, poi editabili): Michele Faruoli /
-        Lucio·Lucius Eni 80 / Iren 80 · Fagiano Eni 70 / Iren 65 · Laforgia e
-        altri Eni 70 / Iren 60. Se la rata è già Incassato da liquidare e il POD
-        coincide → «Già in liquidazione» (checkbox spenta, nessuno overwrite).
-        Una differenza regola vs gettone file non basta a proporre aggiornamento.
-        Create, «da confermare» e «senza match» vanno selezionate a mano.
+        Tabella come Provvigioni: modifica celle, poi conferma Sì/No in Azione.
+        Già Incassato da liquidare + POD uguale → «Già in liquidazione» (nessun
+        overwrite). POD nel file ma assente in CRM → «Inserisci POD dal file».
+        Quote: Faruoli/Lucio 80·80 · Fagiano 70·65 · altri 70·60.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -403,11 +406,11 @@ export function ComparaAgostoImportPanel() {
         </Button>
         <Button
           onClick={runApply}
-          disabled={pending || !preview || selectedApplicable.count === 0}
+          disabled={pending || !preview || confirmedStats.count === 0}
         >
           {pending && preview
             ? "Applicazione…"
-            : `2. Applica selezionate (${selectedApplicable.count})`}
+            : `2. Applica confermate (${confirmedStats.count})`}
         </Button>
       </div>
 
@@ -423,203 +426,159 @@ export function ComparaAgostoImportPanel() {
       ) : null}
 
       {preview ? (
-        <div className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-            <Stat label="Righe OK" value={String(preview.summary.total)} />
-            <Stat
-              label="Da aggiornare"
-              value={String(preview.summary.update)}
-              tone="emerald"
-            />
-            <Stat
-              label="Da creare"
-              value={String(preview.summary.create)}
-              tone="sky"
-            />
-            <Stat
-              label="Da confermare"
-              value={String(preview.summary.confirm)}
-              tone="amber"
-            />
-            <Stat
-              label="Senza match"
-              value={String(preview.summary.unmatched)}
-              tone="red"
-            />
-            <Stat
-              label="Già in liquidazione"
-              value={String(preview.summary.alreadyOk)}
-            />
-            <Stat
-              label="Già liquidate"
-              value={String(preview.summary.skipLiquidated)}
-            />
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm">
             <p>
               Competenza <strong>{periodLabel(preview.competencePeriod)}</strong>
               {" · "}settled{" "}
               <strong>{periodLabel(preview.settledPeriod)}</strong>
-              {" · "}totale regole{" "}
+              {" · "}già ok{" "}
+              <strong>{preview.summary.alreadyOk}</strong>
+              {" · "}confermate{" "}
               <strong>
-                {formatCurrency(preview.summary.ruleAmountTotal)}
+                {confirmedStats.count} ({formatCurrency(confirmedStats.total)})
               </strong>
-              {" · "}selezionato (valori UI){" "}
-              <strong>{formatCurrency(selectedApplicable.total)}</strong>
             </p>
-            <p className="mt-1 text-xs text-slate-600">
-              Fagiano: {preview.summary.fagianoRows} righe · senza POD in file:{" "}
-              {preview.summary.fagianoMissingPod} · match probabile:{" "}
-              {preview.summary.fagianoProbableMatch} · prefill POD:{" "}
-              {preview.summary.fagianoPodPrefill} · POD da confermare:{" "}
-              {preview.summary.fagianoPodConfirm}
-            </p>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              <Button
+                variant="secondary"
+                onClick={() => confirmSuggestion("update_status", true)}
+              >
+                Conferma aggiornamenti
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => confirmSuggestion("insert_pod", true)}
+              >
+                Conferma insert POD
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => confirmSuggestion("create_row", true)}
+              >
+                Conferma create
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setConfirmedKeys(new Set())}
+              >
+                Azzera conferme
+              </Button>
+              <Select
+                value={filter}
+                onChange={(e) =>
+                  setFilter(e.target.value as "all" | ComparaSuggestion)
+                }
+              >
+                <option value="all">Filtro: tutte</option>
+                <option value="update_status">Solo da aggiornare</option>
+                <option value="insert_pod">Solo insert POD</option>
+                <option value="create_row">Solo crea riga</option>
+                <option value="confirm_match">Solo da confermare</option>
+                <option value="already_ok">Solo già in liquidazione</option>
+                <option value="skip_liquidated">Solo già liquidate</option>
+              </Select>
+            </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Button
-              variant="secondary"
-              onClick={() => selectAction("update", true)}
-            >
-              Seleziona aggiornamenti
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => selectAction("create", true)}
-            >
-              Seleziona create
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => selectAction("confirm", true)}
-            >
-              Seleziona da confermare
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => selectAction("unmatched", true)}
-            >
-              Seleziona senza match
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setSelectedKeys(new Set())}
-            >
-              Deseleziona tutto
-            </Button>
-            <Select
-              value={filter}
-              onChange={(e) =>
-                setFilter(e.target.value as "all" | ComparaAgostoAction)
-              }
-            >
-              <option value="all">Filtro: tutte</option>
-              <option value="update">Solo da aggiornare</option>
-              <option value="create">Solo da creare</option>
-              <option value="confirm">Solo da confermare</option>
-              <option value="unmatched">Solo senza match</option>
-              <option value="already_ok">Solo già in liquidazione</option>
-              <option value="skip_liquidated">Solo già liquidate</option>
-            </Select>
-          </div>
-
-          <div className="max-h-[32rem] overflow-auto rounded-lg border border-slate-200">
-            <table className="min-w-full text-left text-xs">
-              <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase text-slate-500">
+          <div className="max-h-[36rem] overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table className="min-w-full border-collapse text-left text-xs">
+              <thead className="sticky top-0 z-20 bg-slate-100 text-[11px] uppercase tracking-wide text-slate-600">
                 <tr>
-                  <th className="px-2 py-2">Sel.</th>
-                  <th className="px-2 py-2">Azione</th>
-                  <th className="px-2 py-2">Nominativo</th>
-                  <th className="px-2 py-2">Forn.</th>
-                  <th className="px-2 py-2">Collaboratore</th>
-                  <th className="px-2 py-2">Importo €</th>
-                  <th className="px-2 py-2">Etichetta</th>
-                  <th className="px-2 py-2">POD file</th>
-                  <th className="px-2 py-2">POD fill</th>
-                  <th className="px-2 py-2">Note</th>
+                  <th className="px-2 py-2 font-semibold">Nominativo</th>
+                  <th className="px-2 py-2 font-semibold">Fornitore</th>
+                  <th className="hidden px-2 py-2 font-semibold lg:table-cell">
+                    Collab.
+                  </th>
+                  <th className="px-2 py-2 font-semibold">Importo</th>
+                  <th className="px-2 py-2 font-semibold">POD / PDR</th>
+                  <th className="px-2 py-2 font-semibold">Stato</th>
+                  <th className="sticky right-0 z-30 bg-slate-100 px-2 py-2 font-semibold shadow-[-2px_0_5px_rgba(15,23,42,0.06)]">
+                    Azione
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRows.map((row) => {
                   const key = comparaAgostoRowKey(row);
-                  const selectable = isSelectable(row);
+                  const editable = canConfirm(row);
                   const edit =
                     rowEdits[key] ??
                     defaultEditForRow(row, preview.defaultRunLabel);
+                  const confirmed = confirmedKeys.has(key);
+                  const hasCrmCollab = Boolean(row.collaboratorId);
                   return (
-                    <tr key={key} className="border-t border-slate-100 align-top">
+                    <tr
+                      key={key}
+                      className={`border-t border-slate-100 align-top ${
+                        confirmed ? "bg-emerald-50/40" : "bg-white"
+                      }`}
+                    >
                       <td className="px-2 py-1.5">
-                        <input
-                          type="checkbox"
-                          disabled={!selectable}
-                          checked={selectable && selectedKeys.has(key)}
-                          onChange={() => toggleKey(key, row)}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <span
-                          className={`inline-block rounded px-1.5 py-0.5 ${ACTION_STYLE[row.action]}`}
-                        >
-                          {COMPARA_AGOSTO_ACTION_LABEL[row.action]}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <div className="font-medium text-slate-800">
-                          {row.nominativo}
-                        </div>
-                        {row.crmClientName &&
-                        row.crmClientName !== row.nominativo ? (
-                          <div className="text-slate-500">
-                            CRM: {row.crmClientName}
-                          </div>
-                        ) : null}
+                        {editable ? (
+                          <input
+                            className="min-w-[10rem] rounded border border-slate-200 bg-transparent px-1 py-1 text-[13px] font-semibold text-slate-900"
+                            value={edit.nominativo}
+                            onChange={(e) =>
+                              patchEdit(key, { nominativo: e.target.value })
+                            }
+                          />
+                        ) : (
+                          <span className="font-semibold text-slate-900">
+                            {row.nominativo}
+                          </span>
+                        )}
                         {row.contractNumber ? (
-                          <div className="text-slate-400">
+                          <div className="text-[10px] text-slate-400">
                             {row.contractNumber}
                           </div>
                         ) : null}
                       </td>
                       <td className="px-2 py-1.5">
-                        {row.supplierName || row.supplierHint}
+                        {editable ? (
+                          <input
+                            className="max-w-[8rem] rounded border border-slate-200 bg-transparent px-1 py-1"
+                            value={edit.supplier}
+                            onChange={(e) =>
+                              patchEdit(key, { supplier: e.target.value })
+                            }
+                          />
+                        ) : (
+                          <span>{row.supplierName || row.supplierHint}</span>
+                        )}
                       </td>
-                      <td className="px-2 py-1.5 min-w-[9rem]">
-                        {selectable ? (
-                          <Select
+                      <td className="hidden px-2 py-1.5 lg:table-cell">
+                        {hasCrmCollab && editable ? (
+                          <select
+                            className="max-w-[7rem] rounded border border-slate-200 bg-transparent px-1 py-1"
                             value={edit.collaboratorId}
+                            title={edit.collaboratorName}
                             onChange={(e) =>
                               onCollaboratorChange(key, row, e.target.value)
                             }
                           >
-                            <option value="">— scegli —</option>
+                            <option value="">—</option>
                             {preview.collaborators.map((c) => (
                               <option key={c.id} value={c.id}>
-                                {c.name}
+                                {shortCollab(c.name)}
                               </option>
                             ))}
-                          </Select>
-                        ) : (
-                          <span>
-                            {row.collaboratorName || row.shopHint || "—"}
+                          </select>
+                        ) : hasCrmCollab ? (
+                          <span title={row.collaboratorName}>
+                            {shortCollab(row.collaboratorName || "")}
                           </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
                         )}
-                        {row.isFagiano ? (
-                          <div className="mt-0.5 text-amber-700">Fagiano</div>
-                        ) : null}
-                        {row.shopHint &&
-                        row.shopHint !== edit.collaboratorName ? (
-                          <div className="text-[10px] text-slate-400">
-                            shop {row.shopHint}
-                          </div>
-                        ) : null}
                       </td>
-                      <td className="px-2 py-1.5 min-w-[5.5rem]">
-                        {selectable ? (
+                      <td className="px-2 py-1.5">
+                        {editable ? (
                           <>
-                            <Input
+                            <input
                               type="number"
                               step="0.01"
-                              className="w-24"
+                              className="w-[5.5rem] rounded border border-slate-200 bg-transparent px-1 py-1 tabular-nums"
                               value={edit.amount ?? ""}
                               onChange={(e) => {
                                 const v = e.target.value;
@@ -633,12 +592,6 @@ export function ComparaAgostoImportPanel() {
                                 });
                               }}
                             />
-                            {row.ruleApplied ? (
-                              <div className="text-[10px] text-slate-500">
-                                regola
-                                {row.units > 1 ? ` ×${row.units}` : ""}
-                              </div>
-                            ) : null}
                             {row.fileAmount != null &&
                             row.fileAmount !== edit.amount ? (
                               <div className="text-[10px] text-slate-400">
@@ -647,61 +600,115 @@ export function ComparaAgostoImportPanel() {
                             ) : null}
                           </>
                         ) : (
-                          <span>
+                          <span className="tabular-nums">
                             {row.ruleAmount != null
                               ? formatCurrency(row.ruleAmount)
                               : "—"}
                           </span>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 min-w-[8rem]">
-                        {selectable ? (
-                          <Input
-                            value={edit.rowLabel}
+                      <td className="px-2 py-1.5">
+                        {editable ? (
+                          <input
+                            className={`max-w-[11rem] rounded border px-1 py-1 font-mono text-xs ${
+                              row.podNeedsFill
+                                ? "border-sky-300 bg-sky-50"
+                                : "border-slate-200 bg-transparent"
+                            }`}
+                            value={edit.pod}
+                            placeholder="POD / PDR…"
                             onChange={(e) =>
-                              patchEdit(key, { rowLabel: e.target.value })
+                              patchEdit(key, { pod: e.target.value })
                             }
                           />
                         ) : (
-                          <span className="text-slate-500">—</span>
+                          <span className="font-mono text-xs">
+                            {row.crmPod || row.podRaw || "—"}
+                          </span>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 font-mono">
-                        {row.podRaw || (
-                          <span className="text-amber-700">assente</span>
-                        )}
-                        {row.crmPod ? (
-                          <div className="text-slate-400">CRM {row.crmPod}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-1.5 min-w-[7rem]">
-                        {selectable &&
-                        (row.podFillMode === "safe_prefill" ||
-                          row.podFillMode === "needs_confirm" ||
-                          row.action === "unmatched" ||
-                          Boolean(row.proposedPodFill)) ? (
-                          <Input
-                            className="font-mono"
-                            value={edit.proposedPodFill}
-                            onChange={(e) =>
-                              patchEdit(key, {
-                                proposedPodFill: e.target.value,
-                              })
+                      <td className="px-2 py-1.5">
+                        {editable ? (
+                          <select
+                            className="max-w-[9.5rem] rounded border border-slate-200 bg-transparent px-1 py-1"
+                            value={
+                              PROVVIGIONE_STATO_OPTIONS.includes(
+                                edit.stato as (typeof PROVVIGIONE_STATO_OPTIONS)[number],
+                              )
+                                ? edit.stato
+                                : "Incassato da liquidare"
                             }
-                            placeholder="POD/PDR"
-                          />
-                        ) : row.podFillMode === "display_from_crm" ? (
-                          <span className="text-slate-500">da CRM</span>
+                            onChange={(e) =>
+                              patchEdit(key, { stato: e.target.value })
+                            }
+                          >
+                            {PROVVIGIONE_STATO_OPTIONS.map((o) => (
+                              <option key={o} value={o}>
+                                {o}
+                              </option>
+                            ))}
+                          </select>
                         ) : (
-                          <span className="text-slate-400">—</span>
+                          <span>{row.crmStato || row.proposedStato}</span>
                         )}
-                        {row.podFillMode === "needs_confirm" ? (
-                          <div className="text-amber-700">conferma</div>
-                        ) : null}
                       </td>
-                      <td className="max-w-[12rem] px-2 py-1.5 text-slate-600">
-                        {row.matchReason}
-                        {row.skipReason ? ` · ${row.skipReason}` : ""}
+                      <td
+                        className={`sticky right-0 z-10 px-2 py-1.5 shadow-[-2px_0_5px_rgba(15,23,42,0.06)] ${
+                          confirmed ? "bg-emerald-50" : "bg-white"
+                        }`}
+                      >
+                        <div
+                          className={`font-medium ${SUGGESTION_STYLE[row.suggestion]}`}
+                        >
+                          {COMPARA_SUGGESTION_LABEL[row.suggestion]}
+                        </div>
+                        {!hasCrmCollab && editable ? (
+                          <select
+                            className="mt-1 max-w-[8rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-[11px]"
+                            value={edit.collaboratorId}
+                            onChange={(e) =>
+                              onCollaboratorChange(key, row, e.target.value)
+                            }
+                          >
+                            <option value="">Collab…</option>
+                            {preview.collaborators.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {shortCollab(c.name)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                        {editable ? (
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <label className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-slate-700">
+                              <input
+                                type="radio"
+                                name={`confirm-${key}`}
+                                checked={confirmed}
+                                onChange={() => setConfirmed(key, row, true)}
+                              />
+                              Sì
+                            </label>
+                            <label className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-slate-700">
+                              <input
+                                type="radio"
+                                name={`confirm-${key}`}
+                                checked={!confirmed}
+                                onChange={() => setConfirmed(key, row, false)}
+                              />
+                              No
+                            </label>
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-[11px] text-slate-500">
+                            — non toccare
+                          </div>
+                        )}
+                        {row.skipReason && row.suggestion === "confirm_match" ? (
+                          <div className="mt-0.5 max-w-[10rem] text-[10px] text-amber-700">
+                            {row.skipReason}
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -711,41 +718,11 @@ export function ComparaAgostoImportPanel() {
           </div>
           {preview.truncated ? (
             <p className="text-xs text-amber-700">
-              Anteprima troncata alle prime {preview.rows.length} righe: i
-              conteggi restano sul totale file.
+              Anteprima troncata alle prime {preview.rows.length} righe.
             </p>
           ) : null}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "emerald" | "amber" | "red" | "sky";
-}) {
-  const toneClass =
-    tone === "emerald"
-      ? "border-emerald-200 bg-emerald-50"
-      : tone === "amber"
-        ? "border-amber-200 bg-amber-50"
-        : tone === "red"
-          ? "border-red-200 bg-red-50"
-          : tone === "sky"
-            ? "border-sky-200 bg-sky-50"
-            : "border-slate-200 bg-white";
-  return (
-    <div className={`rounded-lg border px-3 py-2 ${toneClass}`}>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">
-        {label}
-      </div>
-      <div className="text-lg font-semibold text-slate-900">{value}</div>
     </div>
   );
 }

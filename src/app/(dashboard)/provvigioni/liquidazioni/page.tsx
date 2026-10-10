@@ -103,11 +103,11 @@ export default async function LiquidazioniPage() {
       <Card>
         <CardTitle>Compara Agosto — inviti pagati</CardTitle>
         <p className="mt-1 mb-4 text-sm text-slate-600">
-          Flusso dedicato: match per Nominativo, importi per regola (Faruoli /
-          Lucio 80·80, Fagiano 70·65, altri 70·60) editabili in anteprima.
-          Rate già <strong>Incassato da liquidare</strong> con POD ok → «Già in
-          liquidazione» (non toccare). Checkbox solo su aggiorna / crea /
-          conferma / senza match (stub).
+          Anteprima a tabella (come Provvigioni): Nominativo · Fornitore ·
+          Importo · POD · Stato · Azione. Conferma Sì/No per riga; apply solo
+          sulle confermate. Rate già Incassato da liquidare con POD ok → «Già in
+          liquidazione» (nessun overwrite). POD nel file ma assente in CRM →
+          «Inserisci POD dal file».
         </p>
         <ComparaAgostoImportPanel />
       </Card>
