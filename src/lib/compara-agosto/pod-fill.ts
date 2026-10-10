@@ -7,6 +7,11 @@
  *   nessun overwrite automatico.
  */
 
+import {
+  effectiveCrmPod,
+  isPlaceholderPod,
+  podsEquivalent,
+} from "@/lib/payout/normalize";
 import { normalizePodKey } from "@/lib/storno-status";
 import type { ComparaPodFillMode } from "@/lib/compara-agosto/view-types";
 
@@ -39,12 +44,16 @@ export function decidePodFill(params: {
   ambiguousMatch: boolean;
 }): PodFillDecision {
   const filePod = params.filePodRaw.trim();
-  const fileKey = filePod ? normalizePodKey(filePod) : "";
-  const crmRaw = params.contract ? crmPodRaw(params.contract) : "";
+  const fileUsable = Boolean(filePod) && !isPlaceholderPod(filePod);
+  const fileKey = fileUsable ? normalizePodKey(filePod) : "";
+  const crmStored = params.contract ? crmPodRaw(params.contract) : "";
+  const crmRaw = effectiveCrmPod(crmStored);
   const crmKey = crmRaw ? normalizePodKey(crmRaw) : "";
+  const crmWasPlaceholder =
+    Boolean(crmStored.trim()) && isPlaceholderPod(crmStored);
 
   if (params.ambiguousMatch) {
-    if (fileKey && crmKey && fileKey !== crmKey) {
+    if (fileKey && crmKey && !podsEquivalent(filePod, crmRaw)) {
       return {
         mode: "needs_confirm",
         proposedPodFill: filePod,
@@ -55,7 +64,9 @@ export function decidePodFill(params: {
       return {
         mode: "needs_confirm",
         proposedPodFill: filePod,
-        reason: "Nominativo ambiguo: fill POD da confermare",
+        reason: crmWasPlaceholder
+          ? "Nominativo ambiguo: sostituisci segnaposto POD (XXXX…) dal file"
+          : "Nominativo ambiguo: fill POD da confermare",
       };
     }
     return {
@@ -77,25 +88,27 @@ export function decidePodFill(params: {
     return { mode: "none", proposedPodFill: null, reason: null };
   }
 
-  // File ha POD, CRM vuoto → prefill sicuro
+  // CRM vuoto o segnaposto (XXXX / ZXXXX / maschera) → fill dal file
   if (!crmKey) {
     return {
       mode: "safe_prefill",
       proposedPodFill: filePod,
-      reason: "POD assente in CRM: proposta fill da file",
+      reason: crmWasPlaceholder
+        ? "POD CRM è segnaposto (XXXX…): proposta dal file"
+        : "POD assente in CRM: proposta fill da file",
     };
   }
 
-  // Stesso POD: niente da scrivere
-  if (fileKey === crmKey) {
+  // Stesso POD/PDR anche se manca solo lo 00 iniziale (Excel): non sovrascrivere
+  if (podsEquivalent(filePod, crmRaw)) {
     return {
       mode: "none",
       proposedPodFill: null,
-      reason: "POD file = CRM",
+      reason: "POD/PDR file = CRM (zeri iniziali equivalenti)",
     };
   }
 
-  // Diverso → Michele decide
+  // Diverso → Michele decide (non proporre di togliere gli 00 già corretti in CRM)
   return {
     mode: "needs_confirm",
     proposedPodFill: filePod,

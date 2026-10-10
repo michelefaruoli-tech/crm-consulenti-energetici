@@ -22,6 +22,12 @@ import {
 import { isRecurringMonthly, periodLabel } from "@/lib/recurring";
 import { normalizePodKey } from "@/lib/storno-status";
 import { applyPayoutRowMark } from "@/lib/payout/apply";
+import {
+  effectiveCrmPod,
+  isPlaceholderPod,
+  podsEquivalent,
+  shouldWritePodFromFile,
+} from "@/lib/payout/normalize";
 import { provvigioneStatoActionKind } from "@/lib/provvigioni-stato";
 import {
   loadPayoutContractIndex,
@@ -427,14 +433,19 @@ async function planRows(
       isFagiano: fagiano,
       ambiguousMatch: d.ambiguous,
     });
-    const filePodKey = d.parsed.podRaw.trim()
-      ? normalizePodKey(d.parsed.podRaw)
-      : "";
-    const crmPodKey = crmPod ? normalizePodKey(crmPod) : "";
+    const filePodRaw = d.parsed.podRaw.trim();
+    const fileUsable =
+      Boolean(filePodRaw) && !isPlaceholderPod(filePodRaw);
+    const filePodKey = fileUsable ? normalizePodKey(filePodRaw) : "";
+    const crmEffective = effectiveCrmPod(crmPod);
+    const crmPodKey = crmEffective ? normalizePodKey(crmEffective) : "";
+    // Fill se file ha POD reale e CRM è vuoto/segnaposto (XXXX…).
+    // Se manca solo lo 00, podsEquivalent → già ok, non «inserisci».
     const podNeedsFill = Boolean(filePodKey && !crmPodKey);
     const podAlreadyOk =
-      Boolean(filePodKey && crmPodKey && filePodKey === crmPodKey) ||
-      (!filePodKey && Boolean(crmPodKey));
+      Boolean(
+        fileUsable && crmEffective && podsEquivalent(filePodRaw, crmEffective),
+      ) || (!filePodKey && Boolean(crmPodKey));
     const classified = classifyComparaAgostoAction({
       hasContract: Boolean(d.contract),
       finance: fin,
@@ -794,11 +805,9 @@ export async function importAndApplyComparaAgostoAction(
       const alreadyTarget =
         (markMode === "INCASSATO" && row.crmStato === STATO_INCASSATO) ||
         (markMode === "LIQUIDATO" && row.crmStato === STATO_LIQUIDATO);
+      // Solo fill POD (stato già ok): include sostituzione XXXX/ZXXXX
       const podOnly =
-        alreadyTarget &&
-        Boolean(podFill) &&
-        (row.podNeedsFill ||
-          normalizePodKey(podFill) !== normalizePodKey(row.crmPod || ""));
+        alreadyTarget && shouldWritePodFromFile(podFill, row.crmPod || "");
 
       if (row.action === "unmatched") {
         if (!collaboratorId) {
@@ -1074,15 +1083,14 @@ export async function importAndApplyComparaAgostoAction(
             }
 
             if (proposedPod) {
+              // Storno / stato contratto non bloccano la scrittura se riga confermata
               const contract = await prisma.contract.findUnique({
                 where: { id: prow.contractId },
                 select: { podPdr: true, pod: true, pdr: true },
               });
-              const crmKey = normalizePodKey(
-                contract?.podPdr || contract?.pod || contract?.pdr || "",
-              );
-              const fileKey = normalizePodKey(proposedPod);
-              if (fileKey && crmKey !== fileKey) {
+              const crmRaw =
+                contract?.podPdr || contract?.pod || contract?.pdr || "";
+              if (shouldWritePodFromFile(proposedPod, crmRaw)) {
                 const looksLikePod = /^IT/i.test(proposedPod);
                 await prisma.contract.update({
                   where: { id: prow.contractId },

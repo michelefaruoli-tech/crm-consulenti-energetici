@@ -24,6 +24,13 @@ import { comparaSuggestionForRow } from "../src/lib/compara-agosto/view-types";
 import { deduceComparaPeriods } from "../src/lib/compara-agosto/periods";
 import { comparaAgostoTemplateConfig } from "../src/lib/compara-agosto/template";
 import { readComparaUnits } from "../src/lib/compara-agosto/units";
+import {
+  cellPodText,
+  isPlaceholderPod,
+  podsEquivalent,
+  restorePdrLeadingZeros,
+  shouldWritePodFromFile,
+} from "../src/lib/payout/normalize";
 import { parsePayoutWorkbook } from "../src/lib/payout/parse";
 
 let failures = 0;
@@ -124,6 +131,101 @@ check(
     fileAmount: 55,
   }).amount,
   55,
+);
+
+console.log("\n• PDR zeri iniziali (Excel numerico)");
+check(
+  "restore 12 cifre → 00…",
+  restorePdrLeadingZeros("882602663573"),
+  "00882602663573",
+);
+check(
+  "restore 13 cifre → 0…",
+  restorePdrLeadingZeros("3370000031038"),
+  "03370000031038",
+);
+check(
+  "già 14 con 00 invariato",
+  restorePdrLeadingZeros("00882602663573"),
+  "00882602663573",
+);
+check(
+  "cellPodText number 12 cifre",
+  cellPodText(882602663573),
+  "00882602663573",
+);
+check(
+  "equivalenti senza/con 00",
+  podsEquivalent("882602663573", "00882602663573"),
+  true,
+);
+check(
+  "equivalenti dopo restore",
+  podsEquivalent(
+    restorePdrLeadingZeros("882602663573"),
+    "00882602663573",
+  ),
+  true,
+);
+check(
+  "fill: file senza 00 + CRM con 00 → none",
+  decidePodFill({
+    filePodRaw: restorePdrLeadingZeros("882602663573"),
+    contract: {
+      podPdr: "00882602663573",
+      pod: null,
+      pdr: "00882602663573",
+    },
+    isFagiano: false,
+    ambiguousMatch: false,
+  }).mode,
+  "none",
+);
+check(
+  "IT POD non paddato",
+  restorePdrLeadingZeros("IT001E80700344"),
+  "IT001E80700344",
+);
+check("XXXX è segnaposto", isPlaceholderPod("XXXX"), true);
+check("ZXXXX è segnaposto", isPlaceholderPod("ZXXXX"), true);
+check("PDR reale non segnaposto", isPlaceholderPod("00882602663573"), false);
+check(
+  "write: file reale + CRM XXXX → sì (Maruccia)",
+  shouldWritePodFromFile("00882602663573", "XXXX"),
+  true,
+);
+check(
+  "write: file reale + CRM ZXXXX → sì",
+  shouldWritePodFromFile("IT001E123456789012", "ZXXXX"),
+  true,
+);
+check(
+  "write: file = CRM con 00 → no",
+  shouldWritePodFromFile("00882602663573", "00882602663573"),
+  false,
+);
+check(
+  "write: file senza 00 + CRM con 00 → no",
+  shouldWritePodFromFile("882602663573", "00882602663573"),
+  false,
+);
+check(
+  "fill: CRM XXXX + file PDR → safe_prefill",
+  decidePodFill({
+    filePodRaw: restorePdrLeadingZeros("882602663573"),
+    contract: { podPdr: "XXXX", pod: null, pdr: "XXXX" },
+    isFagiano: true,
+    ambiguousMatch: false,
+  }).mode,
+  "safe_prefill",
+);
+check(
+  "suggestion insert_pod se CRM XXXX",
+  comparaSuggestionForRow({
+    action: "update",
+    podNeedsFill: true,
+  }),
+  "insert_pod",
 );
 
 console.log("\n• POD fill Fagiano");
@@ -364,6 +466,14 @@ async function main() {
       ).length;
       check("Eni 64", eni, 64);
       check("Iren 77", iren, 77);
+      // Excel numerico: dopo cellPodText i PDR gas hanno di nuovo 00/0
+      const pdr00 = parsed.rows.filter((r) =>
+        /^00\d{12}$/.test(r.podRaw),
+      ).length;
+      const pdr14 = parsed.rows.filter((r) => /^\d{14}$/.test(r.podRaw)).length;
+      check("PDR con prefisso 00 (≥40)", pdr00 >= 40, true);
+      check("PDR 14 cifre (≥60)", pdr14 >= 60, true);
+      console.log(`   info PDR 00…=${pdr00} · 14 cifre=${pdr14}`);
     }
   } else {
     console.log(

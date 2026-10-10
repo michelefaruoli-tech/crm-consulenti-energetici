@@ -10,6 +10,7 @@
 import ExcelJS from "exceljs";
 import { periodFromSheetName } from "@/lib/helios-provvigioni-shared";
 import {
+  cellPodText,
   cellText,
   isFormulaWithoutResult,
   isMaskedPod,
@@ -411,7 +412,9 @@ export async function parsePayoutWorkbook(
       }
 
       const podRaw =
-        cols.pod != null ? cellText(row.getCell(cols.pod).value as RawCell) : "";
+        cols.pod != null
+          ? cellPodText(row.getCell(cols.pod).value as RawCell)
+          : "";
       const clientNameRaw =
         cols.clientName != null
           ? cellText(row.getCell(cols.clientName).value as RawCell)
