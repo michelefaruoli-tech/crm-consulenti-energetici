@@ -7,8 +7,8 @@ import autoTable from "jspdf-autotable";
 import {
   buildRendicontoSummaryRows,
   buildRendicontoSupplierCards,
+  rendicontoCardSections,
   formatEuro,
-  rendicontoCountLabel,
   rendicontoSupplierCardHeading,
   reportClienteLabel,
   type RendicontoLine,
@@ -281,7 +281,7 @@ const LINE_COLUMNS: CardColumn[] = [
 
 type BodyMark = "month" | "storno" | "ricorrente" | "line";
 
-/** Una sola tabella incorniciata: barra fornitore, poi i mesi dentro. */
+/** Una sola tabella incorniciata: barra fornitore, poi l’elenco (o i mesi, se il fornitore li tiene). */
 function drawSupplierCard(doc: jsPDF, y: number, card: RendicontoSupplierCardModel): number {
   const swatch = rendicontoSupplierTheme(card.supplierName);
   const bar = rendicontoSupplierCardHeading(card);
@@ -306,29 +306,19 @@ function drawSupplierCard(doc: jsPDF, y: number, card: RendicontoSupplierCardMod
     }
   }
 
-  for (const month of card.months) {
-    pushSection(
-      "month",
-      `${month.label}  ·  ${rendicontoCountLabel(month.count)}`,
-      month.subtotal,
-    );
-    pushLines(month.lines);
-  }
-  for (const month of card.storniMonths) {
-    pushSection(
-      "storno",
-      `Storni  ·  ${month.label}  ·  ${month.count === 1 ? "1 storno" : `${month.count} storni`}`,
-      month.subtotal,
-    );
-    pushLines(month.lines);
-  }
-  if (card.ricorrenti.length > 0) {
-    pushSection(
-      "ricorrente",
-      `Rate ricorrenti  ·  ${rendicontoCountLabel(card.ricorrentiCount)}`,
-      card.ricorrentiSubtotal,
-    );
-    pushLines(card.ricorrenti);
+  for (const section of rendicontoCardSections(card)) {
+    if (section.heading) {
+      pushSection(
+        section.tone === "supplier"
+          ? "month"
+          : section.tone === "storno"
+            ? "storno"
+            : "ricorrente",
+        section.heading,
+        section.amount ?? 0,
+      );
+    }
+    pushLines(section.lines);
   }
 
   const columnStyles: Record<number, { cellWidth: number; halign?: "left" | "right" }> = {};

@@ -4,7 +4,7 @@
  */
 import ExcelJS from "exceljs";
 import {
-  rendicontoCountLabel,
+  rendicontoCardSections,
   rendicontoSupplierCardHeading,
   reportClienteLabel,
   type RendicontoLine,
@@ -128,71 +128,31 @@ function writeSupplierCard(
   paintAmountOnBar(title.getCell(6), theme, 12);
   const start = title.number;
 
-  for (const month of card.months) {
-    const monthRow = sheet.addRow([
-      `${month.label}  ·  ${rendicontoCountLabel(month.count)}`,
-      "",
-      "",
-      "",
-      "",
-      month.subtotal,
-    ]);
-    sheet.mergeCells(monthRow.number, 1, monthRow.number, 5);
-    paintWashRow(monthRow, theme);
-    paintAmountOnBar(
-      monthRow.getCell(6),
-      { ...theme, bar: theme.wash, text: theme.washText },
-      11,
-    );
-    writeLines(sheet, "Incassato", month.lines, theme);
-  }
-
-  for (const month of card.storniMonths) {
-    const label =
-      month.count === 1 ? "1 storno" : `${month.count} storni`;
-    const monthRow = sheet.addRow([
-      `Storni  ·  ${month.label}  ·  ${label}`,
-      "",
-      "",
-      "",
-      "",
-      month.subtotal,
-    ]);
-    sheet.mergeCells(monthRow.number, 1, monthRow.number, 5);
-    paintWashRow(monthRow, RENDICONTO_SECTION_THEME.storni);
-    paintAmountOnBar(
-      monthRow.getCell(6),
-      {
-        ...RENDICONTO_SECTION_THEME.storni,
-        bar: RENDICONTO_SECTION_THEME.storni.wash,
-        text: RENDICONTO_SECTION_THEME.storni.washText,
-      },
-      11,
-    );
-    writeLines(sheet, "Storno", month.lines, theme);
-  }
-
-  if (card.ricorrenti.length > 0) {
-    const monthRow = sheet.addRow([
-      `Rate ricorrenti  ·  ${rendicontoCountLabel(card.ricorrentiCount)}`,
-      "",
-      "",
-      "",
-      "",
-      card.ricorrentiSubtotal,
-    ]);
-    sheet.mergeCells(monthRow.number, 1, monthRow.number, 5);
-    paintWashRow(monthRow, RENDICONTO_SECTION_THEME.ricorrenti);
-    paintAmountOnBar(
-      monthRow.getCell(6),
-      {
-        ...RENDICONTO_SECTION_THEME.ricorrenti,
-        bar: RENDICONTO_SECTION_THEME.ricorrenti.wash,
-        text: RENDICONTO_SECTION_THEME.ricorrenti.washText,
-      },
-      11,
-    );
-    writeLines(sheet, "Ricorrente", card.ricorrenti, theme);
+  for (const section of rendicontoCardSections(card)) {
+    const wash =
+      section.tone === "storno"
+        ? RENDICONTO_SECTION_THEME.storni
+        : section.tone === "ricorrente"
+          ? RENDICONTO_SECTION_THEME.ricorrenti
+          : theme;
+    if (section.heading) {
+      const monthRow = sheet.addRow([
+        section.heading,
+        "",
+        "",
+        "",
+        "",
+        section.amount ?? 0,
+      ]);
+      sheet.mergeCells(monthRow.number, 1, monthRow.number, 5);
+      paintWashRow(monthRow, wash);
+      paintAmountOnBar(
+        monthRow.getCell(6),
+        { ...wash, bar: wash.wash, text: wash.washText },
+        11,
+      );
+    }
+    writeLines(sheet, section.lineKind, section.lines, theme);
   }
 
   const foot = sheet.addRow([

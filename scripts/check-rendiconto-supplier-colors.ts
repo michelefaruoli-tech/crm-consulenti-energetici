@@ -26,8 +26,10 @@ import {
   buildRendicontoSupplierCards,
   compareRendicontoLines,
   groupLinesBySupplier,
+  rendicontoCardSections,
   rendicontoCollectedHeading,
   rendicontoSupplierCardHeading,
+  rendicontoSupplierOmitsMonthTitles,
   type RendicontoIncassatoSource,
   type RendicontoLine,
 } from "../src/lib/report-rendiconto";
@@ -371,19 +373,37 @@ const plenitude = cards.find((card) => card.supplierName === "Plenitude");
 const acea = cards.find((card) => card.supplierName === "Acea Energia");
 check("una sola scheda Iren", cards.filter((card) => card.supplierName === "Iren").length === 1);
 same(
-  "mesi Iren in ordine cronologico",
+  "mesi Iren restano nei dati, in ordine cronologico",
   iren?.months.map((month) => month.month),
   ["2026-09", "2026-10"],
 );
+check("Iren senza titoli di mese", rendicontoSupplierOmitsMonthTitles("Iren"));
+check("Eni senza titoli di mese", rendicontoSupplierOmitsMonthTitles("Eni"));
+check("Plenitude senza titoli di mese", rendicontoSupplierOmitsMonthTitles("Plenitude"));
+check("Enel tiene il mese", !rendicontoSupplierOmitsMonthTitles("Enel Energia"));
+const irenSections = rendicontoCardSections(iren!);
 same(
-  "nomi Iren di settembre",
-  iren?.months[0]?.lines.map((row) => row.clientName),
-  ["ALFA", "zeta"],
+  "Iren è un solo elenco, senza titolo di mese",
+  irenSections
+    .filter((section) => section.lineKind === "Incassato")
+    .map((section) => section.heading),
+  [null],
 );
 same(
-  "nomi Iren di ottobre",
-  iren?.months[1]?.lines.map((row) => `${row.clientName}|${row.podPdr}`),
-  ["mario|POD-A", "MARIO|POD-B"],
+  "nomi Iren A→Z attraverso i mesi",
+  irenSections[0]?.lines.map((row) => `${row.clientName}|${row.podPdr}`),
+  ["ALFA|POD-I1", "mario|POD-A", "MARIO|POD-B", "zeta|POD-I2"],
+);
+same(
+  "storno Iren senza mese nel titolo",
+  irenSections.find((section) => section.lineKind === "Storno")?.heading,
+  "Storni  ·  1 storno",
+);
+const enelSections = rendicontoCardSections(enel!);
+check(
+  "Enel tiene il titolo del mese",
+  (enelSections[0]?.heading ?? "").startsWith("Settembre 2026"),
+  enelSections[0]?.heading ?? "",
 );
 const officialIren = rendiconto.incassatoBySupplier.find((row) => row.supplierName === "Iren");
 same("subtotale Iren ufficiale", iren?.incassatoSubtotal, officialIren?.subtotal);
@@ -438,11 +458,35 @@ const irenHeading = rendicontoSupplierCardHeading(iren!);
 const irenBlock = blockBetween(irenHeading.title, irenHeading.foot);
 check("blocco Iren trovato", irenBlock.length > 2, irenBlock[0]);
 check(
-  "settembre e ottobre stanno dentro Iren",
-  irenBlock.some((value) => value.startsWith("Settembre 2026")) &&
-    irenBlock.some((value) => value.startsWith("Ottobre 2026")) &&
+  "Iren non ha titoli di mese, lo storno resta nella scheda",
+  !irenBlock.some((value) => value.startsWith("Settembre 2026")) &&
+    !irenBlock.some((value) => value.startsWith("Ottobre 2026")) &&
     irenBlock.some((value) => value.startsWith("Storni")),
 );
+let insideIren = false;
+const irenClients: string[] = [];
+sheet.eachRow((row) => {
+  const col1 = String(row.getCell(1).value ?? "");
+  if (col1 === irenHeading.title) {
+    insideIren = true;
+    return;
+  }
+  if (!insideIren) return;
+  if (col1 === irenHeading.foot) {
+    insideIren = false;
+    return;
+  }
+  if (col1 !== "Incassato" && col1 !== "Storno") return;
+  const client = String(row.getCell(2).value ?? "");
+  if (client) irenClients.push((client.split(" · ")[0] ?? client).trim());
+});
+same("excel Iren in ordine alfabetico", irenClients, [
+  "ALFA",
+  "mario",
+  "MARIO",
+  "zeta",
+  "Neri",
+]);
 check(
   "nessun altro fornitore dentro Iren",
   !irenBlock.some((value) => value.startsWith("Enel") || value.startsWith("Plenitude") || value.startsWith("Eni")),
@@ -498,17 +542,46 @@ check("html Plenitude", html.includes("Plenitude"));
 for (const hex of ["#166534", "#c2410c", "#f5c518"]) {
   check(`html colore ${hex}`, htmlFold.includes(hex));
 }
-const articles = html.split("<article").slice(1);
+const articles = html.split("<article").slice(1).map((article) => article.split("</article>")[0] ?? article);
 same("un riquadro html per fornitore", articles.length, cards.length);
 const irenHtml = articles.find((article) => article.includes(">Iren<")) ?? "";
+const plenitudeHtml = articles.find((article) => article.includes(">Plenitude<")) ?? "";
 check(
-  "mesi dentro il riquadro Iren",
-  irenHtml.includes("Settembre 2026") && irenHtml.includes("Ottobre 2026"),
+  "niente titoli di mese nel riquadro Iren",
+  !irenHtml.includes("Settembre 2026") && !irenHtml.includes("Ottobre 2026"),
 );
+check(
+  "niente titoli di mese nel riquadro Plenitude",
+  !plenitudeHtml.includes("Settembre 2026") && !plenitudeHtml.includes("Ottobre 2026"),
+);
+const enelHtml = articles.find((article) => article.includes("Enel Energia")) ?? "";
+check("Enel tiene il titolo del mese in anteprima", enelHtml.includes("Settembre 2026"));
 check(
   "ordine alfabetico nel riquadro Iren",
   irenHtml.indexOf("ALFA") !== -1 &&
-    irenHtml.indexOf("ALFA") < irenHtml.indexOf("zeta"),
+    irenHtml.indexOf("ALFA") < irenHtml.indexOf("mario") &&
+    irenHtml.indexOf("mario") < irenHtml.indexOf("MARIO") &&
+    irenHtml.indexOf("MARIO") < irenHtml.indexOf("zeta"),
+);
+const irenPdfFrom = pdfText.indexOf("ALFA");
+const irenPdfTo = pdfText.indexOf("Subtotale Iren", irenPdfFrom);
+const irenPdf = irenPdfFrom >= 0 && irenPdfTo > irenPdfFrom ? pdfText.slice(irenPdfFrom, irenPdfTo) : "";
+check(
+  "pdf Iren senza titoli di mese",
+  irenPdf.includes("zeta") && !irenPdf.includes("Settembre") && !irenPdf.includes("Ottobre"),
+  irenPdf.slice(0, 80),
+);
+const plenitudePdfFrom = pdfText.indexOf("Agenzia Commerciale");
+const plenitudePdfTo = pdfText.indexOf("Subtotale Plenitude", plenitudePdfFrom);
+const plenitudePdf =
+  plenitudePdfFrom >= 0 && plenitudePdfTo > plenitudePdfFrom
+    ? pdfText.slice(plenitudePdfFrom, plenitudePdfTo)
+    : "";
+check(
+  "pdf Plenitude senza titoli di mese",
+  plenitudePdf.includes("Cliente 01") &&
+    !plenitudePdf.includes("Settembre") &&
+    !plenitudePdf.includes("Ottobre"),
 );
 
 const previewDir = process.env.RENDICONTO_PREVIEW_DIR;

@@ -2,11 +2,11 @@ import {
   buildRendicontoSummaryRows,
   buildRendicontoSupplierCards,
   formatEuro,
-  rendicontoCountLabel,
+  rendicontoCardSections,
   rendicontoSupplierCardHeading,
   reportClienteLabel,
+  type RendicontoCardSection,
   type RendicontoLine,
-  type RendicontoMonthSlice,
   type RendicontoSummary,
 } from "@/lib/report-rendiconto";
 import {
@@ -65,35 +65,33 @@ function LinesTable({
   );
 }
 
-function MonthBlock({
-  slice,
+function SectionBlock({
+  section,
   swatch,
-  kicker,
 }: {
-  slice: RendicontoMonthSlice;
+  section: RendicontoCardSection;
   swatch: RendicontoSwatch;
-  kicker?: string;
 }) {
-  const countLabel =
-    kicker === "Storni"
-      ? slice.count === 1
-        ? "1 storno"
-        : `${slice.count} storni`
-      : rendicontoCountLabel(slice.count);
+  const tone =
+    section.tone === "storno"
+      ? RENDICONTO_SECTION_THEME.storni
+      : section.tone === "ricorrente"
+        ? RENDICONTO_SECTION_THEME.ricorrenti
+        : swatch;
   return (
     <div>
-      <h4
-        className="flex flex-wrap items-baseline justify-between gap-2 rounded-md px-3 py-1.5 text-sm font-semibold"
-        style={{ backgroundColor: swatch.wash, color: swatch.washText }}
-      >
-        <span>
-          {kicker ? `${kicker} · ` : ""}
-          {slice.label}
-          <span className="ml-2 font-medium">{countLabel}</span>
-        </span>
-        <span className="tabular-nums">{formatEuro(slice.subtotal)}</span>
-      </h4>
-      <LinesTable lines={slice.lines} dateHeader="Data" />
+      {section.heading ? (
+        <h4
+          className="flex flex-wrap items-baseline justify-between gap-2 rounded-md px-3 py-1.5 text-sm font-semibold"
+          style={{ backgroundColor: tone.wash, color: tone.washText }}
+        >
+          <span>{section.heading}</span>
+          {section.amount != null ? (
+            <span className="tabular-nums">{formatEuro(section.amount)}</span>
+          ) : null}
+        </h4>
+      ) : null}
+      <LinesTable lines={section.lines} dateHeader={section.dateHeader} />
     </div>
   );
 }
@@ -173,43 +171,13 @@ export function RendicontoSchede({
                 <p className="text-sm font-semibold tabular-nums">{heading.title.replace(`${card.supplierName}  ·  `, "")}</p>
               </header>
               <div className="space-y-4 p-3 sm:p-4">
-                {card.months.map((month) => (
-                  <MonthBlock
-                    key={month.month}
-                    slice={month}
+                {rendicontoCardSections(card).map((section, index) => (
+                  <SectionBlock
+                    key={`${section.tone}-${section.heading ?? "elenco"}-${index}`}
+                    section={section}
                     swatch={theme}
                   />
                 ))}
-                {card.storniMonths.map((month) => (
-                  <MonthBlock
-                    key={`storno-${month.month}`}
-                    slice={month}
-                    swatch={RENDICONTO_SECTION_THEME.storni}
-                    kicker="Storni"
-                  />
-                ))}
-                {card.ricorrenti.length > 0 ? (
-                  <div>
-                    <h4
-                      className="flex flex-wrap items-baseline justify-between gap-2 rounded-md px-3 py-1.5 text-sm font-semibold"
-                      style={{
-                        backgroundColor: RENDICONTO_SECTION_THEME.ricorrenti.wash,
-                        color: RENDICONTO_SECTION_THEME.ricorrenti.washText,
-                      }}
-                    >
-                      <span>
-                        Rate ricorrenti
-                        <span className="ml-2 font-medium">
-                          {rendicontoCountLabel(card.ricorrentiCount)}
-                        </span>
-                      </span>
-                      <span className="tabular-nums">
-                        {formatEuro(card.ricorrentiSubtotal)}
-                      </span>
-                    </h4>
-                    <LinesTable lines={card.ricorrenti} dateHeader="Mesi pagati" />
-                  </div>
-                ) : null}
               </div>
               <footer
                 className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-2.5 text-sm font-semibold"
