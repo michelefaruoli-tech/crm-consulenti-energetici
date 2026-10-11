@@ -7,6 +7,7 @@ import { effectiveGettone } from "@/lib/provvigioni-stato";
 import { reportHasStato } from "@/lib/report-filters";
 import type { ReportExtraLine } from "@/lib/report-extras";
 import { formatMonthLabel } from "@/lib/report-month";
+import { rendicontoSupplierTheme } from "@/lib/rendiconto-supplier-theme";
 import {
   groupReportRecurringByContract,
   type ReportRecurringRow,
@@ -487,6 +488,94 @@ export function rendicontoCollectedHeading(stati: readonly string[]): string {
 
 export function rendicontoCountLabel(count: number): string {
   return count === 1 ? "1 contratto" : `${count} contratti`;
+}
+
+function rendicontoStornoCountLabel(count: number): string {
+  return count === 1 ? "1 storno" : `${count} storni`;
+}
+
+/**
+ * Iren e Eni/Plenitude sono un solo elenco: la divisione per mese
+ * dentro la cornice era un errore di data di incasso, non un periodo vero.
+ * Gli altri fornitori tengono il titolo del mese.
+ */
+export function rendicontoSupplierOmitsMonthTitles(supplierName: string): boolean {
+  const id = rendicontoSupplierTheme(supplierName).id;
+  return id === "iren" || id === "plenitude";
+}
+
+export type RendicontoCardSection = {
+  tone: "supplier" | "storno" | "ricorrente";
+  /** Null: elenco dei contratti, senza titolo di mese. */
+  heading: string | null;
+  amount: number | null;
+  lines: RendicontoLine[];
+  dateHeader: string;
+  lineKind: "Incassato" | "Storno" | "Ricorrente";
+};
+
+/** Sezioni dentro la cornice. Gli importi di mese e subtotale non vengono ricalcolati. */
+export function rendicontoCardSections(
+  card: RendicontoSupplierCardModel,
+): RendicontoCardSection[] {
+  const sections: RendicontoCardSection[] = [];
+  if (rendicontoSupplierOmitsMonthTitles(card.supplierName)) {
+    if (card.months.length > 0) {
+      sections.push({
+        tone: "supplier",
+        heading: null,
+        amount: null,
+        lines: sortRendicontoLines(card.months.flatMap((month) => month.lines)),
+        dateHeader: "Data",
+        lineKind: "Incassato",
+      });
+    }
+    if (card.storniMonths.length > 0) {
+      sections.push({
+        tone: "storno",
+        heading: `Storni  ·  ${rendicontoStornoCountLabel(card.storniCount)}`,
+        amount: card.storniSubtotal,
+        lines: sortRendicontoLines(
+          card.storniMonths.flatMap((month) => month.lines),
+        ),
+        dateHeader: "Data",
+        lineKind: "Storno",
+      });
+    }
+  } else {
+    for (const month of card.months) {
+      sections.push({
+        tone: "supplier",
+        heading: `${month.label}  ·  ${rendicontoCountLabel(month.count)}`,
+        amount: month.subtotal,
+        lines: month.lines,
+        dateHeader: "Data",
+        lineKind: "Incassato",
+      });
+    }
+    for (const month of card.storniMonths) {
+      sections.push({
+        tone: "storno",
+        heading: `Storni  ·  ${month.label}  ·  ${rendicontoStornoCountLabel(month.count)}`,
+        amount: month.subtotal,
+        lines: month.lines,
+        dateHeader: "Data",
+        lineKind: "Storno",
+      });
+    }
+  }
+
+  if (card.ricorrenti.length > 0) {
+    sections.push({
+      tone: "ricorrente",
+      heading: `Rate ricorrenti  ·  ${rendicontoCountLabel(card.ricorrentiCount)}`,
+      amount: card.ricorrentiSubtotal,
+      lines: card.ricorrenti,
+      dateHeader: "Mesi pagati",
+      lineKind: "Ricorrente",
+    });
+  }
+  return sections;
 }
 
 export type RendicontoSummaryRowKind =
