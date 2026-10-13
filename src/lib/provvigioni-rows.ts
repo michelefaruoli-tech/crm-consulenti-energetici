@@ -652,17 +652,22 @@ function buildSingleRow(
   };
 }
 
+function stringsFromUnknown(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const periods: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") periods.push(item);
+  }
+  return periods;
+}
+
 function periodInFromRateWhere(
   where: Prisma.RecurringMonthWhereInput,
 ): string[] | null {
   const period = where.period;
-  if (
-    period &&
-    typeof period === "object" &&
-    "in" in period &&
-    Array.isArray(period.in)
-  ) {
-    return period.in.filter((value): value is string => typeof value === "string");
+  if (period && typeof period === "object" && "in" in period) {
+    const found = stringsFromUnknown(period.in);
+    if (found) return found;
   }
   if (Array.isArray(where.AND)) {
     for (const part of where.AND) {
@@ -679,16 +684,22 @@ function periodsAllowedByRateScope(
   scope: ProvvigioniRowFilterScope | undefined,
 ): Set<string> | null {
   const clauses = scope?.rate ?? [];
-  let allowed: Set<string> | null = null;
+  let intersection: string[] | null = null;
   for (const clause of clauses) {
     const periods = periodInFromRateWhere(clause);
     if (!periods) continue;
-    const next = new Set(periods);
-    allowed = allowed
-      ? new Set([...allowed].filter((period) => next.has(period)))
-      : next;
+    if (intersection === null) {
+      intersection = [...periods];
+      continue;
+    }
+    const next = new Set<string>(periods);
+    const kept: string[] = [];
+    for (const period of intersection) {
+      if (next.has(period)) kept.push(period);
+    }
+    intersection = kept;
   }
-  return allowed;
+  return intersection ? new Set<string>(intersection) : null;
 }
 
 /** Una riga per contratto UT; N righe per ogni mese M nel filtro stato. */
