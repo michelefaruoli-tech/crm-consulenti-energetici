@@ -176,23 +176,23 @@ const heliosWindow = recurringWindow(
   new Date(2026, 8, 15),
 );
 check(
-  "settembre 2026, lag 2 → luglio",
+  "settembre 2026, lag 1 → agosto",
   lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
-  "2026-07",
-);
-check(
-  "ottobre 2026, lag 2 → agosto (riga agosto solo a ottobre)",
-  lastGeneratedPeriod(heliosWindow, new Date(2026, 9, 10), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
   "2026-08",
 );
 check(
-  "novembre 2026, lag 2 → settembre (riga settembre solo a novembre)",
-  lastGeneratedPeriod(heliosWindow, new Date(2026, 10, 5), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
+  "ottobre 2026, lag 1 → settembre (riga settembre solo a ottobre)",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 9, 10), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
   "2026-09",
 );
 check(
-  "a settembre 2026 non generare ancora agosto",
-  lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), HELIOS_RECURRING_GENERATION_LAG_MONTHS) < "2026-08",
+  "novembre 2026, lag 1 → ottobre (riga ottobre solo a novembre)",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 10, 5), HELIOS_RECURRING_GENERATION_LAG_MONTHS),
+  "2026-10",
+);
+check(
+  "a settembre 2026 non generare ancora settembre",
+  lastGeneratedPeriod(heliosWindow, new Date(2026, 8, 15), HELIOS_RECURRING_GENERATION_LAG_MONTHS) < "2026-09",
   true,
 );
 check(
@@ -212,13 +212,13 @@ check(
   "2026-07",
 );
 check(
-  "stessa selezione pagamento/competenza settembre → luglio",
+  "stessa selezione pagamento/competenza settembre → agosto",
   resolveHeliosCompetencePeriod({
     selectedCompetence: "2026-09",
     settledPeriod: "2026-09",
     inferredPeriod: "2026-09",
   }),
-  "2026-07",
+  "2026-08",
 );
 check(
   "foglio luglio (competenza reale) resta luglio",
@@ -239,19 +239,28 @@ check(
   "2026-08",
 );
 check(
-  "campi invertiti: selezione settembre + incasso luglio + foglio settembre → luglio",
+  "campi invertiti lag 1: selezione settembre + incasso agosto → agosto",
+  resolveHeliosCompetencePeriod({
+    selectedCompetence: "2026-09",
+    settledPeriod: "2026-08",
+    inferredPeriod: "2026-09",
+  }),
+  "2026-08",
+);
+check(
+  "scarto di 2 mesi non è più il lag: la competenza resta settembre",
   resolveHeliosCompetencePeriod({
     selectedCompetence: "2026-09",
     settledPeriod: "2026-07",
     inferredPeriod: "2026-09",
   }),
-  "2026-07",
+  "2026-09",
 );
 check(
-  "pagamento corretto resta settembre anche se form invertito",
+  "pagamento corretto resta settembre se il lag è 1",
   resolveHeliosPaymentPeriod({
     selectedCompetence: "2026-09",
-    settledPeriod: "2026-07",
+    settledPeriod: "2026-08",
     inferredPeriod: "2026-09",
   }),
   "2026-09",
@@ -266,17 +275,22 @@ check(
   "2026-09",
 );
 
-const invertedPlan = planHeliosMeseRifShift("2026-09", "2026-07");
+const invertedPlan = planHeliosMeseRifShift("2026-09", "2026-08");
 check(
-  "allinea invertito: period set + settled lug → period lug, settled set",
+  "allinea invertito: period set + settled ago → period ago, settled set",
   `${invertedPlan?.kind}:${invertedPlan?.targetPeriod}:${invertedPlan?.targetSettled}`,
-  "inverted:2026-07:2026-09",
+  "inverted:2026-08:2026-09",
+);
+check(
+  "scarto M+2 storico non si riallinea da solo",
+  String(planHeliosMeseRifShift("2026-09", "2026-07")),
+  "null",
 );
 const coincidentPlan = planHeliosMeseRifShift("2026-09", "2026-09");
 check(
-  "allinea coincidenza: entrambi set → period lug, settled set",
+  "allinea coincidenza: entrambi set → period ago, settled set",
   `${coincidentPlan?.kind}:${coincidentPlan?.targetPeriod}:${coincidentPlan?.targetSettled}`,
-  "coincident:2026-07:2026-09",
+  "coincident:2026-08:2026-09",
 );
 check(
   "allinea già corretto: lug + set → nessuna modifica",
@@ -285,9 +299,9 @@ check(
 );
 
 check(
-  "agosto non è ancora pagabile a settembre 2026",
+  "agosto è pagabile a settembre 2026",
   String(isHeliosCompetenceNotYetPayable("2026-08", new Date(2026, 8, 17))),
-  "true",
+  "false",
 );
 check(
   "settembre non è ancora pagabile a settembre 2026",
@@ -295,14 +309,19 @@ check(
   "true",
 );
 check(
-  "luglio è pagabile a settembre 2026",
-  String(isHeliosCompetenceNotYetPayable("2026-07", new Date(2026, 8, 17))),
+  "ottobre non è pagabile a ottobre 2026",
+  String(isHeliosCompetenceNotYetPayable("2026-10", new Date(2026, 9, 13))),
+  "true",
+);
+check(
+  "settembre è pagabile a ottobre 2026",
+  String(isHeliosCompetenceNotYetPayable("2026-09", new Date(2026, 9, 13))),
   "false",
 );
 check(
-  "heliosLastPayable a settembre 2026 = luglio",
-  heliosLastPayableCompetence(new Date(2026, 8, 17)),
-  "2026-07",
+  "heliosLastPayable a ottobre 2026 = settembre",
+  heliosLastPayableCompetence(new Date(2026, 9, 13)),
+  "2026-09",
 );
 
 if (failures > 0) {

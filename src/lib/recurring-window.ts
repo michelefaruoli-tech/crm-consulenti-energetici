@@ -115,8 +115,19 @@ export const OUT_OF_WINDOW_REASONS = {
 export const RECURRING_AUTO_CLOSED_NOTE = {
   beforeStart: "Esclusa: precedente all'ingresso in fornitura",
   afterEnd: "Esclusa: successiva alla chiusura del contratto",
-  heliosLag: "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)",
+  heliosLag: "Esclusa: Helios non ha ancora pagato questa competenza (lag 1 mese)",
 } as const;
+
+/** Nota lag scritta quando la regola era ancora M+2. Resta una chiusura automatica. */
+export const HELIOS_LAG_AUTO_NOTE_LEGACY =
+  "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)";
+
+export function isHeliosLagAutoNote(note: string | null | undefined): boolean {
+  return (
+    note === RECURRING_AUTO_CLOSED_NOTE.heliosLag ||
+    note === HELIOS_LAG_AUTO_NOTE_LEGACY
+  );
+}
 
 export function isAutomaticClosedRecurringMonth(row: RecurringMonthLike): boolean {
   if (row.status !== "CLOSED") return false;
@@ -124,7 +135,7 @@ export function isAutomaticClosedRecurringMonth(row: RecurringMonthLike): boolea
   return (
     note === RECURRING_AUTO_CLOSED_NOTE.beforeStart ||
     note === RECURRING_AUTO_CLOSED_NOTE.afterEnd ||
-    note === RECURRING_AUTO_CLOSED_NOTE.heliosLag
+    isHeliosLagAutoNote(note)
   );
 }
 
@@ -156,10 +167,10 @@ export function outOfWindowReason(
 
 /**
  * Ultimo mese di competenza da generare automaticamente.
- * Con `generationLagMonths` (Helios = 2): non creare mesi oltre mese_calendario − 2.
+ * Con `generationLagMonths` (Helios = 1): non creare mesi oltre mese_calendario − 1.
  *
- * Helios (esempi Michele): a settembre genera fino a luglio; la riga agosto
- * nasce solo a ottobre; settembre solo a novembre. Mai rate future in anticipo.
+ * Helios: a ottobre 2026 il mese pagato è settembre; a novembre è ottobre.
+ * Mai rate future in anticipo.
  */
 export function lastGeneratedPeriod(
   window: RecurringWindow,

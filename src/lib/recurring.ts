@@ -5,24 +5,91 @@ export function toPeriod(date: Date): string {
   return `${y}-${m}`;
 }
 
+const PERIOD_MONTH_SHORT = [
+  "gen",
+  "feb",
+  "mar",
+  "apr",
+  "mag",
+  "giu",
+  "lug",
+  "ago",
+  "set",
+  "ott",
+  "nov",
+  "dic",
+] as const;
+
+const PERIOD_MONTH_FULL = [
+  "gennaio",
+  "febbraio",
+  "marzo",
+  "aprile",
+  "maggio",
+  "giugno",
+  "luglio",
+  "agosto",
+  "settembre",
+  "ottobre",
+  "novembre",
+  "dicembre",
+] as const;
+
 export function periodLabel(period: string): string {
   const [y, m] = period.split("-");
-  const months = [
-    "gen",
-    "feb",
-    "mar",
-    "apr",
-    "mag",
-    "giu",
-    "lug",
-    "ago",
-    "set",
-    "ott",
-    "nov",
-    "dic",
-  ];
   const mi = Number(m) - 1;
-  return `${months[mi] ?? m} ${y}`;
+  return `${PERIOD_MONTH_SHORT[mi] ?? m} ${y}`;
+}
+
+function yearMonth(year: string, month: number): string | null {
+  if (!/^\d{4}$/.test(year) || month < 1 || month > 12) return null;
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+/**
+ * Mese filtro → YYYY-MM, senza spostare il mese.
+ * Accetta `2026-07`, `lug 2026`, `luglio 2026`, `07/2026`.
+ */
+export function parsePeriodToken(value: string | null | undefined): string | null {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  if (!raw || raw === "(vuoto)") return null;
+
+  const iso = raw.match(/^(\d{4})-(\d{2})$/);
+  if (iso) return yearMonth(iso[1]!, Number(iso[2]));
+
+  const named = raw.match(/^([a-z]+)\s+(\d{4})$/);
+  if (named) {
+    const name = named[1]!;
+    const shortIdx = PERIOD_MONTH_SHORT.indexOf(name as (typeof PERIOD_MONTH_SHORT)[number]);
+    if (shortIdx >= 0) return yearMonth(named[2]!, shortIdx + 1);
+    const fullIdx = PERIOD_MONTH_FULL.indexOf(name as (typeof PERIOD_MONTH_FULL)[number]);
+    if (fullIdx >= 0) return yearMonth(named[2]!, fullIdx + 1);
+    return null;
+  }
+
+  const monthYear = raw.match(/^(\d{1,2})[/.](\d{4})$/);
+  if (monthYear) return yearMonth(monthYear[2]!, Number(monthYear[1]));
+
+  const yearSlashMonth = raw.match(/^(\d{4})[/.](\d{1,2})$/);
+  if (yearSlashMonth) return yearMonth(yearSlashMonth[1]!, Number(yearSlashMonth[2]));
+
+  return null;
+}
+
+/** Normalizza i mesi di un filtro colonna in YYYY-MM distinti, nell'ordine dato. */
+export function normalizeMonthFilterValues(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const period = parsePeriodToken(value);
+    if (!period || seen.has(period)) continue;
+    seen.add(period);
+    out.push(period);
+  }
+  return out;
 }
 
 export function parsePeriod(period: string): Date {

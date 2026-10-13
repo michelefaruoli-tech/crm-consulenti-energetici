@@ -15,7 +15,13 @@ import { DeleteRowButton } from "@/components/ui/delete-row-button";
 import { StornoLegend } from "@/components/ui/storno-legend";
 import { StornoBadgesFromSignals } from "@/components/ui/storno-badge";
 import type { StornoKind } from "@/lib/storno-status";
-import { periodLabel, shortRecurrenceCode, RECURRENCE_OPTIONS, normalizeRecurrence } from "@/lib/recurring";
+import {
+  normalizeMonthFilterValues,
+  periodLabel,
+  shortRecurrenceCode,
+  RECURRENCE_OPTIONS,
+  normalizeRecurrence,
+} from "@/lib/recurring";
 import { buildPageHref } from "@/lib/pagination";
 import {
   COLUMN_FILTER_PARAM,
@@ -653,9 +659,12 @@ export function ProvvigioniFilterTable({
 
     const param = COLUMN_FILTER_PARAM[columnKey as ProvvigioniColumnKey];
     if (!param) return;
+    const applied = MONTH_FILTER_KEYS.includes(columnKey as ProvvigioniColumnKey)
+      ? normalizeMonthFilterValues(values)
+      : values;
     router.push(
       buildPageHref("/provvigioni", {
-        ...baseQuery({ [param]: values.length ? values.join("|") : null }),
+        ...baseQuery({ [param]: applied.length ? applied.join("|") : null }),
       }),
     );
   }
@@ -1392,7 +1401,7 @@ export function ProvvigioniFilterTable({
     {
       key: "meseRif",
       label: "Mese rif.",
-      getValue: (r) => meseRifLabel(r as ProvvigioneRow),
+      getValue: (r) => competenceOfRow(r as ProvvigioneRow) ?? "",
       sortKind: "text",
       render: (r) => (
         <span className="whitespace-nowrap text-xs font-medium tabular-nums text-slate-800">
@@ -2014,7 +2023,7 @@ export function ProvvigioniFilterTable({
               Vista <strong>semplificata M/R</strong>: Nominativo · Pod · Fornitore ·
               Collab. · Competenza · Atteso · Mese previsto · Ritardo · Storno ·
               Stato · azioni. Ritardo solo su «Da incassare» oltre il mese previsto
-              (Helios = competenza + 2).{" "}
+              (Helios = mese precedente).{" "}
             </>
           ) : (
             <>

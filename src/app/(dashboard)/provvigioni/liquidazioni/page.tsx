@@ -81,8 +81,8 @@ export default async function LiquidazioniPage() {
             Chiude le competenze Helios fino a luglio 2026 incluso come{" "}
             <strong>Incassato da liquidare</strong> e{" "}
             <strong>Liquidato</strong> (fornitore + collaboratore), con
-            anteprima obbligatoria. Lag M+2 resta: agosto si crea a ottobre,
-            settembre a novembre — non in anticipo. Operazione annullabile.
+            anteprima obbligatoria. Helios paga il mese precedente: la riga
+            nuova è solo quel mese, mai in anticipo. Operazione annullabile.
           </p>
           <PayoutBulkHistoricalPanel />
         </Card>
@@ -90,7 +90,7 @@ export default async function LiquidazioniPage() {
 
       {session.role === "ADMIN" ? (
         <Card>
-          <CardTitle>Bonifica Helios anticipate (M+2)</CardTitle>
+          <CardTitle>Bonifica Helios anticipate</CardTitle>
           <p className="mt-1 mb-4 text-sm text-slate-600">
             Rate agosto/settembre (e oltre lastPayable) create per errore: il
             sync Provvigioni e il cron le chiudono in automatico. Qui resta

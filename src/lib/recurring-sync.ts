@@ -19,6 +19,7 @@ import {
   lastGeneratedPeriod,
   OUT_OF_WINDOW_REASONS,
   outOfWindowReason,
+  isHeliosLagAutoNote,
   RECURRING_AUTO_CLOSED_NOTE,
   recurringWindow,
   type RecurringWindow,
@@ -69,7 +70,7 @@ function isAutoClosedOutOfWindow(row: OutOfWindowMonthRow): boolean {
     row.status === "CLOSED" &&
     (row.note === AUTO_CLOSED_BEFORE_START ||
       row.note === AUTO_CLOSED_AFTER_END ||
-      row.note === AUTO_CLOSED_HELIOS_LAG)
+      isHeliosLagAutoNote(row.note))
   );
 }
 
@@ -122,7 +123,7 @@ async function closeDisposableOutOfWindowMonths(
 /**
  * Il mese di competenza è ammesso per questo contratto?
  * Guardia da usare prima di creare una rata da azioni manuali o import.
- * Helios: blocca anche competenze oltre lastPayable (lag M+2).
+ * Helios: blocca anche competenze oltre il mese pagato (corrente − 1).
  * Annuali (R): ammette la catena +12 anche oltre expiry formale.
  */
 export async function isPeriodAllowedForContract(
@@ -449,7 +450,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       ) {
         continue;
       }
-      if (row.note === AUTO_CLOSED_HELIOS_LAG && row.status === "CLOSED") continue;
+      if (isHeliosLagAutoNote(row.note) && row.status === "CLOSED") continue;
       const hasEconomic =
         row.paidAt != null ||
         row.settledPeriod != null ||
@@ -596,7 +597,7 @@ async function syncAnnualPeriods(
       existing.status === "CLOSED" &&
       (existing.note === AUTO_CLOSED_BEFORE_START ||
         existing.note === AUTO_CLOSED_AFTER_END ||
-        existing.note === AUTO_CLOSED_HELIOS_LAG ||
+        isHeliosLagAutoNote(existing.note) ||
         isAnnualNextHidden(existing.note));
     if (
       PRESERVED_STATUSES.has(existing.status) &&
@@ -665,7 +666,7 @@ export async function upsertMonthlyBackfillPeriod(
     before.status === "CLOSED" &&
     (before.note === AUTO_CLOSED_BEFORE_START ||
       before.note === AUTO_CLOSED_AFTER_END ||
-      before.note === AUTO_CLOSED_HELIOS_LAG);
+      isHeliosLagAutoNote(before.note));
   if (reopened && (after.status === "MISSING" || after.status === "PENDING")) {
     return { outcome: "aggiornata", motivo: "Rata riaperta (chiusura automatica)" };
   }
@@ -741,7 +742,7 @@ export async function upsertAnnualBackfillPeriod(
     existing?.status === "CLOSED" &&
     existing.note !== AUTO_CLOSED_BEFORE_START &&
     existing.note !== AUTO_CLOSED_AFTER_END &&
-    existing.note !== AUTO_CLOSED_HELIOS_LAG
+    !isHeliosLagAutoNote(existing.note)
   ) {
     return { outcome: "saltata", motivo: "Rata chiusa manualmente" };
   }
@@ -758,7 +759,7 @@ export async function upsertAnnualBackfillPeriod(
     existing.status === "CLOSED" &&
     (existing.note === AUTO_CLOSED_BEFORE_START ||
       existing.note === AUTO_CLOSED_AFTER_END ||
-      existing.note === AUTO_CLOSED_HELIOS_LAG ||
+      isHeliosLagAutoNote(existing.note) ||
       isAnnualNextHidden(existing.note));
   if (existing.status === status && !autoClosed && existing.amount != null) {
     return { outcome: "saltata", motivo: "Già aggiornata" };
@@ -791,7 +792,7 @@ async function upsertMonthStatus(
     existing?.status === "CLOSED" &&
     (existing.note === AUTO_CLOSED_BEFORE_START ||
       existing.note === AUTO_CLOSED_AFTER_END ||
-      existing.note === AUTO_CLOSED_HELIOS_LAG);
+      isHeliosLagAutoNote(existing.note));
   if (existing && PRESERVED_STATUSES.has(existing.status) && !isAutomaticClosure) {
     if (amount != null && existing.amount == null) {
       await prisma.recurringMonth.update({
@@ -813,8 +814,6 @@ async function upsertMonthStatus(
       data: {
         status: finalStatus,
         amount: amount ?? existing.amount,
-        paidAt: null,
-        settledPeriod: null,
         note: isAutomaticClosure ? null : existing.note,
       },
     });
@@ -833,7 +832,7 @@ async function upsertMonthStatus(
 
 /** Sincronizzazione globale, ottimizzata, di tutte le ricorrenze. */
 export async function syncAllRecurringMonths(collaboratorId?: string): Promise<number> {
-  // Helios M+2: chiude/elimina competenze anticipate (es. ago/set a settembre)
+  // Helios: chiude/elimina competenze oltre il mese pagato (corrente − 1)
   // senza click. Idempotente; non tocca ≤ lastPayable. Fail-soft.
   try {
     const { runHeliosAnticipatoryCleanupAuto } = await import(
@@ -976,7 +975,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
         row.status === "CLOSED" &&
         (row.note === AUTO_CLOSED_BEFORE_START ||
           row.note === AUTO_CLOSED_AFTER_END ||
-          row.note === AUTO_CLOSED_HELIOS_LAG);
+          isHeliosLagAutoNote(row.note));
       if (PRESERVED_STATUSES.has(row.status) && !autoClosed) continue;
       if (row.status !== finalStatus || (amount != null && row.amount == null) || autoClosed) {
         updates.push({
@@ -1022,8 +1021,6 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
           data: {
             status: row.status,
             amount: row.amount,
-            paidAt: null,
-            settledPeriod: null,
             ...(row.clearAutoClosure ? { note: null } : {}),
           },
         }),

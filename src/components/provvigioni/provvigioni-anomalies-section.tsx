@@ -216,7 +216,7 @@ function UnifiedAnomaliesView({
         >
           Backup → Integrità
         </Link>
-        . Helios M+2 e bonifica annuali invariati.
+        . Helios (mese precedente) e bonifica annuali invariati.
       </p>
     </section>
   );

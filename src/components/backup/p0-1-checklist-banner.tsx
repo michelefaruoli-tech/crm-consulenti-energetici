@@ -14,7 +14,7 @@ export function P01ChecklistBanner() {
         Chiusura P0.1 — percorso in un colpo solo
       </h2>
       <p className="mb-3 text-sm text-amber-900/90">
-        Helios M+2 e marcatura luglio sono già applicati. Qui restano le bonifiche
+        Il mese precedente di Helios e la marcatura luglio sono già applicati. Qui restano le bonifiche
         dati: sempre <strong>Anteprima</strong>, poi checkbox di conferma, poi{" "}
         <strong>Applica</strong>. Nessuna scrittura automatica.
       </p>

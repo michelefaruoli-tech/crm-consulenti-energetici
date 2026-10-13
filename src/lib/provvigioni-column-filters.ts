@@ -21,6 +21,7 @@ import {
   defaultGettonePrivato,
   operationTypeLabel,
 } from "@/lib/provvigioni-stato";
+import { normalizeMonthFilterValues, parsePeriodToken } from "@/lib/recurring";
 import {
   competencePeriodsForExpectedPayable,
   HELIOS_SUPPLIER_NAME_CONTAINS,
@@ -141,8 +142,9 @@ export type ProvvigioniFilterContext = {
 };
 
 function monthRange(period: string): { gte: Date; lt: Date } | null {
-  if (!/^\d{4}-\d{2}$/.test(period)) return null;
-  const [y, m] = period.split("-").map(Number);
+  const normalized = parsePeriodToken(period);
+  if (!normalized) return null;
+  const [y, m] = normalized.split("-").map(Number);
   return { gte: new Date(y!, m! - 1, 1), lt: new Date(y!, m!, 1) };
 }
 
@@ -405,21 +407,19 @@ export function buildColumnFilterWhere(
     push(out.contract, stornoAmountWhere(filters.stornoAmount));
   }
 
-  // Mese di riferimento: esiste solo sulle rate.
-  const mesi = (filters.meseRif ?? []).filter((v) => /^\d{4}-\d{2}$/.test(v));
-  if (filters.meseRif?.length) {
-    if (mesi.length > 0) {
-      out.rate.push({ period: { in: mesi } });
-      if (!expanded) {
-        out.contract.push({ recurringMonths: { some: { period: { in: mesi } } } });
-      }
+  // Mese di riferimento: stesso campo della colonna (`RecurringMonth.period`), senza lag.
+  const mesi = normalizeMonthFilterValues(filters.meseRif ?? []);
+  if (mesi.length > 0) {
+    out.rate.push({ period: { in: mesi } });
+    if (!expanded) {
+      out.contract.push({ recurringMonths: { some: { period: { in: mesi } } } });
     }
     out.excludeUnitRows = true;
   }
 
-  // P1.1 B4 — mese previsto di pagamento: Helios = competenza+2, altri = competenza.
+  // Mese previsto di pagamento: Helios = competenza + 1, altri = competenza.
   if (filters.mesePrevisto?.length) {
-    const expected = filters.mesePrevisto.filter((v) => /^\d{4}-\d{2}$/.test(v));
+    const expected = normalizeMonthFilterValues(filters.mesePrevisto);
     if (expected.length > 0) {
       const { helios, other } = competencePeriodsForExpectedPayable(expected);
       const heliosSupplier = {
@@ -457,16 +457,14 @@ export function buildColumnFilterWhere(
             },
           });
         }
+        out.excludeUnitRows = true;
       }
     }
-    out.excludeUnitRows = true;
   }
 
   // Mese di incasso: rata → mese pagamento (settledPeriod) se c'è, altrimenti competenza.
   if (filters.collectionMonth?.length) {
-    const periods = filters.collectionMonth.filter((v) =>
-      /^\d{4}-\d{2}$/.test(v),
-    );
+    const periods = normalizeMonthFilterValues(filters.collectionMonth);
     const unitWhere = dateMonthsWhere("collectionDate", filters.collectionMonth);
     if (expanded) {
       if (periods.length > 0) {

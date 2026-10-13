@@ -36,7 +36,7 @@ export type ProvvigioneRow = {
   collectionMonth: string;
   /**
    * P1.1 B4 — mese previsto di pagamento (YYYY-MM).
-   * Helios = competenza + 2; altri = competenza.
+   * Helios = competenza + 1; altri = competenza.
    */
   expectedPeriod?: string;
   /** Etichetta mese previsto (es. «ott 2026»). */
