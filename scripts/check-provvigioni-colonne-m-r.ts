@@ -2,7 +2,7 @@
  * P1.1 B4 — colonne operative M/R (competenza, atteso, mese previsto, ritardo).
  * Uso: npx tsx scripts/check-provvigioni-colonne-m-r.ts
  *
- * Verifica mapping UI puro: Helios M+2, no anticipo, ritardo solo su Da incassare.
+ * Verifica mapping UI puro: Helios mese precedente, no anticipo, ritardo solo su Da incassare.
  * Non tocca motore sync / switch / annuali.
  */
 import {
@@ -12,8 +12,11 @@ import {
   operativeDelayDays,
   operativeDelayLabel,
 } from "../src/lib/provvigioni-operative";
-import { addMonths } from "../src/lib/recurring";
-import { COLUMN_FILTER_PARAM } from "../src/lib/provvigioni-column-filters";
+import { addMonths, parsePeriodToken, periodLabel } from "../src/lib/recurring";
+import {
+  buildColumnFilterWhere,
+  COLUMN_FILTER_PARAM,
+} from "../src/lib/provvigioni-column-filters";
 
 let failures = 0;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -24,21 +27,21 @@ function check(label: string, actual: unknown, expected: unknown) {
   );
 }
 
-console.log("\n• Helios: mese previsto = competenza + M+2 (agosto → ottobre)");
+console.log("\n• Helios: mese previsto = competenza + 1 (agosto → settembre)");
 check(
   "lag costante",
   HELIOS_RECURRING_GENERATION_LAG_MONTHS,
-  2,
+  1,
 );
 check(
-  "agosto → ottobre",
+  "agosto → settembre",
   expectedPayablePeriod("2026-08", "Helios Energia"),
-  "2026-10",
+  "2026-09",
 );
 check(
-  "luglio → settembre",
+  "luglio → agosto",
   expectedPayablePeriod("2026-07", "Helios"),
-  "2026-09",
+  "2026-08",
 );
 check(
   "non-Helios: previsto = competenza",
@@ -54,14 +57,48 @@ check(
 console.log("\n• Filtro mese previsto → competenze DB");
 {
   const mapped = competencePeriodsForExpectedPayable(["2026-10", "2026-09"]);
-  check("Helios da ottobre", mapped.helios.includes("2026-08"), true);
-  check("Helios da settembre", mapped.helios.includes("2026-07"), true);
+  check("Helios da ottobre", mapped.helios.includes("2026-09"), true);
+  check("Helios da settembre", mapped.helios.includes("2026-08"), true);
   check("other resta ottobre", mapped.other.includes("2026-10"), true);
   check(
-    "inverso Helios: ottobre − 2 = agosto",
+    "inverso Helios: ottobre − 1 = settembre",
     addMonths("2026-10", -HELIOS_RECURRING_GENERATION_LAG_MONTHS),
-    "2026-08",
+    "2026-09",
   );
+}
+
+console.log("\n• Filtro mese riferimento = colonna, anche con etichetta italiana");
+{
+  const ctx = { suppliers: [], operationTypes: [] as Array<string | null> };
+  const fromLabel = buildColumnFilterWhere(
+    { meseRif: ["lug 2026"] },
+    ctx,
+    { expanded: true },
+  );
+  const fromIso = buildColumnFilterWhere(
+    { meseRif: ["2026-07"] },
+    ctx,
+    { expanded: true },
+  );
+  const fromSlash = buildColumnFilterWhere(
+    { meseRif: ["07/2026"] },
+    ctx,
+    { expanded: true },
+  );
+  check("etichetta lug 2026 → 2026-07", fromLabel.rate, [
+    { period: { in: ["2026-07"] } },
+  ]);
+  check("iso e etichetta coincidono", fromIso.rate, fromLabel.rate);
+  check("07/2026 non slitta ad agosto", fromSlash.rate, fromLabel.rate);
+  check("colonna dello stesso period", periodLabel("2026-07"), "lug 2026");
+  check("parsePeriodToken lug 2026", parsePeriodToken("lug 2026"), "2026-07");
+  const junk = buildColumnFilterWhere(
+    { meseRif: ["non-un-mese"] },
+    ctx,
+    { expanded: true },
+  );
+  check("valore ignoto non filtra il period", junk.rate, []);
+  check("valore ignoto non esclude le righe unità", junk.excludeUnitRows, false);
 }
 
 console.log("\n• Ritardo: solo Da incassare oltre il mese previsto");

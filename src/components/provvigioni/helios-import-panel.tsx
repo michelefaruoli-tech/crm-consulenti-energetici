@@ -132,7 +132,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
         ? `mesi ${res.competencePeriods.map(periodLabel).join(", ")}`
         : `competenza ${periodLabel(res.competencePeriod)}`;
       setMessage(
-        `Anteprima (${mesiLabel}): ${res.summary.willPay} da incassare · ${res.summary.alreadyPaid} già incassati · ${res.summary.notYetPayable} non ancora pagabili (M+2) · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
+        `Anteprima (${mesiLabel}): ${res.summary.willPay} da incassare · ${res.summary.alreadyPaid} già incassati · ${res.summary.notYetPayable} non ancora pagabili (mese precedente) · ${res.summary.notFound} non trovati · ${res.summary.ambiguous} ambigui` +
           (res.summary.podsToUpdate > 0
             ? ` · ${res.summary.podsToUpdate} POD da aggiornare`
             : ""),
@@ -195,11 +195,11 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
   const form = (
     <div className="space-y-3">
       <p className="rounded-lg border border-sky-200 bg-white/80 px-3 py-2 text-xs text-sky-950">
-        <strong>Flusso:</strong> Helios versa nel mese in corso la competenza di{" "}
-        {HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi prima. Il rendiconto porta le
-        provvigioni da <em>Da incassare</em> a{" "}
-        <em>Incassato da liquidare</em>. <strong>Mese rif.</strong> = competenza
-        (luglio). <strong>Data incasso</strong> = pagamento (settembre). Lo stato{" "}
+        <strong>Flusso:</strong> Helios versa nel mese in corso la competenza del
+        mese precedente. Il rendiconto porta le provvigioni da{" "}
+        <em>Da incassare</em> a <em>Incassato da liquidare</em>.{" "}
+        <strong>Mese rif.</strong> = competenza (settembre).{" "}
+        <strong>Data incasso</strong> = pagamento (ottobre). Lo stato{" "}
         <em>Liquidato</em> lo usi solo quando liquidi il collaboratore.
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
@@ -275,7 +275,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           </Select>
           <p className="mt-1 text-[11px] text-slate-500">
             Quando Helios versa (bonifico). Cambia questo mese e il riferimento
-            si sposta di {HELIOS_RECURRING_GENERATION_LAG_MONTHS} mesi indietro.
+            si sposta al mese precedente.
           </p>
         </Field>
       </div>
@@ -324,7 +324,7 @@ export function HeliosImportPanel({ embedded = false }: { embedded?: boolean }) 
           </span>
           {summary.notYetPayable > 0 ? (
             <span className="rounded-full bg-slate-200 px-2 py-1 text-slate-800">
-              Non ancora pagabili (M+2): {summary.notYetPayable}
+              Non ancora pagabili (mese precedente): {summary.notYetPayable}
             </span>
           ) : null}
           <span className="rounded-full bg-red-100 px-2 py-1 text-red-900">

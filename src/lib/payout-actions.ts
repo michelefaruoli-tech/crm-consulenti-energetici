@@ -888,7 +888,7 @@ export async function applyPayoutBatchAction(
 
       try {
         const competence = row.period ?? batch.run.period;
-        // Helios bulk: mese rif. = competenza; bonifico = competenza + 2 (M+2).
+        // Helios bulk: mese rif. = competenza; bonifico = competenza + 1 mese.
         const settledPeriod =
           row.matchReason === "bulk_historical" && /^\d{4}-\d{2}$/.test(competence)
             ? addMonths(competence, HELIOS_RECURRING_GENERATION_LAG_MONTHS)

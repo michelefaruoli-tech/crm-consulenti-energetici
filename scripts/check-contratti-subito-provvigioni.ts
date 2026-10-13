@@ -2,7 +2,7 @@
  * Contratti salvati → subito in Provvigioni.
  *
  * Verifica (senza DB):
- * - neverSyncedMonthlyWhere include Helios (visibilità lag M+2 senza rate)
+ * - neverSyncedMonthlyWhere include Helios (visibile anche senza rate)
  * - esclude BOZZA / KO
  * - piano backfill Helios rispetta ancora lag (nessuna rata anticipata)
  *
@@ -27,7 +27,7 @@ function check(label: string, actual: unknown, expected: unknown) {
   );
 }
 
-const now = new Date(2026, 9, 1); // 1 ottobre 2026 → lastPayable Helios = agosto
+const now = new Date(2026, 9, 1); // 1 ottobre 2026 → mese pagato Helios = settembre
 
 console.log("\n• neverSyncedMonthlyWhere: Helios incluso, BOZZA/KO esclusi");
 {
@@ -89,7 +89,7 @@ console.log("\n• Helios NUOVA_ATTIVAZIONE ingresso set: a ottobre crea set (ec
   ]);
 }
 
-console.log("\n• Helios ALTRO ingresso set: nessuna rata a ottobre (lag M+2 invariato)");
+console.log("\n• Helios ALTRO ingresso set: a ottobre crea settembre");
 {
   const contract: Contract = {
     id: "h1b",
@@ -115,11 +115,15 @@ console.log("\n• Helios ALTRO ingresso set: nessuna rata a ottobre (lag M+2 in
     statusHistory: [],
     recurringMonths: [],
   };
-  check("nessun periodo Helios ALTRO", expectedPeriodsFor(contract, now), []);
-  check("findMissing null (lag)", findMissing(contract, now), null);
+  check("solo settembre", expectedPeriodsFor(contract, now), ["2026-09"]);
+  check(
+    "findMissing settembre",
+    findMissing(contract, now)?.missingPeriods,
+    ["2026-09"],
+  );
 }
 
-console.log("\n• Helios con ingresso luglio: a ottobre crea fino ad agosto");
+console.log("\n• Helios con ingresso luglio: a ottobre crea solo settembre");
 {
   const contract: Contract = {
     id: "h2",
@@ -146,11 +150,11 @@ console.log("\n• Helios con ingresso luglio: a ottobre crea fino ad agosto");
     recurringMonths: [],
   };
   const expected = expectedPeriodsFor(contract, now);
-  check("periodi lug–ago", expected, ["2026-07", "2026-08"]);
+  check("solo settembre", expected, ["2026-09"]);
   check(
-    "mancanti lug–ago",
+    "mancante settembre",
     findMissing(contract, now)?.missingPeriods,
-    ["2026-07", "2026-08"],
+    ["2026-09"],
   );
 }
 

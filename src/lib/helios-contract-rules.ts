@@ -7,20 +7,17 @@ export const HELIOS_MONTHLY_RESIDENTE = 4;
 export const HELIOS_MONTHLY_ALTRO = 6;
 
 /**
- * Helios: lag fisso M+2 (vincolante) — regola generale sulle ricorrenze mensili.
- * Genera la riga solo nel mese di pagamento/liquidazione, con mese rif. = competenza.
+ * Helios paga il mese precedente al mese corrente (lag = 1, da ottobre 2026).
+ * A ottobre 2026 paga settembre 2026; a novembre paga ottobre.
  *
- * Esempi (calendario → competenza creabile):
- * - settembre → solo fino a luglio (agosto NO: si crea a ottobre)
- * - ottobre → fino ad agosto (settembre NO: si crea a novembre)
- * - novembre → fino a settembre
+ * La riga ricorrente nuova è solo quel mese pagato (mese corrente − 1).
+ * Non si ricreano i mesi già coperti e non si anticipano i mesi futuri.
  *
- * Eccezione (Michele 2026-10): per **nuova attivazione / voltura / switch**
- * la **prima** competenza (= mese ingresso fornitura) si crea e si mostra subito
- * con mese di riferimento, anche se oltre lastPayable. Le rate mensili successive
- * restano M+2. Vedi `isHeliosFirstMonthVisibleOperation`.
+ * Eccezione: per nuova attivazione / voltura / switch la prima competenza
+ * (= mese ingresso fornitura) si crea e si mostra subito, anche se è oltre
+ * il mese pagato. Vedi `isHeliosFirstMonthVisibleOperation`.
  */
-export const HELIOS_RECURRING_GENERATION_LAG_MONTHS = 2;
+export const HELIOS_RECURRING_GENERATION_LAG_MONTHS = 1;
 
 /**
  * Valori `Contract.operationType` (già in schema/UI — non inventati) per cui
@@ -69,8 +66,10 @@ export function isHeliosFirstCompetenceLagException(opts: {
 
 /**
  * Periodi mensili da generare per un contratto.
- * Helios: fino a lastPayable (M+2), più eventuale prima competenza
- * (attivazione/voltura/switch) se ancora oltre il lag ma ≤ mese calendario.
+ * Non-Helios: dal mese di ingresso fino al mese corrente.
+ * Helios: solo il mese pagato (corrente − lag), se cade nella finestra.
+ * Se l'ingresso è ancora oltre quel mese, la prima competenza di
+ * attivazione/voltura/switch si crea da sola.
  */
 export function monthlyPeriodsDueForContract(opts: {
   supplierName: string | null | undefined;
@@ -80,19 +79,24 @@ export function monthlyPeriodsDueForContract(opts: {
 }): string[] {
   const lag = recurringGenerationLagMonths(opts.supplierName);
   const lastPeriod = lastGeneratedPeriod(opts.window, opts.now, lag);
-  const base =
-    opts.window.start <= lastPeriod
+  if (lag <= 0) {
+    return opts.window.start <= lastPeriod
       ? monthsBetween(opts.window.start, lastPeriod)
       : [];
+  }
 
-  if (lag <= 0) return base;
-  if (!isHeliosFirstMonthVisibleOperation(opts.operationType)) return base;
-  if (opts.window.start <= lastPeriod) return base;
+  if (
+    opts.window.start <= lastPeriod &&
+    isPeriodInRecurringWindow(opts.window, lastPeriod)
+  ) {
+    return [lastPeriod];
+  }
 
+  if (!isHeliosFirstMonthVisibleOperation(opts.operationType)) return [];
   const nowPeriod = toPeriod(opts.now);
-  if (opts.window.start > nowPeriod) return base;
-  if (!isPeriodInRecurringWindow(opts.window, opts.window.start)) return base;
-
+  if (opts.window.start > nowPeriod) return [];
+  if (opts.window.start <= lastPeriod) return [];
+  if (!isPeriodInRecurringWindow(opts.window, opts.window.start)) return [];
   return [opts.window.start];
 }
 
@@ -132,7 +136,7 @@ function validYearMonth(value: string | null | undefined): string | null {
   return /^\d{4}-\d{2}$/.test(period) ? period : null;
 }
 
-/** Competenza Helios dal mese di pagamento (settembre → luglio). */
+/** Competenza Helios dal mese di pagamento (settembre → agosto). */
 export function heliosCompetenceFromPaymentMonth(paymentPeriod: string): string {
   return addMonths(paymentPeriod, -HELIOS_RECURRING_GENERATION_LAG_MONTHS);
 }
@@ -143,7 +147,7 @@ function isLagAhead(later: string, earlier: string): boolean {
 
 /**
  * Mese riferimento Helios = competenza, mai il mese di pagamento/incasso.
- * Se foglio o selezione coincidono con il pagamento, si applica il lag di 2 mesi.
+ * Se foglio o selezione coincidono con il pagamento, si applica il lag di 1 mese.
  * Se i due campi sono invertiti (pagamento in competenza, competenza in incasso),
  * si usa il mese più vecchio come competenza.
  */
@@ -177,7 +181,7 @@ export function resolveHeliosCompetencePeriod(opts: {
 }
 
 /**
- * Mese in cui Helios versa (Data incasso), sempre competenza + 2 mesi
+ * Mese in cui Helios versa (Data incasso), sempre competenza + 1 mese
  * se i campi form/foglio sono allineati o invertiti.
  */
 export function resolveHeliosPaymentPeriod(opts: {
@@ -210,7 +214,7 @@ export type HeliosMeseRifShiftPlan = {
 
 /**
  * Allineamento rate già importate.
- * - coincident: period = settled = pagamento → period diventa pagamento − 2
+ * - coincident: period = settled = pagamento → period diventa pagamento − 1
  * - inverted: period = pagamento e settled = competenza → si scambiano
  */
 export function planHeliosMeseRifShift(
@@ -236,7 +240,7 @@ export function heliosLastPayableCompetence(now: Date = new Date()): string {
   return addMonths(toPeriod(now), -HELIOS_RECURRING_GENERATION_LAG_MONTHS);
 }
 
-/** Agosto/settembre in settembre 2026: competenza non ancora pagata da Helios. */
+/** Competenza successiva al mese pagato (corrente − 1): Helios non l'ha ancora versata. */
 export function isHeliosCompetenceNotYetPayable(
   period: string,
   now: Date = new Date(),

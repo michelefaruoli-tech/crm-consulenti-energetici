@@ -20,25 +20,30 @@ function check(name: string, got: unknown, want: unknown) {
 
 const now = new Date(2026, 8, 27); // 27 set 2026
 const last = heliosLastPayableCompetence(now);
-check("lastPayable settembre = 2026-07", last, "2026-07");
+check("lastPayable settembre = 2026-08", last, "2026-08");
 
 const window = {
   start: "2025-01",
   end: null as string | null,
 };
 check(
-  "lastGeneratedPeriod lag2 = lastPayable",
+  "lastGeneratedPeriod lag 1 = lastPayable",
   lastGeneratedPeriod(window, now, HELIOS_RECURRING_GENERATION_LAG_MONTHS),
   last,
 );
 
-for (const period of ["2026-08", "2026-09", "2026-10"]) {
+for (const period of ["2026-09", "2026-10"]) {
   check(
     `${period} da bonificare a settembre`,
     isHeliosCompetenceNotYetPayable(period, now) && period > last,
     true,
   );
 }
+check(
+  "2026-08 NON da bonificare a settembre",
+  isHeliosCompetenceNotYetPayable("2026-08", now),
+  false,
+);
 check(
   "2026-07 NON da bonificare",
   isHeliosCompetenceNotYetPayable("2026-07", now),

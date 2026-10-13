@@ -123,7 +123,7 @@ export async function applyPayoutRowMark(params: {
   ) {
     return {
       ok: false,
-      reason: `Competenza Helios ${params.period} non ancora pagabile (lag M+2)`,
+      reason: `Competenza Helios ${params.period} non ancora pagabile (mese precedente)`,
     };
   }
 

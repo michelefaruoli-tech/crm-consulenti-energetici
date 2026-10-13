@@ -1,9 +1,8 @@
 /**
- * Bonifica rate Helios con competenza oltre lastPayable (lag M+2).
+ * Bonifica rate Helios con competenza oltre il mese pagato (corrente − 1).
  *
- * A settembre 2026 lastPayable = luglio: agosto/settembre non devono esistere
- * (né PENDING né PAID/LIQUIDATED). Percorso automatico (sync/cron) + apply
- * manuale a lotti. Neon HTTP: niente transazioni.
+ * A ottobre 2026 il mese pagato è settembre: ottobre non va creato in anticipo.
+ * Percorso automatico (sync/cron) + apply manuale a lotti. Neon HTTP: niente transazioni.
  */
 import "server-only";
 
@@ -17,6 +16,8 @@ import {
 import { periodLabel } from "@/lib/recurring";
 import { clientDisplayName } from "@/lib/utils";
 import {
+  HELIOS_LAG_AUTO_NOTE_LEGACY,
+  isHeliosLagAutoNote,
   RECURRING_AUTO_CLOSED_NOTE,
   recurringWindow,
 } from "@/lib/recurring-window";
@@ -255,7 +256,7 @@ export async function applyHeliosAnticipatoryCleanup(opts: {
       continue;
     }
     // Già bonificata in un passaggio precedente: idempotente.
-    if (m.status === "CLOSED" && m.note === CLOSE_NOTE) {
+    if (m.status === "CLOSED" && isHeliosLagAutoNote(m.note)) {
       skipped += 1;
       continue;
     }
@@ -325,7 +326,10 @@ export async function runHeliosAnticipatoryCleanupAuto(opts?: {
       where: {
         period: { gt: lastPayable },
         NOT: {
-          AND: [{ status: "CLOSED" }, { note: CLOSE_NOTE }],
+          AND: [
+            { status: "CLOSED" },
+            { note: { in: [CLOSE_NOTE, HELIOS_LAG_AUTO_NOTE_LEGACY] } },
+          ],
         },
         contract: {
           deletedAt: null,

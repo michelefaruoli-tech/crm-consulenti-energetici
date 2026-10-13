@@ -292,7 +292,7 @@ export function buildOperativaKpiCards(opts: {
       id: "ricorrenti_mensili_mese",
       label: "Ricorrenti mensili del mese",
       value: formatCurrency(opts.ricorrentiMese),
-      hint: `Competenza ${opts.competence} · Helios solo se già in M+2`,
+      hint: `Competenza ${opts.competence} · Helios solo se è il mese precedente`,
       href: provvigioniDeepLinkHref("da-incassare-m", {
         ...ex,
         competence: opts.competence,
@@ -579,7 +579,7 @@ export async function loadOperativaAlerts(opts: {
     },
     {
       id: "helios_m2",
-      label: "Helios in finestra M+2",
+      label: "Helios oltre il mese pagato",
       hint: `Rate con competenza > ${lastHelios} (non ancora pagabili)`,
       count: heliosM2,
       href: "/backup#integrita",

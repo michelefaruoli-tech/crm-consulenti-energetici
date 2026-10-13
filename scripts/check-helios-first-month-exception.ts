@@ -1,6 +1,6 @@
 /**
  * Eccezione Helios: attivazione / voltura / switch → prima competenza subito
- * con mese di riferimento; ricorrenze successive restano M+2.
+ * con mese di riferimento; le ricorrenze successive seguono il mese precedente.
  *
  * Uso: npx tsx scripts/check-helios-first-month-exception.ts
  */
@@ -22,7 +22,7 @@ function check(label: string, actual: unknown, expected: unknown) {
   );
 }
 
-const now = new Date(2026, 9, 1); // ottobre → lastPayable = agosto
+const now = new Date(2026, 9, 1); // ottobre → mese pagato = settembre
 
 console.log("\n• Tipi operazione eccezione (valori già in schema)");
 {
@@ -105,7 +105,7 @@ console.log("\n• Helios SWITCH ingresso ottobre → crea ott; ricorrenze > las
   );
 }
 
-console.log("\n• Helios VOLTURA ingresso luglio → lag normale lug–ago (eccezione no-op)");
+console.log("\n• Helios VOLTURA ingresso luglio → a ottobre solo settembre");
 {
   const window = recurringWindow(
     {
@@ -118,18 +118,18 @@ console.log("\n• Helios VOLTURA ingresso luglio → lag normale lug–ago (ecc
     now,
   );
   check(
-    "periodi lug–ago",
+    "solo settembre",
     monthlyPeriodsDueForContract({
       supplierName: "Helios",
       operationType: "VOLTURA",
       window,
       now,
     }),
-    ["2026-07", "2026-08"],
+    ["2026-09"],
   );
 }
 
-console.log("\n• Helios senza tipo eccezione (ALTRO) + ingresso set → nessuna rata (M+2)");
+console.log("\n• Helios ALTRO ingresso set → a ottobre crea settembre (mese pagato)");
 {
   const window = recurringWindow(
     {
@@ -142,14 +142,39 @@ console.log("\n• Helios senza tipo eccezione (ALTRO) + ingresso set → nessun
     now,
   );
   check(
-    "periodi vuoti",
+    "solo settembre",
     monthlyPeriodsDueForContract({
       supplierName: "Helios",
       operationType: "ALTRO",
       window,
       now,
     }),
-    [],
+    ["2026-09"],
+  );
+}
+
+console.log("\n• A novembre la riga nuova è solo ottobre");
+{
+  const november = new Date(2026, 10, 1);
+  const window = recurringWindow(
+    {
+      insertionDate: new Date(2026, 0, 1),
+      supplyStartDate: new Date(2026, 0, 1),
+      operationType: "VOLTURA",
+      status: "ATTIVATO",
+      expiryDate: null,
+    },
+    november,
+  );
+  check(
+    "solo ottobre",
+    monthlyPeriodsDueForContract({
+      supplierName: "Helios",
+      operationType: "VOLTURA",
+      window,
+      now: november,
+    }),
+    ["2026-10"],
   );
 }
 

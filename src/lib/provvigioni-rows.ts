@@ -153,7 +153,7 @@ function expandedUnitWhere(
       ],
     });
     // Mensili ricorrenti senza nessuna rata generata ancora (anche Helios
-    // nel lag M+2): vedi `neverSyncedMonthlyWhere` in provvigioni-filters.ts.
+    // nel mese non ancora pagato): vedi `neverSyncedMonthlyWhere` in provvigioni-filters.ts.
     unitOrs.push({ AND: [...base, neverSyncedMonthlyWhere] });
   }
   return { OR: unitOrs };
@@ -232,7 +232,7 @@ function expandedRateWhere(
           ],
         },
       },
-      // Helios M+2: nascondi rate oltre lastPayable, tranne la prima competenza
+      // Helios: nascondi rate oltre il mese pagato, tranne la prima competenza
       // di attivazione/voltura/switch (eccezione mese riferimento).
       {
         NOT: {
@@ -411,6 +411,8 @@ export type BuildProvvigioneRowsOpts = {
    * (default: solo ultima liquidata + da incassare / PAID).
    */
   includeArchivedAnnual?: boolean;
+  /** Filtri rata (mese riferimento): l'espansione in memoria deve rispettarli. */
+  scope?: ProvvigioniRowFilterScope;
 };
 
 function monthAmount(
@@ -650,6 +652,45 @@ function buildSingleRow(
   };
 }
 
+function periodInFromRateWhere(
+  where: Prisma.RecurringMonthWhereInput,
+): string[] | null {
+  const period = where.period;
+  if (
+    period &&
+    typeof period === "object" &&
+    "in" in period &&
+    Array.isArray(period.in)
+  ) {
+    return period.in.filter((value): value is string => typeof value === "string");
+  }
+  if (Array.isArray(where.AND)) {
+    for (const part of where.AND) {
+      if (!part || typeof part !== "object") continue;
+      const found = periodInFromRateWhere(part);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Mesi di competenza imposti dal filtro colonna, se il where li esprime. */
+function periodsAllowedByRateScope(
+  scope: ProvvigioniRowFilterScope | undefined,
+): Set<string> | null {
+  const clauses = scope?.rate ?? [];
+  let allowed: Set<string> | null = null;
+  for (const clause of clauses) {
+    const periods = periodInFromRateWhere(clause);
+    if (!periods) continue;
+    const next = new Set(periods);
+    allowed = allowed
+      ? new Set([...allowed].filter((period) => next.has(period)))
+      : next;
+  }
+  return allowed;
+}
+
 /** Una riga per contratto UT; N righe per ogni mese M nel filtro stato. */
 export function expandContractsToProvvigioneRows(
   contracts: ContractForProvvigioneRow[],
@@ -674,8 +715,10 @@ export function expandContractsToProvvigioneRows(
     }
 
     const isAnnual = isRecurringAnnual(contract.recurrence);
+    const allowedPeriods = periodsAllowedByRateScope(opts.scope);
     const rawMonths = (contract.recurringMonths ?? [])
       .filter((m) => statuses.includes(m.status))
+      .filter((m) => !allowedPeriods || allowedPeriods.has(m.period))
       .filter((m) => !isAnnualNextHidden(m.note))
       .filter((m) => {
         if (!isHeliosSupplier(contract.supplier.name)) return true;

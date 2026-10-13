@@ -225,7 +225,7 @@ export async function buildBulkHistoricalPlan(params: {
   | { ok: false; error: string }
 > {
   const lastPayable = heliosLastPayableCompetence();
-  // Mai marcare oltre lastPayable M+2 (es. a settembre max luglio).
+  // Mai marcare oltre il mese pagato (a ottobre max settembre).
   const periodLimit =
     params.periodLimit > lastPayable ? lastPayable : params.periodLimit;
   const excluded =

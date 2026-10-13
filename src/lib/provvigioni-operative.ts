@@ -2,7 +2,7 @@
  * P1.1 B4 — colonne operative M/R (sola lettura / mapping UI).
  *
  * - Competenza = mese riferimento della rata (`period`)
- * - Mese previsto = mese in cui il fornitore dovrebbe pagare (Helios = competenza + 2)
+ * - Mese previsto = mese in cui il fornitore dovrebbe pagare (Helios = competenza + 1)
  * - Ritardo = giorni oltre la fine del mese previsto, solo se ancora «Da incassare»
  *
  * Non cambia motore Helios / no-anticipo / switch.
@@ -22,7 +22,7 @@ function validYearMonth(value: string | null | undefined): string | null {
 
 /**
  * Mese in cui l'incasso è atteso (YYYY-MM).
- * Helios: competenza + lag M+2; altri fornitori: stessa competenza.
+ * Helios: competenza + 1 mese; altri fornitori: stessa competenza.
  */
 export function expectedPayablePeriod(
   competencePeriod: string | null | undefined,
@@ -78,7 +78,7 @@ export function operativeDelayLabel(days: number | null | undefined): string {
 
 /**
  * Competenze da cercare in DB quando l'utente filtra per mese previsto P.
- * Helios: P − 2; non-Helios: P.
+ * Helios: P − 1; non-Helios: P.
  */
 export function competencePeriodsForExpectedPayable(
   expectedPeriods: string[],
@@ -104,5 +104,5 @@ export function isHeliosRowSupplier(name: string | null | undefined): boolean {
   return isHeliosSupplier(name);
 }
 
-/** Export lag per smoke test B4 (agosto → ottobre). */
+/** Export lag per smoke test B4 (agosto → settembre). */
 export { HELIOS_RECURRING_GENERATION_LAG_MONTHS };

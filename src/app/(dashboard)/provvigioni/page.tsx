@@ -666,6 +666,7 @@ export default async function ProvvigioniPage({
     now: new Date(),
     statoFilter: statoEffective,
     includeArchivedAnnual,
+    scope: rowFilterScope,
   };
   let prebuiltExpandedRows: ProvvigioneRow[] | null = null;
 

@@ -55,7 +55,7 @@ console.log("\n• Rate mensili (M) create in anticipo rispetto al mese dovuto")
   );
 }
 
-console.log("\n• Helios: il ritardo M+2 resta, non è \"anticipo\"");
+console.log("\n• Helios: il mese precedente è dovuto, il mese corrente è anticipo");
 {
   type Contract = Parameters<typeof findEarlyMonthlyRows>[0];
   const contract: Contract = {
@@ -68,13 +68,14 @@ console.log("\n• Helios: il ritardo M+2 resta, non è \"anticipo\"");
     supplier: { name: "Helios" },
     statusHistory: [],
     recurringMonths: [
-      { id: "r1", period: "2026-07", status: "PENDING" }, // ultimo generabile a settembre
+      { id: "r1", period: "2026-08", status: "PENDING" },
+      { id: "r2", period: "2026-09", status: "PENDING" },
     ],
   };
   check(
-    "luglio è l'ultimo mese generabile (settembre − 2): non è in anticipo",
-    findEarlyMonthlyRows(contract, now),
-    [],
+    "a settembre agosto è il mese pagato; settembre è in anticipo",
+    findEarlyMonthlyRows(contract, now).map((r) => r.period),
+    ["2026-09"],
   );
 }
 

@@ -160,8 +160,8 @@ export function PayoutBulkHistoricalPanel() {
       <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">
         <strong>Mese riferimento</strong> = competenza sulla riga (
         <code className="text-xs">period</code>
-        ), non il mese di bonifico. Lag M+2: a settembre non si creano agosto né
-        settembre; agosto solo a ottobre, settembre solo a novembre.
+        ), non il mese di bonifico. Helios paga il mese precedente: a ottobre
+        si crea solo settembre, a novembre solo ottobre. Nessun mese futuro.
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

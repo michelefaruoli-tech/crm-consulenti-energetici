@@ -151,7 +151,7 @@ export function ProvvigioniBackfillPanel() {
       setMessage(
         `Sync ultimo mese completato: ${synced} contratti sincronizzati su ${scanned} esaminati` +
           (errCount > 0 ? ` (${errCount} errori).` : ".") +
-          " Helios senza rate nel lag M+2 resta visibile in Da incassare; le rate si creano al mese di pagamento.",
+          " Helios senza rate nel mese precedente resta visibile in Da incassare; la riga si crea nel mese pagato.",
       );
       await runPreview(30);
     } catch (e) {
@@ -180,8 +180,8 @@ export function ProvvigioniBackfillPanel() {
         Trova i contratti ricorrenti (mensili o annuali, qualsiasi fornitore)
         già salvati che non hanno ancora la riga in Provvigioni e la crea come{" "}
         <strong>Da incassare</strong> (mai liquidata in automatico). Rispetta
-        sempre la finestra di fornitura e il ritardo Helios M+2: a settembre non
-        crea agosto né settembre; agosto solo a ottobre. Le annuali solo al 13°
+        sempre la finestra di fornitura e il mese precedente di Helios: a ottobre
+        crea solo settembre, a novembre solo ottobre. Le annuali solo al 13°
         mese. Non tocca mai una rata già presente — Incassato, Pagato o storno
         restano come li hai impostati tu. Percorso: Anteprima → conferma → Crea.
         Per i contratti di oggi/ultimo mese usa «Sync ultimo mese» (idempotente)

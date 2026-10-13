@@ -40,6 +40,7 @@ const CLIENT_NAME_SELECT = {
 const AUTO_CLOSED_NOTES = new Set([
   "Esclusa: precedente all'ingresso in fornitura",
   "Esclusa: successiva alla chiusura del contratto",
+  "Esclusa: Helios non ha ancora pagato questa competenza (lag 1 mese)",
   "Esclusa: Helios non ha ancora pagato questa competenza (lag 2 mesi)",
 ]);
 

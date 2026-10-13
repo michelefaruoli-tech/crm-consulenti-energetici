@@ -2,7 +2,7 @@
  * Verifica della logica di backfill "contratto salvato ma non in Provvigioni"
  * (senza database): quali periodi dovrebbero già esistere per un contratto
  * ricorrente e quali risultano davvero mancanti rispetto alle rate già
- * presenti. Copre mensile non-Helios, mensile Helios (lag M+2), annuale
+ * presenti. Copre mensile non-Helios, mensile Helios (mese precedente), annuale
  * (+12), KO/ANNULLATO e una tantum (mai backfillato).
  *
  * Uso: npx tsx scripts/check-backfill-provvigioni.ts
@@ -69,7 +69,7 @@ console.log("\n• Mensile non-Helios: contratto appena salvato, nessuna rata es
   check("tipo M", missing?.recurrenceKind, "M");
 }
 
-console.log("\n• Mensile Helios: lag M+2 resta (agosto non generabile a settembre)");
+console.log("\n• Mensile Helios: a settembre il mese pagato è agosto");
 {
   const contract: Contract = {
     ...base,
@@ -80,12 +80,11 @@ console.log("\n• Mensile Helios: lag M+2 resta (agosto non generabile a settem
     recurringMonths: [],
   };
   const expected = expectedPeriodsFor(contract, now);
-  check("ultimo periodo generabile = luglio (settembre − 2)", expected.at(-1), "2026-07");
-  check("agosto NON tra i periodi attesi", expected.includes("2026-08"), false);
+  check("a settembre solo agosto", expected, ["2026-08"]);
   check("settembre NON tra i periodi attesi", expected.includes("2026-09"), false);
 }
 
-console.log("\n• Helios: a ottobre nasce agosto, settembre ancora no");
+console.log("\n• Helios: a ottobre nasce solo settembre");
 {
   const contract: Contract = {
     ...base,
@@ -97,9 +96,9 @@ console.log("\n• Helios: a ottobre nasce agosto, settembre ancora no");
   };
   const october = new Date(2026, 9, 15);
   const expected = expectedPeriodsFor(contract, october);
-  check("a ottobre ultimo = agosto", expected.at(-1), "2026-08");
-  check("a ottobre agosto presente", expected.includes("2026-08"), true);
-  check("a ottobre settembre ancora assente", expected.includes("2026-09"), false);
+  check("a ottobre solo settembre", expected, ["2026-09"]);
+  check("a ottobre agosto non è la riga nuova", expected.includes("2026-08"), false);
+  check("a ottobre ottobre non è anticipato", expected.includes("2026-10"), false);
 }
 
 console.log("\n• Mensile: rate già presenti non vengono riproposte come mancanti");

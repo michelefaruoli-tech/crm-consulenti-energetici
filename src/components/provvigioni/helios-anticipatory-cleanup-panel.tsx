@@ -121,7 +121,7 @@ export function HeliosAnticipatoryCleanupPanel() {
         skipped += res.skipped;
       }
       setMessage(
-        `Bonifica completata: ${closed} chiuse (lag M+2), ${deleted} eliminate` +
+        `Bonifica completata: ${closed} chiuse (oltre il mese pagato), ${deleted} eliminate` +
           (skipped > 0 ? `, ${skipped} saltate` : "") +
           `. Competenze fino a ${preview.lastPayableLabel} non toccate.`,
       );
