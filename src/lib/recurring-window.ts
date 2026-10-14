@@ -13,7 +13,8 @@
  *   dell'evento di chiusura.
  * - Nessun mese prima del primo, nessuno dopo l'ultimo.
  */
-import { addMonths, isAnnualNextHidden, toPeriod } from "@/lib/recurring";
+import { addMonths, isAnnualNextHidden, isRecurringMonthly, toPeriod } from "@/lib/recurring";
+import { MONTHLY_SWITCH_KO_NOTE_PREFIX } from "@/lib/provvigioni-filters";
 import { computeSupplyStartDate } from "@/lib/supply-dates";
 
 /** Giorno prima (es. fornitura nuova 1/10 → ultimo giorno del vecchio 30/09). */
@@ -163,6 +164,69 @@ export function outOfWindowReason(
   if (period < window.start) return OUT_OF_WINDOW_REASONS.beforeStart;
   if (window.end && period > window.end) return OUT_OF_WINDOW_REASONS.afterEnd;
   return null;
+}
+
+/**
+ * Ultimo mese ancora in fornitura da non chiudere quando un ricorrente
+ * mensile passa KO perché sullo stesso POD entra un contratto nuovo.
+ *
+ * Esempio: nuovo fornitore dal 1° ottobre → expiry 30/09 → resta settembre,
+ * se quel mese è già nel mese pagato (Helios: calendario − 1).
+ * Un KO vero (senza nota di switch, o senza scadenza) non preserva nulla.
+ */
+export function preservedMonthlySwitchPeriod(opts: {
+  status: string | null | undefined;
+  recurrence: string | null | undefined;
+  koNotes: string | null | undefined;
+  window: RecurringWindow;
+  lastGenerated: string;
+}): string | null {
+  if (opts.status !== "KO") return null;
+  if (!isRecurringMonthly(opts.recurrence)) return null;
+  if (!opts.koNotes?.startsWith(MONTHLY_SWITCH_KO_NOTE_PREFIX)) return null;
+  const end = opts.window.end;
+  if (!end) return null;
+  if (end < opts.window.start) return null;
+  if (end > opts.lastGenerated) return null;
+  return end;
+}
+
+/** CLOSED senza date e senza nota manuale: il sync dello switch può riaprirla. */
+export function isBareClosedRecurringMonth(row: RecurringMonthLike): boolean {
+  if (row.status !== "CLOSED") return false;
+  if (row.paidAt != null) return false;
+  if (row.settledPeriod != null) return false;
+  const note = row.note?.trim() ?? "";
+  return note === "" || isHeliosLagAutoNote(note);
+}
+
+export type PreservedSwitchMonthPlan =
+  | { kind: "create"; status: "MISSING" | "PENDING" }
+  | { kind: "reopen"; status: "MISSING" | "PENDING" }
+  | { kind: "keep" };
+
+/**
+ * Cosa fare della rata dell'ultimo mese tenuto dopo un KO da switch.
+ * PAID / LIQUIDATED / ERROR_UNPAID e le chiusure con nota manuale restano.
+ */
+export function preservedSwitchMonthPlan(
+  row: RecurringMonthLike | undefined,
+  period: string,
+  nowPeriod: string,
+): PreservedSwitchMonthPlan {
+  const status = period < nowPeriod ? "MISSING" : "PENDING";
+  if (!row) return { kind: "create", status };
+  if (
+    row.status === "PAID" ||
+    row.status === "LIQUIDATED" ||
+    row.status === "ERROR_UNPAID" ||
+    row.status === "PENDING" ||
+    row.status === "MISSING"
+  ) {
+    return { kind: "keep" };
+  }
+  if (isBareClosedRecurringMonth(row)) return { kind: "reopen", status };
+  return { kind: "keep" };
 }
 
 /**

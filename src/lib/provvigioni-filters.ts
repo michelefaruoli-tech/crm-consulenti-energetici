@@ -91,6 +91,34 @@ export const nonRecurringWhere: Prisma.ContractWhereInput = {
 export const KO_STATUSES = ["KO", "ANNULLATO", "CHIUSO"] as const;
 
 /**
+ * Chiusura da switch sullo stesso POD (ricorrente mensile).
+ * Il contratto resta KO, ma l'ultimo mese ancora in fornitura deve
+ * comparire in Provvigioni (settembre se il nuovo parte il 1° ottobre).
+ */
+export const MONTHLY_SWITCH_KO_NOTE_PREFIX = "KO: nuovo contratto stesso POD";
+
+const SWITCH_KO_OPEN_RATE_STATUSES = [
+  "MISSING",
+  "PENDING",
+  "PAID",
+  "LIQUIDATED",
+  "ERROR_UNPAID",
+] as const;
+
+/** Mensile KO da switch, non storico, con almeno una rata ancora operativa. */
+export function monthlySwitchKoContractWhere(): Prisma.ContractWhereInput {
+  return {
+    status: "KO",
+    recurrenceKind: "M",
+    isHistorical: false,
+    koNotes: { startsWith: MONTHLY_SWITCH_KO_NOTE_PREFIX },
+    recurringMonths: {
+      some: { status: { in: [...SWITCH_KO_OPEN_RATE_STATUSES] } },
+    },
+  };
+}
+
+/**
  * Contratti mensili ricorrenti (M) senza ancora nessuna rata `RecurringMonth`
  * generata: dati storici pre-PR #19, sync fallito in background, oppure
  * Helios ancora nel lag M+2 (nessuna competenza pagabile → sync non crea
@@ -259,7 +287,7 @@ function provvigioneStatoWhereOne(
         },
       ],
     };
-    return {
+    const collectedContract: Prisma.ContractWhereInput = {
       status: { notIn: [...excludedStatus] },
       OR: [
         collectedLikeUt,
@@ -268,6 +296,33 @@ function provvigioneStatoWhereOne(
             { OR: recurringWhereOr },
             { recurringMonths: { some: recurringPaid } },
           ],
+        },
+      ],
+    };
+    /**
+     * Contratto già liquidato al collaboratore, con una rata nuova ancora
+     * PAID (Helios settembre su contratti PROVVIGIONE_LIQUIDATA).
+     * Non togliere PROVVIGIONE_LIQUIDATA dal notIn sopra: gli UT liquidati
+     * con collectionDate resterebbero in Incassato.
+     */
+    const liquidatedWithOpenPaid: Prisma.ContractWhereInput = {
+      status: "PROVVIGIONE_LIQUIDATA",
+      OR: recurringWhereOr,
+      recurringMonths: { some: recurringPaid },
+    };
+    return {
+      OR: [
+        collectedContract,
+        liquidatedWithOpenPaid,
+        {
+          AND: [
+            monthlySwitchKoContractWhere(),
+            { recurringMonths: { some: recurringPaid } },
+          ],
+        },
+        {
+          status: "IN_ATTESA_PAGAMENTO",
+          recurringMonths: { some: recurringPaid },
         },
       ],
     };
@@ -281,7 +336,7 @@ function provvigioneStatoWhereOne(
     };
     // BOZZA esclusa: in Provvigioni entrano solo contratti salvati (INSERITO+)
     // o inviati al BO — non le bozze incomplete.
-    return {
+    const openContract: Prisma.ContractWhereInput = {
       status: { notIn: ["BOZZA", "DA_CONTROLLARE", "STORNATO", ...KO_STATUSES] },
       OR: [
         { status: "IN_ATTESA_PAGAMENTO" },
@@ -312,6 +367,17 @@ function provvigioneStatoWhereOne(
           ],
         },
         neverSyncedMonthlyWhere,
+      ],
+    };
+    return {
+      OR: [
+        openContract,
+        {
+          AND: [
+            monthlySwitchKoContractWhere(),
+            { recurringMonths: { some: missingRate } },
+          ],
+        },
       ],
     };
   }
@@ -392,7 +458,12 @@ export function buildProvvigioniContractWhere(
     if (f.includeHistorical === false) {
       and.push({ isHistorical: false });
     }
-    and.push({ status: { notIn: [...KO_STATUSES] } });
+    and.push({
+      OR: [
+        { status: { notIn: [...KO_STATUSES] } },
+        monthlySwitchKoContractWhere(),
+      ],
+    });
   }
 
   if (f.visibility && Object.keys(f.visibility).length > 0) {

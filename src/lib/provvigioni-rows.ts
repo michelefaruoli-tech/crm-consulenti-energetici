@@ -455,13 +455,36 @@ function buildSingleRow(
   );
 
   const competencePeriod = monthOverride?.period ?? opts.effectiveCompetence;
+  const competenceMonth =
+    !monthOverride && competencePeriod
+      ? (contract.recurringMonths ?? []).find((month) => month.period === competencePeriod)
+      : undefined;
+  /**
+   * Con il mese di competenza selezionato, lo stato in elenco è quello della
+   * rata di quel mese. Così un contratto già Liquidato o KO da switch con
+   * rata PAID/MISSING resta nella coda giusta (Incassato / Da incassare).
+   */
+  const competenceRateStato =
+    competenceMonth &&
+    competenceMonth.status !== "CLOSED" &&
+    (competenceMonth.status === "PAID" ||
+      competenceMonth.status === "LIQUIDATED" ||
+      competenceMonth.status === "MISSING" ||
+      competenceMonth.status === "PENDING" ||
+      competenceMonth.status === "ERROR_UNPAID")
+      ? competenceMonth.status === "PAID"
+        ? "Incassato da liquidare"
+        : competenceMonth.status === "LIQUIDATED"
+          ? "Liquidato"
+          : "Da incassare"
+      : null;
   const expandStato = monthOverride
     ? monthOverride.status === "PAID"
       ? "Incassato da liquidare"
       : monthOverride.status === "LIQUIDATED"
         ? "Liquidato"
         : "Da incassare"
-    : null;
+    : competenceRateStato;
 
   const paidRecurringForCompetence = competencePeriod
     ? (contract.recurringMonths ?? []).some(
@@ -721,7 +744,25 @@ export function expandContractsToProvvigioneRows(
 
   for (const contract of contracts) {
     if (!isRecurring(contract.recurrence)) {
-      rows.push(buildSingleRow(contract, opts));
+      const allowedOnUnit = periodsAllowedByRateScope(opts.scope);
+      const unitMonths = (contract.recurringMonths ?? [])
+        .filter((month) => statuses.includes(month.status))
+        .filter((month) => !allowedOnUnit || allowedOnUnit.has(month.period))
+        .sort((a, b) => b.period.localeCompare(a.period));
+      if (unitMonths.length > 0) {
+        for (const month of unitMonths) {
+          rows.push(
+            buildSingleRow(contract, opts, {
+              period: month.period,
+              status: month.status,
+              amount: monthAmount(month, contract),
+              settledPeriod: month.settledPeriod,
+            }),
+          );
+        }
+      } else {
+        rows.push(buildSingleRow(contract, opts));
+      }
       continue;
     }
 
