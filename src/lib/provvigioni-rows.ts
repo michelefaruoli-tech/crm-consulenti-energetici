@@ -8,6 +8,8 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { pageSkip as paginationSkip } from "@/lib/pagination";
 import { formatMonthYear } from "@/lib/date-parse";
+import { pageByVisibleClientName } from "@/lib/provvigioni-client-sort";
+import type { VisibleClientNameSource } from "@/lib/provvigioni-client-sort";
 import { clientDisplayName } from "@/lib/utils";
 import {
   effectiveCollectionDate,
@@ -1227,6 +1229,181 @@ export async function loadStornoContractsForIds(
   }) as Promise<ContractForProvvigioneRow[]>;
 }
 
+type ExpandedPageItem =
+  | { kind: "ut"; contract: ContractForProvvigioneRow }
+  | {
+      kind: "rate";
+      contract: ContractForProvvigioneRow;
+      rate: {
+        period: string;
+        status: string;
+        amount: unknown;
+        settledPeriod?: string | null;
+      };
+    };
+
+type ExpandedClientSortKey = {
+  kind: "ut" | "rate";
+  contractId: string;
+  client: VisibleClientNameSource;
+  pod: string;
+  period: string;
+  status: string;
+  amount: unknown;
+  settledPeriod: string | null;
+};
+
+function tieBreakExpandedClient(
+  a: ExpandedClientSortKey,
+  b: ExpandedClientSortKey,
+): number {
+  const pod = comparePod(a.pod, b.pod);
+  if (pod !== 0) return pod;
+  const id = a.contractId.localeCompare(b.contractId);
+  if (id !== 0) return id;
+  return a.period.localeCompare(b.period);
+}
+
+function comparePod(a: string, b: string): number {
+  return a.localeCompare(b, "it", { numeric: true, sensitivity: "base" });
+}
+
+function supplyPointCode(contract: {
+  podPdr: string | null;
+  pod: string | null;
+  pdr: string | null;
+}): string {
+  return contract.podPdr || contract.pod || contract.pdr || "";
+}
+
+/**
+ * Nominativo sull'elenco espanso già filtrato (fornitore, mese rif., …):
+ * carica solo nome e POD, ordina, poi idrata la pagina. Non riscrive rate né importi.
+ */
+async function loadClientSortedExpandedItems(args: {
+  utWhere: Prisma.ContractWhereInput;
+  rateWhere: Prisma.RecurringMonthWhereInput | null;
+  utCount: number;
+  skip: number;
+  take: number;
+  dir: "asc" | "desc";
+  contractSelect: Prisma.ContractSelect;
+}): Promise<ExpandedPageItem[]> {
+  const keyed: ExpandedClientSortKey[] = [];
+  if (args.utCount > 0) {
+    const utContracts = await prisma.contract.findMany({
+      where: args.utWhere,
+      select: {
+        id: true,
+        podPdr: true,
+        pod: true,
+        pdr: true,
+        client: {
+          select: {
+            type: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+    for (const contract of utContracts) {
+      keyed.push({
+        kind: "ut",
+        contractId: contract.id,
+        client: contract.client,
+        pod: supplyPointCode(contract),
+        period: "",
+        status: "",
+        amount: null,
+        settledPeriod: null,
+      });
+    }
+  }
+  if (args.rateWhere) {
+    const rates = await prisma.recurringMonth.findMany({
+      where: args.rateWhere,
+      select: {
+        period: true,
+        status: true,
+        amount: true,
+        settledPeriod: true,
+        contract: {
+          select: {
+            id: true,
+            podPdr: true,
+            pod: true,
+            pdr: true,
+            client: {
+              select: {
+                type: true,
+                companyName: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    for (const rate of rates) {
+      keyed.push({
+        kind: "rate",
+        contractId: rate.contract.id,
+        client: rate.contract.client,
+        pod: supplyPointCode(rate.contract),
+        period: rate.period,
+        status: rate.status,
+        amount: rate.amount,
+        settledPeriod: rate.settledPeriod,
+      });
+    }
+  }
+
+  const pageKeys = pageByVisibleClientName(
+    keyed,
+    (row) => row.client,
+    args.dir,
+    args.skip,
+    args.take,
+    tieBreakExpandedClient,
+  );
+  const ids = [...new Set(pageKeys.map((row) => row.contractId))];
+  if (ids.length === 0) return [];
+
+  const full = await prisma.contract.findMany({
+    where: { id: { in: ids } },
+    select: args.contractSelect,
+  });
+  const byId = new Map(
+    full.map((contract) => [
+      contract.id,
+      contract as ContractForProvvigioneRow,
+    ]),
+  );
+  const items: ExpandedPageItem[] = [];
+  for (const row of pageKeys) {
+    const contract = byId.get(row.contractId);
+    if (!contract) continue;
+    if (row.kind === "ut") {
+      items.push({ kind: "ut", contract });
+      continue;
+    }
+    items.push({
+      kind: "rate",
+      contract,
+      rate: {
+        period: row.period,
+        status: row.status,
+        amount: row.amount,
+        settledPeriod: row.settledPeriod,
+      },
+    });
+  }
+  return items;
+}
+
 /** Pagina elenco espanso: pagina rate/UT direttamente in DB (no scan completo). */
 export async function fetchExpandedProvvigionePage(args: {
   contractWhere: Prisma.ContractWhereInput;
@@ -1237,6 +1414,8 @@ export async function fetchExpandedProvvigionePage(args: {
   buildOpts: BuildProvvigioneRowsOpts;
   orderBy: Prisma.ContractOrderByWithRelationInput[];
   scope?: ProvvigioniRowFilterScope;
+  /** Se presente, A→Z / Z→A sul nominativo visibile delle righe già filtrate. */
+  clientSort?: "asc" | "desc";
 }): Promise<{
   rows: ProvvigioneRow[];
   contracts: ContractForProvvigioneRow[];
@@ -1266,18 +1445,22 @@ export async function fetchExpandedProvvigionePage(args: {
     archivedIds,
   );
 
-  type PageItem =
-    | { kind: "ut"; contract: ContractForProvvigioneRow }
-    | {
-        kind: "rate";
-        contract: ContractForProvvigioneRow;
-        rate: { period: string; status: string; amount: unknown; settledPeriod?: string | null };
-      };
-
-  const items: PageItem[] = [];
+  const items: ExpandedPageItem[] = [];
   const utCount = await prisma.contract.count({ where: utWhere });
 
-  if (skip < utCount) {
+  if (args.clientSort) {
+    items.push(
+      ...(await loadClientSortedExpandedItems({
+        utWhere,
+        rateWhere,
+        utCount,
+        skip,
+        take,
+        dir: args.clientSort,
+        contractSelect: args.contractSelect,
+      })),
+    );
+  } else if (skip < utCount) {
     const utTake = Math.min(take, utCount - skip);
     const utContracts = await prisma.contract.findMany({
       where: utWhere,
