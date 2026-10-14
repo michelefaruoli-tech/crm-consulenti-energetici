@@ -320,6 +320,10 @@ function provvigioneStatoWhereOne(
             { recurringMonths: { some: recurringPaid } },
           ],
         },
+        {
+          status: "IN_ATTESA_PAGAMENTO",
+          recurringMonths: { some: recurringPaid },
+        },
       ],
     };
   }

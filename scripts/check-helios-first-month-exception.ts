@@ -439,6 +439,38 @@ console.log("\n• Lista: switch KO e liquidato con rata PAID restano in Incassa
     liquidatedRows[0]?.stato,
     "Incassato da liquidare",
   );
+
+  const waiting = expandContractsToProvvigioneRows(
+    [{ ...base, id: "c-attesa", status: "IN_ATTESA_PAGAMENTO", recurrence: "M" }],
+    {
+      expandMode: "incassato",
+      statoFilter: "Incassato",
+      now,
+      latestMap: new Map([["c-attesa", true]]),
+      earlyMap: new Map([["c-attesa", false]]),
+    },
+  );
+  check("In attesa con rata PAID resta in Incassato", waiting.length, 1);
+  check("stato riga in attesa+PAID", waiting[0]?.stato, "Incassato da liquidare");
+
+  const ut = expandContractsToProvvigioneRows(
+    [{ ...base, id: "c-ut", status: "IN_ATTESA_PAGAMENTO", recurrence: "UT" }],
+    {
+      expandMode: "incassato",
+      statoFilter: "Incassato",
+      now,
+      latestMap: new Map([["c-ut", true]]),
+      earlyMap: new Map([["c-ut", false]]),
+    },
+  );
+  check("UT con rata PAID di settembre resta in Incassato", ut.length, 1);
+  check("competenza UT", ut[0]?.competencePeriod, "2026-09");
+  check(
+    "Incassato include In attesa con rata PAID",
+    incassato.includes('"status":"IN_ATTESA_PAGAMENTO"') &&
+      incassato.includes('"status":"PAID"'),
+    true,
+  );
 }
 
 if (failures > 0) {

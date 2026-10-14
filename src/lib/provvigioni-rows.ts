@@ -744,7 +744,25 @@ export function expandContractsToProvvigioneRows(
 
   for (const contract of contracts) {
     if (!isRecurring(contract.recurrence)) {
-      rows.push(buildSingleRow(contract, opts));
+      const allowedOnUnit = periodsAllowedByRateScope(opts.scope);
+      const unitMonths = (contract.recurringMonths ?? [])
+        .filter((month) => statuses.includes(month.status))
+        .filter((month) => !allowedOnUnit || allowedOnUnit.has(month.period))
+        .sort((a, b) => b.period.localeCompare(a.period));
+      if (unitMonths.length > 0) {
+        for (const month of unitMonths) {
+          rows.push(
+            buildSingleRow(contract, opts, {
+              period: month.period,
+              status: month.status,
+              amount: monthAmount(month, contract),
+              settledPeriod: month.settledPeriod,
+            }),
+          );
+        }
+      } else {
+        rows.push(buildSingleRow(contract, opts));
+      }
       continue;
     }
 
