@@ -22,6 +22,10 @@ import {
   RECURRENCE_OPTIONS,
   normalizeRecurrence,
 } from "@/lib/recurring";
+import {
+  isArchivioInternalLabel,
+  omitArchivioFilterOptions,
+} from "@/lib/supplier-names";
 import { buildPageHref } from "@/lib/pagination";
 import {
   COLUMN_FILTER_PARAM,
@@ -456,8 +460,8 @@ export function ProvvigioniFilterTable({
     const fromRows = rows
       .map((row) => String(row.agency ?? "").trim())
       .filter((a) => a && a !== "—");
-    return Array.from(
-      new Set([...PROVVIGIONE_AGENCY_OPTIONS, ...fromRows]),
+    return omitArchivioFilterOptions(
+      Array.from(new Set([...PROVVIGIONE_AGENCY_OPTIONS, ...fromRows])),
     ).sort((a, b) => a.localeCompare(b, "it"));
   }, [rows]);
   /** Filtri di colonna presenti in URL: vanno conservati in ogni navigazione. */
@@ -697,7 +701,7 @@ export function ProvvigioniFilterTable({
     );
     if (!res.ok) throw new Error("Valori filtro non disponibili");
     const data = (await res.json()) as { values?: string[] };
-    return data.values ?? [];
+    return omitArchivioFilterOptions(data.values ?? []);
   }
 
   const selectedCount = selectedKeys.size;
@@ -2184,6 +2188,7 @@ export function ProvvigioniFilterTable({
               : {}),
           },
         }}
+        omitFilterOption={isArchivioInternalLabel}
         filterOptionsOverride={{
           ...(collaboratorByName
             ? { collaboratorName: Object.keys(collaboratorByName) }

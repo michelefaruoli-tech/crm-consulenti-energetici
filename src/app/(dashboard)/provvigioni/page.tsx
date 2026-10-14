@@ -585,6 +585,7 @@ export default async function ProvvigioniPage({
       ? loadVisibleCollaboratorOptions(session)
       : Promise.resolve([]),
     prisma.supplier.findMany({
+      where: { NOT: { name: { startsWith: "_archivio_" } } },
       select: { name: true, active: true },
       orderBy: { name: "asc" },
     }),
