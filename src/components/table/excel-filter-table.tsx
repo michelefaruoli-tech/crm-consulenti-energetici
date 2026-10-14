@@ -1013,7 +1013,7 @@ export function ExcelFilterTable({
                       onClick={() => toggleSort(col.key)}
                       title={
                         isServerCol
-                          ? "Ordina su tutto il database (cognome + nome)"
+                          ? "Ordina A→Z / Z→A il nominativo visibile, sull’elenco già filtrato"
                           : col.sortKind === "date"
                             ? "Ordina per data (solo questa pagina)"
                             : "Ordina A→Z / Z→A (solo questa pagina)"

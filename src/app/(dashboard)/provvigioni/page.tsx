@@ -3,7 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/auth";
 import { canConfirmCommission, hasPermission } from "@/lib/permissions";
 import { formatMonthYear } from "@/lib/date-parse";
-import { clientDisplayName, clientSortKey } from "@/lib/utils";
+import {
+  compareVisibleNameStrings,
+  pageByVisibleClientName,
+} from "@/lib/provvigioni-client-sort";
+import { clientDisplayName } from "@/lib/utils";
 import { ROLE_LABELS, type AppRole } from "@/lib/constants";
 import {
   ProvvigioniFilterTable,
@@ -408,6 +412,7 @@ export default async function ProvvigioniPage({
    * Filtri che valgono sulla singola rata (mese rif., mese incasso, gettone):
    * le righe vanno prese dal database rata per rata, non espanse in memoria,
    * altrimenti comparirebbero mesi esclusi dal filtro.
+   * L'ordine Nominativo, se chiesto, si applica su quelle stesse righe.
    */
   const rateScopeActive =
     rowFilterScope.rate.length > 0 ||
@@ -508,9 +513,11 @@ export default async function ProvvigioniPage({
     },
   } as const;
 
-  // Ordinamento cliente: solo se il filtro non è enorme (altrimenti troppo lento)
+  // Nominativo: ordina il perimetro già filtrato (Helios, settembre, …)
+  // sul nome visibile in cella, poi taglia la pagina. Senza tetto: un elenco
+  // oltre la soglia precedente restava in ordine di inserimento con la freccia accesa.
   let pageContractIds: string[] | null = null;
-  if (sortByClient && !listUsesExpandedRows && total <= 800) {
+  if (sortByClient && !listUsesExpandedRows) {
     const light = await prisma.contract.findMany({
       where: contractWhere,
       select: {
@@ -525,17 +532,14 @@ export default async function ProvvigioniPage({
         },
       },
     });
-    light.sort((a, b) => {
-      const cmp = clientSortKey(a.client).localeCompare(
-        clientSortKey(b.client),
-        "it",
-        { sensitivity: "base", numeric: true },
-      );
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    pageContractIds = light
-      .slice(pageSkip(page), pageSkip(page) + PAGE_SIZE)
-      .map((r) => r.id);
+    pageContractIds = pageByVisibleClientName(
+      light,
+      (row) => row.client,
+      sortDir,
+      pageSkip(page),
+      PAGE_SIZE,
+      (a, b) => a.id.localeCompare(b.id),
+    ).map((row) => row.id);
   }
 
   // Separiamo il summary finanziario (query pesanti) dal batch principale per non
@@ -680,6 +684,7 @@ export default async function ProvvigioniPage({
       buildOpts: buildRowOpts,
       orderBy: defaultOrderBy,
       scope: rowFilterScope,
+      clientSort: sortByClient ? sortDir : undefined,
     });
     contracts = expandedPage.contracts as (typeof contractsRaw)[number][];
     prebuiltExpandedRows = expandedPage.rows;
@@ -765,11 +770,9 @@ export default async function ProvvigioniPage({
 
     if (listUsesExpandedRows && sortByClient) {
       rows.sort((a, b) => {
-        const cmp = a.clientName.localeCompare(b.clientName, "it", {
-          sensitivity: "base",
-          numeric: true,
-        });
-        return sortDir === "asc" ? cmp : -cmp;
+        const cmp = compareVisibleNameStrings(a.clientName, b.clientName);
+        if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
+        return a.id.localeCompare(b.id);
       });
     }
 
