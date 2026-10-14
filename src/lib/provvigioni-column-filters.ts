@@ -133,6 +133,28 @@ export function columnFiltersToQuery(
 }
 
 /**
+ * Query del cambio pagina: filtri elenco (fornitore, ordinamento Nominativo, …)
+ * più filtri di colonna valorizzati (mese di riferimento, gettone, …).
+ * Un filtro colonna vuoto non cancella un parametro già presente: `storno`
+ * è sia lo stato storno sia la colonna, e va tenuto se è attivo.
+ */
+export function provvigioniPageQuery(
+  base: Record<string, string | undefined | null>,
+  filters: ProvvigioniColumnFilters,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value == null || value === "") continue;
+    out[key] = value;
+  }
+  for (const [param, value] of Object.entries(columnFiltersToQuery(filters))) {
+    if (!value) continue;
+    out[param] = value;
+  }
+  return out;
+}
+
+/**
  * Dati di contesto letti una volta per tradurre le colonne derivate.
  * Sono poche righe (fornitori e tipi operazione distinti): una query, niente N+1.
  */
