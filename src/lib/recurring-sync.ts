@@ -19,6 +19,8 @@ import {
   lastGeneratedPeriod,
   OUT_OF_WINDOW_REASONS,
   outOfWindowReason,
+  preservedMonthlySwitchPeriod,
+  preservedSwitchMonthPlan,
   isHeliosLagAutoNote,
   RECURRING_AUTO_CLOSED_NOTE,
   recurringWindow,
@@ -332,6 +334,7 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
       status: true,
       paymentStatus: true,
       expiryDate: true,
+      koNotes: true,
       statusHistory: {
         where: { toStatus: "CHIUSO" },
         select: { changedAt: true },
@@ -386,22 +389,14 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
   }
   await purgeOutOfWindowMonths(contractId, window, preservePeriods);
 
-  // Pratica fallita: chiudi mesi aperti e non generarne di nuovi.
+  const amount = Number(contract.commission?.expected ?? 0) || null;
+
+  // Pratica fallita: chiudi i mesi aperti. Eccezione: KO da switch mensile,
+  // l'ultimo mese ancora in fornitura (entro il mese pagato) resta.
   if (contract.status === "ANNULLATO" || contract.status === "KO") {
-    const open = await prisma.recurringMonth.findMany({
-      where: { contractId, status: { in: ["PENDING", "MISSING"] } },
-      select: { id: true },
-    });
-    for (const row of open) {
-      await prisma.recurringMonth.update({
-        where: { id: row.id },
-        data: { status: "CLOSED" },
-      });
-    }
+    await closeFailedPracticeMonths(contract, window, nowDate, now, amount);
     return;
   }
-
-  const amount = Number(contract.commission?.expected ?? 0) || null;
 
   if (isRecurringAnnual(contract.recurrence)) {
     // Anche CHIUSO (expiry formale 12 mesi): il +12 resta dovuto.
@@ -487,6 +482,86 @@ export async function syncRecurringMonthsForContract(contractId: string): Promis
 
   for (const period of periodsDue) {
     await upsertMonthStatus(contractId, period, now, amount);
+  }
+}
+
+type SwitchCloseContract = {
+  id: string;
+  status: string | null;
+  recurrence: string | null;
+  koNotes: string | null;
+  supplier: { name: string | null } | null;
+};
+
+/** Chiude i mesi aperti di un KO/ANNULLATO, tenendo l'ultimo mese da switch. */
+async function closeFailedPracticeMonths(
+  contract: SwitchCloseContract,
+  window: RecurringWindow,
+  nowDate: Date,
+  nowPeriod: string,
+  amount: number | null,
+): Promise<void> {
+  const keep = preservedMonthlySwitchPeriod({
+    status: contract.status,
+    recurrence: contract.recurrence,
+    koNotes: contract.koNotes,
+    window,
+    lastGenerated: lastGeneratedPeriod(
+      window,
+      nowDate,
+      recurringGenerationLagMonths(contract.supplier?.name),
+    ),
+  });
+
+  const open = await prisma.recurringMonth.findMany({
+    where: {
+      contractId: contract.id,
+      status: { in: ["PENDING", "MISSING"] },
+    },
+    select: { id: true, period: true },
+  });
+  for (const row of open) {
+    if (keep && row.period === keep) continue;
+    await prisma.recurringMonth.update({
+      where: { id: row.id },
+      data: { status: "CLOSED" },
+    });
+  }
+  if (!keep) return;
+
+  const existing = await prisma.recurringMonth.findUnique({
+    where: { contractId_period: { contractId: contract.id, period: keep } },
+    select: {
+      id: true,
+      status: true,
+      amount: true,
+      paidAt: true,
+      settledPeriod: true,
+      note: true,
+    },
+  });
+  const plan = preservedSwitchMonthPlan(existing ?? undefined, keep, nowPeriod);
+  if (plan.kind === "create") {
+    await prisma.recurringMonth.create({
+      data: {
+        contractId: contract.id,
+        period: keep,
+        status: plan.status,
+        amount,
+        paidAt: null,
+      },
+    });
+    return;
+  }
+  if (plan.kind === "reopen" && existing) {
+    await prisma.recurringMonth.update({
+      where: { id: existing.id },
+      data: {
+        status: plan.status,
+        amount: existing.amount ?? amount,
+        note: null,
+      },
+    });
   }
 }
 
@@ -871,6 +946,7 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       status: true,
       paymentStatus: true,
       expiryDate: true,
+      koNotes: true,
       commission: { select: { expected: true } },
       supplier: { select: { name: true } },
       statusHistory: {
@@ -953,7 +1029,40 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
       continue;
     }
     if (!isRecurringMonthly(contract.recurrence)) continue;
-    if (contract.status === "ANNULLATO" || contract.status === "KO") continue;
+    if (contract.status === "ANNULLATO" || contract.status === "KO") {
+      const keep = preservedMonthlySwitchPeriod({
+        status: contract.status,
+        recurrence: contract.recurrence,
+        koNotes: contract.koNotes,
+        window,
+        lastGenerated: lastGeneratedPeriod(
+          window,
+          nowDate,
+          recurringGenerationLagMonths(contract.supplier?.name),
+        ),
+      });
+      if (keep) {
+        const row = contract.recurringMonths.find((month) => month.period === keep);
+        const plan = preservedSwitchMonthPlan(row, keep, now);
+        const amount = Number(contract.commission?.expected ?? 0) || null;
+        if (plan.kind === "create") {
+          creates.push({
+            contractId: contract.id,
+            period: keep,
+            status: plan.status,
+            amount,
+          });
+        } else if (plan.kind === "reopen" && row) {
+          updates.push({
+            id: row.id,
+            status: plan.status,
+            amount: amount ?? (row.amount == null ? null : Number(row.amount)),
+            clearAutoClosure: true,
+          });
+        }
+      }
+      continue;
+    }
 
     const periodsDue = monthlyPeriodsDueForContract({
       supplierName: contract.supplier?.name,

@@ -10,7 +10,19 @@ import {
   isHeliosFirstMonthVisibleOperation,
   monthlyPeriodsDueForContract,
 } from "../src/lib/helios-contract-rules";
-import { recurringWindow } from "../src/lib/recurring-window";
+import {
+  preservedMonthlySwitchPeriod,
+  preservedSwitchMonthPlan,
+  recurringWindow,
+} from "../src/lib/recurring-window";
+import {
+  buildProvvigioniContractWhere,
+  provvigioneStatoWhere,
+} from "../src/lib/provvigioni-filters";
+import {
+  expandContractsToProvvigioneRows,
+  type ContractForProvvigioneRow,
+} from "../src/lib/provvigioni-rows";
 import { findEarlyMonthlyRows } from "../src/lib/provvigioni-integrity";
 
 let failures = 0;
@@ -233,6 +245,199 @@ console.log("\n• Integrity: prima competenza eccezione non è «early»");
       supplyStartPeriod: "2026-09",
     }),
     true,
+  );
+}
+
+console.log("\n• Switch 1 ottobre: ultimo mese settembre resta");
+{
+  const window = recurringWindow(
+    {
+      insertionDate: new Date(2026, 0, 1),
+      supplyStartDate: new Date(2026, 0, 1),
+      operationType: "SWITCH",
+      status: "KO",
+      expiryDate: new Date(2026, 8, 30),
+    },
+    now,
+  );
+  const note = "KO: nuovo contratto stesso POD in fornitura dal 01/10/2026";
+  check("finestra fino a settembre", window.end, "2026-09");
+  check(
+    "periodo preservato",
+    preservedMonthlySwitchPeriod({
+      status: "KO",
+      recurrence: "M",
+      koNotes: note,
+      window,
+      lastGenerated: "2026-09",
+    }),
+    "2026-09",
+  );
+  check(
+    "KO vero senza nota switch non preserva",
+    preservedMonthlySwitchPeriod({
+      status: "KO",
+      recurrence: "M",
+      koNotes: "KO: pratica fallita",
+      window,
+      lastGenerated: "2026-09",
+    }),
+    null,
+  );
+  check(
+    "ANNULLATO non preserva",
+    preservedMonthlySwitchPeriod({
+      status: "ANNULLATO",
+      recurrence: "M",
+      koNotes: note,
+      window,
+      lastGenerated: "2026-09",
+    }),
+    null,
+  );
+  check(
+    "mese oltre il pagato non si anticipa",
+    preservedMonthlySwitchPeriod({
+      status: "KO",
+      recurrence: "M",
+      koNotes: note,
+      window: { start: "2026-01", end: "2026-10" },
+      lastGenerated: "2026-09",
+    }),
+    null,
+  );
+  check(
+    "rata assente: crea MISSING",
+    preservedSwitchMonthPlan(undefined, "2026-09", "2026-10"),
+    { kind: "create", status: "MISSING" },
+  );
+  check(
+    "CLOSED nudo: riapre",
+    preservedSwitchMonthPlan(
+      { status: "CLOSED", paidAt: null, settledPeriod: null, note: null },
+      "2026-09",
+      "2026-10",
+    ),
+    { kind: "reopen", status: "MISSING" },
+  );
+  check(
+    "PAID non torna indietro",
+    preservedSwitchMonthPlan(
+      { status: "PAID", paidAt: new Date(2026, 9, 1), settledPeriod: "2026-10", note: null },
+      "2026-09",
+      "2026-10",
+    ),
+    { kind: "keep" },
+  );
+  check(
+    "LIQUIDATED non torna indietro",
+    preservedSwitchMonthPlan(
+      { status: "LIQUIDATED", paidAt: new Date(2026, 8, 1), settledPeriod: "2026-09", note: null },
+      "2026-09",
+      "2026-10",
+    ),
+    { kind: "keep" },
+  );
+}
+
+console.log("\n• Lista: switch KO e liquidato con rata PAID restano in Incassato");
+{
+  const daIncassare = JSON.stringify(provvigioneStatoWhere("Da incassare"));
+  check("Da incassare esclude ancora BOZZA", daIncassare.includes("BOZZA"), true);
+  check("Da incassare cita ancora KO", daIncassare.includes("KO"), true);
+  const incassato = JSON.stringify(provvigioneStatoWhere("Incassato"));
+  check(
+    "Incassato include il contratto liquidato con rata PAID",
+    incassato.includes("PROVVIGIONE_LIQUIDATA"),
+    true,
+  );
+  check(
+    "Incassato include la nota switch",
+    incassato.includes("KO: nuovo contratto stesso POD"),
+    true,
+  );
+  const list = JSON.stringify(
+    buildProvvigioniContractWhere({
+      canViewAll: true,
+      sessionUserId: "u1",
+      stato: "Incassato",
+    }),
+  );
+  check(
+    "elenco senza filtro KO tiene lo switch",
+    list.includes("KO: nuovo contratto stesso POD"),
+    true,
+  );
+
+  const base: ContractForProvvigioneRow = {
+    id: "c-ko",
+    clientId: "cl1",
+    supplierId: "s1",
+    status: "KO",
+    paymentStatus: null,
+    recurrence: "M",
+    podPdr: "IT001E111",
+    pod: "IT001E111",
+    pdr: null,
+    collectionDate: null,
+    commissionConfirmed: true,
+    supplyStartDate: new Date(2026, 0, 1),
+    insertionDate: new Date(2026, 0, 1),
+    createdAt: new Date(2026, 0, 1),
+    expiryDate: new Date(2026, 8, 30),
+    durationMonths: null,
+    stornoEndDate: null,
+    operationType: "SWITCH",
+    collaboratorId: "u1",
+    notes: null,
+    agency: null,
+    client: {
+      type: "PRIVATO",
+      companyName: null,
+      firstName: "Mario",
+      lastName: "Rossi",
+    },
+    collaborator: { id: "u1", name: "Collab" },
+    supplier: { id: "s1", name: "Helios", stornoMonths: 0 },
+    commission: {
+      id: "cm1",
+      expected: 4,
+      received: null,
+      paid: null,
+      stornoDate: null,
+      stornoAmount: null,
+    },
+    recurringMonths: [
+      { period: "2026-09", status: "PAID", amount: 4, settledPeriod: "2026-10" },
+    ],
+  };
+  const koRows = expandContractsToProvvigioneRows([base], {
+    expandMode: null,
+    statoFilter: "Incassato",
+    effectiveCompetence: "2026-09",
+    now,
+    latestMap: new Map([["c-ko", true]]),
+    earlyMap: new Map([["c-ko", false]]),
+  });
+  check("KO switch con rata PAID resta in Incassato", koRows.length, 1);
+  check("stato riga = Incassato da liquidare", koRows[0]?.stato, "Incassato da liquidare");
+
+  const liquidatedRows = expandContractsToProvvigioneRows(
+    [{ ...base, id: "c-liq", status: "PROVVIGIONE_LIQUIDATA" }],
+    {
+      expandMode: null,
+      statoFilter: "Incassato",
+      effectiveCompetence: "2026-09",
+      now,
+      latestMap: new Map([["c-liq", true]]),
+      earlyMap: new Map([["c-liq", false]]),
+    },
+  );
+  check("contratto liquidato con rata PAID resta in Incassato", liquidatedRows.length, 1);
+  check(
+    "stato riga liquidato+PAID",
+    liquidatedRows[0]?.stato,
+    "Incassato da liquidare",
   );
 }
 

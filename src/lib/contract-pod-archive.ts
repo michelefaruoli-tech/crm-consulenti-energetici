@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { recurringMonthlyWhereOr } from "@/lib/provvigioni-filters";
+import {
+  MONTHLY_SWITCH_KO_NOTE_PREFIX,
+  recurringMonthlyWhereOr,
+} from "@/lib/provvigioni-filters";
 import { isRecurringMonthly } from "@/lib/recurring";
 import { syncRecurringMonthsForContract } from "@/lib/recurring-sync";
 import { normalizePodKey, computeStornoEndDate } from "@/lib/storno-status";
@@ -147,7 +150,7 @@ export function keepMonthlyRecurringUntilNewSupply(opts: {
 }
 
 function supersedeNote(supply: Date): string {
-  return `KO: nuovo contratto stesso POD in fornitura dal ${formatItDate(supply)}`;
+  return `${MONTHLY_SWITCH_KO_NOTE_PREFIX} in fornitura dal ${formatItDate(supply)}`;
 }
 
 /**
