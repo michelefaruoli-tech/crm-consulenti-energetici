@@ -150,6 +150,7 @@ function recurring(opts: {
     contractId: `k-${opts.number}`,
     period: opts.period,
     settledPeriod: opts.period,
+    status: "PAID",
     amount: opts.amount,
     paidAt: new Date(Date.UTC(2026, 8, 1)),
     contractNumber: opts.number,

@@ -6,6 +6,7 @@
  */
 import {
   buildReportRecurringWhere,
+  reportIncassoMonthWhere,
   reportRecurringHeliosLagWhere,
 } from "../src/lib/report-recurring";
 import {
@@ -43,7 +44,7 @@ console.log("\n• Rate Da incassare: nessun filtro periodo (mese Report ≠ com
   );
 }
 
-console.log("\n• Rate Incassato: periodo competenza ancora applicato");
+console.log("\n• Rate Incassato: mese di incasso (pagamento, altrimenti competenza)");
 {
   const where = buildReportRecurringWhere({
     from: "2026-09-01",
@@ -53,9 +54,14 @@ console.log("\n• Rate Incassato: periodo competenza ancora applicato");
     competenceOnly: true,
     visibility: {},
   });
+  const incasso = JSON.stringify(reportIncassoMonthWhere(["2026-09"]));
+  const serialized = JSON.stringify(where);
+  check("PAID", serialized.includes('"status":"PAID"'), true);
+  check("stessa clausola incasso di Provvigioni", serialized.includes(incasso.slice(1, -1)), true);
   check(
-    "PAID nel mese",
-    JSON.stringify(where).includes('"period":{"in":["2026-09"]}'),
+    "settembre pagato a ottobre non sta anche in settembre",
+    incasso.includes('"settledPeriod":{"in":["2026-09"]}') &&
+      incasso.includes('"settledPeriod":null'),
     true,
   );
 }
@@ -111,6 +117,7 @@ console.log("\n• Caso 60+4: una tantum + rata 4 € (simulazione totali Report
         contractId: "c-helios",
         period: "2026-07",
         settledPeriod: null,
+        status: "PAID",
         amount: 4,
         paidAt: null,
         contractNumber: "M-4",
