@@ -61,6 +61,7 @@ import {
   buildColumnFilterWhere,
   columnFiltersToQuery,
   parseProvvigioniColumnFilters,
+  provvigioniPageQuery,
 } from "@/lib/provvigioni-column-filters";
 import { loadProvvigioniFilterContext } from "@/lib/provvigioni-query";
 import {
@@ -584,6 +585,7 @@ export default async function ProvvigioniPage({
       ? loadVisibleCollaboratorOptions(session)
       : Promise.resolve([]),
     prisma.supplier.findMany({
+      where: { NOT: { name: { startsWith: "_archivio_" } } },
       select: { name: true, active: true },
       orderBy: { name: "asc" },
     }),
@@ -935,21 +937,24 @@ export default async function ProvvigioniPage({
       })
     : null;
   const roleLabel = ROLE_LABELS[session.role as AppRole] ?? session.role;
-  const queryBase = {
-    collab: collabFilter,
-    settled: settledPeriod,
-    supplier,
-    stato,
-    tipologia,
-    q,
-    vista: vistaTab === "tutti" ? undefined : vistaTab,
-    focus,
-    storno: stornoParam,
-    competence: competenceQueryValue,
-    sort: sortByClient ? "client" : undefined,
-    dir: sortByClient ? sortDir : undefined,
-    ...(includeArchivedAnnual ? { archiviate: "1" } : {}),
-  };
+  const queryBase = provvigioniPageQuery(
+    {
+      collab: collabFilter,
+      settled: settledPeriod,
+      supplier,
+      stato,
+      tipologia,
+      q,
+      vista: vistaTab === "tutti" ? undefined : vistaTab,
+      focus,
+      storno: stornoParam,
+      competence: competenceQueryValue,
+      sort: sortByClient ? "client" : undefined,
+      dir: sortByClient ? sortDir : undefined,
+      ...(includeArchivedAnnual ? { archiviate: "1" } : {}),
+    },
+    columnFilters,
+  );
   const anomalieHref = `/provvigioni?${new URLSearchParams({
     settled: settledPeriod,
     ...(collabFilter ? { collab: collabFilter } : {}),

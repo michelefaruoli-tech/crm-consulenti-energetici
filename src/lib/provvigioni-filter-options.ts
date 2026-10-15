@@ -25,6 +25,7 @@ import {
 import { rateStatusesForStatoFilter } from "@/lib/provvigioni-rows";
 import { expectedPayablePeriod } from "@/lib/provvigioni-operative";
 import { toPeriod } from "@/lib/recurring";
+import { omitArchivioFilterOptions } from "@/lib/supplier-names";
 
 const MAX_OPTIONS = 400;
 /** Tetto di sicurezza sulle scansioni per i valori derivati (gettone di listino). */
@@ -43,7 +44,7 @@ function sortValues(values: Set<string>, numeric: boolean): string[] {
     if (numeric) return Number(a) - Number(b);
     return a.localeCompare(b, "it", { numeric: true });
   });
-  return list.slice(0, MAX_OPTIONS);
+  return omitArchivioFilterOptions(list).slice(0, MAX_OPTIONS);
 }
 
 export type ProvvigioniFilterOptions = {

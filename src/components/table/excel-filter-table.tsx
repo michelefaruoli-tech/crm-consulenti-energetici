@@ -110,6 +110,11 @@ type Props = {
    */
   filterOptionsOverride?: Record<string, string[]>;
   /**
+   * Nasconde una voce dal menu filtro (Cerca / Tutti / Nessuno).
+   * Non tocca le righe in tabella: solo l’elenco delle opzioni.
+   */
+  omitFilterOption?: (value: string) => boolean;
+  /**
    * Modalità bozza: le modifiche restano locali (onCellDraft) finché non salvi.
    * Gli input sono controllati via getDraftValue.
    */
@@ -138,6 +143,7 @@ export function ExcelFilterTable({
   resetKey,
   serverColumnFilter,
   filterOptionsOverride,
+  omitFilterOption,
   draftMode = false,
   getDraftValue,
   isDraftDirty,
@@ -292,28 +298,30 @@ export function ExcelFilterTable({
   }, [openFilter, multiSelectServerKeys, serverColumnFilter?.activeValues]);
 
   const optionsByColumn = useMemo(() => {
+    const visible = (value: string) =>
+      omitFilterOption ? !omitFilterOption(value) : true;
     const map: Record<string, string[]> = {};
     for (const col of columns) {
       const remote = remoteOptions[col.key];
       if (remote && remote.length > 0) {
-        map[col.key] = remote;
+        map[col.key] = remote.filter(visible);
         continue;
       }
       if (filterOptionsOverride?.[col.key]?.length) {
-        map[col.key] = [...filterOptionsOverride[col.key]].sort((a, b) =>
-          a.localeCompare(b, "it"),
-        );
+        map[col.key] = filterOptionsOverride[col.key]
+          .filter(visible)
+          .sort((a, b) => a.localeCompare(b, "it"));
         continue;
       }
       const set = new Set<string>();
       for (const row of rows) {
         const v = col.getValue(row) || "(vuoto)";
-        set.add(v);
+        if (visible(v)) set.add(v);
       }
       map[col.key] = [...set].sort((a, b) => a.localeCompare(b, "it"));
     }
     return map;
-  }, [rows, columns, filterOptionsOverride, remoteOptions]);
+  }, [rows, columns, filterOptionsOverride, remoteOptions, omitFilterOption]);
 
   function sortValue(col: FilterColumn, row: Record<string, unknown>): string | number {
     const raw = col.getValue(row) || "";
