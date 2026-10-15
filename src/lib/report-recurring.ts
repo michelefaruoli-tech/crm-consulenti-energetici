@@ -1,7 +1,8 @@
 /**
- * Rate ricorrenti (RecurringMonth PAID) da includere nei Report.
- * Il Report contratti usa solo Commission; le rate mensili Helios (€4/€6)
- * vivono in RecurringMonth e vanno sommate a parte.
+ * Rate ricorrenti da includere nel Report.
+ * Il mese del Report è la colonna Incasso di Provvigioni:
+ * `settledPeriod` se il fornitore ha già pagato, altrimenti la competenza.
+ * L’importo è quello della rata (se > 0), altrimenti il gettone del contratto.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import {
@@ -9,19 +10,22 @@ import {
   heliosLastPayableCompetence,
 } from "@/lib/helios-contract-rules";
 import { prisma } from "@/lib/prisma";
+import { effectiveGettone } from "@/lib/provvigioni-stato";
+import { provvigioneStatoWhere } from "@/lib/provvigioni-filters";
+import { loadArchivedAnnualLiquidatedRateIds } from "@/lib/provvigioni-rows";
 import {
   parseFilterList,
   resolveReportPeriod,
   resolveReportStati,
 } from "@/lib/report-filters";
 import { REPORT_MONTH_LABELS } from "@/lib/report-month";
+import { notAnnualNextHiddenWhere } from "@/lib/recurring";
 
 const RECURRING_UNPAID_STATUSES = [
   "MISSING",
   "PENDING",
   "ERROR_UNPAID",
 ] as const;
-const RECURRING_PAID_STATUSES = ["PAID", "LIQUIDATED"] as const;
 
 /** Stesso gating Helios M+2 di `expandedRateWhere` in provvigioni-rows. */
 export function reportRecurringHeliosLagWhere(
@@ -78,8 +82,24 @@ function recurringStatusGroups(stato?: string | null): {
 }
 
 /**
- * Rate «Da incassare» non hanno mese di incasso: nessun filtro periodo
- * (allineato a Provvigioni «tutti i periodi»). Incassato/Pagato restano sul periodo.
+ * Stessa regola della colonna Incasso in Provvigioni.
+ * Una rata sta in un solo mese: il pagamento (`settledPeriod`) se c’è,
+ * altrimenti la competenza (`period`). Non entra sia a settembre sia a ottobre.
+ */
+export function reportIncassoMonthWhere(
+  periods: string[],
+): Prisma.RecurringMonthWhereInput {
+  return {
+    OR: [
+      { settledPeriod: { in: periods } },
+      { AND: [{ settledPeriod: null }, { period: { in: periods } }] },
+    ],
+  };
+}
+
+/**
+ * Rate «Da incassare» non hanno mese di incasso: nessun filtro periodo.
+ * Incassato / Pagato usano il mese di incasso (non la sola competenza).
  */
 export function buildReportRecurringWhere(params: {
   from?: string | null;
@@ -119,23 +139,44 @@ export function buildReportRecurringWhere(params: {
   ];
 
   const heliosLag = reportRecurringHeliosLagWhere(params.now ?? new Date());
-  const periodWhere: Prisma.RecurringMonthWhereInput = params.competenceOnly
-    ? { period: { in: periods } }
-    : {
-        OR: [
-          { period: { in: periods } },
-          { settledPeriod: { in: periods } },
-        ],
-      };
+  const incassoWhere = reportIncassoMonthWhere(periods);
 
   const branches: Prisma.RecurringMonthWhereInput[] = [];
 
-  if (paid.length > 0 && periods.length > 0) {
+  /**
+   * Incassato = rate PAID, Pagato = rate LIQUIDATED.
+   * Il contratto deve passare lo stesso stato di Provvigioni, così un KO
+   * storico con rata pagata non entra nel Report.
+   */
+  if (paid.includes("PAID") && periods.length > 0) {
+    const statoWhere = provvigioneStatoWhere("Incassato");
     branches.push({
       AND: [
-        { status: { in: paid } },
-        periodWhere,
-        { contract: { AND: contractAnd } },
+        { status: "PAID" },
+        incassoWhere,
+        heliosLag,
+        notAnnualNextHiddenWhere,
+        {
+          contract: {
+            AND: [...contractAnd, ...(statoWhere ? [statoWhere] : [])],
+          },
+        },
+      ],
+    });
+  }
+  if (paid.includes("LIQUIDATED") && periods.length > 0) {
+    const statoWhere = provvigioneStatoWhere("Pagato");
+    branches.push({
+      AND: [
+        { status: "LIQUIDATED" },
+        incassoWhere,
+        heliosLag,
+        notAnnualNextHiddenWhere,
+        {
+          contract: {
+            AND: [...contractAnd, ...(statoWhere ? [statoWhere] : [])],
+          },
+        },
       ],
     });
   }
@@ -160,6 +201,8 @@ export type ReportRecurringRow = {
   contractId: string;
   period: string;
   settledPeriod: string | null;
+  /** PAID = incassato da liquidare, LIQUIDATED = già liquidato. */
+  status: string;
   amount: number;
   paidAt: Date | null;
   contractNumber: string;
@@ -220,7 +263,9 @@ export function groupReportRecurringByContract(
   return [...map.values()]
     .map((group) => {
       const first = group[0]!;
-      const periods = [...new Set(group.map((g) => g.period))].sort();
+      const periods = [
+        ...new Set(group.map((g) => g.settledPeriod || g.period)),
+      ].sort();
       return {
         contractId: first.contractId,
         contractNumber: first.contractNumber,
@@ -271,12 +316,9 @@ function periodsInRange(from: string, to: string, month?: string | null): string
 }
 
 /**
- * Rate ricorrenti nel periodo Report:
- * - competenza (`period`) nel range, oppure
- * - mese bonifico (`settledPeriod`) nel range
- *
- * Così «ricorrenti giugno» entrano sia se giugno è la competenza
- * sia se giugno è il mese del rendiconto.
+ * Rate del mese di incasso del Report (stessa colonna di Provvigioni).
+ * Incassato = PAID, Pagato = LIQUIDATED. Le annuali liquidate già in
+ * archivio (tutte tranne l’ultima) restano fuori, come in elenco.
  */
 export async function loadReportRecurringPaid(params: {
   from?: string | null;
@@ -286,8 +328,8 @@ export async function loadReportRecurringPaid(params: {
   supplierId?: string | null;
   visibility: Prisma.ContractWhereInput;
   /**
-   * Report «Incassato»: usa solo il mese competenza (`period`).
-   * Evita rate vecchie (es. 2025-05) incluse solo perché il bonifico è a luglio.
+   * Conservato per i chiamanti esistenti. Le rate Incassato/Pagato usano
+   * sempre il mese di incasso (pagamento se c’è, altrimenti competenza).
    */
   competenceOnly?: boolean;
   /** Stato report: Incassato → PAID, Pagato → LIQUIDATED */
@@ -298,8 +340,40 @@ export async function loadReportRecurringPaid(params: {
   const recurringWhere = buildReportRecurringWhere(params);
   if (!recurringWhere) return [];
 
+  const { paid } = recurringStatusGroups(params.stato);
+  let where: Prisma.RecurringMonthWhereInput = recurringWhere;
+  if (paid.includes("LIQUIDATED")) {
+    const collabIds = parseFilterList(params.collaboratorId);
+    const supplierIds = parseFilterList(params.supplierId);
+    const archived = await loadArchivedAnnualLiquidatedRateIds({
+      AND: [
+        params.visibility,
+        { deletedAt: null },
+        { isHistorical: false },
+        ...(collabIds.length === 1
+          ? [{ collaboratorId: collabIds[0]! }]
+          : collabIds.length > 1
+            ? [{ collaboratorId: { in: collabIds } }]
+            : []),
+        ...(supplierIds.length === 1
+          ? [{ supplierId: supplierIds[0]! }]
+          : supplierIds.length > 1
+            ? [{ supplierId: { in: supplierIds } }]
+            : []),
+      ],
+    });
+    if (archived.length > 0) {
+      const CHUNK = 8000;
+      const excluded: Prisma.RecurringMonthWhereInput[] = [];
+      for (let i = 0; i < archived.length; i += CHUNK) {
+        excluded.push({ id: { notIn: archived.slice(i, i + CHUNK) } });
+      }
+      where = { AND: [recurringWhere, ...excluded] };
+    }
+  }
+
   const rows = await prisma.recurringMonth.findMany({
-    where: recurringWhere,
+    where,
     include: {
       contract: {
         select: {
@@ -311,6 +385,7 @@ export async function loadReportRecurringPaid(params: {
           collaboratorId: true,
           collaborator: { select: { name: true } },
           supplier: { select: { name: true } },
+          commission: { select: { expected: true } },
           client: {
             select: {
               type: true,
@@ -332,12 +407,22 @@ export async function loadReportRecurringPaid(params: {
       c.type === "AZIENDA"
         ? c.companyName?.trim() || "—"
         : [c.lastName, c.firstName].filter(Boolean).join(" ").trim() || "—";
+    const rateAmount = m.amount == null ? 0 : Number(m.amount);
+    const amount =
+      rateAmount > 0
+        ? rateAmount
+        : effectiveGettone({
+            expected: Number(m.contract.commission?.expected ?? 0),
+            clientType: c.type,
+            supplierName: m.contract.supplier.name,
+          });
     return {
       id: m.id,
       contractId: m.contract.id,
       period: m.period,
       settledPeriod: m.settledPeriod,
-      amount: Number(m.amount ?? 0),
+      status: m.status,
+      amount,
       paidAt: m.paidAt,
       contractNumber: m.contract.contractNumber,
       podPdr: (m.contract.podPdr || m.contract.pod || m.contract.pdr || "").trim(),
@@ -358,4 +443,11 @@ export function sumReportRecurring(rows: ReportRecurringRow[]): {
     count: rows.length,
     amount: rows.reduce((s, r) => s + r.amount, 0),
   };
+}
+
+/** Quota delle rate già liquidata al collaboratore (stato LIQUIDATED). */
+export function sumReportRecurringLiquidato(rows: ReportRecurringRow[]): number {
+  return rows
+    .filter((r) => r.status === "LIQUIDATED")
+    .reduce((s, r) => s + r.amount, 0);
 }

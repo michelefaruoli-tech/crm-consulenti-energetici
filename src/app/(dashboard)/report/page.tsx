@@ -18,6 +18,7 @@ import { isRecurringAnnual, isRecurringMonthly } from "@/lib/recurring";
 import {
   loadReportRecurringPaid,
   sumReportRecurring,
+  sumReportRecurringLiquidato,
 } from "@/lib/report-recurring";
 import {
   loadReportStornos,
@@ -230,15 +231,30 @@ export default async function ReportPage({
           }),
         0,
       );
-  const totalPaid = onlyStornato
+  const liquidatoRates = includeRecurring
+    ? sumReportRecurringLiquidato(recurringRows)
+    : 0;
+  const liquidatoOneShot = onlyStornato
     ? 0
     : oneShot.reduce(
-        (s, c) => s + Number(c.commission?.paid ?? 0),
+        (s, c) =>
+          s +
+          (c.status === "PROVVIGIONE_LIQUIDATA"
+            ? reportIncassatoAmount(c.commission, {
+                clientType: c.client.type,
+                supplierName: c.supplier.name,
+              })
+            : 0),
         0,
       );
+  const totalPaid = liquidatoOneShot + liquidatoRates;
+  const recurringAmount = includeRecurring ? recurringTotals.amount : 0;
+  const unaTantumDaLiquidare = totalReceivedOneShot - liquidatoOneShot;
+  const incassatoDaLiquidare =
+    unaTantumDaLiquidare + (recurringAmount - liquidatoRates);
   const totalReceived =
     totalReceivedOneShot +
-    (includeRecurring ? recurringTotals.amount : 0) +
+    recurringAmount +
     (includeStornos ? stornoTotals.amount : 0);
 
   const monthMap = new Map<string, { count: number; received: number; expected: number }>();
@@ -306,11 +322,12 @@ export default async function ReportPage({
       };
       cur.count += 1;
       cur.expected += Number(c.commission?.expected ?? 0);
-      cur.received += reportIncassatoAmount(c.commission, {
+      const incassato = reportIncassatoAmount(c.commission, {
         clientType: c.client.type,
         supplierName: c.supplier.name,
       });
-      cur.paid += Number(c.commission?.paid ?? 0);
+      cur.received += incassato;
+      if (c.status === "PROVVIGIONE_LIQUIDATA") cur.paid += incassato;
       byCollab.set(id, cur);
     }
   }
@@ -327,6 +344,7 @@ export default async function ReportPage({
       };
       cur.recurring += r.amount;
       cur.received += r.amount;
+      if (r.status === "LIQUIDATED") cur.paid += r.amount;
       cur.count += 1;
       byCollab.set(r.collaboratorId, cur);
     }
@@ -371,10 +389,11 @@ export default async function ReportPage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
-          Il mese segue la colonna <strong>Incasso</strong> di Provvigioni (es. 06/2026 →
-          Giugno). Con filtro <strong>Stornato</strong> vedi solo i clawback negativi
-          (gettone già pagato in passato); poi in Provvigioni puoi passare a KO/Cessato
-          e archiviare.
+          Il mese è la colonna <strong>Incasso</strong> di Provvigioni, sugli stessi
+          filtri. Per le rate vale il mese di pagamento se c’è, altrimenti la
+          competenza. Con filtro <strong>Stornato</strong> vedi solo i clawback
+          negativi (gettone già pagato in passato); poi in Provvigioni puoi passare
+          a KO/Cessato e archiviare.
         </p>
       </div>
 
@@ -482,8 +501,12 @@ export default async function ReportPage({
           <p className="mt-2 text-3xl font-bold">{totalContracts}</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Gettone previsto (una tantum)</p>
-          <p className="mt-2 text-3xl font-bold">{formatCurrency(totalExpected)}</p>
+          <p className="text-sm text-slate-500">Gettone una tantum</p>
+          <p className="mt-2 text-3xl font-bold">{formatCurrency(totalReceivedOneShot)}</p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            {formatCurrency(unaTantumDaLiquidare)} ancora da liquidare +{" "}
+            {formatCurrency(liquidatoOneShot)} già liquidati
+          </p>
         </div>
         <div className="rounded-xl border border-violet-200 bg-violet-50 p-5 shadow-sm">
           <p className="text-sm text-violet-700">Rate ricorrenti pagate</p>
@@ -513,15 +536,18 @@ export default async function ReportPage({
             {formatCurrency(totalReceived)}
           </p>
           <p className="mt-1 text-[11px] text-emerald-800">
-            una tantum {formatCurrency(totalReceivedOneShot)} + ricorrenti{" "}
-            {formatCurrency(includeRecurring ? recurringTotals.amount : 0)}{" "}
-            + storni {formatCurrency(includeStornos ? stornoTotals.amount : 0)}
+            {formatCurrency(incassatoDaLiquidare)} incassato da liquidare +{" "}
+            {formatCurrency(totalPaid)} liquidato + storni{" "}
+            {formatCurrency(includeStornos ? stornoTotals.amount : 0)}
           </p>
         </div>
         <div className="rounded-xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
           <p className="text-sm text-sky-700">Già liquidato ai collab.</p>
           <p className="mt-2 text-3xl font-bold text-sky-900">
             {formatCurrency(totalPaid)}
+          </p>
+          <p className="mt-1 text-[11px] text-sky-800">
+            Quota Liquidato di Provvigioni, stesso mese di incasso.
           </p>
         </div>
       </div>

@@ -162,8 +162,9 @@ export function reportPeriodUsesCollectionDate(stato: string): boolean {
 }
 
 /**
- * Rate ricorrenti nel Report «Incassato» / «Pagato»: filtra solo per mese competenza,
- * non per mese bonifico (`settledPeriod`), così luglio non include rate 2025-05/06.
+ * Le rate Incassato/Pagato del Report usano il mese di incasso
+ * (`settledPeriod` se presente, altrimenti competenza). Il flag resta
+ * per i chiamanti; il filtro periodo non dipende più da questo booleano.
  */
 export function reportRecurringCompetenceOnly(stato: string): boolean {
   const stati = resolveReportStati(stato);
