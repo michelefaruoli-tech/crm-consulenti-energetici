@@ -134,13 +134,20 @@ function expandedUnitWhere(
     { recurrenceKind: "R" },
     ...(archiveUnitClause ? [archiveUnitClause] : []),
   ];
+  /**
+   * Annuali in Incassato: solo «orfani» con collectionDate e senza rate PAID.
+   * Se c’è già una rata PAID, l’importo passa dalle rate (come il Report):
+   * altrimenti unità+rata doppio conteggio (es. Sinergy MORETTI 70+70).
+   */
   const annual: Prisma.ContractWhereInput =
     expandMode === "da-incassare"
       ? { AND: [...annualBase, { collectionDate: null }] }
       : expandMode === "incassato"
-        ? {
-            AND: [...annualBase, { collectionDate: { not: null } }],
-          }
+        ? withoutMatchingRates(
+            { AND: [...annualBase, { collectionDate: { not: null } }] },
+            rateStatuses,
+            rateExtra,
+          )
         : { AND: annualBase };
   const unitOrs: Prisma.ContractWhereInput[] = [ut, annual];
   if (expandMode === "da-incassare" || expandMode === "all") {
