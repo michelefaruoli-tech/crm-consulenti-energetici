@@ -485,3 +485,52 @@ export async function updateUserRoleAction(
     return { error: msg.slice(0, 200) };
   }
 }
+
+/**
+ * Aggiorna il nominativo visualizzato (User.name) — Admin / Master.
+ * Non espone né modifica password. Dopo il rename i filtri Provvigioni/Report
+ * leggono il nuovo nome dal join su collaboratore.
+ */
+export async function updateUserNameAction(
+  formData: FormData,
+): Promise<{ error?: string; ok?: boolean }> {
+  try {
+    const session = await requireSession();
+    if (!hasPermission(session.role, "users.manage")) {
+      return {
+        error: "Permesso negato: solo Amministratori possono cambiare il nominativo",
+      };
+    }
+
+    const userId = String(formData.get("userId") ?? "").trim();
+    const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
+    if (!userId) return { error: "Utente mancante" };
+    if (name.length < 2) return { error: "Nominativo troppo corto (min. 2 caratteri)" };
+    if (name.length > 80) return { error: "Nominativo troppo lungo (max. 80 caratteri)" };
+    if (/^\[Eliminato\]/i.test(name)) {
+      return { error: "Nominativo non valido" };
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active) return { error: "Utente non trovato" };
+
+    if (user.name === name) {
+      revalidatePath("/utenti");
+      return { ok: true };
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { name },
+    });
+
+    revalidatePath("/utenti");
+    revalidatePath("/provvigioni");
+    revalidatePath("/report");
+    return { ok: true };
+  } catch (e) {
+    console.error("[updateUserNameAction]", e);
+    const msg = e instanceof Error ? e.message : "Errore cambio nominativo";
+    return { error: msg.slice(0, 200) };
+  }
+}

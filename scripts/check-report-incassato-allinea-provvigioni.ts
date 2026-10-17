@@ -323,6 +323,62 @@ console.log("\n• Mese di incasso rate: settledPeriod, non doppio conteggio");
   );
 }
 
+console.log(
+  "\n• Caso Michele: annuale con rata PAID non si doppia (Sinergy 70, non 140)",
+);
+{
+  // Report: unità annuale saltata se già in recurringRows → solo 70.
+  // Provvigioni (dopo fix): stessi orfani senza rate PAID → solo 70.
+  const annualWithPaidRate: RendicontoIncassatoSource = {
+    contractNumber: "CTR-2026-UA0192-520",
+    collectionDate: new Date(Date.UTC(2026, 6, 1)),
+    insertionDate: new Date(Date.UTC(2025, 4, 1)),
+    status: "PROVVIGIONE_LIQUIDATA",
+    podPdr: "IT001E74476362",
+    pod: null,
+    pdr: null,
+    collaborator: { name: "Michele Faruoli" },
+    supplier: { name: "Sinergy" },
+    client: {
+      type: "AZIENDA",
+      companyName: "MORETTI MICHELE",
+      firstName: null,
+      lastName: null,
+    },
+    commission: { received: 70, expected: 70 },
+    recurrence: "Annuale",
+  };
+  const rateRow: ReportRecurringRow = {
+    id: "sinergy-paid",
+    contractId: "c-sinergy",
+    period: "2026-05",
+    settledPeriod: "2026-07",
+    status: "PAID",
+    amount: 70,
+    paidAt: null,
+    contractNumber: "CTR-2026-UA0192-520",
+    podPdr: "IT001E74476362",
+    collaboratorId: "michele",
+    collaboratorName: "Michele Faruoli",
+    supplierName: "Sinergy",
+    clientName: "MORETTI MICHELE",
+    clientType: "AZIENDA",
+  };
+  const r = buildRendiconto({
+    contracts: [annualWithPaidRate],
+    stornoRows: [] as ReportStornoRow[],
+    recurringRows: [rateRow],
+    skipRecurring: false,
+    onlyStornato: false,
+  });
+  check("solo rata 70 (niente unità+rata)", r.totNetto, 70);
+  check(
+    "allinea card corretta 70 (non 140)",
+    compareReportProvvigioniAmounts(r.totNetto, 70).ok,
+    true,
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check falliti`);
   process.exit(1);

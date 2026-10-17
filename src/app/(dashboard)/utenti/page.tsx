@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { roleDisplayLabel, ROLE_LABELS, type AppRole } from "@/lib/constants";
 import { EditUserRoleForm } from "@/components/utenti/edit-user-role-form";
+import { EditUserNameForm } from "@/components/utenti/edit-user-name-form";
 import { DeleteAllUsersButton } from "@/components/utenti/delete-all-users-button";
 import { AdminSetPasswordButton } from "@/components/utenti/admin-set-password-button";
 import { CreateUserForm } from "@/components/utenti/create-user-form";
@@ -202,10 +203,19 @@ export default async function UtentiPage({
             {users.map((user) => (
               <tr key={user.id} className="border-t border-slate-100 align-top">
                 <td className="px-4 py-3 font-medium">
-                  {user.name}
-                  {user.id === session.id ? (
-                    <span className="ml-2 text-xs text-emerald-700">(tu)</span>
-                  ) : null}
+                  <div className="space-y-1">
+                    <p>
+                      {user.name}
+                      {user.id === session.id ? (
+                        <span className="ml-2 text-xs text-emerald-700">(tu)</span>
+                      ) : null}
+                    </p>
+                    {isAdmin ? (
+                      <EditUserNameForm
+                        user={{ id: user.id, name: user.name }}
+                      />
+                    ) : null}
+                  </div>
                 </td>
                 <td className="px-4 py-3">{user.email}</td>
                 <td className="px-4 py-3">

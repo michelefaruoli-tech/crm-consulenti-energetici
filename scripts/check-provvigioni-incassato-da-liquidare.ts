@@ -2,6 +2,7 @@
  * P1.1 B2 — vista first-class «Incassato da liquidare».
  * Uso: npx tsx scripts/check-provvigioni-incassato-da-liquidare.ts
  */
+import { readFileSync } from "node:fs";
 import {
   buildProvvigioniListWhere,
   effectiveStatoForList,
@@ -130,6 +131,27 @@ check(
   JSON.stringify(whereFocusPlusStato) === JSON.stringify(whereStato),
   true,
 );
+
+console.log(
+  "\n• Annuali Incassato: niente doppio conteggio unità+rata PAID (Sinergy)",
+);
+{
+  const src = readFileSync("src/lib/provvigioni-rows.ts", "utf8");
+  const start = src.indexOf("Annuali in Incassato");
+  const end = src.indexOf("const unitOrs: Prisma.ContractWhereInput[]");
+  const annualBlock = src.slice(start, end);
+  check(
+    "incassato annual usa withoutMatchingRates",
+    annualBlock.includes("withoutMatchingRates") &&
+      annualBlock.includes('expandMode === "incassato"'),
+    true,
+  );
+  check(
+    "commento regola Sinergy presente",
+    annualBlock.includes("doppio conteggio") || annualBlock.includes("Sinergy"),
+    true,
+  );
+}
 
 if (failures > 0) {
   console.error(`\n❌ ${failures} verifiche B2 Incassato da liquidare fallite.`);
