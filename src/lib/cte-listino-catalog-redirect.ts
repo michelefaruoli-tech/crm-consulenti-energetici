@@ -19,9 +19,10 @@ export function listinoCatalogLanding(kind: CteListinoKind): ListinoCatalogLandi
         fornitore: "Duferco",
       };
     case "duferco-fix-family":
+      // Landing su gas fissi (CUN 4 / Sempre Zero XS ottobre 2026); luce resta nel listino.
       return {
         categoria: "RESIDENZIALE",
-        utility: "LUCE",
+        utility: "GAS",
         prezzo: "FISSO",
         fornitore: "Duferco",
       };

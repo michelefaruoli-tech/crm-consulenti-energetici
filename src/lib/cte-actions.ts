@@ -15,6 +15,7 @@ import {
   deactivateListinoOffersByName,
   upsertListinoOffers,
 } from "@/lib/cte-listino-shared";
+import { attachDufercoFixFamilyGasPdfs } from "@/lib/cte-duferco-fix-family-pdfs";
 import { SEV_IREN_OBSOLETE_OFFER_NAMES } from "@/lib/cte-sev-iren-listino";
 import { userCanManageCteOffer } from "@/lib/cte-scope";
 import { hasPermission } from "@/lib/permissions";
@@ -417,16 +418,21 @@ export async function importCteListinoAction(
     );
   }
 
+  let pdfAttached = 0;
+  if (kind === "duferco-fix-family") {
+    pdfAttached = await attachDufercoFixFamilyGasPdfs(prisma, usable);
+  }
+
   await writeAuditLog({
     userId: session.id,
     action: "IMPORT_CTE_LISTINO",
     entity: "CteOffer",
-    details: { source: pack.kind, ...result, deactivated },
+    details: { source: pack.kind, ...result, deactivated, pdfAttached },
   });
 
   await notifyCteStaff({
     title: `Import listino CTE — ${LISTINO_KIND_LABEL[kind]}`,
-    body: `+${result.created} create, ${result.updated} aggiornate${deactivated ? `, ${deactivated} disattivate` : ""} (da ${session.name})`,
+    body: `+${result.created} create, ${result.updated} aggiornate${deactivated ? `, ${deactivated} disattivate` : ""}${pdfAttached ? `, ${pdfAttached} PDF gas` : ""} (da ${session.name})`,
     excludeUserId: session.id,
   });
 
