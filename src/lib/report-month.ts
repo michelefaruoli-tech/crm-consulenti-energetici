@@ -36,9 +36,24 @@ export function formatMonthLabel(month: string): string {
   return `${REPORT_MONTH_LABELS[idx]} ${y}`;
 }
 
+/** Valore URL per «tutti i periodi» (stessa card Provvigioni senza mese). */
+export const REPORT_ALL_PERIODS = "all";
+
+export function isReportAllPeriods(
+  month?: string | null,
+): boolean {
+  if (!month?.trim()) return false;
+  return month
+    .split("|")
+    .map((p) => p.trim().toLowerCase())
+    .some((p) => p === REPORT_ALL_PERIODS || p === "tutti");
+}
+
 /** Ultimi N mesi (corrente incluso), dal più recente. */
 export function recentMonthOptions(count = 24): { value: string; label: string }[] {
-  const out: { value: string; label: string }[] = [];
+  const out: { value: string; label: string }[] = [
+    { value: REPORT_ALL_PERIODS, label: "Tutti i periodi" },
+  ];
   const now = new Date();
   for (let i = 0; i < count; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -63,6 +78,7 @@ function guessMonthFromRange(from: string, to: string): string | null {
 /** Mesi multipli da URL: `2026-05|2026-06` (separatore `|`). */
 export function parseMonthList(raw: string | null | undefined): string[] {
   if (!raw?.trim() || raw.trim() === "custom") return [];
+  if (isReportAllPeriods(raw)) return [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const part of raw.split("|")) {
@@ -84,11 +100,21 @@ export function formatMonthsLabel(months: string[]): string {
   return `${months.length} mesi (${formatMonthLabel(months[0]!)} … ${formatMonthLabel(months[months.length - 1]!)})`;
 }
 
+export type ReportPeriod = {
+  from: string;
+  to: string;
+  month: string | null;
+  months: string[];
+  /** True = stesso universo della card Provvigioni «tutti i periodi». */
+  allPeriods: boolean;
+};
+
 /**
  * Risolve from/to:
- * 1) se c'è `month` (anche più mesi con `|`) → unione di quei mesi
- * 2) altrimenti from/to passati (periodo personalizzato)
- * 3) altrimenti mese corrente
+ * 1) se `month=all` / `tutti` → tutti i periodi (niente filtro data)
+ * 2) se c'è `month` (anche più mesi con `|`) → unione di quei mesi
+ * 3) altrimenti from/to passati (periodo personalizzato)
+ * 4) altrimenti mese corrente
  *
  * Con più mesi: `from`/`to` = inizio del più vecchio → fine del più recente
  * (per Dal/Al); il filtro contratti usa l'unione dei mesi (anche non contigui).
@@ -97,7 +123,19 @@ export function resolveReportPeriod(params: {
   from?: string | null;
   to?: string | null;
   month?: string | null;
-}): { from: string; to: string; month: string | null; months: string[] } {
+}): ReportPeriod {
+  if (isReportAllPeriods(params.month)) {
+    const cur = currentMonthValue();
+    const range = monthToDateRange(cur)!;
+    return {
+      from: range.from,
+      to: range.to,
+      month: REPORT_ALL_PERIODS,
+      months: [],
+      allPeriods: true,
+    };
+  }
+
   const months = parseMonthList(params.month);
   if (months.length > 0) {
     const first = monthToDateRange(months[0]!);
@@ -108,6 +146,7 @@ export function resolveReportPeriod(params: {
         to: last.to,
         month: months.join("|"),
         months,
+        allPeriods: false,
       };
     }
   }
@@ -119,12 +158,13 @@ export function resolveReportPeriod(params: {
       to: params.to.trim(),
       month: guessed,
       months: guessed ? [guessed] : [],
+      allPeriods: false,
     };
   }
 
   const cur = currentMonthValue();
   const range = monthToDateRange(cur)!;
-  return { ...range, month: cur, months: [cur] };
+  return { ...range, month: cur, months: [cur], allPeriods: false };
 }
 
 /** Elenco mesi YYYY-MM da from/to (inclusi), se `months` del periodo è vuoto. */
@@ -148,12 +188,16 @@ export function monthsBetweenInclusive(fromYmd: string, toYmd: string): string[]
   return out;
 }
 
-/** Mesi ammessi per le righe Incassato del rendiconto. */
+/** Mesi ammessi per le righe Incassato del rendiconto.
+ * Lista vuota = nessun filtro mese (tutti i periodi), come la card Provvigioni.
+ */
 export function resolveIncassatoMonths(period: {
   from: string;
   to: string;
   months: string[];
+  allPeriods?: boolean;
 }): string[] {
+  if (period.allPeriods) return [];
   if (period.months.length > 0) return period.months;
   return monthsBetweenInclusive(period.from, period.to);
 }

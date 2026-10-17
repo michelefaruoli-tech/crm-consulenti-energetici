@@ -1,8 +1,7 @@
 /**
- * Allineamento totali «Da incassare» tra Report e Provvigioni.
+ * Allineamento totali tra Report e Provvigioni.
  * Provvigioni usa `sumExpandedAmountForStato` senza filtro competenza;
- * il Report deve includere le stesse rate PENDING/MISSING/ERROR_UNPAID
- * (nessun vincolo di mese) + stesso gettone UT.
+ * il Report con gli stessi filtri deve chiudere sulla stessa cifra.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { parseFilterList } from "@/lib/filter-list";
@@ -22,10 +21,10 @@ export type ReportProvvigioniAlignInput = {
   supplierIds?: string[];
 };
 
-/** Stesso importo della card «Da incassare» in Provvigioni (tutti i periodi). */
-export async function sumDaIncassareLikeProvvigioni(
+function listWhereForStato(
   input: ReportProvvigioniAlignInput,
-): Promise<number> {
+  stato: "Da incassare" | "Incassato",
+): Prisma.ContractWhereInput {
   const collabIds = parseFilterList(input.collaboratorId);
   const collab =
     collabIds.length > 0 ? collabIds.join("|") : undefined;
@@ -39,7 +38,7 @@ export async function sumDaIncassareLikeProvvigioni(
   };
 
   let where = buildProvvigioniListWhere({
-    filters: { ...baseFilters, stato: "Da incassare" },
+    filters: { ...baseFilters, stato },
     applyCompetenceToList: false,
   });
 
@@ -49,7 +48,14 @@ export async function sumDaIncassareLikeProvvigioni(
   } else if (supplierIds.length > 1) {
     where = { AND: [where, { supplierId: { in: supplierIds } }] };
   }
+  return where;
+}
 
+/** Stesso importo della card «Da incassare» in Provvigioni (tutti i periodi). */
+export async function sumDaIncassareLikeProvvigioni(
+  input: ReportProvvigioniAlignInput,
+): Promise<number> {
+  const where = listWhereForStato(input, "Da incassare");
   const expandMode = getRecurringExpandMode("Da incassare", true, undefined);
   return sumExpandedAmountForStato(
     where,
@@ -57,6 +63,15 @@ export async function sumDaIncassareLikeProvvigioni(
     null,
     "Da incassare",
   );
+}
+
+/** Stesso importo della card «Incassato da liquidare» (tutti i periodi). */
+export async function sumIncassatoLikeProvvigioni(
+  input: ReportProvvigioniAlignInput,
+): Promise<number> {
+  const where = listWhereForStato(input, "Incassato");
+  const expandMode = getRecurringExpandMode("Incassato", true, undefined);
+  return sumExpandedAmountForStato(where, expandMode, null, "Incassato");
 }
 
 export type TotalsAlignmentResult = {
@@ -67,7 +82,7 @@ export type TotalsAlignmentResult = {
 };
 
 /** Confronto Report vs Provvigioni: fallisce se i totali divergono. */
-export function compareReportProvvigioniDaIncassare(
+export function compareReportProvvigioniAmounts(
   reportAmount: number,
   provvigioniAmount: number,
   epsilon = 0.005,
@@ -75,4 +90,28 @@ export function compareReportProvvigioniDaIncassare(
   const diff = Math.round((reportAmount - provvigioniAmount) * 100) / 100;
   const ok = Math.abs(diff) <= epsilon;
   return { ok, reportAmount, provvigioniAmount, diff };
+}
+
+/** @deprecated usa compareReportProvvigioniAmounts */
+export function compareReportProvvigioniDaIncassare(
+  reportAmount: number,
+  provvigioniAmount: number,
+  epsilon = 0.005,
+): TotalsAlignmentResult {
+  return compareReportProvvigioniAmounts(
+    reportAmount,
+    provvigioniAmount,
+    epsilon,
+  );
+}
+
+/**
+ * Netto rendiconto atteso quando Report = Incassato|Stornato e stessi filtri
+ * della card: Incassato da liquidare − |storni| (storni già con segno −).
+ */
+export function expectedRendicontoNettoFromIncassatoCard(
+  incassatoDaLiquidare: number,
+  storniSigned: number,
+): number {
+  return Math.round((incassatoDaLiquidare + storniSigned) * 100) / 100;
 }
