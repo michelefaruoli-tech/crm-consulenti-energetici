@@ -178,8 +178,8 @@ export default async function CatalogoCtePage({
             {importato === "duferco-fix-family" ? (
               <>
                 {" "}
-                Fix Family residenziali (Sempre Zero XS/S/M, CUN 1/2). Flex Condomini resta listino
-                separato.
+                Fix Family: gas fissi (CUN 4, Sempre Zero XS · ottobre 2026) e luce (Sempre Zero
+                XS/S/M, CUN 1/2). Flex Condomini resta listino separato.
               </>
             ) : null}
           </p>

@@ -107,26 +107,53 @@ const irenRedirect = buildCatalogRedirectAfterListinoImport({
 assert(irenRedirect.includes("importato=iren"), "redirect iren");
 assert(irenRedirect.includes("fornitore=Iren"), "redirect iren fornitore");
 
-assert(DUFERCO_FIX_FAMILY_LISTINO.length === 5, "duferco fix family 5");
+assert(DUFERCO_FIX_FAMILY_LISTINO.length === 7, "duferco fix family 5 luce + 2 gas");
 assert(
   DUFERCO_FIX_FAMILY_LISTINO.every(
-    (o) =>
-      o.supplierName === "Duferco Energia" && o.category === "RESIDENZIALE" && o.utility === "LUCE",
+    (o) => o.supplierName === "Duferco Energia" && o.category === "RESIDENZIALE",
   ),
-  "duferco fix family residenziale luce",
+  "duferco fix family residenziale",
 );
-const xs = DUFERCO_FIX_FAMILY_LISTINO.find((o) => o.offerName.includes("SEMPRE ZERO XS"));
-assert(xs?.bands[0]?.energyPrice === 0.14531 && xs.ccvAnnual === 133.23, "xs mono/qcv");
+assert(
+  DUFERCO_FIX_FAMILY_LISTINO.filter((o) => o.utility === "LUCE").length === 5,
+  "duferco fix family 5 luce",
+);
+assert(
+  DUFERCO_FIX_FAMILY_LISTINO.filter((o) => o.utility === "GAS").length === 2,
+  "duferco fix family 2 gas",
+);
+const xs = DUFERCO_FIX_FAMILY_LISTINO.find(
+  (o) => o.offerName.includes("SEMPRE ZERO XS") && o.utility === "LUCE",
+);
+assert(xs?.bands[0]?.energyPrice === 0.14531 && xs.ccvAnnual === 133.23, "xs luce mono/qcv");
 const cun2 = DUFERCO_FIX_FAMILY_LISTINO.find((o) => o.offerName.includes("CUN 2"));
 assert(cun2?.bands[0]?.energyPrice === 0.12441 && cun2.ccvAnnual === 193.23, "cun2");
+const cun4Gas = DUFERCO_FIX_FAMILY_LISTINO.find(
+  (o) => o.offerName.includes("CUN 4") && o.utility === "GAS",
+);
+assert(
+  cun4Gas?.bands[0]?.energyPrice === 0.745 &&
+    cun4Gas.ccvAnnual === 156 &&
+    cun4Gas.annualConsumptionMax === 1500 &&
+    cun4Gas.validFrom === "2026-10-15" &&
+    cun4Gas.validTo === "2026-10-31",
+  "cun4 gas",
+);
+const xsGas = DUFERCO_FIX_FAMILY_LISTINO.find(
+  (o) => o.offerName.includes("SEMPRE ZERO XS") && o.utility === "GAS",
+);
+assert(xsGas?.bands[0]?.energyPrice === 0.739 && xsGas.ccvAnnual === 156, "xs gas");
+assert(/003450GSFML05XX00000010073831026/.test(cun4Gas?.notes ?? ""), "cun4 codice");
+assert(/003450GSFML05XX00000010073861026/.test(xsGas?.notes ?? ""), "xs gas codice");
 const dufercoRedirect = buildCatalogRedirectAfterListinoImport({
   kind: "duferco-fix-family",
-  created: 5,
+  created: 7,
   updated: 0,
   label: "Duferco Fix Family",
 });
 assert(dufercoRedirect.includes("importato=duferco-fix-family"), "redirect fix family");
 assert(dufercoRedirect.includes("categoria=RESIDENZIALE"), "redirect fix family residenziale");
+assert(dufercoRedirect.includes("utility=GAS"), "redirect fix family gas");
 
 assert(COMPARA_SEMPLICE_LISTINO.length === 15, "compara 15 energia");
 assert(
@@ -192,13 +219,37 @@ async function main(): Promise<void> {
     const buf = readFileSync(xsPdf);
     const hash = createHash("sha256").update(buf).digest("hex");
     const extracted = await extractCtePdfText(new Uint8Array(buf));
-    assert(isDufercoFixFamilyListinoText(extracted.text), "testo Fix Family riconosciuto");
+    assert(isDufercoFixFamilyListinoText(extracted.text), "testo Fix Family luce riconosciuto");
     const known = detectListinoFromPdf(hash, extracted.text);
-    assert(known?.offers.length === 5, "pdf Fix Family → 5");
-    console.log("pdf Duferco Fix Family: ok");
+    assert(known?.offers.length === 7, "pdf Fix Family luce → 7 (5 luce + 2 gas)");
+    console.log("pdf Duferco Fix Family luce: ok");
   } else {
-    console.log("pdf Duferco Fix Family assente, skip extract");
+    console.log("pdf Duferco Fix Family luce assente, skip extract");
   }
+
+  const cun4GasPdf = join(DUFERCO_FIX_DIR, "FIX_FAMILY_CUN_4_24_MESI.pdf");
+  if (existsSync(cun4GasPdf)) {
+    const buf = readFileSync(cun4GasPdf);
+    const hash = createHash("sha256").update(buf).digest("hex");
+    const extracted = await extractCtePdfText(new Uint8Array(buf));
+    assert(isDufercoFixFamilyListinoText(extracted.text), "testo Fix Family gas riconosciuto");
+    const known = detectListinoFromPdf(hash, extracted.text);
+    assert(known?.offers.length === 7, "pdf Fix Family gas → 7");
+    const gas = known?.offers.filter((o) => o.utility === "GAS") ?? [];
+    assert(gas.length === 2, "2 gas nel pack");
+    console.log("pdf Duferco Fix Family gas: ok");
+  } else {
+    console.log("pdf Duferco Fix Family gas assente, skip extract");
+  }
+
+  const publicGasPdf = join(
+    process.cwd(),
+    "public",
+    "cte",
+    "duferco-fix-family",
+    "FIX_FAMILY_CUN_4_24_MESI.pdf",
+  );
+  assert(existsSync(publicGasPdf), "PDF gas in public/cte/duferco-fix-family");
 
   const comparaPath = join(SAMPLES, "Offerta-commerciale-9.pdf");
   if (existsSync(comparaPath)) {
@@ -212,7 +263,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "check-cte-listini: ok (7 corporate + 19 SEV + 25 Iren + 5 Duferco Fix Family + 15 Compara)",
+    "check-cte-listini: ok (7 corporate + 19 SEV + 25 Iren + 7 Duferco Fix Family + 15 Compara)",
   );
 }
 
