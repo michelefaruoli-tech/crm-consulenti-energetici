@@ -45,9 +45,10 @@ export async function loadReportStornos(params: {
   const { dateFrom, dateTo } = reportDateRange(period.from, period.to);
   const months = period.months;
 
-  // Unione mesi (anche non contigui), altrimenti intervallo Dal/Al
-  const stornoDateWhere =
-    months.length > 1
+  // Tutti i periodi = nessun filtro data; unione mesi; altrimenti Dal/Al
+  const stornoDateWhere: Prisma.CommissionWhereInput = period.allPeriods
+    ? { stornoDate: { not: null } }
+    : months.length > 1
       ? {
           OR: months.map((m) => {
             const r = monthToDateRange(m)!;
@@ -68,7 +69,7 @@ export async function loadReportStornos(params: {
         AND: [
           params.visibility,
           { deletedAt: null },
-          { isHistorical: false },
+          // Stesso perimetro Provvigioni: anche contratti Storico.
           // Include anche status STORNATO (gettone già recuperato):
           // Uccellatori/Davanzo sparivano dal Report dopo il recupero.
           ...(collabIds.length === 1

@@ -379,8 +379,9 @@ export default async function ReportPage({
   qs.set("stato", stato);
   const exportBaseQuery = qs.toString();
 
-  const periodLabelText =
-    months.length > 0
+  const periodLabelText = period.allPeriods
+    ? "Tutti i periodi"
+    : months.length > 0
       ? formatMonthsLabel(months)
       : `${dateFrom.toLocaleDateString("it-IT")} – ${dateTo.toLocaleDateString("it-IT")}`;
 
@@ -390,10 +391,10 @@ export default async function ReportPage({
         <h1 className="text-2xl font-bold text-slate-900">Report</h1>
         <p className="text-slate-500">
           Il mese è la colonna <strong>Incasso</strong> di Provvigioni, sugli stessi
-          filtri. Per le rate vale il mese di pagamento se c’è, altrimenti la
-          competenza. Con filtro <strong>Stornato</strong> vedi solo i clawback
-          negativi (gettone già pagato in passato); poi in Provvigioni puoi passare
-          a KO/Cessato e archiviare.
+          filtri (anche contratti Storico ancora da liquidare). «Tutti i periodi»
+          coincide con la card Incassato da liquidare. Per le rate vale il mese di
+          pagamento se c’è, altrimenti la competenza. Con filtro{" "}
+          <strong>Stornato</strong> vedi solo i clawback negativi.
         </p>
       </div>
 

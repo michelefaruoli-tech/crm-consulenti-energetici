@@ -60,7 +60,9 @@ function isAllowedReportStato(raw: string): boolean {
 }
 
 export {
+  REPORT_ALL_PERIODS,
   REPORT_MONTH_LABELS,
+  isReportAllPeriods,
   monthToDateRange,
   formatMonthLabel,
   formatMonthsLabel,
@@ -234,13 +236,20 @@ function dateWhereForStato(
   return { insertionDate: { gte: dateFrom, lte: dateTo } };
 }
 
-/** Unione di mesi (anche non contigui: Maggio + Agosto senza Giugno). */
+/** Unione di mesi (anche non contigui: Maggio + Agosto senza Giugno).
+ * Con `allPeriods` nessun filtro data (come «Tutti i periodi» in Provvigioni).
+ */
 function dateWhereForStatoPeriod(
   stato: string,
   months: string[],
   fallbackFrom: Date,
   fallbackTo: Date,
+  allPeriods = false,
 ): Prisma.ContractWhereInput {
+  if (allPeriods) {
+    // Stesso comportamento di «Da incassare»: niente vincolo di mese.
+    return {};
+  }
   if (months.length <= 1) {
     if (months.length === 1) {
       const r = monthToDateRange(months[0]!);
@@ -269,10 +278,14 @@ export function buildReportContractWhere(
   const stati = resolveReportStati(params.stato);
   const months = period.months;
 
+  /**
+   * Stesso perimetro di Provvigioni: i contratti `isHistorical` restano
+   * (regola Michele — badge Storico). Non forzare `isHistorical: false`,
+   * altrimenti Incassato da liquidare in Provvigioni e Report divergono.
+   */
   const and: Prisma.ContractWhereInput[] = [
     visibility,
     { deletedAt: null },
-    { isHistorical: false },
   ];
 
   /**
@@ -291,7 +304,15 @@ export function buildReportContractWhere(
 
   if (effectiveStati.length === 1) {
     const s = effectiveStati[0]!;
-    and.push(dateWhereForStatoPeriod(s, months, dateFrom, dateTo));
+    and.push(
+      dateWhereForStatoPeriod(
+        s,
+        months,
+        dateFrom,
+        dateTo,
+        period.allPeriods,
+      ),
+    );
     const statoWhere = provvigioneStatoWhere(s);
     if (statoWhere) and.push(statoWhere);
   } else {
@@ -301,7 +322,13 @@ export function buildReportContractWhere(
       const statoWhere = provvigioneStatoWhere(s);
       ors.push({
         AND: [
-          dateWhereForStatoPeriod(s, months, dateFrom, dateTo),
+          dateWhereForStatoPeriod(
+            s,
+            months,
+            dateFrom,
+            dateTo,
+            period.allPeriods,
+          ),
           ...(statoWhere ? [statoWhere] : []),
         ],
       });
@@ -340,7 +367,7 @@ export function reportStatoHint(stato: string): string {
     case "Da incassare":
       return "Nessun periodo: compare sempre, in qualsiasi mese/intervallo scelto. Non ha ancora un incasso, quindi non ha un «mese di incasso» da filtrare — stesso comportamento di «Tutti i periodi» in Provvigioni.";
     case "Incassato":
-      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni. Incassato dal fornitore, ancora da liquidare al collaboratore. Gli storni non entrano qui: usa il filtro «Stornato».";
+      return "Periodo = colonna Incasso (MM/AAAA) in Provvigioni, oppure «Tutti i periodi» = stessa card Incassato da liquidare. Include anche i contratti Storico ancora da liquidare. Gli storni: filtro «Stornato».";
     case "Pagato":
       return "Periodo = data di incasso (stesso mese della colonna Incasso). Liquidato al collaboratore.";
     case "Stornato":

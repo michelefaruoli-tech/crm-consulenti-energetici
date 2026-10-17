@@ -93,8 +93,9 @@ export async function GET(req: NextRequest) {
     : [];
 
   const period = resolveReportPeriod({ from, to, month });
-  const periodLabelText =
-    period.months.length > 0
+  const periodLabelText = period.allPeriods
+    ? "Tutti i periodi"
+    : period.months.length > 0
       ? formatMonthsLabel(period.months)
       : `${period.from} - ${period.to}`;
   const incassatoMonths = resolveIncassatoMonths(period);

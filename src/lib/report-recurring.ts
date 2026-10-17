@@ -113,19 +113,26 @@ export function buildReportRecurringWhere(params: {
   now?: Date;
 }): Prisma.RecurringMonthWhereInput | null {
   const period = resolveReportPeriod(params);
-  const periods = periodsInRange(period.from, period.to, period.month);
+  const periods = period.allPeriods
+    ? []
+    : periodsInRange(period.from, period.to, period.month);
   const { unpaid, paid } = recurringStatusGroups(params.stato);
   if (unpaid.length === 0 && paid.length === 0) return null;
-  if (paid.length > 0 && periods.length === 0 && unpaid.length === 0) {
+  if (
+    paid.length > 0 &&
+    periods.length === 0 &&
+    unpaid.length === 0 &&
+    !period.allPeriods
+  ) {
     return null;
   }
 
   const collabIds = parseFilterList(params.collaboratorId);
   const supplierIds = parseFilterList(params.supplierId);
+  /** Stesso perimetro Provvigioni: non escludere `isHistorical`. */
   const contractAnd: Prisma.ContractWhereInput[] = [
     params.visibility,
     { deletedAt: null },
-    { isHistorical: false },
     ...(collabIds.length === 1
       ? [{ collaboratorId: collabIds[0]! }]
       : collabIds.length > 1
@@ -139,7 +146,8 @@ export function buildReportRecurringWhere(params: {
   ];
 
   const heliosLag = reportRecurringHeliosLagWhere(params.now ?? new Date());
-  const incassoWhere = reportIncassoMonthWhere(periods);
+  const incassoWhere =
+    periods.length > 0 ? reportIncassoMonthWhere(periods) : null;
 
   const branches: Prisma.RecurringMonthWhereInput[] = [];
 
@@ -147,13 +155,14 @@ export function buildReportRecurringWhere(params: {
    * Incassato = rate PAID, Pagato = rate LIQUIDATED.
    * Il contratto deve passare lo stesso stato di Provvigioni, così un KO
    * storico con rata pagata non entra nel Report.
+   * Con «tutti i periodi» non si filtra il mese di incasso (come la card).
    */
-  if (paid.includes("PAID") && periods.length > 0) {
+  if (paid.includes("PAID") && (periods.length > 0 || period.allPeriods)) {
     const statoWhere = provvigioneStatoWhere("Incassato");
     branches.push({
       AND: [
         { status: "PAID" },
-        incassoWhere,
+        ...(incassoWhere ? [incassoWhere] : []),
         heliosLag,
         notAnnualNextHiddenWhere,
         {
@@ -164,12 +173,15 @@ export function buildReportRecurringWhere(params: {
       ],
     });
   }
-  if (paid.includes("LIQUIDATED") && periods.length > 0) {
+  if (
+    paid.includes("LIQUIDATED") &&
+    (periods.length > 0 || period.allPeriods)
+  ) {
     const statoWhere = provvigioneStatoWhere("Pagato");
     branches.push({
       AND: [
         { status: "LIQUIDATED" },
-        incassoWhere,
+        ...(incassoWhere ? [incassoWhere] : []),
         heliosLag,
         notAnnualNextHiddenWhere,
         {
@@ -349,7 +361,6 @@ export async function loadReportRecurringPaid(params: {
       AND: [
         params.visibility,
         { deletedAt: null },
-        { isHistorical: false },
         ...(collabIds.length === 1
           ? [{ collaboratorId: collabIds[0]! }]
           : collabIds.length > 1
