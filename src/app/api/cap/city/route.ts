@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CAP_CDN_CACHE_HEADERS } from "@/lib/cdn-cache-headers";
 import { lookupCityCap } from "@/lib/city-cap-lookup";
 
 /** GET /api/cap/city?q=Manfredonia&province=FG → CAP + provincia */
@@ -9,20 +10,23 @@ export async function GET(request: Request) {
   if (q.length < 2) {
     return NextResponse.json(
       { error: "Indica almeno 2 caratteri del comune" },
-      { status: 400 },
+      { status: 400, headers: CAP_CDN_CACHE_HEADERS },
     );
   }
 
   const matches = await lookupCityCap(q, province || undefined);
   const first = matches[0];
-  return NextResponse.json({
-    found: matches.length > 0,
-    multi: matches.length > 1,
-    query: q,
-    matches,
-    city: matches.length === 1 ? first?.city ?? "" : "",
-    province: matches.length === 1 ? first?.province ?? "" : "",
-    region: matches.length === 1 ? first?.region ?? "" : "",
-    zipCode: matches.length === 1 ? first?.zipCode ?? "" : "",
-  });
+  return NextResponse.json(
+    {
+      found: matches.length > 0,
+      multi: matches.length > 1,
+      query: q,
+      matches,
+      city: matches.length === 1 ? first?.city ?? "" : "",
+      province: matches.length === 1 ? first?.province ?? "" : "",
+      region: matches.length === 1 ? first?.region ?? "" : "",
+      zipCode: matches.length === 1 ? first?.zipCode ?? "" : "",
+    },
+    { headers: CAP_CDN_CACHE_HEADERS },
+  );
 }

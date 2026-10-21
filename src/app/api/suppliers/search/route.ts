@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
+import { SUPPLIER_SEARCH_BROWSER_CACHE_HEADERS } from "@/lib/cdn-cache-headers";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
   const session = await requireApiSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
 
   const { searchParams } = new URL(request.url);
   const q = (searchParams.get("q") ?? "").trim();
-  if (q.length < 1) return NextResponse.json({ items: [] });
+  if (q.length < 1) {
+    return NextResponse.json(
+      { items: [] },
+      { headers: SUPPLIER_SEARCH_BROWSER_CACHE_HEADERS },
+    );
+  }
 
   const suppliers = await prisma.supplier.findMany({
     where: {
@@ -27,7 +38,10 @@ export async function GET(request: Request) {
     orderBy: { name: "asc" },
   });
 
-  return NextResponse.json({
-    items: suppliers.map((s) => ({ id: s.id, label: s.name, code: s.code })),
-  });
+  return NextResponse.json(
+    {
+      items: suppliers.map((s) => ({ id: s.id, label: s.name, code: s.code })),
+    },
+    { headers: SUPPLIER_SEARCH_BROWSER_CACHE_HEADERS },
+  );
 }
