@@ -1157,6 +1157,46 @@ export async function syncAllRecurringMonths(collaboratorId?: string): Promise<n
 }
 
 /**
+ * Cooldown sync background su Provvigioni (Hobby Fluid Active CPU).
+ * Una navigazione/filtro non deve rilanciare il sync globale: resta
+ * syncAllRecurringMonths diretto per Backup, cron e azioni esplicite.
+ */
+export const BACKGROUND_RECURRING_SYNC_COOLDOWN_MS = 20 * 60 * 1000;
+
+const recurringSyncGateStore = globalThis as unknown as {
+  __crmRecurringSyncAt?: Map<string, number>;
+};
+
+function recurringSyncGate(): Map<string, number> {
+  if (!recurringSyncGateStore.__crmRecurringSyncAt) {
+    recurringSyncGateStore.__crmRecurringSyncAt = new Map();
+  }
+  return recurringSyncGateStore.__crmRecurringSyncAt;
+}
+
+/**
+ * Sync globale in background con cooldown (idempotente, zero perdita dati).
+ * Ritorna `null` se saltato per cooldown; altrimenti il conteggio contratti.
+ */
+export async function syncAllRecurringMonthsBackground(
+  collaboratorId?: string,
+): Promise<number | null> {
+  const key = collaboratorId ?? "__all__";
+  const gate = recurringSyncGate();
+  const now = Date.now();
+  const last = gate.get(key) ?? 0;
+  if (now - last < BACKGROUND_RECURRING_SYNC_COOLDOWN_MS) {
+    console.info("[syncAllRecurringMonthsBackground] skip cooldown", {
+      key,
+      remainingMs: BACKGROUND_RECURRING_SYNC_COOLDOWN_MS - (now - last),
+    });
+    return null;
+  }
+  gate.set(key, now);
+  return syncAllRecurringMonths(collaboratorId);
+}
+
+/**
  * Segnalazioni rate mancanti/pending.
  * `contractScope` = stesso perimetro di Provvigioni (`panelContractScopeWhere`:
  * visibility di ruolo + eventuale filtro collab UI). Stringa = solo un
