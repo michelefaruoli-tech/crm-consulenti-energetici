@@ -25,9 +25,7 @@ import {
 import { computeSupplyStartDate } from "../src/lib/supply-dates";
 import { clientDisplayName } from "../src/lib/utils";
 
-/** Fornitori annuali (R) anche se ancora marcati UT per drift recurrenceKind. */
-const ANNUAL_SUPPLIER_HINT =
-  /sinergy|etruria|dolomiti|duferco/i;
+import { isAnnualRecurringSupplier } from "../src/lib/helios-contract-rules";
 
 const CLIENT_NAME_SELECT = {
   type: true,
@@ -450,7 +448,7 @@ async function main() {
       matches[0]!;
 
     const clientLabel = clientDisplayName(row.client);
-    const annualSupplier = ANNUAL_SUPPLIER_HINT.test(row.supplier.name);
+    const annualSupplier = isAnnualRecurringSupplier(row.supplier.name);
 
     // Vitucci/Quadrifoglio: Sinergy/Etruria restati UT perché set-annual scriveva
     // solo `recurrence` e non `recurrenceKind` (e Etruria non era in lista).

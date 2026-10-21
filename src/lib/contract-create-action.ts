@@ -23,6 +23,7 @@ import { suggestPersonNameOrder } from "@/lib/italian-person-name";
 import { defaultCommissionExpected } from "@/lib/commission";
 import {
   heliosMonthlyCommission,
+  isAnnualRecurringSupplier,
   isHeliosSupplier,
 } from "@/lib/helios-contract-rules";
 import { recurrenceWriteData } from "@/lib/recurring";
@@ -470,6 +471,7 @@ async function createFullContractActionInner(
       select: { name: true },
     });
     const isHelios = isHeliosSupplier(lineSupplier?.name);
+    const isAnnual = isAnnualRecurringSupplier(lineSupplier?.name);
 
     const operationType = line.operationType || payload.operationType || "SWITCH";
     const supplyStart =
@@ -591,7 +593,11 @@ async function createFullContractActionInner(
               propertyHolder: line.propertyHolder,
             }),
             parentContractId: firstId || null,
-            ...(isHelios ? recurrenceWriteData("M") : {}),
+            ...(isHelios
+              ? recurrenceWriteData("M")
+              : isAnnual
+                ? recurrenceWriteData("R")
+                : {}),
           },
           select: { id: true },
         });

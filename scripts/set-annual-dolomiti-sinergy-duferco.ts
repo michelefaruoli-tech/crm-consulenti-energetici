@@ -1,6 +1,10 @@
 /**
  * Imposta ricorrenza annuale (R) per Dolomiti, Sinergy, Duferco, Etruria.
  * Scrive SEMPRE `recurrence` + `recurrenceKind` (via recurrenceWriteData).
+ * Match fornitore con `contains` (es. «Duferco Energia»).
+ *
+ * Per Duferco con sync rate +13 mesi preferire:
+ *   npx tsx scripts/set-duferco-annual-r.ts --apply
  *
  * Uso:
  *   npx tsx scripts/set-annual-dolomiti-sinergy-duferco.ts --dry
@@ -12,11 +16,12 @@ dotenv.config();
 
 import { PrismaNeonHttp } from "@prisma/adapter-neon";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { isAnnualRecurringSupplier } from "../src/lib/helios-contract-rules";
 import { recurrenceWriteData } from "../src/lib/recurring";
 
 const DRY = process.argv.includes("--dry");
 
-const SUPPLIERS_ANNUAL = ["Dolomiti", "Sinergy", "Duferco", "Etruria"];
+const SUPPLIER_HINTS = ["Dolomiti", "Sinergy", "Duferco", "Etruria"];
 
 const prisma = new PrismaClient({
   adapter: new PrismaNeonHttp(process.env.DATABASE_URL!, {
@@ -30,12 +35,11 @@ async function main() {
     throw new Error("DATABASE_URL mancante (.env.local)");
   }
 
-  const contracts = await prisma.contract.findMany({
+  const candidates = await prisma.contract.findMany({
     where: {
       deletedAt: null,
-      isHistorical: false,
-      OR: SUPPLIERS_ANNUAL.map((name) => ({
-        supplier: { name: { equals: name, mode: "insensitive" as const } },
+      OR: SUPPLIER_HINTS.map((name) => ({
+        supplier: { name: { contains: name, mode: "insensitive" as const } },
       })),
       NOT: { recurrenceKind: "R" },
     },
@@ -46,6 +50,10 @@ async function main() {
       supplier: { select: { name: true } },
     },
   });
+
+  const contracts = candidates.filter((c) =>
+    isAnnualRecurringSupplier(c.supplier.name),
+  );
 
   const bySupplier: Record<string, number> = {};
   for (const c of contracts) {

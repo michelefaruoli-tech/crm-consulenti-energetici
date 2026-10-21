@@ -81,7 +81,7 @@ function podFromProduct(product: string): string | null {
 
 function recurrenceForSupplier(supplier: string | null): "M" | "R" {
   if (!supplier) return "M";
-  if (/^(sinergy|etruria)$/i.test(supplier)) return "R";
+  if (/sinergy|etruria|duferco|dolomiti/i.test(supplier)) return "R";
   return "M";
 }
 

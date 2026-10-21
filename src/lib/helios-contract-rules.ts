@@ -260,6 +260,19 @@ export function isHeliosSupplier(name: string | null | undefined): boolean {
 }
 
 /**
+ * Fornitori a ricorrenza annuale (R / 13° mese): Duferco, Sinergy, Etruria, Dolomiti.
+ * Usato come default in creazione contratto e per allineare drift UT→R.
+ */
+export function isAnnualRecurringSupplier(
+  name: string | null | undefined,
+): boolean {
+  const raw = String(name ?? "").trim();
+  if (!raw) return false;
+  const key = raw.toLowerCase();
+  return /duferco|sinergy|etruria|dolomiti/.test(key);
+}
+
+/**
  * Gettone mensile Helios:
  * - €4 per tutti i domestici / privati
  * - €6 per business / aziende
