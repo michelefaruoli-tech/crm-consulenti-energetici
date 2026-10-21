@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { CAP_CDN_CACHE_HEADERS } from "@/lib/cdn-cache-headers";
 import {
   CAP_LOCAL_PLACES,
   provinceSiglaFromCap,
@@ -25,6 +26,10 @@ function toPlace(p: {
   };
 }
 
+function json(data: unknown, status = 200) {
+  return NextResponse.json(data, { status, headers: CAP_CDN_CACHE_HEADERS });
+}
+
 /** Lookup CAP italiano: restituisce TUTTE le località (es. 85025 → Melfi + PZ). */
 export async function GET(
   _request: Request,
@@ -33,7 +38,7 @@ export async function GET(
   const { cap } = await context.params;
   const clean = cap.replace(/\D/g, "");
   if (clean.length !== 5) {
-    return NextResponse.json({ error: "CAP non valido" }, { status: 400 });
+    return json({ error: "CAP non valido" }, 400);
   }
 
   const fallbackProvince = provinceSiglaFromCap(clean);
@@ -48,7 +53,7 @@ export async function GET(
       if (local?.length) {
         const places = local.map(toPlace);
         const first = places[0]!;
-        return NextResponse.json({
+        return json({
           found: true,
           cap: clean,
           multi: places.length > 1,
@@ -61,7 +66,7 @@ export async function GET(
         });
       }
       // CAP fuori elenco Zippopotam: comunque provincia da range → form compilabile
-      return NextResponse.json({
+      return json({
         found: false,
         cap: clean,
         places: [],
@@ -105,7 +110,7 @@ export async function GET(
     });
 
     const first = unique[0];
-    return NextResponse.json({
+    return json({
       found: unique.length > 0,
       cap: clean,
       multi: unique.length > 1,
@@ -120,7 +125,7 @@ export async function GET(
     if (local?.length) {
       const places = local.map(toPlace);
       const first = places[0]!;
-      return NextResponse.json({
+      return json({
         found: true,
         cap: clean,
         multi: places.length > 1,
@@ -132,7 +137,7 @@ export async function GET(
         source: "local",
       });
     }
-    return NextResponse.json({
+    return json({
       found: false,
       cap: clean,
       places: [],
