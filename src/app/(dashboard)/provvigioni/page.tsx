@@ -25,9 +25,8 @@ import {
   getMissingRecurringAlerts,
   getHeliosAbsentAlerts,
   getPaidToLiquidateAlerts,
-  syncAllRecurringMonths,
+  syncAllRecurringMonthsBackground,
   syncRecurringMonthsForContract,
-  reconcileAllRecurringBounds,
 } from "@/lib/recurring-sync";
 import {
   computeSupplyStartDate,
@@ -357,15 +356,6 @@ export default async function ProvvigioniPage({
   };
   const recurringOperationalView =
     vista === "mensile" || vista === "annuale" || focus === "ricorrenze-mancanti";
-  // Sync rate in background: non bloccare il render (evita timeout dopo bulk UT/M/R).
-  if (recurringOperationalView) {
-    void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
-      console.error("sync all recurring", e),
-    );
-    void reconcileAllRecurringBounds().catch((e) =>
-      console.error("reconcile recurring bounds", e),
-    );
-  }
 
   const sortByClient = sortRaw === "client";
   const sortDir: "asc" | "desc" = dirRaw === "desc" ? "desc" : "asc";
@@ -376,7 +366,10 @@ export default async function ProvvigioniPage({
     { id: "desc" },
   ];
 
-  // Con una ricerca mirata riconcilia subito i contratti trovati; altrimenti usa il sync leggero.
+  // Ricerca mirata: sync immediato sui contratti trovati (perimetro stretto).
+  // Altrimenti sync globale in background con cooldown (Hobby Fluid CPU),
+  // senza reconcile ridondante (già coperto da syncAllRecurringMonths).
+  // Backup / cron / azioni usano ancora syncAllRecurringMonths diretto.
   if (q) {
     const matchingRecurring = await prisma.contract.findMany({
       where: buildProvvigioniContractWhere(statsBaseFilters),
@@ -390,9 +383,12 @@ export default async function ProvvigioniPage({
         ),
       ),
     );
-  } else if (!recurringOperationalView) {
-    void syncAllRecurringMonths(sessionCollabFilter).catch((e) =>
-      console.error("sync recurring", e),
+  } else {
+    void syncAllRecurringMonthsBackground(sessionCollabFilter).catch((e) =>
+      console.error(
+        recurringOperationalView ? "sync all recurring" : "sync recurring",
+        e,
+      ),
     );
   }
 
