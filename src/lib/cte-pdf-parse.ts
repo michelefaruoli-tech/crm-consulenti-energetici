@@ -291,18 +291,20 @@ function extractUtility(line: string, offerName: string | null, hits: CtePdfHit[
 }
 
 function extractCategory(line: string, hits: CtePdfHit[]): CteCategory | null {
+  // Fix Business PDF: tabella tipi fornitura cita anche «CONDOMINIO» — priorità a CLIENTI BUSINESS.
+  if (
+    /fix\s*business/i.test(line) ||
+    /clienti business/i.test(line) ||
+    /non domest/i.test(line) ||
+    /uso non domestico/i.test(line) ||
+    /\bpmi\b/i.test(line)
+  ) {
+    addHit(hits, "category", "BUSINESS", line, line.search(/fix\s*business|clienti business|non domest|pmi/i));
+    return "BUSINESS";
+  }
   if (/condomin/i.test(line)) {
     addHit(hits, "category", "CONDOMINI", line, line.search(/condomin/i));
     return "CONDOMINI";
-  }
-  if (
-    /non domest/i.test(line) ||
-    /uso non domestico/i.test(line) ||
-    /\bpmi\b/i.test(line) ||
-    /clienti business/i.test(line)
-  ) {
-    addHit(hits, "category", "BUSINESS", line, line.search(/non domest|pmi|clienti business/i));
-    return "BUSINESS";
   }
   if (/uso domestico|clienti domestici|siti ad uso domestico/i.test(line)) {
     addHit(hits, "category", "RESIDENZIALE", line, line.search(/domestico/i));

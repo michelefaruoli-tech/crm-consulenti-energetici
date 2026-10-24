@@ -26,6 +26,13 @@ export function listinoCatalogLanding(kind: CteListinoKind): ListinoCatalogLandi
         prezzo: "FISSO",
         fornitore: "Duferco",
       };
+    case "duferco-fix-business":
+      return {
+        categoria: "BUSINESS",
+        utility: "LUCE",
+        prezzo: "FISSO",
+        fornitore: "Duferco",
+      };
     case "dolomiti":
       return {
         categoria: "RESIDENZIALE",

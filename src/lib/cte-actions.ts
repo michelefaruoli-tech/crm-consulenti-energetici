@@ -15,6 +15,7 @@ import {
   deactivateListinoOffersByName,
   upsertListinoOffers,
 } from "@/lib/cte-listino-shared";
+import { attachDufercoFixBusinessPdfs } from "@/lib/cte-duferco-fix-business-pdfs";
 import { attachDufercoFixFamilyGasPdfs } from "@/lib/cte-duferco-fix-family-pdfs";
 import { SEV_IREN_OBSOLETE_OFFER_NAMES } from "@/lib/cte-sev-iren-listino";
 import { userCanManageCteOffer } from "@/lib/cte-scope";
@@ -370,6 +371,7 @@ const LISTINO_KINDS: CteListinoKind[] = [
   "compara",
   "duferco-flex-condomini",
   "duferco-fix-family",
+  "duferco-fix-business",
 ];
 
 export async function importCteListinoAction(
@@ -422,6 +424,9 @@ export async function importCteListinoAction(
   if (kind === "duferco-fix-family") {
     pdfAttached = await attachDufercoFixFamilyGasPdfs(prisma, usable);
   }
+  if (kind === "duferco-fix-business") {
+    pdfAttached = await attachDufercoFixBusinessPdfs(prisma, usable);
+  }
 
   await writeAuditLog({
     userId: session.id,
@@ -432,7 +437,7 @@ export async function importCteListinoAction(
 
   await notifyCteStaff({
     title: `Import listino CTE — ${LISTINO_KIND_LABEL[kind]}`,
-    body: `+${result.created} create, ${result.updated} aggiornate${deactivated ? `, ${deactivated} disattivate` : ""}${pdfAttached ? `, ${pdfAttached} PDF gas` : ""} (da ${session.name})`,
+    body: `+${result.created} create, ${result.updated} aggiornate${deactivated ? `, ${deactivated} disattivate` : ""}${pdfAttached ? `, ${pdfAttached} PDF allegati` : ""} (da ${session.name})`,
     excludeUserId: session.id,
   });
 

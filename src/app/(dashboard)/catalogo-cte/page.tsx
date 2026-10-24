@@ -182,6 +182,13 @@ export default async function CatalogoCtePage({
                 XS/S/M, CUN 1/2). Flex Condomini resta listino separato.
               </>
             ) : null}
+            {importato === "duferco-fix-business" ? (
+              <>
+                {" "}
+                Fix Business luce (Andante Plus, Andante, Allegro, Adagio, Super Adagio · ottobre
+                2026). Fix Family e Flex Condomini restano listini separati.
+              </>
+            ) : null}
           </p>
         </div>
       ) : null}

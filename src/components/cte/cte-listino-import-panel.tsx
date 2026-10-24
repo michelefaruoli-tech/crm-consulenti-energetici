@@ -10,6 +10,7 @@ import type { CteListinoKind } from "@/lib/cte-listino-detect";
 
 const ITEMS: Array<{ kind: CteListinoKind; title: string }> = [
   { kind: "duferco-fix-family", title: "Duferco Fix Family (luce+gas)" },
+  { kind: "duferco-fix-business", title: "Duferco Fix Business" },
   { kind: "duferco-flex-condomini", title: "Duferco Flex" },
   { kind: "dolomiti", title: "Dolomiti" },
   { kind: "enel-corporate", title: "Enel" },

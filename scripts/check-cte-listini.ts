@@ -10,6 +10,10 @@ import { detectListinoFromImageHash, detectListinoFromPdf } from "../src/lib/cte
 import { listinoOfferToParseResult } from "../src/lib/cte-listino-shared";
 import { ENEL_CORPORATE_LISTINO } from "../src/lib/cte-enel-corporate-listino";
 import {
+  DUFERCO_FIX_BUSINESS_LISTINO,
+  isDufercoFixBusinessListinoText,
+} from "../src/lib/cte-duferco-fix-business-listino";
+import {
   DUFERCO_FIX_FAMILY_LISTINO,
   isDufercoFixFamilyListinoText,
 } from "../src/lib/cte-duferco-fix-family-listino";
@@ -26,6 +30,9 @@ const SAMPLES =
   "/cursor/stores/bc-13eb74be-095d-494b-8617-c7fbc59dbb56/internal/campioni-cte/prova-upload";
 
 const DUFERCO_FIX_DIR = join(SAMPLES, "duferco-fix-family");
+const DUFERCO_BUSINESS_DIR =
+  process.env.CTE_DUFERCO_BUSINESS_DIR ||
+  "/cursor/stores/bc-13eb74be-095d-494b-8617-c7fbc59dbb56/internal/duferco-fix-business";
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -155,6 +162,51 @@ assert(dufercoRedirect.includes("importato=duferco-fix-family"), "redirect fix f
 assert(dufercoRedirect.includes("categoria=RESIDENZIALE"), "redirect fix family residenziale");
 assert(dufercoRedirect.includes("utility=GAS"), "redirect fix family gas");
 
+assert(DUFERCO_FIX_BUSINESS_LISTINO.length === 5, "duferco fix business 5");
+assert(
+  DUFERCO_FIX_BUSINESS_LISTINO.every(
+    (o) =>
+      o.supplierName === "Duferco Energia" &&
+      o.category === "BUSINESS" &&
+      o.utility === "LUCE" &&
+      o.priceKind === "FISSO" &&
+      o.bands.length === 3 &&
+      o.validFrom === "2026-10-01" &&
+      o.validTo === "2026-10-31",
+  ),
+  "duferco fix business shape",
+);
+const andantePlus = DUFERCO_FIX_BUSINESS_LISTINO.find((o) =>
+  o.offerName.includes("ANDANTE PLUS"),
+);
+assert(
+  andantePlus?.bands[0]?.energyPrice === 0.18332 &&
+    andantePlus.ccvAnnual === 180 &&
+    /CSV 0,00550/.test(andantePlus.notes),
+  "andante plus",
+);
+const superAdagio = DUFERCO_FIX_BUSINESS_LISTINO.find((o) =>
+  o.offerName.includes("SUPER ADAGIO"),
+);
+assert(
+  superAdagio?.bands[0]?.energyPrice === 0.18222 &&
+    superAdagio.bands[1]?.energyPrice === 0.19668 &&
+    superAdagio.bands[2]?.energyPrice === 0.16936 &&
+    superAdagio.ccvAnnual === 144,
+  "super adagio ott 2026",
+);
+assert(/003450ESFML02XX00000010073911026/.test(superAdagio?.notes ?? ""), "super adagio codice");
+const businessRedirect = buildCatalogRedirectAfterListinoImport({
+  kind: "duferco-fix-business",
+  created: 0,
+  updated: 5,
+  label: "Duferco Fix Business",
+});
+assert(businessRedirect.includes("importato=duferco-fix-business"), "redirect fix business");
+assert(businessRedirect.includes("categoria=BUSINESS"), "redirect fix business business");
+assert(businessRedirect.includes("utility=LUCE"), "redirect fix business luce");
+assert(businessRedirect.includes("fornitore=Duferco"), "redirect fix business fornitore");
+
 assert(COMPARA_SEMPLICE_LISTINO.length === 15, "compara 15 energia");
 assert(
   !COMPARA_SEMPLICE_LISTINO.some((o) => o.offerName.includes("BUSINESS SUPER LUCE")),
@@ -251,6 +303,30 @@ async function main(): Promise<void> {
   );
   assert(existsSync(publicGasPdf), "PDF gas in public/cte/duferco-fix-family");
 
+  const businessPdf = join(DUFERCO_BUSINESS_DIR, "FIX_BUSINESS_SUPER_ADAGIO_24_MESI.pdf");
+  if (existsSync(businessPdf)) {
+    const buf = readFileSync(businessPdf);
+    const hash = createHash("sha256").update(buf).digest("hex");
+    const extracted = await extractCtePdfText(new Uint8Array(buf));
+    assert(isDufercoFixBusinessListinoText(extracted.text), "testo Fix Business riconosciuto");
+    const known = detectListinoFromPdf(hash, extracted.text);
+    assert(known?.offers.length === 5, "pdf Fix Business → 5");
+    const sa = known?.offers.find((o) => o.offerName.includes("SUPER ADAGIO"));
+    assert(sa?.bands[0]?.energyPrice === 0.18222 && sa.ccvAnnual === 144, "detect super adagio");
+    console.log("pdf Duferco Fix Business: ok");
+  } else {
+    console.log("pdf Duferco Fix Business assente, skip extract");
+  }
+
+  const publicBusinessPdf = join(
+    process.cwd(),
+    "public",
+    "cte",
+    "duferco-fix-business",
+    "FIX_BUSINESS_SUPER_ADAGIO_24_MESI.pdf",
+  );
+  assert(existsSync(publicBusinessPdf), "PDF business in public/cte/duferco-fix-business");
+
   const comparaPath = join(SAMPLES, "Offerta-commerciale-9.pdf");
   if (existsSync(comparaPath)) {
     const buf = readFileSync(comparaPath);
@@ -263,7 +339,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "check-cte-listini: ok (7 corporate + 19 SEV + 25 Iren + 7 Duferco Fix Family + 15 Compara)",
+    "check-cte-listini: ok (7 corporate + 19 SEV + 25 Iren + 7 Duferco Fix Family + 5 Fix Business + 15 Compara)",
   );
 }
 
