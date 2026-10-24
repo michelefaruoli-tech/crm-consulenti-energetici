@@ -1,5 +1,9 @@
 import { COMPARA_SEMPLICE_LISTINO, COMPARA_SEMPLICE_PDF_HASH } from "@/lib/cte-compara-listino";
 import { allDolomitiListinoOffers, dolomitiOffersForScreenshotHash } from "@/lib/cte-dolomiti-listino";
+import {
+  allDufercoFixBusinessOffers,
+  isDufercoFixBusinessListinoText,
+} from "@/lib/cte-duferco-fix-business-listino";
 import { allDufercoFixFamilyOffers, isDufercoFixFamilyListinoText } from "@/lib/cte-duferco-fix-family-listino";
 import { allDufercoFlexCondominiOffers } from "@/lib/cte-duferco-flex-condomini";
 import {
@@ -21,7 +25,8 @@ export type CteListinoKind =
   | "iren"
   | "compara"
   | "duferco-flex-condomini"
-  | "duferco-fix-family";
+  | "duferco-fix-family"
+  | "duferco-fix-business";
 
 function dolomitiToShared(rows: ReturnType<typeof allDolomitiListinoOffers>): CteListinoOffer[] {
   return rows.map((row) => ({
@@ -87,6 +92,12 @@ export function listinoByKind(kind: CteListinoKind): KnownCteListino {
         layout: "duferco-fix-family",
         offers: allDufercoFixFamilyOffers(),
       };
+    case "duferco-fix-business":
+      return {
+        kind: "duferco-fix-business",
+        layout: "duferco-business",
+        offers: allDufercoFixBusinessOffers(),
+      };
   }
 }
 
@@ -120,6 +131,9 @@ export function detectListinoFromPdf(hex: string, text: string): KnownCteListino
   if (isIrenTovagliettaListinoText(text)) {
     return listinoByKind("iren");
   }
+  if (isDufercoFixBusinessListinoText(text)) {
+    return listinoByKind("duferco-fix-business");
+  }
   if (isDufercoFixFamilyListinoText(text)) {
     return listinoByKind("duferco-fix-family");
   }
@@ -134,4 +148,5 @@ export const LISTINO_KIND_LABEL: Record<CteListinoKind, string> = {
   compara: "Compara Semplice",
   "duferco-flex-condomini": "Duferco Flex Condomini",
   "duferco-fix-family": "Duferco Fix Family",
+  "duferco-fix-business": "Duferco Fix Business",
 };
